@@ -1,0 +1,24 @@
+[Unit]
+Description=LibreOJ backend
+After=libreoj-mariadb.service libreoj-redis.service libreoj-minio.service
+Requires=libreoj-mariadb.service libreoj-redis.service libreoj-minio.service
+PartOf=libreoj.target
+
+[Service]
+User=libreoj
+Group=libreoj
+WorkingDirectory=/opt/LibreOJ/apps/backend
+Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--max-old-space-size=512
+Environment=LIBREOJ_CONFIG_FILE=/opt/LibreOJ/config/backend.yaml
+Environment=TMPDIR=/opt/LibreOJ/data/tmp
+ExecStart=/usr/bin/node dist/main.js
+Restart=on-failure
+RestartSec=3
+UMask=0077
+LimitCORE=0
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=libreoj.target

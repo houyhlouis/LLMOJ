@@ -1,0 +1,18 @@
+[Unit]
+Description=LibreOJ minio
+After=network.target
+PartOf=libreoj.target
+
+[Service]
+User=libreoj
+Group=libreoj
+EnvironmentFile=/opt/LibreOJ/config/minio.env
+ExecStart=/opt/LibreOJ/runtime/minio server --address 127.0.0.1:19000 --console-address 127.0.0.1:19001 /opt/LibreOJ/data/minio
+Restart=on-failure
+RestartSec=3
+UMask=0027
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=libreoj.target

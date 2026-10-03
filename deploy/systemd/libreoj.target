@@ -1,0 +1,7 @@
+[Unit]
+Description=LibreOJ local online judge
+Wants=libreoj-mariadb.service libreoj-redis.service libreoj-minio.service libreoj-backend.service libreoj-nginx.service libreoj-judge.service
+After=network.target
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,103 @@
+.titleCell {
+  overflow-wrap: anywhere;
+
+  > a {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+.updatedCell {
+  white-space: nowrap;
+}
+
+.detailHeader {
+  // The shared toolbar has a fixed height; titles and wrapped actions need more space.
+  height: auto !important;
+  min-height: 68px;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 0;
+
+  > :global(.ui.header) {
+    margin: 0;
+    flex: 1;
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+
+  > :global(.ui.button) {
+    margin: 0;
+  }
+}
+
+.content {
+  min-width: 0;
+}
+
+.labels {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 18px;
+
+  :global(.ui.label) {
+    margin: 0 !important;
+  }
+}
+
+.privateNote,
+.unavailable,
+.empty {
+  color: var(--theme-description-message-foreground);
+}
+
+.description {
+  margin: 18px 0;
+}
+
+.noteRow > :global(td) {
+  border-top: none !important;
+  padding-top: 0 !important;
+  padding-bottom: 16px !important;
+}
+
+.note {
+  padding: 4px 12px;
+  border-left: 2px solid var(--theme-border);
+  overflow-wrap: anywhere;
+}
+
+.empty {
+  padding: 28px 11px !important;
+}
+
+.editorActions {
+  margin: 20px 0;
+}
+
+.completion {
+  margin: 18px 0 38px !important;
+
+  > :global(.label) {
+    color: var(--theme-foreground) !important;
+  }
+
+  &:global([data-percent="0"]) :global(.bar > .progress) {
+    color: var(--theme-foreground) !important;
+  }
+}
+
+@media only screen and (max-width: 767px) {
+  .detailHeader > :global(.ui.header) {
+    flex-basis: 100%;
+  }
+}

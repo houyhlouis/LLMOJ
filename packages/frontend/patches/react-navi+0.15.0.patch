@@ -1,0 +1,15 @@
+diff --git a/dist/es/Link.js b/dist/es/Link.js
+index 206c99d..b2899d4 100644
+--- a/dist/es/Link.js
++++ b/dist/es/Link.js
+@@ -78,9 +78,8 @@ export var useLinkProps = function (_a) {
+                 "This value is no longer supported - please set it to \"mount\" instead.");
+         }
+     }
+-    // Prefetch on hover by default.
+     if (prefetch === undefined) {
+-        prefetch = 'hover';
++        prefetch = false;
+     }
+     var hashScrollBehaviorFromContext = React.useContext(HashScrollContext);
+     var context = React.useContext(NaviContext);

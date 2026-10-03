@@ -1,0 +1,117 @@
+// Match the existing Problem Set toolbar and list rhythm.
+.headerRow {
+  height: 68px;
+  margin-top: -15px;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.headerRightControls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-grow: 1;
+}
+
+.toolbarTitle {
+  margin: 0 !important;
+}
+
+.pagination {
+  text-align: center;
+  margin-top: 20px;
+  margin-bottom: 18px;
+}
+
+.topPagination:empty {
+  margin-top: 15px;
+}
+
+.tableHeaderRow {
+  white-space: nowrap;
+}
+
+.row {
+  height: 44px;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.tableScroll {
+  margin-top: 1em;
+  overflow-x: auto;
+}
+
+.subtitle {
+  margin-top: 7px;
+  color: var(--theme-description-message-foreground);
+
+  p:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.pageContent {
+  margin-top: 24px;
+}
+
+.sectionToolbar {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin: 0 0 20px;
+
+  > :global(.header) {
+    margin: 0;
+  }
+}
+
+.description {
+  color: var(--theme-description-message-foreground);
+  margin: 0 0 20px;
+  line-height: 1.7;
+}
+
+.preview {
+  margin: 20px 0;
+}
+
+.summaryEntry {
+  padding: 24px 0;
+  border-bottom: 1px solid var(--theme-border);
+
+  &:first-child {
+    padding-top: 0;
+  }
+
+  &:last-child {
+    border-bottom: 0;
+  }
+}
+
+@media only screen and (min-width: 1024px) {
+  .topPagination {
+    margin-top: 16px;
+    margin-bottom: 28px;
+  }
+}
+
+@media only screen and (max-width: 767px) {
+  .headerRow {
+    min-height: 53px;
+    height: auto;
+    flex-wrap: wrap;
+    margin-top: 0;
+  }
+
+  .pagination {
+    margin-top: 14px;
+  }
+
+  .sectionToolbar {
+    flex-wrap: wrap;
+  }
+}

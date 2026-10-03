@@ -1,0 +1,10 @@
+diff --git a/index.d.ts b/index.d.ts
+index 6433335..62b82ba 100644
+--- a/index.d.ts
++++ b/index.d.ts
+@@ -1,4 +1,4 @@
+-import { Plugin } from 'vite';
++import { Plugin } from '../vite';
+ interface VitePluginHtmlMinifierTerser {
+   removeAttributeQuotes?: boolean,
+   collapseWhitespace?: boolean,

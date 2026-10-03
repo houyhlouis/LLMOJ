@@ -1,0 +1,12 @@
+[Unit]
+Description=LibreOJ judge workspace
+PartOf=libreoj.target
+
+[Mount]
+What=tmpfs
+Where=/opt/LibreOJ/data/judge/work/2
+Type=tmpfs
+Options=size=512m,mode=0755,nodev,nosuid
+
+[Install]
+WantedBy=libreoj.target

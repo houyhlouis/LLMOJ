@@ -1,0 +1,37 @@
+.message {
+  align-items: flex-start !important;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+
+  :global(.content) {
+    min-width: 0;
+  }
+
+  a {
+    cursor: pointer;
+
+    &:not(:last-child) {
+      margin-right: 7px;
+    }
+  }
+
+  p {
+    margin-top: 6px !important;
+    margin-bottom: 6px !important;
+
+    &:last-child {
+      margin-bottom: -2px !important;
+    }
+  }
+
+  pre {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+}
+
+.errorStack {
+  white-space: pre-wrap;
+}

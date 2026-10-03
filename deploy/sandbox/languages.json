@@ -1,0 +1,110 @@
+{
+  "cpp": {
+    "compilers": [
+      "g++",
+      "clang++"
+    ],
+    "versions": [
+      "14.2",
+      "20.1"
+    ],
+    "executables": [
+      "/usr/local/bin/g++",
+      "/usr/local/bin/clang++"
+    ],
+    "architectures": [
+      "64",
+      "32"
+    ]
+  },
+  "c": {
+    "compilers": [
+      "gcc",
+      "clang"
+    ],
+    "versions": [
+      "14.2",
+      "20.1"
+    ],
+    "executables": [
+      "/usr/local/bin/gcc",
+      "/usr/local/bin/clang"
+    ],
+    "architectures": [
+      "64",
+      "32"
+    ]
+  },
+  "java": {
+    "version": "21",
+    "executables": [
+      "/usr/bin/javac",
+      "/usr/bin/java"
+    ]
+  },
+  "kotlin": {
+    "version": "1.9.25",
+    "executables": [
+      "/usr/local/bin/kotlinc",
+      "/usr/local/bin/kotlin"
+    ]
+  },
+  "pascal": {
+    "version": "3.2.2",
+    "executables": [
+      "/usr/bin/fpc"
+    ]
+  },
+  "python": {
+    "versions": [
+      "2.7.18",
+      "3.9.25",
+      "3.10.20"
+    ],
+    "executables": [
+      "/usr/local/bin/python2.7",
+      "/usr/local/bin/python3.9",
+      "/usr/local/bin/python3.10"
+    ]
+  },
+  "rust": {
+    "version": "1.97.0",
+    "executables": [
+      "/usr/local/bin/rustc"
+    ]
+  },
+  "swift": {
+    "version": "6.3.3",
+    "executables": [
+      "/usr/local/bin/swiftc"
+    ]
+  },
+  "go": {
+    "version": "1.26.5",
+    "executables": [
+      "/usr/local/bin/go"
+    ]
+  },
+  "haskell": {
+    "version": "9.4.7",
+    "executables": [
+      "/usr/bin/ghc"
+    ]
+  },
+  "csharp": {
+    "compiler": "dotnet 10.0.109 Roslyn",
+    "runtime": "Mono 6.8",
+    "executables": [
+      "/usr/local/bin/csc",
+      "/usr/local/bin/mono"
+    ]
+  },
+  "fsharp": {
+    "compiler": "dotnet 10.0.109 F#",
+    "runtime": "Mono 6.8",
+    "executables": [
+      "/usr/local/bin/fsharpc",
+      "/usr/local/bin/mono"
+    ]
+  }
+}

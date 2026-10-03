@@ -1,0 +1,192 @@
+.notes {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--theme-foreground);
+}
+
+.description {
+  max-width: 850px;
+}
+
+.actions,
+.problemToolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+
+  > :global(.button) {
+    margin: 0 !important;
+  }
+}
+
+.actions {
+  margin-top: 22px;
+}
+
+.privacyNotes {
+  margin-top: 22px;
+}
+
+.modelField {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+
+  > :global(.dropdown) {
+    flex: 1;
+    min-width: 0 !important;
+  }
+
+  > :global(.button) {
+    flex-shrink: 0;
+    margin: 0;
+  }
+}
+
+.importCount {
+  max-width: 240px;
+}
+
+.problemPanel {
+  margin: 14px 0 22px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--theme-border);
+}
+
+.panelHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+
+  > :global(.header) {
+    margin: 0;
+  }
+
+  > a {
+    font-size: 13px;
+  }
+}
+
+.problemToolbar {
+  margin-top: 10px;
+
+  .caseCount {
+    margin: 0 !important;
+
+    input {
+      width: 85px !important;
+    }
+  }
+}
+
+.rangeNote,
+.jobStatus {
+  color: var(--theme-foreground);
+  font-size: 13px;
+}
+
+.jobsHeading {
+  margin-top: 28px !important;
+}
+
+.jobs {
+  margin-top: 14px;
+}
+
+.job {
+  padding: 12px 0;
+  border-top: 1px solid var(--theme-border);
+  overflow-wrap: anywhere;
+
+  &:last-child {
+    padding-bottom: 0;
+  }
+
+  p:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.jobHeading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+
+  > div {
+    flex: 1;
+    min-width: 180px;
+  }
+
+  > :global(.button) {
+    margin: 0;
+  }
+}
+
+.jobProgress {
+  margin: 12px 0 28px !important;
+}
+
+.jobDetail,
+.jobError {
+  margin-top: 8px;
+}
+
+.jobError {
+  color: var(--theme-message-error-foreground);
+}
+
+.usageToolbar {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.usageSummary {
+  margin: 20px 0;
+}
+.usageTable {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 14px 0;
+  :global(table) {
+    font-size: 13px;
+  }
+}
+
+.configuration {
+  .configurationMain {
+    min-width: 0;
+  }
+}
+@media (max-width: 900px) {
+  .configuration {
+    flex-direction: column;
+    .configurationMenu {
+      width: 100%;
+      position: static;
+      margin: 0 0 18px;
+      :global(.menu) {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        width: 100% !important;
+      }
+    }
+    .configurationMain {
+      width: 100%;
+    }
+  }
+  .modelField {
+    flex-wrap: wrap;
+    > :global(.dropdown) {
+      flex-basis: 200px;
+    }
+  }
+}

@@ -1,0 +1,64 @@
+user www-data;
+worker_processes auto;
+pid /opt/LibreOJ/data/nginx/nginx.pid;
+events { worker_connections 1024; }
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    # Log paths without query strings: judge authentication and file signatures use them.
+    log_format private_request '$remote_addr [$time_local] "$request_method $uri $server_protocol" $status $body_bytes_sent';
+    access_log /opt/LibreOJ/logs/nginx/access.log private_request;
+    error_log /opt/LibreOJ/logs/nginx/error.log;
+    client_max_body_size 128m;
+    client_body_temp_path /opt/LibreOJ/data/nginx/client_body;
+    proxy_temp_path /opt/LibreOJ/data/nginx/proxy;
+    map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+    server {
+        listen 0.0.0.0:80;
+        server_name _;
+        root /opt/LibreOJ/public;
+        location /api/socket {
+            proxy_pass http://127.0.0.1:2002;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_read_timeout 3600s;
+            proxy_send_timeout 3600s;
+            access_log off;
+            error_log /opt/LibreOJ/logs/nginx/error.log crit;
+        }
+        location /api/ {
+            proxy_pass http://127.0.0.1:2002;
+            proxy_http_version 1.1;
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+        location /socket.io/ {
+            proxy_pass http://127.0.0.1:2002;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_read_timeout 3600s;
+            proxy_send_timeout 3600s;
+        }
+        location /storage/ {
+            proxy_pass http://127.0.0.1:19000/;
+            # file.service signs with this internal endpoint before rewriting the URL.
+            # Restore the signed host and remove /storage/ when forwarding to MinIO.
+            proxy_http_version 1.1;
+            proxy_set_header Host 127.0.0.1:19000;
+            proxy_set_header Connection "";
+            proxy_request_buffering off;
+            proxy_buffering off;
+        }
+        location / { try_files $uri $uri/ /index.html; }
+    }
+}

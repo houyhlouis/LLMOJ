@@ -1,0 +1,18 @@
+[Unit]
+Description=LibreOJ mariadb
+After=network.target
+PartOf=libreoj.target
+
+[Service]
+User=mysql
+Group=mysql
+ExecStart=/usr/sbin/mariadbd --defaults-file=/opt/LibreOJ/config/mariadb.cnf
+TimeoutStartSec=120
+Restart=on-failure
+RestartSec=3
+UMask=0027
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=libreoj.target

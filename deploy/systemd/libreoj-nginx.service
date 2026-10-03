@@ -1,0 +1,18 @@
+[Unit]
+Description=LibreOJ nginx
+After=libreoj-backend.service
+PartOf=libreoj.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/nginx -p /opt/LibreOJ/ -c /opt/LibreOJ/config/nginx.conf -g "daemon off;"
+ExecReload=/usr/sbin/nginx -p /opt/LibreOJ/ -c /opt/LibreOJ/config/nginx.conf -s reload
+KillSignal=SIGQUIT
+Restart=on-failure
+RestartSec=3
+UMask=0027
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=libreoj.target

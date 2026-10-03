@@ -1,0 +1,10 @@
+diff --git a/index.js b/index.js
+index a89b364..5dbdf41 100644
+--- a/index.js
++++ b/index.js
+@@ -22,4 +22,4 @@ function parser(match, utils) {
+   ].join('');
+ }
+ 
+-module.exports = regexp(/@(\w+)/, parser);
++module.exports = regexp(/@([a-zA-Z0-9\-_.#$]{3,24})/, parser);

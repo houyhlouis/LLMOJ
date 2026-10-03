@@ -1,0 +1,26 @@
+[Unit]
+Description=LibreOJ judge (7 execution slots, 3 submissions)
+After=libreoj-backend.service
+Requires=libreoj-backend.service
+PartOf=libreoj.target
+RequiresMountsFor=/opt/LibreOJ/data/judge/work/1 /opt/LibreOJ/data/judge/work/2 /opt/LibreOJ/data/judge/work/3 /opt/LibreOJ/data/judge/work/4 /opt/LibreOJ/data/judge/work/5 /opt/LibreOJ/data/judge/work/6 /opt/LibreOJ/data/judge/work/7
+
+[Service]
+WorkingDirectory=/opt/LibreOJ/apps/judge
+Environment=NODE_ENV=production
+Environment=LIBREOJ_JUDGE_CONFIG_FILE=/opt/LibreOJ/config/judge.yaml
+Environment=UV_THREADPOOL_SIZE=32
+Environment=NODE_OPTIONS=--max-old-space-size=512
+ExecStart=/usr/bin/node -r @swc-node/register index.mjs
+Delegate=cpu memory pids
+DelegateSubgroup=supervisor
+OOMPolicy=continue
+AllowedCPUs=1-7
+TasksMax=2048
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+UMask=0022
+
+[Install]
+WantedBy=libreoj.target

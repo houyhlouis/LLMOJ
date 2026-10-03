@@ -1,0 +1,6 @@
+# LibreOJ instance files under /opt/LibreOJ.
+/opt/LibreOJ/config/mariadb.cnf r,
+/opt/LibreOJ/data/mariadb/ r,
+/opt/LibreOJ/data/mariadb/** rwk,
+/opt/LibreOJ/logs/mariadb/ r,
+/opt/LibreOJ/logs/mariadb/** rw,

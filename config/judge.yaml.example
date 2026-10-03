@@ -1,0 +1,47 @@
+# Template only: replace judge key, upstream rootfs ID, and backend Unix group ID before use.
+serverUrl: http://127.0.0.1:2002
+downloadEndpointOverride: null
+key: REPLACE_WITH_JUDGE_CLIENT_KEY
+dataStore: /opt/LibreOJ/data/judge/testdata
+binaryCacheStore: /opt/LibreOJ/data/judge/cache
+binaryCacheMaxSize: 536870912
+taskConsumingThreads: 3
+maxConcurrentDownloads: 10
+maxConcurrentTasks: 7
+taskWorkingDirectories:
+- /opt/LibreOJ/data/judge/work/1
+- /opt/LibreOJ/data/judge/work/2
+- /opt/LibreOJ/data/judge/work/3
+- /opt/LibreOJ/data/judge/work/4
+- /opt/LibreOJ/data/judge/work/5
+- /opt/LibreOJ/data/judge/work/6
+- /opt/LibreOJ/data/judge/work/7
+rpcTimeout: 20000
+downloadTimeout: 20000
+downloadRetry: 3
+sandbox:
+  rootfs: /opt/LibreOJ/runtime/sandbox-rootfs
+  rootfsId: REPLACE_WITH_ROOTFS_ID
+  user: sandbox
+  hostname: libreoj-judge
+  environments:
+    PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    HOME: /sandbox
+    LC_ALL: en_US.UTF-8
+  resourceMode: default
+cpuAffinity:
+  compiler:
+  - 0
+  - 1
+  userProgram:
+  - 1
+  interactor:
+  - 0
+  checker:
+  - 0
+  - 1
+aiRunnerSocket: /opt/LibreOJ/data/judge/ai-runner.sock
+aiGeneratedDirectory: /opt/LibreOJ/data/ai-generated
+
+# Use the numeric GID of the backend service group (for example: getent group libreoj).
+aiRunnerGid: REPLACE_WITH_BACKEND_GROUP_ID

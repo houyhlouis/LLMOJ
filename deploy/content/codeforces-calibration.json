@@ -1,0 +1,3490 @@
+{
+  "checkedAt": "2026-09-20",
+  "sources": [
+    "https://codeforces.com/api/problemset.problems",
+    "https://codeforces.com/api/contest.list?gym=false"
+  ],
+  "sha256": {
+    "problems": "ea43f1a26555461ff909a4d8dac5b0861e847b3801a902777c540eea8fa2e75e",
+    "contests": "eb2cb05de7af84fe80ed930b9ae3f70120c8907862677992dc55b984e94fa537"
+  },
+  "examples": [
+    {
+      "id": "2264A",
+      "title": "Rumb Needs a Hand",
+      "rating": 800,
+      "contestDateUTC": "2026-09-13",
+      "tags": [
+        "implementation",
+        "sortings",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2264/A"
+    },
+    {
+      "id": "2263A",
+      "title": "Min Max Game",
+      "rating": 800,
+      "contestDateUTC": "2026-09-12",
+      "tags": [
+        "games"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2263/A"
+    },
+    {
+      "id": "2260A",
+      "title": "Monocarp's Contest",
+      "rating": 800,
+      "contestDateUTC": "2026-09-08",
+      "tags": [
+        "implementation"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2260/A"
+    },
+    {
+      "id": "2259B",
+      "title": "Minus Two",
+      "rating": 800,
+      "contestDateUTC": "2026-09-05",
+      "tags": [
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2259/B"
+    },
+    {
+      "id": "2259A",
+      "title": "Moo Language School",
+      "rating": 800,
+      "contestDateUTC": "2026-09-05",
+      "tags": [
+        "brute force",
+        "greedy",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2259/A"
+    },
+    {
+      "id": "2258A",
+      "title": "Odd Eraser",
+      "rating": 800,
+      "contestDateUTC": "2026-08-29",
+      "tags": [
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2258/A"
+    },
+    {
+      "id": "2257B",
+      "title": "Gigantomachy",
+      "rating": 800,
+      "contestDateUTC": "2026-08-17",
+      "tags": [
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2257/B"
+    },
+    {
+      "id": "2257A",
+      "title": "Creating Abbreviations",
+      "rating": 800,
+      "contestDateUTC": "2026-08-17",
+      "tags": [
+        "brute force",
+        "strings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2257/A"
+    },
+    {
+      "id": "2256A",
+      "title": "Three Numbers on the Blackboard",
+      "rating": 800,
+      "contestDateUTC": "2026-08-09",
+      "tags": [
+        "math",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2256/A"
+    },
+    {
+      "id": "2253A",
+      "title": "The Best Card",
+      "rating": 800,
+      "contestDateUTC": "2026-08-07",
+      "tags": [
+        "greedy",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2253/A"
+    },
+    {
+      "id": "2263B",
+      "title": "Min Matrices",
+      "rating": 900,
+      "contestDateUTC": "2026-09-12",
+      "tags": [
+        "constructive algorithms"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2263/B"
+    },
+    {
+      "id": "2260B",
+      "title": "Monocarp and Projects",
+      "rating": 900,
+      "contestDateUTC": "2026-09-08",
+      "tags": [
+        "brute force",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2260/B"
+    },
+    {
+      "id": "2258B1",
+      "title": "Carrot Chopdown (Easy Version)",
+      "rating": 900,
+      "contestDateUTC": "2026-08-29",
+      "tags": [
+        "brute force",
+        "games",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2258/B1"
+    },
+    {
+      "id": "2254B",
+      "title": "Evanescent",
+      "rating": 900,
+      "contestDateUTC": "2026-08-04",
+      "tags": [
+        "implementation",
+        "strings",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2254/B"
+    },
+    {
+      "id": "2247B",
+      "title": "Yet Another Constructive",
+      "rating": 900,
+      "contestDateUTC": "2026-07-18",
+      "tags": [
+        "constructive algorithms"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2247/B"
+    },
+    {
+      "id": "2246B",
+      "title": "ezraft and Array",
+      "rating": 900,
+      "contestDateUTC": "2026-07-12",
+      "tags": [
+        "constructive algorithms",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2246/B"
+    },
+    {
+      "id": "2238B",
+      "title": "Crimson Triples",
+      "rating": 900,
+      "contestDateUTC": "2026-06-28",
+      "tags": [
+        "dp",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2238/B"
+    },
+    {
+      "id": "2233B",
+      "title": "Different Distances",
+      "rating": 900,
+      "contestDateUTC": "2026-06-09",
+      "tags": [
+        "constructive algorithms"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2233/B"
+    },
+    {
+      "id": "2232B",
+      "title": "Cake Leveling",
+      "rating": 900,
+      "contestDateUTC": "2026-05-30",
+      "tags": [
+        "binary search",
+        "greedy",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2232/B"
+    },
+    {
+      "id": "2229C1",
+      "title": "We Be Flipping (Easy Version)",
+      "rating": 900,
+      "contestDateUTC": "2026-05-23",
+      "tags": [
+        "constructive algorithms",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2229/C1"
+    },
+    {
+      "id": "2264B",
+      "title": "Knife's Pill Farm",
+      "rating": 1000,
+      "contestDateUTC": "2026-09-13",
+      "tags": [
+        "data structures",
+        "greedy",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2264/B"
+    },
+    {
+      "id": "2259C",
+      "title": "101",
+      "rating": 1000,
+      "contestDateUTC": "2026-09-05",
+      "tags": [
+        "constructive algorithms",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2259/C"
+    },
+    {
+      "id": "2256B",
+      "title": "Domino Tiles",
+      "rating": 1000,
+      "contestDateUTC": "2026-08-09",
+      "tags": [
+        "implementation",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2256/B"
+    },
+    {
+      "id": "2254C1",
+      "title": "Marenol (easy version)",
+      "rating": 1000,
+      "contestDateUTC": "2026-08-04",
+      "tags": [
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2254/C1"
+    },
+    {
+      "id": "2248B",
+      "title": "Merge to Match",
+      "rating": 1000,
+      "contestDateUTC": "2026-08-01",
+      "tags": [
+        "greedy",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2248/B"
+    },
+    {
+      "id": "2250B",
+      "title": "String Construction",
+      "rating": 1000,
+      "contestDateUTC": "2026-07-26",
+      "tags": [
+        "constructive algorithms"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2250/B"
+    },
+    {
+      "id": "2242B",
+      "title": "Predominant Frequency Division",
+      "rating": 1000,
+      "contestDateUTC": "2026-07-06",
+      "tags": [
+        "data structures",
+        "greedy",
+        "implementation",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2242/B"
+    },
+    {
+      "id": "2241C",
+      "title": "RemovevomeR",
+      "rating": 1000,
+      "contestDateUTC": "2026-06-30",
+      "tags": [
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2241/C"
+    },
+    {
+      "id": "2237C",
+      "title": "Duck Surplus",
+      "rating": 1000,
+      "contestDateUTC": "2026-06-18",
+      "tags": [
+        "binary search",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2237/C"
+    },
+    {
+      "id": "2237B",
+      "title": "Annoying the Ghost",
+      "rating": 1000,
+      "contestDateUTC": "2026-06-18",
+      "tags": [
+        "brute force",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2237/B"
+    },
+    {
+      "id": "2253B",
+      "title": "Hypercarp and the Control Panel",
+      "rating": 1100,
+      "contestDateUTC": "2026-08-07",
+      "tags": [
+        "brute force",
+        "data structures",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2253/B"
+    },
+    {
+      "id": "2252B",
+      "title": "Always Changing",
+      "rating": 1100,
+      "contestDateUTC": "2026-08-06",
+      "tags": [
+        "dp",
+        "greedy",
+        "math",
+        "strings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2252/B"
+    },
+    {
+      "id": "2247C",
+      "title": "Inversion of a Subsequence",
+      "rating": 1100,
+      "contestDateUTC": "2026-07-18",
+      "tags": [
+        "greedy",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2247/C"
+    },
+    {
+      "id": "2245B",
+      "title": "Delete and Concatenate",
+      "rating": 1100,
+      "contestDateUTC": "2026-07-16",
+      "tags": [
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2245/B"
+    },
+    {
+      "id": "2244C",
+      "title": "Stepan and Permutation",
+      "rating": 1100,
+      "contestDateUTC": "2026-07-14",
+      "tags": [
+        "constructive algorithms",
+        "dfs and similar",
+        "dsu",
+        "greedy",
+        "math",
+        "number theory",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2244/C"
+    },
+    {
+      "id": "2241D",
+      "title": "An Alternative Way",
+      "rating": 1100,
+      "contestDateUTC": "2026-06-30",
+      "tags": [
+        "dp",
+        "greedy",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2241/D"
+    },
+    {
+      "id": "2241B",
+      "title": "Good times Good times",
+      "rating": 1100,
+      "contestDateUTC": "2026-06-30",
+      "tags": [
+        "constructive algorithms",
+        "dfs and similar",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2241/B"
+    },
+    {
+      "id": "2240B",
+      "title": "AI Finds Nothing Here",
+      "rating": 1100,
+      "contestDateUTC": "2026-06-27",
+      "tags": [
+        "combinatorics",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2240/B"
+    },
+    {
+      "id": "2231B",
+      "title": "Another Sorting Problem",
+      "rating": 1100,
+      "contestDateUTC": "2026-05-21",
+      "tags": [
+        "constructive algorithms"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2231/B"
+    },
+    {
+      "id": "2228B",
+      "title": "Remilia Plays Soku",
+      "rating": 1100,
+      "contestDateUTC": "2026-05-16",
+      "tags": [
+        "games",
+        "implementation"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2228/B"
+    },
+    {
+      "id": "2262A1",
+      "title": "Floor of MEX (Easy Version)",
+      "rating": 1200,
+      "contestDateUTC": "2026-09-12",
+      "tags": [
+        "constructive algorithms",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2262/A1"
+    },
+    {
+      "id": "2259D",
+      "title": "MEX Multiset",
+      "rating": 1200,
+      "contestDateUTC": "2026-09-05",
+      "tags": [
+        "constructive algorithms",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2259/D"
+    },
+    {
+      "id": "2257C",
+      "title": "Spying on the Beaver",
+      "rating": 1200,
+      "contestDateUTC": "2026-08-17",
+      "tags": [
+        "constructive algorithms",
+        "dfs and similar",
+        "dsu",
+        "graphs",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2257/C"
+    },
+    {
+      "id": "2255A",
+      "title": "Hot Potatoes at the Fairy Warehouse",
+      "rating": 1200,
+      "contestDateUTC": "2026-08-09",
+      "tags": [
+        "games",
+        "greedy",
+        "implementation"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2255/A"
+    },
+    {
+      "id": "2254C2",
+      "title": "Marenol (hard version)",
+      "rating": 1200,
+      "contestDateUTC": "2026-08-04",
+      "tags": [
+        "greedy",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2254/C2"
+    },
+    {
+      "id": "2244D",
+      "title": "Yaroslav and Productivity",
+      "rating": 1200,
+      "contestDateUTC": "2026-07-14",
+      "tags": [
+        "constructive algorithms",
+        "dp",
+        "greedy",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2244/D"
+    },
+    {
+      "id": "2234C",
+      "title": "Vessels, Heights and Two Versions (Easy Version)",
+      "rating": 1200,
+      "contestDateUTC": "2026-06-07",
+      "tags": [
+        "dfs and similar",
+        "dsu",
+        "greedy",
+        "implementation",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2234/C"
+    },
+    {
+      "id": "2224B",
+      "title": "Zhily and Mex and Max",
+      "rating": 1200,
+      "contestDateUTC": "2026-05-06",
+      "tags": [
+        "constructive algorithms",
+        "greedy",
+        "math",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2224/B"
+    },
+    {
+      "id": "2227D",
+      "title": "Palindromex",
+      "rating": 1200,
+      "contestDateUTC": "2026-04-30",
+      "tags": [
+        "binary search",
+        "brute force",
+        "constructive algorithms",
+        "data structures",
+        "greedy",
+        "implementation",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2227/D"
+    },
+    {
+      "id": "2220B",
+      "title": "OIE Excursion",
+      "rating": 1200,
+      "contestDateUTC": "2026-04-13",
+      "tags": [
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2220/B"
+    },
+    {
+      "id": "2264C",
+      "title": "Madamant's Skating Dynasty",
+      "rating": 1300,
+      "contestDateUTC": "2026-09-13",
+      "tags": [
+        "combinatorics",
+        "math",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2264/C"
+    },
+    {
+      "id": "2260C",
+      "title": "Maximize XOR, Minimize Operations",
+      "rating": 1300,
+      "contestDateUTC": "2026-09-08",
+      "tags": [
+        "bitmasks",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2260/C"
+    },
+    {
+      "id": "2254D",
+      "title": "Silhouette",
+      "rating": 1300,
+      "contestDateUTC": "2026-08-04",
+      "tags": [
+        "constructive algorithms",
+        "math",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2254/D"
+    },
+    {
+      "id": "2248C",
+      "title": "Maximize the Score",
+      "rating": 1300,
+      "contestDateUTC": "2026-08-01",
+      "tags": [
+        "dp",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2248/C"
+    },
+    {
+      "id": "2249A",
+      "title": "Rank Subsequence",
+      "rating": 1300,
+      "contestDateUTC": "2026-07-26",
+      "tags": [
+        "brute force",
+        "greedy",
+        "implementation"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2249/A"
+    },
+    {
+      "id": "2242C",
+      "title": "Unstable Elements",
+      "rating": 1300,
+      "contestDateUTC": "2026-07-06",
+      "tags": [
+        "brute force",
+        "data structures",
+        "implementation",
+        "sortings",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2242/C"
+    },
+    {
+      "id": "2239A",
+      "title": "Nim Game Is XOR Game",
+      "rating": 1300,
+      "contestDateUTC": "2026-06-27",
+      "tags": [
+        "constructive algorithms",
+        "games",
+        "greedy",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2239/A"
+    },
+    {
+      "id": "2236D",
+      "title": "Brand New Tatar TV Show",
+      "rating": 1300,
+      "contestDateUTC": "2026-06-12",
+      "tags": [
+        "binary search",
+        "constructive algorithms",
+        "dp",
+        "games",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2236/D"
+    },
+    {
+      "id": "2232C1",
+      "title": "Seating Arrangement (Easy Version)",
+      "rating": 1300,
+      "contestDateUTC": "2026-05-30",
+      "tags": [
+        "binary search",
+        "dp",
+        "greedy",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2232/C1"
+    },
+    {
+      "id": "2230C",
+      "title": "Arrange the Numbers in a Circle",
+      "rating": 1300,
+      "contestDateUTC": "2026-05-18",
+      "tags": [
+        "constructive algorithms",
+        "implementation",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2230/C"
+    },
+    {
+      "id": "2252C",
+      "title": "Risky Tower",
+      "rating": 1400,
+      "contestDateUTC": "2026-08-06",
+      "tags": [
+        "binary search",
+        "brute force",
+        "data structures",
+        "greedy",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2252/C"
+    },
+    {
+      "id": "2248D",
+      "title": "Good Pair Queries",
+      "rating": 1400,
+      "contestDateUTC": "2026-08-01",
+      "tags": [
+        "constructive algorithms",
+        "greedy",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2248/D"
+    },
+    {
+      "id": "2245C",
+      "title": "MEXOR",
+      "rating": 1400,
+      "contestDateUTC": "2026-07-16",
+      "tags": [
+        "bitmasks",
+        "constructive algorithms",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2245/C"
+    },
+    {
+      "id": "2244E",
+      "title": "Masha and the Garland",
+      "rating": 1400,
+      "contestDateUTC": "2026-07-14",
+      "tags": [
+        "data structures",
+        "dp",
+        "greedy",
+        "implementation",
+        "math",
+        "number theory",
+        "strings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2244/E"
+    },
+    {
+      "id": "2246C",
+      "title": "0mar and Alternating Sums",
+      "rating": 1400,
+      "contestDateUTC": "2026-07-12",
+      "tags": [
+        "combinatorics",
+        "dp",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2246/C"
+    },
+    {
+      "id": "2238C",
+      "title": "Village Guilds",
+      "rating": 1400,
+      "contestDateUTC": "2026-06-28",
+      "tags": [
+        "dfs and similar",
+        "dp",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2238/C"
+    },
+    {
+      "id": "2233C",
+      "title": "Cost of a Bracket Sequence",
+      "rating": 1400,
+      "contestDateUTC": "2026-06-09",
+      "tags": [
+        "brute force",
+        "dp",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2233/C"
+    },
+    {
+      "id": "2229C2",
+      "title": "We Be Flipping (Hard Version)",
+      "rating": 1400,
+      "contestDateUTC": "2026-05-23",
+      "tags": [
+        "constructive algorithms",
+        "dp",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2229/C2"
+    },
+    {
+      "id": "2231C",
+      "title": "Chipmunk Theo and Equality",
+      "rating": 1400,
+      "contestDateUTC": "2026-05-21",
+      "tags": [
+        "implementation",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2231/C"
+    },
+    {
+      "id": "2227E",
+      "title": "It All Went Sideways",
+      "rating": 1400,
+      "contestDateUTC": "2026-04-30",
+      "tags": [
+        "binary search",
+        "data structures",
+        "dp",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2227/E"
+    },
+    {
+      "id": "2259E",
+      "title": "Treasure Map Destruction (Constructive Version)",
+      "rating": 1500,
+      "contestDateUTC": "2026-09-05",
+      "tags": [
+        "2-sat",
+        "constructive algorithms",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2259/E"
+    },
+    {
+      "id": "2253C",
+      "title": "Sum of Distinct Values in a Matrix",
+      "rating": 1500,
+      "contestDateUTC": "2026-08-07",
+      "tags": [
+        "greedy",
+        "sortings",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2253/C"
+    },
+    {
+      "id": "2254E",
+      "title": "Chronostasis",
+      "rating": 1500,
+      "contestDateUTC": "2026-08-04",
+      "tags": [
+        "binary search",
+        "data structures",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2254/E"
+    },
+    {
+      "id": "2247D1",
+      "title": "XOR Sorting (Easy Version)",
+      "rating": 1500,
+      "contestDateUTC": "2026-07-18",
+      "tags": [
+        "bitmasks",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2247/D1"
+    },
+    {
+      "id": "2238D",
+      "title": "Storming Arasaka",
+      "rating": 1500,
+      "contestDateUTC": "2026-06-28",
+      "tags": [
+        "greedy",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2238/D"
+    },
+    {
+      "id": "2239B",
+      "title": "Decidophobia",
+      "rating": 1500,
+      "contestDateUTC": "2026-06-27",
+      "tags": [
+        "greedy",
+        "math",
+        "sortings",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2239/B"
+    },
+    {
+      "id": "2237D",
+      "title": "Fullmetal Bitchemist",
+      "rating": 1500,
+      "contestDateUTC": "2026-06-18",
+      "tags": [
+        "constructive algorithms",
+        "greedy",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2237/D"
+    },
+    {
+      "id": "2234D",
+      "title": "XOR, Expression and Two Binary Numbers",
+      "rating": 1500,
+      "contestDateUTC": "2026-06-07",
+      "tags": [
+        "bitmasks",
+        "divide and conquer",
+        "dp",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2234/D"
+    },
+    {
+      "id": "2232C2",
+      "title": "Seating Arrangement (Hard Version)",
+      "rating": 1500,
+      "contestDateUTC": "2026-05-30",
+      "tags": [
+        "binary search",
+        "greedy",
+        "math",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2232/C2"
+    },
+    {
+      "id": "2228C1",
+      "title": "Cirno and Number (Easy Version)",
+      "rating": 1500,
+      "contestDateUTC": "2026-05-16",
+      "tags": [
+        "binary search",
+        "brute force",
+        "dp",
+        "greedy",
+        "implementation"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2228/C1"
+    },
+    {
+      "id": "2258B2",
+      "title": "Carrot Chopdown (Hard Version)",
+      "rating": 1600,
+      "contestDateUTC": "2026-08-29",
+      "tags": [
+        "brute force",
+        "greedy",
+        "implementation",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2258/B2"
+    },
+    {
+      "id": "2257D",
+      "title": "Bermuda Rectangle",
+      "rating": 1600,
+      "contestDateUTC": "2026-08-17",
+      "tags": [
+        "binary search",
+        "implementation",
+        "math",
+        "number theory",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2257/D"
+    },
+    {
+      "id": "2255B",
+      "title": "A Ribbon for Tomorrow",
+      "rating": 1600,
+      "contestDateUTC": "2026-08-09",
+      "tags": [
+        "combinatorics",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2255/B"
+    },
+    {
+      "id": "2242D",
+      "title": "Two Digit Strings",
+      "rating": 1600,
+      "contestDateUTC": "2026-07-06",
+      "tags": [
+        "dp",
+        "strings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2242/D"
+    },
+    {
+      "id": "2241E",
+      "title": "Fair and Square",
+      "rating": 1600,
+      "contestDateUTC": "2026-06-30",
+      "tags": [
+        "combinatorics",
+        "dp",
+        "graphs",
+        "math",
+        "number theory",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2241/E"
+    },
+    {
+      "id": "2228C2",
+      "title": "Cirno and Number (Hard Version)",
+      "rating": 1600,
+      "contestDateUTC": "2026-05-16",
+      "tags": [
+        "binary search",
+        "dfs and similar",
+        "dp",
+        "greedy",
+        "implementation"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2228/C2"
+    },
+    {
+      "id": "2223B",
+      "title": "Zhily and Barknights",
+      "rating": 1600,
+      "contestDateUTC": "2026-05-06",
+      "tags": [
+        "binary search",
+        "data structures",
+        "dp",
+        "math",
+        "sortings",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2223/B"
+    },
+    {
+      "id": "2207C",
+      "title": "Where's My Water?",
+      "rating": 1600,
+      "contestDateUTC": "2026-03-08",
+      "tags": [
+        "data structures",
+        "divide and conquer",
+        "dp",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2207/C"
+    },
+    {
+      "id": "2207B",
+      "title": "One Night At Freddy's",
+      "rating": 1600,
+      "contestDateUTC": "2026-03-08",
+      "tags": [
+        "games",
+        "greedy",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2207/B"
+    },
+    {
+      "id": "2199C",
+      "title": "Minesweeper",
+      "rating": 1600,
+      "contestDateUTC": "2026-03-02",
+      "tags": [
+        "*special",
+        "constructive algorithms",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2199/C"
+    },
+    {
+      "id": "2260D",
+      "title": "Signs of Prefix Sums",
+      "rating": 1700,
+      "contestDateUTC": "2026-09-08",
+      "tags": [
+        "brute force",
+        "constructive algorithms",
+        "dfs and similar",
+        "dp",
+        "implementation"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2260/D"
+    },
+    {
+      "id": "2252D",
+      "title": "Array Replacement",
+      "rating": 1700,
+      "contestDateUTC": "2026-08-06",
+      "tags": [
+        "greedy",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2252/D"
+    },
+    {
+      "id": "2249B",
+      "title": "Permutation Cuts",
+      "rating": 1700,
+      "contestDateUTC": "2026-07-26",
+      "tags": [
+        "combinatorics",
+        "implementation",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2249/B"
+    },
+    {
+      "id": "2245D1",
+      "title": "Construct an Array (Easy Version)",
+      "rating": 1700,
+      "contestDateUTC": "2026-07-16",
+      "tags": [
+        "dfs and similar",
+        "implementation",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2245/D1"
+    },
+    {
+      "id": "2244F",
+      "title": "Anya Loves Trees!",
+      "rating": 1700,
+      "contestDateUTC": "2026-07-14",
+      "tags": [
+        "dfs and similar",
+        "dp",
+        "greedy",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2244/F"
+    },
+    {
+      "id": "2241F",
+      "title": "A Bit Odd",
+      "rating": 1700,
+      "contestDateUTC": "2026-06-30",
+      "tags": [
+        "data structures",
+        "games",
+        "greedy",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2241/F"
+    },
+    {
+      "id": "2236F1",
+      "title": "Elections in Saransk (easy version)",
+      "rating": 1700,
+      "contestDateUTC": "2026-06-12",
+      "tags": [
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2236/F1"
+    },
+    {
+      "id": "2236E",
+      "title": "Friendly Gifts",
+      "rating": 1700,
+      "contestDateUTC": "2026-06-12",
+      "tags": [
+        "brute force",
+        "dp"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2236/E"
+    },
+    {
+      "id": "2229D",
+      "title": "Me When Median Problem",
+      "rating": 1700,
+      "contestDateUTC": "2026-05-23",
+      "tags": [
+        "binary search",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2229/D"
+    },
+    {
+      "id": "2230D",
+      "title": "Good Schedule",
+      "rating": 1700,
+      "contestDateUTC": "2026-05-18",
+      "tags": [
+        "dp",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2230/D"
+    },
+    {
+      "id": "2264D",
+      "title": "Dr. Agos's Dark Mode",
+      "rating": 1800,
+      "contestDateUTC": "2026-09-13",
+      "tags": [
+        "brute force",
+        "chinese remainder theorem",
+        "constructive algorithms",
+        "math",
+        "strings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2264/D"
+    },
+    {
+      "id": "2262A2",
+      "title": "Floor of MEX (Hard Version)",
+      "rating": 1800,
+      "contestDateUTC": "2026-09-12",
+      "tags": [
+        "dp",
+        "implementation",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2262/A2"
+    },
+    {
+      "id": "2259F",
+      "title": "Binary Bubble Sort Inversions",
+      "rating": 1800,
+      "contestDateUTC": "2026-09-05",
+      "tags": [
+        "data structures",
+        "math",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2259/F"
+    },
+    {
+      "id": "2253D",
+      "title": "Hypercarp and Interdimensional Jumps",
+      "rating": 1800,
+      "contestDateUTC": "2026-08-07",
+      "tags": [
+        "binary search",
+        "brute force",
+        "geometry",
+        "greedy",
+        "implementation",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2253/D"
+    },
+    {
+      "id": "2222D",
+      "title": "Permutation Construction",
+      "rating": 1800,
+      "contestDateUTC": "2026-04-25",
+      "tags": [
+        "constructive algorithms",
+        "data structures",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2222/D"
+    },
+    {
+      "id": "2218G",
+      "title": "The 67th Iteration of \"Counting is Fun\"",
+      "rating": 1800,
+      "contestDateUTC": "2026-04-04",
+      "tags": [
+        "implementation",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2218/G"
+    },
+    {
+      "id": "2211C2",
+      "title": "Equal Multisets (Hard Version)",
+      "rating": 1800,
+      "contestDateUTC": "2026-03-28",
+      "tags": [
+        "constructive algorithms",
+        "dsu",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2211/C2"
+    },
+    {
+      "id": "2209D",
+      "title": "Ghostfires",
+      "rating": 1800,
+      "contestDateUTC": "2026-03-21",
+      "tags": [
+        "constructive algorithms",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2209/D"
+    },
+    {
+      "id": "2204E",
+      "title": "Sum of Digits (and Again)",
+      "rating": 1800,
+      "contestDateUTC": "2026-03-16",
+      "tags": [
+        "brute force",
+        "constructive algorithms",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2204/E"
+    },
+    {
+      "id": "2208D1",
+      "title": "Tree Orientation (Easy Version)",
+      "rating": 1800,
+      "contestDateUTC": "2026-03-14",
+      "tags": [
+        "constructive algorithms",
+        "dfs and similar",
+        "dsu",
+        "graphs",
+        "greedy",
+        "matrices",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2208/D1"
+    },
+    {
+      "id": "2259G",
+      "title": "Index Removal",
+      "rating": 1900,
+      "contestDateUTC": "2026-09-05",
+      "tags": [
+        "binary search",
+        "data structures",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2259/G"
+    },
+    {
+      "id": "2254F",
+      "title": "Whiplash",
+      "rating": 1900,
+      "contestDateUTC": "2026-08-04",
+      "tags": [
+        "bitmasks",
+        "constructive algorithms",
+        "math",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2254/F"
+    },
+    {
+      "id": "2248E",
+      "title": "Excuse for Breaks",
+      "rating": 1900,
+      "contestDateUTC": "2026-08-01",
+      "tags": [
+        "binary search",
+        "brute force",
+        "greedy",
+        "math",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2248/E"
+    },
+    {
+      "id": "2244G",
+      "title": "Yura and Deadlines",
+      "rating": 1900,
+      "contestDateUTC": "2026-07-14",
+      "tags": [
+        "data structures",
+        "dp"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2244/G"
+    },
+    {
+      "id": "2246D",
+      "title": "diss_quack and Array Game",
+      "rating": 1900,
+      "contestDateUTC": "2026-07-12",
+      "tags": [
+        "bitmasks",
+        "brute force",
+        "games",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2246/D"
+    },
+    {
+      "id": "2233D",
+      "title": "Goods on the Shelf",
+      "rating": 1900,
+      "contestDateUTC": "2026-06-09",
+      "tags": [
+        "brute force",
+        "data structures",
+        "implementation",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2233/D"
+    },
+    {
+      "id": "2234F",
+      "title": "Vessels, Heights and Two Versions (Hard Version)",
+      "rating": 1900,
+      "contestDateUTC": "2026-06-07",
+      "tags": [
+        "data structures",
+        "dfs and similar",
+        "dsu",
+        "greedy",
+        "implementation",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2234/F"
+    },
+    {
+      "id": "2231D",
+      "title": "Maximum Prefix Sums",
+      "rating": 1900,
+      "contestDateUTC": "2026-05-21",
+      "tags": [
+        "constructive algorithms",
+        "greedy",
+        "implementation",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2231/D"
+    },
+    {
+      "id": "2228D",
+      "title": "Sanae, Cross and Color",
+      "rating": 1900,
+      "contestDateUTC": "2026-05-16",
+      "tags": [
+        "binary search",
+        "data structures",
+        "implementation"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2228/D"
+    },
+    {
+      "id": "2226D",
+      "title": "Reserved Reversals",
+      "rating": 1900,
+      "contestDateUTC": "2026-04-28",
+      "tags": [
+        "constructive algorithms",
+        "dp",
+        "greedy",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2226/D"
+    },
+    {
+      "id": "2262B",
+      "title": "Culling Game",
+      "rating": 2000,
+      "contestDateUTC": "2026-09-12",
+      "tags": [
+        "binary search",
+        "data structures",
+        "implementation",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2262/B"
+    },
+    {
+      "id": "2260E",
+      "title": "Cyclic Balance",
+      "rating": 2000,
+      "contestDateUTC": "2026-09-08",
+      "tags": [
+        "binary search",
+        "constructive algorithms",
+        "dp",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2260/E"
+    },
+    {
+      "id": "2257E",
+      "title": "Busy Beaver",
+      "rating": 2000,
+      "contestDateUTC": "2026-08-17",
+      "tags": [
+        "brute force",
+        "data structures",
+        "divide and conquer",
+        "dp",
+        "greedy",
+        "implementation",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2257/E"
+    },
+    {
+      "id": "2249C",
+      "title": "Double-Rift Dial",
+      "rating": 2000,
+      "contestDateUTC": "2026-07-26",
+      "tags": [
+        "data structures",
+        "dfs and similar",
+        "dsu",
+        "implementation",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2249/C"
+    },
+    {
+      "id": "2247D2",
+      "title": "XOR Sorting (Hard Version)",
+      "rating": 2000,
+      "contestDateUTC": "2026-07-18",
+      "tags": [
+        "bitmasks",
+        "data structures",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2247/D2"
+    },
+    {
+      "id": "2245D2",
+      "title": "Construct an Array (Hard Version)",
+      "rating": 2000,
+      "contestDateUTC": "2026-07-16",
+      "tags": [
+        "2-sat",
+        "constructive algorithms",
+        "dfs and similar",
+        "graphs",
+        "implementation"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2245/D2"
+    },
+    {
+      "id": "2238E",
+      "title": "Cake Trial",
+      "rating": 2000,
+      "contestDateUTC": "2026-06-28",
+      "tags": [
+        "dp",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2238/E"
+    },
+    {
+      "id": "2237E",
+      "title": "Permutation Commutation",
+      "rating": 2000,
+      "contestDateUTC": "2026-06-18",
+      "tags": [
+        "data structures",
+        "graphs",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2237/E"
+    },
+    {
+      "id": "2232D",
+      "title": "Magical Tiered Cake",
+      "rating": 2000,
+      "contestDateUTC": "2026-05-30",
+      "tags": [
+        "constructive algorithms",
+        "dfs and similar",
+        "dp",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2232/D"
+    },
+    {
+      "id": "2227G",
+      "title": "Drowning",
+      "rating": 2000,
+      "contestDateUTC": "2026-04-30",
+      "tags": [
+        "binary search",
+        "data structures",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2227/G"
+    },
+    {
+      "id": "2264E1",
+      "title": "A Prime Flood (Easy Version)",
+      "rating": 2100,
+      "contestDateUTC": "2026-09-13",
+      "tags": [
+        "combinatorics",
+        "dp",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2264/E1"
+    },
+    {
+      "id": "2253E",
+      "title": "Diameter Intersections",
+      "rating": 2100,
+      "contestDateUTC": "2026-08-07",
+      "tags": [
+        "brute force",
+        "dfs and similar",
+        "fft",
+        "graphs",
+        "implementation",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2253/E"
+    },
+    {
+      "id": "2252E",
+      "title": "Generational Triplets",
+      "rating": 2100,
+      "contestDateUTC": "2026-08-06",
+      "tags": [
+        "bitmasks",
+        "combinatorics",
+        "dp",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2252/E"
+    },
+    {
+      "id": "2234E",
+      "title": "Vlad, Misha and Two Arrays",
+      "rating": 2100,
+      "contestDateUTC": "2026-06-07",
+      "tags": [
+        "brute force",
+        "combinatorics",
+        "dfs and similar",
+        "divide and conquer",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2234/E"
+    },
+    {
+      "id": "2229E",
+      "title": "Deconstruction Tree",
+      "rating": 2100,
+      "contestDateUTC": "2026-05-23",
+      "tags": [
+        "combinatorics",
+        "data structures",
+        "dp",
+        "graphs",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2229/E"
+    },
+    {
+      "id": "2230E",
+      "title": "Minimum Influence",
+      "rating": 2100,
+      "contestDateUTC": "2026-05-18",
+      "tags": [
+        "binary search",
+        "data structures",
+        "greedy",
+        "implementation",
+        "math",
+        "sortings",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2230/E"
+    },
+    {
+      "id": "2227H",
+      "title": "Fallen Leaves",
+      "rating": 2100,
+      "contestDateUTC": "2026-04-30",
+      "tags": [
+        "dfs and similar",
+        "dp",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2227/H"
+    },
+    {
+      "id": "2210D",
+      "title": "A Simple RBS Problem",
+      "rating": 2100,
+      "contestDateUTC": "2026-03-29",
+      "tags": [
+        "constructive algorithms",
+        "math",
+        "strings",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2210/D"
+    },
+    {
+      "id": "2210C2",
+      "title": "A Simple GCD Problem (Hard Version)",
+      "rating": 2100,
+      "contestDateUTC": "2026-03-29",
+      "tags": [
+        "dp",
+        "greedy",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2210/C2"
+    },
+    {
+      "id": "2207E1",
+      "title": "N-MEX (Constructive Version)",
+      "rating": 2100,
+      "contestDateUTC": "2026-03-08",
+      "tags": [
+        "constructive algorithms",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2207/E1"
+    },
+    {
+      "id": "2262C",
+      "title": "Traveling the World",
+      "rating": 2200,
+      "contestDateUTC": "2026-09-12",
+      "tags": [
+        "combinatorics",
+        "constructive algorithms",
+        "graphs",
+        "greedy",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2262/C"
+    },
+    {
+      "id": "2259H",
+      "title": "Treasure Map Destruction (Counting Version)",
+      "rating": 2200,
+      "contestDateUTC": "2026-09-05",
+      "tags": [
+        "dfs and similar",
+        "dp",
+        "dsu",
+        "graphs",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2259/H"
+    },
+    {
+      "id": "2254G",
+      "title": "Nightcrawler",
+      "rating": 2200,
+      "contestDateUTC": "2026-08-04",
+      "tags": [
+        "data structures",
+        "dfs and similar",
+        "dp",
+        "greedy",
+        "sortings",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2254/G"
+    },
+    {
+      "id": "2242E",
+      "title": "Product of Closures",
+      "rating": 2200,
+      "contestDateUTC": "2026-07-06",
+      "tags": [
+        "bitmasks",
+        "brute force",
+        "constructive algorithms",
+        "greedy",
+        "implementation",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2242/E"
+    },
+    {
+      "id": "2239C",
+      "title": "Revival",
+      "rating": 2200,
+      "contestDateUTC": "2026-06-27",
+      "tags": [
+        "binary search",
+        "data structures",
+        "math",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2239/C"
+    },
+    {
+      "id": "2236F2",
+      "title": "Elections in Saransk (hard version)",
+      "rating": 2200,
+      "contestDateUTC": "2026-06-12",
+      "tags": [
+        "combinatorics",
+        "dp",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2236/F2"
+    },
+    {
+      "id": "2233E1",
+      "title": "Permutation Transmission (Easy Version)",
+      "rating": 2200,
+      "contestDateUTC": "2026-06-09",
+      "tags": [
+        "bitmasks",
+        "combinatorics",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2233/E1"
+    },
+    {
+      "id": "2225E",
+      "title": "Covering Points with Circles",
+      "rating": 2200,
+      "contestDateUTC": "2026-04-21",
+      "tags": [
+        "constructive algorithms",
+        "geometry",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2225/E"
+    },
+    {
+      "id": "2209E",
+      "title": "A Trivial String Problem",
+      "rating": 2200,
+      "contestDateUTC": "2026-03-21",
+      "tags": [
+        "brute force",
+        "dp",
+        "hashing",
+        "string suffix structures",
+        "strings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2209/E"
+    },
+    {
+      "id": "2204F",
+      "title": "Sum of Fractions",
+      "rating": 2200,
+      "contestDateUTC": "2026-03-16",
+      "tags": [
+        "binary search",
+        "brute force",
+        "combinatorics",
+        "data structures",
+        "greedy",
+        "math",
+        "number theory",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2204/F"
+    },
+    {
+      "id": "2255D",
+      "title": "How Long Until Nothing Remains?",
+      "rating": 2300,
+      "contestDateUTC": "2026-08-09",
+      "tags": [
+        "binary search",
+        "bitmasks",
+        "data structures",
+        "greedy",
+        "math",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2255/D"
+    },
+    {
+      "id": "2249D",
+      "title": "Xor Permutation Matrix",
+      "rating": 2300,
+      "contestDateUTC": "2026-07-26",
+      "tags": [
+        "bitmasks",
+        "constructive algorithms",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2249/D"
+    },
+    {
+      "id": "2247E",
+      "title": "Build a Tree",
+      "rating": 2300,
+      "contestDateUTC": "2026-07-18",
+      "tags": [
+        "constructive algorithms",
+        "trees",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2247/E"
+    },
+    {
+      "id": "2245E",
+      "title": "Tom and Jerry",
+      "rating": 2300,
+      "contestDateUTC": "2026-07-16",
+      "tags": [
+        "dfs and similar",
+        "dsu",
+        "games",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2245/E"
+    },
+    {
+      "id": "2233E2",
+      "title": "Permutation Transmission (Difficult Version)",
+      "rating": 2300,
+      "contestDateUTC": "2026-06-09",
+      "tags": [
+        "bitmasks",
+        "combinatorics",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2233/E2"
+    },
+    {
+      "id": "2231E",
+      "title": "Graph Cutting",
+      "rating": 2300,
+      "contestDateUTC": "2026-05-21",
+      "tags": [
+        "dfs and similar",
+        "dp",
+        "math",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2231/E"
+    },
+    {
+      "id": "2223C",
+      "title": "Zhily and Signpost",
+      "rating": 2300,
+      "contestDateUTC": "2026-05-06",
+      "tags": [
+        "chinese remainder theorem",
+        "dfs and similar",
+        "math",
+        "number theory",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2223/C"
+    },
+    {
+      "id": "2226E",
+      "title": "Mental Monumental (Hard Version)",
+      "rating": 2300,
+      "contestDateUTC": "2026-04-28",
+      "tags": [
+        "data structures",
+        "greedy",
+        "math",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2226/E"
+    },
+    {
+      "id": "2219C",
+      "title": "Coloring a Red Black Tree",
+      "rating": 2300,
+      "contestDateUTC": "2026-04-13",
+      "tags": [
+        "dfs and similar",
+        "dp",
+        "greedy",
+        "math",
+        "probabilities",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2219/C"
+    },
+    {
+      "id": "2217F",
+      "title": "Interval Game",
+      "rating": 2300,
+      "contestDateUTC": "2026-04-07",
+      "tags": [
+        "bitmasks",
+        "combinatorics",
+        "constructive algorithms",
+        "dp",
+        "games",
+        "greedy",
+        "math",
+        "probabilities"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2217/F"
+    },
+    {
+      "id": "2258E",
+      "title": "DivMEX",
+      "rating": 2400,
+      "contestDateUTC": "2026-08-29",
+      "tags": [
+        "data structures",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2258/E"
+    },
+    {
+      "id": "2241G",
+      "title": "Summmon",
+      "rating": 2400,
+      "contestDateUTC": "2026-06-30",
+      "tags": [
+        "binary search",
+        "data structures",
+        "greedy",
+        "implementation",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2241/G"
+    },
+    {
+      "id": "2237F",
+      "title": "Paint the Array",
+      "rating": 2400,
+      "contestDateUTC": "2026-06-18",
+      "tags": [
+        "data structures",
+        "dp",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2237/F"
+    },
+    {
+      "id": "2229F",
+      "title": "Load Unbalancing",
+      "rating": 2400,
+      "contestDateUTC": "2026-05-23",
+      "tags": [
+        "binary search",
+        "bitmasks",
+        "dp",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2229/F"
+    },
+    {
+      "id": "2228E1",
+      "title": "Amanojaku and Sequence (Easy Version)",
+      "rating": 2400,
+      "contestDateUTC": "2026-05-16",
+      "tags": [
+        "combinatorics",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2228/E1"
+    },
+    {
+      "id": "2211F",
+      "title": "Learning Binary Search",
+      "rating": 2400,
+      "contestDateUTC": "2026-03-28",
+      "tags": [
+        "combinatorics",
+        "divide and conquer",
+        "dp",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2211/F"
+    },
+    {
+      "id": "2207E2",
+      "title": "N-MEX (Counting Version)",
+      "rating": 2400,
+      "contestDateUTC": "2026-03-08",
+      "tags": [
+        "combinatorics",
+        "constructive algorithms",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2207/E2"
+    },
+    {
+      "id": "2206F",
+      "title": "Minesweeper String",
+      "rating": 2400,
+      "contestDateUTC": "2026-03-08",
+      "tags": [
+        "fft",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2206/F"
+    },
+    {
+      "id": "2205F",
+      "title": "Simons and Reconstructing His Roads",
+      "rating": 2400,
+      "contestDateUTC": "2026-02-26",
+      "tags": [
+        "constructive algorithms",
+        "data structures",
+        "dsu",
+        "graphs"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2205/F"
+    },
+    {
+      "id": "2195H",
+      "title": "Codeforces Heuristic Contest 001",
+      "rating": 2400,
+      "contestDateUTC": "2026-02-15",
+      "tags": [
+        "brute force",
+        "constructive algorithms",
+        "geometry",
+        "implementation"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2195/H"
+    },
+    {
+      "id": "2260F",
+      "title": "Edge Three-Coloring",
+      "rating": 2500,
+      "contestDateUTC": "2026-09-08",
+      "tags": [
+        "brute force",
+        "dfs and similar",
+        "dsu",
+        "graphs",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2260/F"
+    },
+    {
+      "id": "2258F",
+      "title": "Plus Minus Tree",
+      "rating": 2500,
+      "contestDateUTC": "2026-08-29",
+      "tags": [
+        "data structures",
+        "dfs and similar",
+        "dp",
+        "graphs",
+        "greedy",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2258/F"
+    },
+    {
+      "id": "2258D",
+      "title": "Magic Tiles",
+      "rating": 2500,
+      "contestDateUTC": "2026-08-29",
+      "tags": [
+        "dp",
+        "greedy",
+        "implementation"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2258/D"
+    },
+    {
+      "id": "2257F1",
+      "title": "Beaver's Jumping Track (Easy Version)",
+      "rating": 2500,
+      "contestDateUTC": "2026-08-17",
+      "tags": [
+        "data structures",
+        "dp",
+        "matrices"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2257/F1"
+    },
+    {
+      "id": "2248F",
+      "title": "Matrix Elimination",
+      "rating": 2500,
+      "contestDateUTC": "2026-08-01",
+      "tags": [
+        "binary search",
+        "greedy",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2248/F"
+    },
+    {
+      "id": "2239D",
+      "title": "Hunting the Beast",
+      "rating": 2500,
+      "contestDateUTC": "2026-06-27",
+      "tags": [
+        "combinatorics",
+        "dp",
+        "graphs",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2239/D"
+    },
+    {
+      "id": "2228E2",
+      "title": "Amanojaku and Sequence (Hard Version)",
+      "rating": 2500,
+      "contestDateUTC": "2026-05-16",
+      "tags": [
+        "combinatorics",
+        "data structures",
+        "implementation",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2228/E2"
+    },
+    {
+      "id": "2206E",
+      "title": "Parallel Sums",
+      "rating": 2500,
+      "contestDateUTC": "2026-03-08",
+      "tags": [
+        "data structures",
+        "geometry"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2206/E"
+    },
+    {
+      "id": "2206B",
+      "title": "Subtree Removal Game",
+      "rating": 2500,
+      "contestDateUTC": "2026-03-08",
+      "tags": [
+        "binary search",
+        "games",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2206/B"
+    },
+    {
+      "id": "2199G",
+      "title": "Jammer",
+      "rating": 2500,
+      "contestDateUTC": "2026-03-02",
+      "tags": [
+        "*special",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2199/G"
+    },
+    {
+      "id": "2253F",
+      "title": "4-beauty",
+      "rating": 2600,
+      "contestDateUTC": "2026-08-07",
+      "tags": [
+        "bitmasks",
+        "dp",
+        "graphs",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2253/F"
+    },
+    {
+      "id": "2252F",
+      "title": "Spectral Components",
+      "rating": 2600,
+      "contestDateUTC": "2026-08-06",
+      "tags": [
+        "dfs and similar",
+        "dp",
+        "greedy",
+        "sortings",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2252/F"
+    },
+    {
+      "id": "2238F",
+      "title": "Infinite Work",
+      "rating": 2600,
+      "contestDateUTC": "2026-06-28",
+      "tags": [
+        "combinatorics",
+        "graphs",
+        "greedy",
+        "math",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2238/F"
+    },
+    {
+      "id": "2236G",
+      "title": "Criterion in Burlandia",
+      "rating": 2600,
+      "contestDateUTC": "2026-06-12",
+      "tags": [
+        "binary search",
+        "bitmasks",
+        "brute force",
+        "data structures",
+        "dfs and similar",
+        "divide and conquer",
+        "implementation",
+        "trees",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2236/G"
+    },
+    {
+      "id": "2232E",
+      "title": "Snaking Arrangement",
+      "rating": 2600,
+      "contestDateUTC": "2026-05-30",
+      "tags": [
+        "combinatorics",
+        "constructive algorithms"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2232/E"
+    },
+    {
+      "id": "2231F",
+      "title": "Quadratic Jumps",
+      "rating": 2600,
+      "contestDateUTC": "2026-05-21",
+      "tags": [
+        "brute force",
+        "constructive algorithms",
+        "greedy",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2231/F"
+    },
+    {
+      "id": "2222F",
+      "title": "Building Tree",
+      "rating": 2600,
+      "contestDateUTC": "2026-04-25",
+      "tags": [
+        "data structures",
+        "divide and conquer",
+        "dsu",
+        "graphs",
+        "implementation"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2222/F"
+    },
+    {
+      "id": "2225F",
+      "title": "String Cutting",
+      "rating": 2600,
+      "contestDateUTC": "2026-04-21",
+      "tags": [
+        "binary search",
+        "brute force",
+        "greedy",
+        "hashing",
+        "string suffix structures",
+        "strings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2225/F"
+    },
+    {
+      "id": "2217G",
+      "title": "Down the Pivot",
+      "rating": 2600,
+      "contestDateUTC": "2026-04-07",
+      "tags": [
+        "combinatorics",
+        "dp",
+        "math",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2217/G"
+    },
+    {
+      "id": "2206D",
+      "title": "Christmas Tree Un-decoration",
+      "rating": 2600,
+      "contestDateUTC": "2026-03-08",
+      "tags": [
+        "data structures",
+        "dp",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2206/D"
+    },
+    {
+      "id": "2264F",
+      "title": "Deranged Calculator",
+      "rating": 2700,
+      "contestDateUTC": "2026-09-13",
+      "tags": [
+        "constructive algorithms",
+        "implementation",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2264/F"
+    },
+    {
+      "id": "2264E2",
+      "title": "A Prime Flood (Hard Version)",
+      "rating": 2700,
+      "contestDateUTC": "2026-09-13",
+      "tags": [
+        "brute force",
+        "combinatorics",
+        "dp",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2264/E2"
+    },
+    {
+      "id": "2257F2",
+      "title": "Beaver's Jumping Track (Hard Version)",
+      "rating": 2700,
+      "contestDateUTC": "2026-08-17",
+      "tags": [
+        "data structures",
+        "dp",
+        "matrices"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2257/F2"
+    },
+    {
+      "id": "2242F",
+      "title": "Summer Vacation",
+      "rating": 2700,
+      "contestDateUTC": "2026-07-06",
+      "tags": [
+        "data structures",
+        "dp",
+        "probabilities",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2242/F"
+    },
+    {
+      "id": "2234G",
+      "title": "Stripe, Token and Two Players",
+      "rating": 2700,
+      "contestDateUTC": "2026-06-07",
+      "tags": [
+        "data structures",
+        "dp",
+        "games"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2234/G"
+    },
+    {
+      "id": "2230F",
+      "title": "Game on Growing Tree",
+      "rating": 2700,
+      "contestDateUTC": "2026-05-18",
+      "tags": [
+        "binary search",
+        "dfs and similar",
+        "divide and conquer",
+        "dp",
+        "games",
+        "implementation",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2230/F"
+    },
+    {
+      "id": "2228F",
+      "title": "Momoyo and the Network",
+      "rating": 2700,
+      "contestDateUTC": "2026-05-16",
+      "tags": [
+        "binary search",
+        "dfs and similar",
+        "divide and conquer",
+        "dp",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2228/F"
+    },
+    {
+      "id": "2219D",
+      "title": "MEX Replacement on Tree",
+      "rating": 2700,
+      "contestDateUTC": "2026-04-13",
+      "tags": [
+        "data structures",
+        "implementation",
+        "math",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2219/D"
+    },
+    {
+      "id": "2215E",
+      "title": "Star Map",
+      "rating": 2700,
+      "contestDateUTC": "2026-04-12",
+      "tags": [
+        "constructive algorithms",
+        "data structures",
+        "geometry",
+        "greedy",
+        "sortings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2215/E"
+    },
+    {
+      "id": "2210F",
+      "title": "A Simple Problem",
+      "rating": 2700,
+      "contestDateUTC": "2026-03-29",
+      "tags": [
+        "binary search",
+        "data structures",
+        "greedy",
+        "math",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2210/F"
+    },
+    {
+      "id": "2262D",
+      "title": "PLUSworld",
+      "rating": 2800,
+      "contestDateUTC": "2026-09-12",
+      "tags": [
+        "constructive algorithms",
+        "graphs",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2262/D"
+    },
+    {
+      "id": "2249E1",
+      "title": "String (Easy Version)",
+      "rating": 2800,
+      "contestDateUTC": "2026-07-26",
+      "tags": [
+        "divide and conquer",
+        "implementation",
+        "strings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2249/E1"
+    },
+    {
+      "id": "2245F",
+      "title": "Familiar?",
+      "rating": 2800,
+      "contestDateUTC": "2026-07-16",
+      "tags": [
+        "brute force",
+        "combinatorics",
+        "dp"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2245/F"
+    },
+    {
+      "id": "2233F",
+      "title": "Shortest GCD Paths",
+      "rating": 2800,
+      "contestDateUTC": "2026-06-09",
+      "tags": [
+        "dp",
+        "graphs",
+        "math",
+        "number theory",
+        "shortest paths"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2233/F"
+    },
+    {
+      "id": "2223D",
+      "title": "Zhily and Cycle",
+      "rating": 2800,
+      "contestDateUTC": "2026-05-06",
+      "tags": [
+        "graphs",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2223/D"
+    },
+    {
+      "id": "2226F",
+      "title": "Inversion Invasion",
+      "rating": 2800,
+      "contestDateUTC": "2026-04-28",
+      "tags": [
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2226/F"
+    },
+    {
+      "id": "2215D",
+      "title": "EXPloration, EXPloitation, and Gain Some EXPerience!",
+      "rating": 2800,
+      "contestDateUTC": "2026-04-12",
+      "tags": [
+        "bitmasks",
+        "brute force",
+        "dp",
+        "greedy",
+        "implementation"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2215/D"
+    },
+    {
+      "id": "2217H",
+      "title": "Closer",
+      "rating": 2800,
+      "contestDateUTC": "2026-04-07",
+      "tags": [
+        "dfs and similar",
+        "dp",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2217/H"
+    },
+    {
+      "id": "2201F2",
+      "title": "Monotone Monochrome Matrices (Hard Version)",
+      "rating": 2800,
+      "contestDateUTC": "2026-02-23",
+      "tags": [
+        "constructive algorithms",
+        "data structures",
+        "hashing",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2201/F2"
+    },
+    {
+      "id": "2189F",
+      "title": "Zhora the Vacuum Cleaner",
+      "rating": 2800,
+      "contestDateUTC": "2026-01-23",
+      "tags": [
+        "data structures",
+        "dfs and similar",
+        "dp",
+        "greedy",
+        "implementation",
+        "sortings",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2189/F"
+    },
+    {
+      "id": "2260G",
+      "title": "Sortable Permutations",
+      "rating": 2900,
+      "contestDateUTC": "2026-09-08",
+      "tags": [
+        "brute force",
+        "combinatorics",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2260/G"
+    },
+    {
+      "id": "2255E1",
+      "title": "What Will Remain at the End? (Easy Version)",
+      "rating": 2900,
+      "contestDateUTC": "2026-08-09",
+      "tags": [
+        "brute force",
+        "data structures"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2255/E1"
+    },
+    {
+      "id": "2247F",
+      "title": "Paths on a Grid",
+      "rating": 2900,
+      "contestDateUTC": "2026-07-18",
+      "tags": [
+        "data structures",
+        "dp",
+        "hashing"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2247/F"
+    },
+    {
+      "id": "2246F",
+      "title": "Whoname and Unsorted Array",
+      "rating": 2900,
+      "contestDateUTC": "2026-07-12",
+      "tags": [
+        "constructive algorithms"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2246/F"
+    },
+    {
+      "id": "2229G",
+      "title": "Roadworks",
+      "rating": 2900,
+      "contestDateUTC": "2026-05-23",
+      "tags": [
+        "binary search",
+        "data structures",
+        "dp",
+        "greedy",
+        "two pointers"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2229/G"
+    },
+    {
+      "id": "2225G",
+      "title": "Simple Problem",
+      "rating": 2900,
+      "contestDateUTC": "2026-04-21",
+      "tags": [
+        "brute force",
+        "graphs",
+        "greedy",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2225/G"
+    },
+    {
+      "id": "2211G",
+      "title": "Rational Bubble Sort",
+      "rating": 2900,
+      "contestDateUTC": "2026-03-28",
+      "tags": [
+        "constructive algorithms",
+        "geometry",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2211/G"
+    },
+    {
+      "id": "2207F",
+      "title": "Hanabi",
+      "rating": 2900,
+      "contestDateUTC": "2026-03-08",
+      "tags": [
+        "binary search",
+        "data structures",
+        "dp",
+        "dsu",
+        "flows",
+        "graph matchings",
+        "graphs",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2207/F"
+    },
+    {
+      "id": "2206M",
+      "title": "Deformed Balance",
+      "rating": 2900,
+      "contestDateUTC": "2026-03-08",
+      "tags": [],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2206/M"
+    },
+    {
+      "id": "2206I",
+      "title": "Growth Factor",
+      "rating": 2900,
+      "contestDateUTC": "2026-03-08",
+      "tags": [
+        "combinatorics",
+        "dp",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2206/I"
+    },
+    {
+      "id": "2248G",
+      "title": "No Balance Left",
+      "rating": 3000,
+      "contestDateUTC": "2026-08-01",
+      "tags": [
+        "bitmasks",
+        "dp",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2248/G"
+    },
+    {
+      "id": "2249E2",
+      "title": "String (Hard Version)",
+      "rating": 3000,
+      "contestDateUTC": "2026-07-26",
+      "tags": [
+        "divide and conquer",
+        "implementation",
+        "strings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2249/E2"
+    },
+    {
+      "id": "2232F",
+      "title": "The Cake Is a Lie",
+      "rating": 3000,
+      "contestDateUTC": "2026-05-30",
+      "tags": [
+        "greedy",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2232/F"
+    },
+    {
+      "id": "2226G",
+      "title": "Stop Spot",
+      "rating": 3000,
+      "contestDateUTC": "2026-04-28",
+      "tags": [
+        "implementation",
+        "strings",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2226/G"
+    },
+    {
+      "id": "2199I",
+      "title": "Strange Process",
+      "rating": 3000,
+      "contestDateUTC": "2026-03-02",
+      "tags": [
+        "*special"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2199/I"
+    },
+    {
+      "id": "2205G",
+      "title": "Simons and Diophantus Equation",
+      "rating": 3000,
+      "contestDateUTC": "2026-02-26",
+      "tags": [
+        "bitmasks",
+        "brute force",
+        "data structures",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2205/G"
+    },
+    {
+      "id": "2196E2",
+      "title": "Fuzzy Concatenation (Hard version)",
+      "rating": 3000,
+      "contestDateUTC": "2026-02-11",
+      "tags": [
+        "binary search",
+        "bitmasks",
+        "data structures",
+        "dp",
+        "greedy",
+        "string suffix structures"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2196/E2"
+    },
+    {
+      "id": "2194F2",
+      "title": "Again Trees... (hard version)",
+      "rating": 3000,
+      "contestDateUTC": "2026-02-08",
+      "tags": [
+        "bitmasks",
+        "data structures",
+        "dfs and similar",
+        "dp",
+        "fft",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2194/F2"
+    },
+    {
+      "id": "2158F2",
+      "title": "Distinct GCDs (Hard Version)",
+      "rating": 3000,
+      "contestDateUTC": "2025-11-29",
+      "tags": [
+        "combinatorics",
+        "constructive algorithms",
+        "graphs",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2158/F2"
+    },
+    {
+      "id": "2161F",
+      "title": "SubMST",
+      "rating": 3000,
+      "contestDateUTC": "2025-10-30",
+      "tags": [
+        "combinatorics",
+        "graphs",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2161/F"
+    },
+    {
+      "id": "2262E",
+      "title": "Paired Bracket Sequences",
+      "rating": 3100,
+      "contestDateUTC": "2026-09-12",
+      "tags": [
+        "combinatorics",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2262/E"
+    },
+    {
+      "id": "2255F",
+      "title": "Who Will Witness the End?",
+      "rating": 3100,
+      "contestDateUTC": "2026-08-09",
+      "tags": [
+        "fft",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2255/F"
+    },
+    {
+      "id": "2222G",
+      "title": "Statistics on Tree",
+      "rating": 3100,
+      "contestDateUTC": "2026-04-25",
+      "tags": [
+        "binary search",
+        "brute force",
+        "dfs and similar",
+        "divide and conquer",
+        "graphs",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2222/G"
+    },
+    {
+      "id": "2206G",
+      "title": "Extra Transition",
+      "rating": 3100,
+      "contestDateUTC": "2026-03-08",
+      "tags": [
+        "graphs"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2206/G"
+    },
+    {
+      "id": "2187F1",
+      "title": "Al Fine (Maximizing Version)",
+      "rating": 3100,
+      "contestDateUTC": "2026-01-29",
+      "tags": [
+        "binary search",
+        "data structures",
+        "divide and conquer",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2187/F1"
+    },
+    {
+      "id": "2172D",
+      "title": "Divisor Card Game",
+      "rating": 3100,
+      "contestDateUTC": "2025-11-16",
+      "tags": [
+        "combinatorics",
+        "dp"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2172/D"
+    },
+    {
+      "id": "2172C",
+      "title": "Circles Are Far from Each Other",
+      "rating": 3100,
+      "contestDateUTC": "2025-11-16",
+      "tags": [
+        "binary search",
+        "greedy"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2172/C"
+    },
+    {
+      "id": "2147G",
+      "title": "Modular Tetration",
+      "rating": 3100,
+      "contestDateUTC": "2025-09-20",
+      "tags": [
+        "combinatorics",
+        "math",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2147/G"
+    },
+    {
+      "id": "2138E2",
+      "title": "Determinant Construction (Hard Version)",
+      "rating": 3100,
+      "contestDateUTC": "2025-09-08",
+      "tags": [
+        "brute force",
+        "constructive algorithms",
+        "math",
+        "matrices",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2138/E2"
+    },
+    {
+      "id": "2138E1",
+      "title": "Determinant Construction (Easy Version)",
+      "rating": 3100,
+      "contestDateUTC": "2025-09-08",
+      "tags": [
+        "brute force",
+        "constructive algorithms",
+        "math",
+        "matrices",
+        "number theory"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2138/E1"
+    },
+    {
+      "id": "2249F",
+      "title": "Even Simple Path",
+      "rating": 3200,
+      "contestDateUTC": "2026-07-26",
+      "tags": [
+        "constructive algorithms",
+        "graphs",
+        "shortest paths"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2249/F"
+    },
+    {
+      "id": "2229H",
+      "title": "Wowee Binary String",
+      "rating": 3200,
+      "contestDateUTC": "2026-05-23",
+      "tags": [
+        "combinatorics",
+        "dp",
+        "strings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2229/H"
+    },
+    {
+      "id": "2190E",
+      "title": "Median Permutation",
+      "rating": 3200,
+      "contestDateUTC": "2026-01-17",
+      "tags": [
+        "combinatorics"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2190/E"
+    },
+    {
+      "id": "2180F2",
+      "title": "Control Car (Hard Version)",
+      "rating": 3200,
+      "contestDateUTC": "2025-12-19",
+      "tags": [
+        "combinatorics",
+        "dp",
+        "matrices",
+        "probabilities"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2180/F2"
+    },
+    {
+      "id": "2157H",
+      "title": "Keygen 3",
+      "rating": 3200,
+      "contestDateUTC": "2025-11-23",
+      "tags": [
+        "brute force",
+        "combinatorics",
+        "constructive algorithms",
+        "dfs and similar",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2157/H"
+    },
+    {
+      "id": "2165E",
+      "title": "Rainbow Branch",
+      "rating": 3200,
+      "contestDateUTC": "2025-11-16",
+      "tags": [
+        "constructive algorithms",
+        "dp",
+        "greedy",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2165/E"
+    },
+    {
+      "id": "2159D2",
+      "title": "Inverse Minimum Partition (Hard Version)",
+      "rating": 3200,
+      "contestDateUTC": "2025-10-12",
+      "tags": [
+        "dp",
+        "greedy",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2159/D2"
+    },
+    {
+      "id": "2128F",
+      "title": "Strict Triangle",
+      "rating": 3200,
+      "contestDateUTC": "2025-07-27",
+      "tags": [
+        "graphs",
+        "greedy",
+        "shortest paths"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2128/F"
+    },
+    {
+      "id": "2124G",
+      "title": "Maximise Sum",
+      "rating": 3200,
+      "contestDateUTC": "2025-07-06",
+      "tags": [
+        "binary search",
+        "data structures"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2124/G"
+    },
+    {
+      "id": "2096H",
+      "title": "Wonderful XOR Problem",
+      "rating": 3200,
+      "contestDateUTC": "2025-04-19",
+      "tags": [
+        "bitmasks",
+        "combinatorics",
+        "dp",
+        "fft",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2096/H"
+    },
+    {
+      "id": "2239E",
+      "title": "The end of this world,",
+      "rating": 3300,
+      "contestDateUTC": "2026-06-27",
+      "tags": [
+        "data structures",
+        "divide and conquer",
+        "dsu",
+        "graphs"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2239/E"
+    },
+    {
+      "id": "2207G",
+      "title": "Toothless",
+      "rating": 3300,
+      "contestDateUTC": "2026-03-08",
+      "tags": [
+        "constructive algorithms",
+        "dfs and similar",
+        "dsu"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2207/G"
+    },
+    {
+      "id": "2196F",
+      "title": "Indivisible",
+      "rating": 3300,
+      "contestDateUTC": "2026-02-11",
+      "tags": [
+        "brute force",
+        "constructive algorithms",
+        "graphs"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2196/F"
+    },
+    {
+      "id": "2190G",
+      "title": "Maximize Determinant",
+      "rating": 3300,
+      "contestDateUTC": "2026-01-17",
+      "tags": [
+        "graphs"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2190/G"
+    },
+    {
+      "id": "2190F",
+      "title": "Xor Product",
+      "rating": 3300,
+      "contestDateUTC": "2026-01-17",
+      "tags": [
+        "bitmasks",
+        "dp"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2190/F"
+    },
+    {
+      "id": "2178I",
+      "title": "Numbers or Fireworks",
+      "rating": 3300,
+      "contestDateUTC": "2025-12-27",
+      "tags": [
+        "bitmasks",
+        "combinatorics",
+        "dp",
+        "graphs"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2178/I"
+    },
+    {
+      "id": "2178H",
+      "title": "Create or Duplicate",
+      "rating": 3300,
+      "contestDateUTC": "2025-12-27",
+      "tags": [
+        "bitmasks",
+        "graphs",
+        "number theory",
+        "shortest paths"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2178/H"
+    },
+    {
+      "id": "2172G",
+      "title": "Gene Editor",
+      "rating": 3300,
+      "contestDateUTC": "2025-11-16",
+      "tags": [],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2172/G"
+    },
+    {
+      "id": "2154F2",
+      "title": "Bombing (Hard Version)",
+      "rating": 3300,
+      "contestDateUTC": "2025-10-19",
+      "tags": [
+        "combinatorics",
+        "dp"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2154/F2"
+    },
+    {
+      "id": "2147I1",
+      "title": "Longest Increasing Path (Easy Version)",
+      "rating": 3300,
+      "contestDateUTC": "2025-09-20",
+      "tags": [
+        "constructive algorithms",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2147/I1"
+    },
+    {
+      "id": "2255E2",
+      "title": "What Will Remain at the End? (Hard Version)",
+      "rating": 3400,
+      "contestDateUTC": "2026-08-09",
+      "tags": [
+        "data structures"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2255/E2"
+    },
+    {
+      "id": "2229I",
+      "title": "The Endians",
+      "rating": 3400,
+      "contestDateUTC": "2026-05-23",
+      "tags": [
+        "dp",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2229/I"
+    },
+    {
+      "id": "2223F",
+      "title": "Zhily and Colorful Strings",
+      "rating": 3400,
+      "contestDateUTC": "2026-05-06",
+      "tags": [
+        "divide and conquer",
+        "fft",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2223/F"
+    },
+    {
+      "id": "2180H1",
+      "title": "Bug Is Feature (Unconditional Version)",
+      "rating": 3400,
+      "contestDateUTC": "2025-12-19",
+      "tags": [
+        "games"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2180/H1"
+    },
+    {
+      "id": "2174D",
+      "title": "Secret Message",
+      "rating": 3400,
+      "contestDateUTC": "2025-12-06",
+      "tags": [
+        "data structures",
+        "dp",
+        "greedy",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2174/D"
+    },
+    {
+      "id": "2164H",
+      "title": "PalindromePalindrome",
+      "rating": 3400,
+      "contestDateUTC": "2025-11-06",
+      "tags": [
+        "data structures",
+        "strings"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2164/H"
+    },
+    {
+      "id": "2122F",
+      "title": "Colorful Polygon",
+      "rating": 3400,
+      "contestDateUTC": "2025-07-19",
+      "tags": [
+        "constructive algorithms",
+        "divide and conquer",
+        "geometry"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2122/F"
+    },
+    {
+      "id": "2124H",
+      "title": "Longest Good Subsequence",
+      "rating": 3400,
+      "contestDateUTC": "2025-07-06",
+      "tags": [
+        "dp",
+        "math",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2124/H"
+    },
+    {
+      "id": "2081G2",
+      "title": "Hard Formula (Hard Version)",
+      "rating": 3400,
+      "contestDateUTC": "2025-03-15",
+      "tags": [
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2081/G2"
+    },
+    {
+      "id": "2080D",
+      "title": "Order Statistics",
+      "rating": 3400,
+      "contestDateUTC": "2025-03-10",
+      "tags": [
+        "*special",
+        "binary search"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2080/D"
+    },
+    {
+      "id": "2262F",
+      "title": "Rank Removal",
+      "rating": 3500,
+      "contestDateUTC": "2026-09-12",
+      "tags": [
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2262/F"
+    },
+    {
+      "id": "2245H",
+      "title": "Connect Connect See",
+      "rating": 3500,
+      "contestDateUTC": "2026-07-16",
+      "tags": [
+        "brute force",
+        "data structures"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2245/H"
+    },
+    {
+      "id": "2239F",
+      "title": "Colorful Works",
+      "rating": 3500,
+      "contestDateUTC": "2026-06-27",
+      "tags": [
+        "dp",
+        "fft",
+        "games",
+        "implementation"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2239/F"
+    },
+    {
+      "id": "2237I2",
+      "title": "DBFS Order (Hard Version)",
+      "rating": 3500,
+      "contestDateUTC": "2026-06-18",
+      "tags": [
+        "dp",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2237/I2"
+    },
+    {
+      "id": "2237I1",
+      "title": "DBFS Order (Easy Version)",
+      "rating": 3500,
+      "contestDateUTC": "2026-06-18",
+      "tags": [
+        "dp",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2237/I1"
+    },
+    {
+      "id": "2237H",
+      "title": "Slime and Queries",
+      "rating": 3500,
+      "contestDateUTC": "2026-06-18",
+      "tags": [
+        "data structures",
+        "greedy",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2237/H"
+    },
+    {
+      "id": "2223E",
+      "title": "Zhily and Permutation",
+      "rating": 3500,
+      "contestDateUTC": "2026-05-06",
+      "tags": [
+        "data structures",
+        "divide and conquer",
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2223/E"
+    },
+    {
+      "id": "2222H",
+      "title": "Counting Sort?",
+      "rating": 3500,
+      "contestDateUTC": "2026-04-25",
+      "tags": [
+        "brute force",
+        "combinatorics",
+        "dp"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2222/H"
+    },
+    {
+      "id": "2219E",
+      "title": "Weird Chessboard",
+      "rating": 3500,
+      "contestDateUTC": "2026-04-13",
+      "tags": [
+        "constructive algorithms",
+        "math"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2219/E"
+    },
+    {
+      "id": "2215G",
+      "title": "Maze",
+      "rating": 3500,
+      "contestDateUTC": "2026-04-12",
+      "tags": [
+        "trees"
+      ],
+      "officialProblemUrl": "https://codeforces.com/problemset/problem/2215/G"
+    }
+  ]
+}

@@ -1,0 +1,143 @@
+import { Injectable } from "@nestjs/common";
+
+import { Redis } from "ioredis";
+
+import { JudgeTaskMeta, JudgeTaskPayload, JudgeTaskType } from "@libreoj/judge-protocol";
+
+import { JudgeTaskService } from "./judge-task-service.interface";
+
+import { JudgeTaskProgress } from "./judge-task-progress.interface";
+
+import { logger } from "../logger";
+import { RedisService } from "../redis/redis.service";
+import { MetricsService } from "../metrics/metrics.service";
+
+// Smaller means higher priority
+// With the same priority value, the smaller ID means higher priority
+export enum JudgeTaskPriorityType {
+  High = 1,
+  Medium = 2,
+  Low = 3,
+  Lowest = 4
+}
+
+export interface QueuedJudgeTaskMeta extends JudgeTaskMeta {
+  enqueueTime: number;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+export interface JudgeTaskExtraInfo {}
+
+// Extra info is also send to judge client while ONLY meta is used to identity the task
+export class JudgeTask<ExtraInfo extends JudgeTaskExtraInfo> implements JudgeTaskPayload<ExtraInfo> {
+  constructor(
+    public taskId: string, // Passed by the task creator, to indentify the task
+    public type: JudgeTaskType,
+    public priorityType: JudgeTaskPriorityType,
+    public priority: number,
+    public extraInfo: ExtraInfo
+  ) {}
+
+  getMeta(): JudgeTaskMeta {
+    return {
+      taskId: this.taskId,
+      type: this.type
+    };
+  }
+}
+
+const REDIS_KEY_JUDGE_QUEUE = "judge-queue";
+const REDIS_CONSUME_TIMEOUT = 10;
+
+@Injectable()
+export class JudgeQueueService {
+  private readonly redisForPush: Redis;
+
+  private readonly redisForConsume: Redis;
+
+  private readonly taskServices: Map<JudgeTaskType, JudgeTaskService<JudgeTaskProgress, JudgeTaskExtraInfo>> =
+    new Map();
+
+  constructor(private readonly redisService: RedisService, private readonly metricsService: MetricsService) {
+    this.redisForPush = this.redisService.getClient();
+    this.redisForConsume = this.redisService.getClient();
+  }
+
+  private readonly metricJudgeTaskQueueTime = this.metricsService.histogram(
+    "libreoj_judge_task_queue_time_seconds",
+    this.metricsService.histogram.BUCKETS_TIME_10M_30,
+    ["type", "priority_type"]
+  );
+
+  registerTaskType<TaskProgress>(
+    taskType: JudgeTaskType,
+    service: JudgeTaskService<TaskProgress, JudgeTaskExtraInfo>
+  ): void {
+    this.taskServices.set(taskType, service);
+  }
+
+  async pushTask(taskId: string, type: JudgeTaskType, priority: number, repush = false): Promise<void> {
+    if (repush) logger.verbose(`Repush judge task: { taskId: ${taskId}, type: ${type}, priority: ${priority} }`);
+    else logger.verbose(`New judge task: { taskId: ${taskId}, type: ${type}, priority: ${priority} }`);
+    await this.redisForPush.zadd(
+      REDIS_KEY_JUDGE_QUEUE,
+      priority,
+      JSON.stringify({
+        taskId,
+        type,
+        enqueueTime: Date.now()
+      })
+    );
+  }
+
+  async consumeTask(): Promise<JudgeTask<JudgeTaskExtraInfo>> {
+    logger.verbose("Consuming task queue");
+
+    // ioredis's definition doesn't have bzpopmin method
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const redisResponse: [key: string, element: string, score: string] = await (this.redisForConsume as any).bzpopmin(
+      REDIS_KEY_JUDGE_QUEUE,
+      REDIS_CONSUME_TIMEOUT
+    );
+    if (!redisResponse) {
+      logger.verbose("Consuming task queue - timeout or empty");
+      return null;
+    }
+
+    const [, taskJson, priorityString] = redisResponse;
+    const priority = Number(priorityString);
+    const taskMeta: QueuedJudgeTaskMeta = JSON.parse(taskJson);
+    const dequeuedTime = Date.now();
+    const task = await this.taskServices.get(taskMeta.type).getTaskToBeSentToJudgeByTaskId(taskMeta.taskId, priority);
+    if (!task) {
+      logger.verbose(
+        `Consumed judge task { taskId: ${taskMeta.taskId}, type: ${taskMeta.type} }, but taskId is invalid, maybe canceled?`
+      );
+      return null;
+    }
+
+    if (taskMeta.enqueueTime) {
+      this.metricJudgeTaskQueueTime.observe(
+        {
+          type: task.type,
+          priority_type: task.priorityType
+        },
+        (Date.now() - dequeuedTime) / 1000
+      );
+    }
+
+    logger.verbose(
+      `Consumed judge task { taskId: ${task.taskId}, type: ${task.type}, priority: ${priority} (${
+        JudgeTaskPriorityType[task.priorityType]
+      }) }`
+    );
+    return task;
+  }
+
+  /**
+   * @return `false` means the task is canceled.
+   */
+  async onTaskProgress(taskMeta: JudgeTaskMeta, progress: JudgeTaskProgress): Promise<boolean> {
+    return await this.taskServices.get(taskMeta.type).onTaskProgress(taskMeta.taskId, progress);
+  }
+}

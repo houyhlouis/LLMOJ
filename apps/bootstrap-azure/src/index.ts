@@ -1,0 +1,59 @@
+import { AzureFunction, Context, HttpRequest } from "@azure/functions";
+import geoip from "geoip-country";
+import { handleRequest } from "@libreoj/bootstrap-core";
+
+const initializationPromise = (async () => {
+  // Polyfills for Web interfaces
+  const nodeFetch = await import("node-fetch"); // node-fetch is a ESM only package
+  global.fetch = nodeFetch.default as any;
+  global.Headers = nodeFetch.Headers as any;
+  global.Request = nodeFetch.Request as any;
+  global.Response = nodeFetch.Response as any;
+})();
+
+function getClientIp(xForwardedForList: string[]) {
+  if (xForwardedForList.length >= 1) return xForwardedForList[0].trim().split(":")[0];
+  return "127.0.0.1";
+}
+
+const httpTrigger: AzureFunction = async (context: Context, req: HttpRequest) => {
+  await initializationPromise;
+
+  const headers = { ...req.headers };
+
+  // Remove first X-Forwarded-For host since it's prepended by proxy
+  const xForwardedForList = headers["x-forwarded-for"].split(",").filter(host => !host.startsWith("127."));
+  if (xForwardedForList.length > 0) {
+    headers["x-forwarded-for"] = xForwardedForList.join(",");
+  } else {
+    delete headers["x-forwarded-for"];
+  }
+
+  // Get region code
+  const clientIp = getClientIp(xForwardedForList);
+  const clientIpRegion = geoip.lookup(clientIp)?.country;
+
+  const requestInit: RequestInit = {
+    headers,
+    method: req.method
+  };
+  if (req.method !== "GET" && req.method !== "HEAD") requestInit.body = req.body;
+
+  const response = handleRequest(new Request(req.url, requestInit), {
+    ip: clientIp,
+    ipRegion: clientIpRegion
+  });
+
+  const responseHeaders: Record<string, string> = {};
+  response.headers.forEach((value, key) => {
+    responseHeaders[key] = value;
+  });
+
+  context.res = {
+    status: response.status,
+    body: Buffer.from(await response.arrayBuffer()),
+    headers: responseHeaders
+  };
+};
+
+export default httpTrigger;
