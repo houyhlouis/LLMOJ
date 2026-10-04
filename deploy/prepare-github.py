@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIRECTORIES = {"apps", "packages", "infra", "deploy", "config", ".github", "wiki"}
 SOURCE_FILES = {
-    "LICENSE", "README.md", "README.zh-CN.md", "README-DEVELOPMENT.md", "README-DEVELOPMENT.zh-CN.md",
+    "LICENSE", "README.md", "README.en.md", "README.zh-CN.md", "README-DEVELOPMENT.md", "README-DEVELOPMENT.zh-CN.md",
     "THIRD_PARTY_NOTICES.md", "install.sh", "install.zh-CN.sh",
     "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", ".gitignore",
     ".gitmodules", ".node-version", ".npmrc", ".prettierrc",

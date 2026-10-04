@@ -1,5 +1,3 @@
-import url from "url";
-
 import { NestMiddleware, Injectable } from "@nestjs/common";
 
 import { Request, Response } from "express"; // eslint-disable-line import/no-extraneous-dependencies
@@ -19,7 +17,19 @@ export class MetricsMiddleware implements NestMiddleware {
 
   private readonly responseTimeMiddleware = responseTime((req, res, time) => {
     if (!req.url || !(res.statusCode >= 200 && res.statusCode < 400)) return;
-    this.metricRequestLatency.observe({ api: url.parse(req.url).pathname }, time / 1000);
+    let pathname: string;
+    try {
+      // Preserve origin-form paths (including // and *) without interpreting
+      // them as hosts. Absolute-form request targets use the WHATWG parser.
+      pathname =
+        req.url.startsWith("/") || req.url === "*"
+          ? req.url.split(/[?#]/, 1)[0]
+          : new URL(req.url, "http://metrics.invalid").pathname;
+    } catch {
+      // Invalid request targets must not break response header emission.
+      return;
+    }
+    this.metricRequestLatency.observe({ api: pathname }, time / 1000);
   });
 
   async use(req: Request, res: Response, next: () => void) {

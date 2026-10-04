@@ -168,6 +168,45 @@ export async function verifySavedCredentials({ connection, bcrypt, credentialSto
   return saved;
 }
 
+// Keep the final login details visible even when build output is redirected. A
+// controlling terminal is preferred; unattended installs can still read stdout.
+// Only credentials verified against the current database password are displayed.
+export async function showAdminCredentials({ connection, bcrypt, credentialStore,
+  language = process.env.LLMOJ_INSTALL_LANG, environment = process.env,
+  openTerminal = () => fs.open("/dev/tty", "w"), stdout = process.stdout }) {
+  const credentials = await verifySavedCredentials({ connection, bcrypt, credentialStore });
+  const chinese = language === "zh-CN";
+  const message = [
+    chinese ? "管理员登录信息" : "Administrator login details",
+    chinese ? "管理员用户名: admin" : "Administrator username: admin",
+    credentials
+      ? `${chinese ? "管理员密码" : "Administrator password"}: ${credentials.password}`
+      : (chinese
+        ? "管理员密码: 沿用原有密码（初始凭据缺失或已失效，未显示过期密码，未重置）"
+        : "Administrator password: retained; initial credentials are missing or no longer current (not displayed or reset)"),
+    chinese ? "管理员权限: 所有权限已开放（isAdmin）" : "Administrator privileges: all permissions (isAdmin)",
+    `${chinese ? "管理员凭据文件位置" : "Administrator credential file location"}: ${credentialStore.filename} ${
+      chinese ? "（仅 root 可读，0600）" : "(root only, 0600)"}`,
+    ""
+  ].join("\n");
+  let terminal;
+  try {
+    terminal = await openTerminal();
+  } catch (error) {
+    // /dev/tty cannot be opened without a controlling terminal (for example in CI).
+    if (!["ENXIO", "ENODEV", "ENOENT", "ENOTTY", "EACCES"].includes(error.code)) throw error;
+  }
+  if (terminal) {
+    try { await terminal.writeFile(message); } finally { await terminal.close(); }
+    return { verified: !!credentials, destination: "terminal" };
+  }
+  if (environment.INVOCATION_ID || environment.JOURNAL_STREAM) {
+    throw new BootstrapError("Administrator credentials cannot be printed to a systemd journal; run the installer in your terminal.");
+  }
+  stdout.write(message);
+  return { verified: !!credentials, destination: "stdout" };
+}
+
 function argumentsFor(argv) {
   const options = { root: process.env.LIBREOJ_ROOT || "/opt/LibreOJ", showCredentials: false };
   for (let index = 0; index < argv.length; index++) {
@@ -188,9 +227,6 @@ function argumentsFor(argv) {
 async function main() {
   if (process.getuid?.() !== 0) throw new BootstrapError("Run the administrator initialization through the installer with sudo.");
   const options = argumentsFor(process.argv.slice(2));
-  if (options.showCredentials && (process.env.INVOCATION_ID || process.env.JOURNAL_STREAM)) {
-    throw new BootstrapError("Administrator credentials cannot be printed from a systemd service; run the installer in your terminal.");
-  }
   const require = createRequire(path.join(options.root, "apps/backend/package.json"));
   const bcrypt = require("bcrypt");
   const mariadb = require("mariadb");
@@ -207,14 +243,7 @@ async function main() {
   try {
     const credentialStore = fileCredentialStore(path.join(options.root, "config/admin-credentials.json"));
     if (options.showCredentials) {
-      const credentials = await verifySavedCredentials({ connection, bcrypt, credentialStore });
-      const chinese = process.env.LLMOJ_INSTALL_LANG === "zh-CN";
-      process.stdout.write(chinese ? "管理员用户名: admin\n" : "Administrator username: admin\n");
-      if (credentials) process.stdout.write(`${chinese ? "管理员密码" : "Administrator password"}: ${credentials.password}\n`);
-      else process.stdout.write(chinese
-        ? "管理员密码: 沿用原有密码（没有可验证的初始密码记录，未重置）\n"
-        : "Administrator password: retained; no verified initial password record (not reset)\n");
-      process.stdout.write(chinese ? "管理员权限: 所有权限已开放（isAdmin）\n" : "Administrator privileges: all permissions (isAdmin)\n");
+      await showAdminCredentials({ connection, bcrypt, credentialStore });
     } else {
       const definitions = await readPermissionDefinitions(options.root);
       const result = await bootstrapAdmin({ connection, bcrypt, credentialStore, ...definitions, email: options.email });

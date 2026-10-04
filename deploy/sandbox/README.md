@@ -16,11 +16,11 @@ sudo bash deploy/sandbox/build.sh stage /opt/LibreOJ/runtime/sandbox-archives/ro
 sudo env LIBREOJ_X32_SUPPORTED=0 bash deploy/sandbox/build.sh stage /opt/LibreOJ/runtime/sandbox-archives/rootfs-实际ROOTFS_ID.tar.gz
 ```
 
-构建脚本直接调用上游 `infra/sandbox-rootfs/build.sh`；基底镜像、下载包及 testlib 由上游配方固定 digest/checksum，APT 使用固定日期快照。配方内容生成 `ROOTFS_ID`，归档另带 SHA-256 文件。固定来源提高可复现性，但不承诺 Docker 导出归档在不同构建器上逐字节一致。
+构建脚本直接调用上游 `infra/sandbox-rootfs/build.sh`；基底镜像、下载包及 testlib 由上游配方固定 digest/checksum，APT 使用固定日期快照。配方内容生成 `ROOTFS_ID`，归档另带 SHA-256 文件。归档使用 gzip 的快速压缩级别，并向标准错误显示已处理字节数和速率；压缩级别不参与 `ROOTFS_ID`，归档格式和校验规则保持不变。固定来源提高可复现性，但不承诺 Docker 导出归档在不同构建器上逐字节一致。
 
 暂存脚本直接调用上游 `stage.sh`，校验归档散列、内嵌 ID、设备节点和 sandbox UID，执行上游完整语言 smoke test，卸载验证挂载后安装到 `runtime/rootfs-<ID>`，再创建 `runtime/sandbox-rootfs` 符号链接和 `runtime/rootfs-id` 构建元数据。已有目标不会被覆盖。构建和暂存命令均不启动 judge 或任何服务。
 
-默认使用未经修改的上游 `stage.sh`。显式设置 `LIBREOJ_X32_SUPPORTED=0` 时使用 `stage-host.sh`/`smoke-test-host.sh`：仅跳过 x32 二进制的执行，仍编译 x32，并保留全部 amd64/i386、语言版本、testlib 和归档完整性验证。该选择不改变上游配方、镜像或内嵌 `ROOTFS_ID`。
+默认使用 `infra/sandbox-rootfs/stage.sh`。两种暂存入口都显式设置验证目录的权限，保证安装器使用 `umask 0077` 时 UID 999 仍可读取只读挂载的校验脚本，且不能写入该目录。显式设置 `LIBREOJ_X32_SUPPORTED=0` 时使用 `stage-host.sh`/`smoke-test-host.sh`：仅跳过 x32 二进制的执行，仍编译 x32，并保留全部 amd64/i386、语言版本、testlib 和归档完整性验证。该选择不改变上游配方、镜像或内嵌 `ROOTFS_ID`。
 
 Judge 配置使用：
 

@@ -121,7 +121,8 @@ done
 REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VALIDATION_DIRECTORY=/run/libreoj-rootfs-validation
 VALIDATION_DIRECTORY_OUTSIDE="$TEMPORARY_DIRECTORY$VALIDATION_DIRECTORY"
-mkdir "$VALIDATION_DIRECTORY_OUTSIDE"
+# Validation runs as UID 999 even when the installer uses a private umask.
+mkdir -m 0755 "$VALIDATION_DIRECTORY_OUTSIDE"
 declare -A VALIDATION_FILES=(
     [libreoj-rootfs-smoke-test]="$REPOSITORY_ROOT/infra/sandbox-rootfs/smoke-test.sh"
     [compile-java.sh]="$REPOSITORY_ROOT/apps/judge/src/languages/compile-java.sh"

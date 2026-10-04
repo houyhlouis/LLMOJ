@@ -42,7 +42,7 @@ sudo ln -sfn node-v24.21.0-linux-x64 /opt/LibreOJ/runtime/node
 rm -r -- "$OJ_NODE_STAGE"
 
 sudo env PATH=/opt/LibreOJ/runtime/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-  npm install --prefix /opt/LibreOJ/runtime/tooling --ignore-scripts --no-audit --no-fund pnpm@11.13.0
+  npm install --prefix /opt/LibreOJ/runtime/tooling --ignore-scripts --no-audit --no-fund pnpm@11.13.1
 
 sudo env PATH=/opt/LibreOJ/runtime/node/bin:/opt/LibreOJ/runtime/tooling/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   npm_config_nodedir=/opt/LibreOJ/runtime/node CMAKE_BUILD_PARALLEL_LEVEL=2 \

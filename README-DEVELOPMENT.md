@@ -2,11 +2,11 @@
 
 English | [简体中文](README-DEVELOPMENT.zh-CN.md)
 
-LLMOJ is based on LibreOJ and keeps the main MIT license and component notices. See the [README](README.md) and [Wiki](wiki/Home.md).
+LLMOJ is based on LibreOJ and keeps the main MIT license and component notices. See the [README](README.en.md) and [Wiki](wiki/Home.md).
 
 ## Toolchain
 
-Node >=22.13; the installer pins 24.21.0. Use package.json's pnpm 11.13.0. Native builds need Linux amd64, CMake, C++, libfmt; execution also needs namespaces and cgroup v2.
+Node >=22.13; the installer pins 24.21.0. Use package.json's pnpm 11.13.1. Native builds need Linux amd64, CMake, C++, libfmt; execution also needs namespaces and cgroup v2.
 
 ```bash
 pnpm install --frozen-lockfile
@@ -34,6 +34,10 @@ python3 deploy/test/docker-support.test.py
 sudo python3 deploy/test/install-support.test.py
 sudo python3 deploy/test/install-network.test.py
 sudo python3 deploy/test/judge-config.test.py
+sudo python3 deploy/test/admin-output.test.py
+python3 deploy/test/install-flow.test.py
+sudo python3 deploy/test/redis-host.test.py
+sudo python3 deploy/test/sandbox-staging.test.py
 python3 deploy/prepare-github.py --archive release/llmoj-source.tar.gz
 ```
 

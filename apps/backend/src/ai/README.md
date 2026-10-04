@@ -8,7 +8,7 @@ Provider credentials are encrypted with AES-256-GCM. Configuration responses exp
 
 `HYHOJ_AI_STATE_DIR` selects the private key directory. The backend creates a 32-byte `master.key` with mode `0600` inside a directory with mode `0700` and verifies ownership and file type. Keep this file outside the source repository. An existing encrypted database requires its matching original key; a missing key causes startup to fail. Private database backups must include the corresponding key and must never be committed or distributed with source code.
 
-Provider requests require HTTPS and reject redirects, private destinations and URLs containing credentials. For an intentional local provider, set `HYHOJ_AI_PRIVATE_HOSTS` to its exact hostname. Avoid adding public providers to this allowlist unless the deployment requires it. Model output limits and API capabilities remain provider-specific; the application validates its configured limits before issuing a request.
+Provider requests support HTTP/HTTPS and permit private, loopback and public destinations without a `HYHOJ_AI_PRIVATE_HOSTS` allowlist. DNS lookup results remain pinned to each connection. Redirects and credential-bearing Base URLs remain rejected; account permissions and owner-scoped key storage are unchanged. Model output limits and API capabilities remain provider-specific; the application validates its configured limits before issuing a request.
 
 `HYHOJ_AI_SAMPLE_INPUTS_DIR` and `HYHOJ_AI_GENERATED_DIR` select private temporary work directories. Backend and judge configuration must agree on the sandbox input paths and runner socket. Generated programs execute in the judge sandbox. Its root filesystem and compiler dependencies are supplied separately from the source repository.
 
@@ -31,7 +31,7 @@ The `.mjs` integration suites additionally require an explicitly configured disp
 - `HYHOJ_TEST_STATE`: a private JSON file with `users` and `tokens` maps for newly created test accounts. Do not reuse production sessions or include this file in the repository.
 - `HYHOJ_TEST_BASE`: the loopback origin of the dedicated test backend or frontend proxy, without URL credentials, query or path.
 
-Use a dedicated local Redis instance configured with an explicit nonzero logical database. The client rejects the former installation's service ports. It validates the configuration before connecting and refuses HTTP redirects. The default AI fixture account is `ai_fixture`; `HYHOJ_AI_FIXTURE_USER` can select another dedicated test account, but `admin` is rejected. Set `HYHOJ_AI_PRIVATE_HOSTS=127.0.0.1` in the disposable backend to enable the synthetic provider on port `2230`.
+Use a dedicated local Redis instance configured with an explicit nonzero logical database. The client rejects the former installation's service ports. It validates the configuration before connecting and refuses HTTP redirects. The default AI fixture account is `ai_fixture`; `HYHOJ_AI_FIXTURE_USER` can select another dedicated test account, but `admin` is rejected. The synthetic provider on loopback port `2230` works without an address allowlist.
 
 Browser integration requires Playwright available as a local backend development dependency. Screenshots are saved only when `HYHOJ_TEST_EVIDENCE_DIR` is set to a directory outside the repository. After integration tests, remove the disposable test database, sessions and temporary files.
 

@@ -1,110 +1,85 @@
 # LLMOJ
 
-English | [简体中文](README.zh-CN.md)
+简体中文 | [English](README.en.md)
 
-## Quick installation
+**LLMOJ 是基于 LibreOJ 的在线评测平台，面向算法竞赛、日常训练与 AI 辅助出题。** 它将题库、比赛、评测和用户权限管理整合在一起，并提供题面整理、翻译、来源检索及测试数据生成等 AI 工作流。
 
-Replace `houyhlouis/LLMOJ` with your public repository. On an Ubuntu 24.04 / 26.04 amd64 server, download and run the English installer:
+[使用文档](wiki/Home.zh-CN.md) · [AI 配置](wiki/AI.zh-CN.md) · [分布式评测](wiki/Distributed-Judging.zh-CN.md) · [问题反馈](https://github.com/houyhlouis/LLMOJ/issues)
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/install.sh -o /tmp/llmoj-install.sh && sudo bash /tmp/llmoj-install.sh --repository houyhlouis/LLMOJ
-```
+## 功能特性
 
-## Features and what LLMOJ adds
+### 题库、竞赛与权限管理
 
-**LLMOJ combines a LibreOJ-based online judge with LLM-assisted problem authoring and learning.** Submissions are compiled, executed and scored by the judge; AI assists with content and authoring workflows. Connect your own model and search services. No model weights, shared API keys or preconfigured accounts are included.
+- 中英文界面与浏览器代码编辑器，支持题目管理、题单、讨论及提交记录查询。
+- 支持 NOI、IOI、ICPC 赛制，提供比赛权限、排行榜和重评功能。
+- 支持多用户、用户组、题目与讨论授权，以及比赛和管理功能的权限控制。
 
-### AI-assisted problem authoring
+### 多语言评测与扩展
 
-- **Statement import and translation:** organize statement content and translate it between languages, with editable output for review.
-- **Problem source discovery:** combine search evidence and semantic checks to help identify the original source.
-- **Analysis and explanations:** request tags, difficulty suggestions and tutorial assistance within the problem workflow.
-- **Test-data generation with execution checks:** generate reference solutions, generators and validation programs, compile and run them inside the judge sandbox, and validate output before activating the supported data installation workflow. Generated problems and data remain private by default.
+- 支持 C/C++、Python、Java 等语言，以及传统题、交互题、通信题和提交答案题。
+- 采用 LibreOJ 的 `simple-sandbox` 与原版 rootfs 配方，提供进程、文件系统、网络隔离和资源限制。
+- 普通提交可由本机或多台远程评测机处理；每台评测机使用独立凭据连接，并按需下载测试文件。
 
-AI output requires review and is not a correctness guarantee. Program execution currently needs a local sandbox worker on the web server.
+### AI 辅助出题与学习
 
-### Private, configurable AI workflows
+- **题面与题解：** 整理导入内容、跨语言翻译，辅助生成标签、难度建议和题解草稿。
+- **来源检索：** 结合搜索结果与语义核对，辅助查找题目原始出处。
+- **测试数据：** 生成标程、数据生成器和校验程序，在沙盒中编译、运行与校验，通过后写入测试文件与评测配置。
+- **任务管理：** 查看进度，取消或重试任务；写入题目时重新检查用户权限和题目版本。
+- **独立配置：** 用户配置自己的模型与搜索服务（Tavily/MCP），API Key 加密保存；支持 HTTP/HTTPS、公网、内网及本机服务地址。
 
-- User-owned model, search and MCP configuration, with user-supplied service credentials.
-- Provider keys encrypted with AES-256-GCM; configuration responses report whether a key exists without returning it.
-- Bounded job concurrency, progress, checkpoints, cancellation and retries.
-- Writes recheck current permissions and the problem snapshot. Usage metadata excludes API keys and prompt/response bodies.
+AI 生成内容需要审核。标程验证和测试数据生成的执行环节依赖网页节点上的本机沙盒；部署模式和配置方法见下文及 [AI 文档](wiki/AI.zh-CN.md)。
 
-### A complete competitive programming platform
+## 一键安装
 
-- Chinese and English UI, browser code editor, problem sets, private study lists, discussions and permission management.
-- Traditional, interactive, communication and output-only problems.
-- NOI, IOI and ICPC contest rules, permissions, scoreboards and private contest summaries.
-- Original LibreOJ `simple-sandbox` and rootfs recipe, filesystem/network isolation and cgroup resource limits. NOI Linux 2.0 is not bundled or used.
-- Multiple remote judges for ordinary submissions, each with separate credentials.
+### 环境要求
 
-### Deployment choices
-
-- A standalone GitHub shell entry point downloads a pinned source commit. Public repositories need no GitHub login.
-- Interactive port, hostname, site name, installation directory, deployment role and Docker sources.
-- Automatic systemd configuration and a full-permission `admin` account with a random password.
-- Complete (`all`) or web-only (`web`) deployment, with independent judge and HTTPS tutorials.
-
-## Installation details
-
-Requirements: Ubuntu 24.04 / 26.04 amd64, a normal VM or physical server, systemd 254+, cgroup v2 and at least 3 GiB RAM. Complete installation needs 30 GiB free disk; web-only needs 10 GiB. For compilation, 8 GiB RAM and 40 GiB disk are recommended. First installation downloads dependencies and builds the application and, in complete mode, rootfs.
-
-| Option | Default / behavior |
+| 项目 | 要求 |
 | --- | --- |
-| Website listener | `0.0.0.0:80`; browse `http://SERVER_IP` without a port suffix |
-| Site name | `LLMOJ`; customizable |
-| Deployment | `--role all`; `web` omits local judging/rootfs |
-| Installation directory | `/opt/LibreOJ`, retained for path compatibility |
-| Docker package source | `--docker-source https://download.docker.com` |
-| Docker Hub mirrors | `--docker-mirrors URL[,URL]`; empty keeps existing Docker defaults |
-| Local judge slots | Automatic by CPU/RAM; override with `--judge-slots 1..7` |
+| 已验证系统 | Ubuntu 24.04 amd64，普通虚拟机或物理机 |
+| 内存 | 至少 3 GiB，编译建议 8 GiB |
+| 空闲磁盘 | 完整安装至少 30 GiB，建议 40 GiB；仅网页模式至少 10 GiB |
+| 系统与网络 | systemd 254+、cgroup v2；能够访问软件源、GitHub 及构建依赖下载源 |
 
-Missing Docker is installed when rootfs must be built. Package repositories and image mirrors are separate options. The installer appends `/linux/ubuntu` to the package source base URL and retains Docker's official signing key. Custom Hub mirrors are merged into Docker configuration, preserving other settings and backing up the original; applying a change restarts Docker and can affect existing containers. Blank input leaves mirror configuration unchanged. See [Docker sources](wiki/Docker-Sources.md).
+在服务器终端运行中文安装入口：
 
 ```bash
-# Non-interactive example; substitute your own mirror URLs:
-sudo bash /tmp/llmoj-install.sh --repository houyhlouis/LLMOJ \
-  --yes --port 8080 --public-url http://oj.example.com:8080 \
-  --docker-source https://YOUR_PACKAGE_MIRROR/docker-ce \
-  --docker-mirrors https://YOUR_DOCKER_HUB_MIRROR
+curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/install.zh-CN.sh -o /tmp/llmoj-install.zh-CN.sh && \
+  sudo bash /tmp/llmoj-install.zh-CN.sh --repository houyhlouis/LLMOJ
 ```
 
-Pin releases with `--ref VERSION_TAG_OR_COMMIT`, and pin the downloaded script URL to that same version. With local source, run `sudo bash deploy/install.sh`. `--plan` shows steps; `--check` checks the environment without installing. Firewalls and TLS are configured separately. Database, Redis, MinIO, backend and metrics stay on loopback. Configure [HTTPS](wiki/HTTPS.md) before sending public-internet credentials.
+脚本会交互设置部署模式、端口、域名、站名、安装目录和 Docker 源，随后安装依赖、构建应用并配置服务。完整模式还会构建评测 rootfs，首次安装需要等待下载和编译完成。
 
-After success, the installer prints `admin` and a random 32-character password, with all administrator permissions. Credentials are saved in root-owned `config/admin-credentials.json`, mode `0600`; retries retain the password. Save it and change it after your first login.
+默认安装到 `/opt/LibreOJ`，站点监听 `0.0.0.0:80`，浏览器访问 `http://服务器IP`。自定义端口、镜像源、无人值守安装及固定版本方法见 [安装教程](wiki/Installation.zh-CN.md)。
 
-## Architecture and distributed judging
+### 安装后
 
-```mermaid
-flowchart LR
-  Browser[Browser] --> Nginx[Nginx]
-  Nginx --> Frontend[Frontend assets]
-  Nginx --> Backend[Backend]
-  Backend --> DB[MariaDB]
-  Backend --> Redis[Redis]
-  Backend --> MinIO[MinIO]
-  Judges[Local or remote judges] <-->|Authenticated WebSocket| Backend
-  Judges --> Sandbox[simple-sandbox and rootfs]
-  Judges -->|Signed test-file downloads| Nginx
-  Backend -->|Local UNIX socket| AIWorker[Local AI sandbox worker]
-```
+1. **登录管理账号：** 安装成功后，终端直接打印 `admin` 与随机密码；服务器同时保存 `config/admin-credentials.json`（默认位于 `/opt/LibreOJ`，仅 root 可读）。首次登录后修改密码，重跑安装不会重置账号密码。
+2. **开始使用：** 创建用户、配置权限并添加题目，提交一个简单程序确认评测结果，再按需创建题单或比赛。
+3. **配置 AI：** 具有 AI 配置权限的用户填写自己的服务地址、模型和 API Key，并执行连接测试；项目不提供共享 Key 或预付费服务。
 
-Ordinary judging supports multiple remote nodes. AI reference-solution validation and test-data generation currently use a local UNIX socket and private shared directories. Adding a remote judge does not move these actions off the web server. Use `all` plus remote judges for full AI execution, or accept that limitation with `web`.
+公网使用请配置 [HTTPS](wiki/HTTPS.zh-CN.md)，并在防火墙或云安全组中放行选定的网站端口。安装器不会自动修改防火墙规则。
 
-## Documentation
+## 部署模式
 
-- [English Wiki](wiki/Home.md) · [中文 Wiki](wiki/Home.zh-CN.md)
-- [Installation](wiki/Installation.md) · [Docker sources](wiki/Docker-Sources.md)
-- [Distributed judging](wiki/Distributed-Judging.md) · [Remote judge setup](wiki/Remote-Judge.md)
-- [AI configuration](wiki/AI.md) · [HTTPS](wiki/HTTPS.md)
-- [GitHub and Wiki publishing](wiki/Publishing.md)
+| 模式 | 包含内容与用途 |
+| --- | --- |
+| `--role all`（默认） | 网页、存储、本机评测和 AI 执行环境；可再添加远程评测机分担普通提交 |
+| `--role web` | 网页和存储，不构建本机 rootfs；普通提交需接入远程评测机 |
 
-Wiki source is included. GitHub Wiki is a separate repository; uploading these files does not publish it automatically. `deploy/export-wiki.py` exports both languages.
+需要 AI 标程验证和数据生成时，网页节点使用 `all`。远程普通评测机不会自动替代本机 AI worker。详细架构图、节点注册和部署步骤见 [分布式评测](wiki/Distributed-Judging.zh-CN.md)。
 
-## License and release scope
+## 文档与开发
 
-The main source is **MIT**, retaining LibreOJ's copyright and license. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md); third-party software, fonts and the rootfs recipe retain their own licenses.
+| 文档 | 内容 |
+| --- | --- |
+| [安装与配置](wiki/Installation.zh-CN.md) · [Docker 源](wiki/Docker-Sources.zh-CN.md) | 安装参数、镜像源、服务管理与重试 |
+| [分布式评测](wiki/Distributed-Judging.zh-CN.md) · [独立评测机](wiki/Remote-Judge.zh-CN.md) | 系统架构、网页与评测分离、节点接入 |
+| [AI 功能](wiki/AI.zh-CN.md) · [HTTPS](wiki/HTTPS.zh-CN.md) | 模型配置、执行环境与站点加密访问 |
+| [开发说明](README-DEVELOPMENT.zh-CN.md) · [源码包](deploy/SOURCE-PACKAGE.zh-CN.md) | 构建、测试与发布文件范围 |
 
-The source package includes application/judge code, sandbox source, the original rootfs recipe, installers and bilingual documentation. It excludes complete rootfs, NOI Linux images, installed binaries, databases, real credentials and debugging output. Rootfs is built during installation. See [package contents](deploy/SOURCE-PACKAGE.md).
+完整文档见 [中文 Wiki](wiki/Home.zh-CN.md) / [English Wiki](wiki/Home.md)。
 
-Configuration and build checks exist; fresh-server one-command installation and real multi-machine deployment have not yet been validated end to end. [Development notes](README-DEVELOPMENT.md).
+## 许可与致谢
+
+项目基于 LibreOJ，主体采用 [MIT](LICENSE)，保留上游版权和许可。感谢 LibreOJ 及相关开源组件的贡献者；第三方组件和 rootfs 配方遵循各自许可，详见 [第三方声明](THIRD_PARTY_NOTICES.md)。

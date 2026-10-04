@@ -2,21 +2,22 @@
 
 [English](Distributed-Judging.md) | 简体中文
 
-## 两种结构
+## 系统架构与部署结构
 
 推荐的 AI 完整结构：网页节点使用 `--role all`，保留本机评测和 AI 沙盒 worker；另加远程 judge 分担普通提交评测。纯网页结构：网页节点使用 `--role web`，普通提交全部由远程 judge 执行，本机不构建 rootfs。
 
 ```mermaid
 flowchart LR
-    Users[浏览器] --> Web[Nginx 与后端]
-    Web --> DB[本机 MariaDB 与 Redis]
-    Web --> Store[本机 MinIO]
-    J1[Judge 1] <-->|WebSocket /api/socket| Web
-    J2[Judge 2] <-->|WebSocket /api/socket| Web
-    J3[Judge N] <-->|WebSocket /api/socket| Web
-    J1 -->|签名下载 /storage/| Web
-    J2 -->|签名下载 /storage/| Web
-    Web -->|完整模式：UNIX socket| LocalAI[本机 AI 沙盒 worker]
+    Browser[浏览器] --> Nginx[Nginx]
+    Nginx --> Frontend[前端资源]
+    Nginx --> Backend[后端]
+    Backend --> DB[MariaDB]
+    Backend --> Redis[Redis]
+    Backend --> MinIO[MinIO]
+    Judges[本机或远程评测机] <-->|认证的 WebSocket /api/socket| Backend
+    Judges --> Sandbox[每台节点的 simple-sandbox 与 rootfs]
+    Judges -->|签名下载 /storage/| Nginx
+    Backend -->|all 模式：本机 UNIX socket| AIWorker[本机 AI 沙盒 worker]
 ```
 
 judge 主动连接网页节点，不需要网页节点连接评测机的入站端口。远程 judge 不持有数据库、Redis 或 MinIO 管理凭据；它通过后端领取任务，使用短期签名 URL 下载测试文件并缓存，再回传结果。当前部署采用一个后端实例，不是后端数据库的高可用集群。
@@ -74,9 +75,7 @@ fetch('/api/judgeClient/listJudgeClients', {
 
 ## AI 与纯网页限制
 
-模型编辑、翻译、检索等后端 AI 操作可以继续配置。标程验证和生成测试数据使用本机 UNIX socket 与私有目录，未实现跨机器的 AI worker 协议。普通 judge 的分布式评测不自动迁移这些功能。
-
-需要完整 AI 能力时采用 `--role all` 并保留本机 worker，再增加远程 judge；纯网页模式需接受上述执行功能不可用。不要用开放 TCP 或不受控共享目录替代本机 AI socket。
+模型编辑、翻译、检索等后端 AI 操作可以继续配置。AI 标程验证和测试数据生成目前使用网页服务器上的本机 UNIX socket 与私有共享目录，未实现跨机器的 AI worker 协议。新增远程评测机只分担普通提交，不会迁移这些执行功能；它们需要 `all` 模式保留的本机 worker，在 `web` 模式下不可用。不要用开放 TCP 或不受控共享目录替代本机 AI socket。
 
 ## 排错
 

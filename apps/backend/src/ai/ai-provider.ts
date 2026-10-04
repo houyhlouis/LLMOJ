@@ -53,27 +53,6 @@ export interface ProviderResponse {
   };
 }
 
-function privateAddress(address: string): boolean {
-  const value = address.toLowerCase();
-  if (value.includes(":")) {
-    if (value.startsWith("::ffff:")) return privateAddress(value.slice(7));
-    return value === "::" || value === "::1" || /^(fc|fd|fe[89ab]|ff)/.test(value) || !/^[23]/.test(value);
-  }
-  const [a, b] = value.split(".").map(Number);
-  return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    a >= 224 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 192 && b === 0) ||
-    (a === 198 && (b === 18 || b === 19))
-  );
-}
-
 /** A URL may never contain a secret. Keys are added to the outgoing request only. */
 export function validateBaseUrl(value: string): URL {
   let url: URL;
@@ -133,10 +112,6 @@ async function rawProviderRequest(
   if (signal?.aborted) throw aiCancellationError(signal);
   const url = new URL(urlText);
   const hostname = url.hostname.replace(/^\[|\]$/g, "");
-  const allowed = (process.env.HYHOJ_AI_PRIVATE_HOSTS || "")
-    .split(",")
-    .map(x => x.trim())
-    .filter(Boolean);
   const records = isIP(hostname)
     ? [{ address: hostname, family: isIP(hostname) }]
     : await awaitAiActive(
@@ -146,10 +121,7 @@ async function rawProviderRequest(
         signal
       );
   if (signal?.aborted) throw aiCancellationError(signal);
-  if (!records.length || (!allowed.includes(hostname) && records.some(x => privateAddress(x.address))))
-    throw new AiError("PRIVATE_ENDPOINT_BLOCKED");
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && allowed.includes(hostname)))
-    throw new AiError("HTTPS_REQUIRED");
+  if (!records.length) throw new AiError("PROVIDER_NETWORK_ERROR");
   const data = body === undefined ? null : JSON.stringify(body);
   return await new Promise((resolve, reject) => {
     const req = (url.protocol === "https:" ? https : http).request(

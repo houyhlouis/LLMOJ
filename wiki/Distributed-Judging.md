@@ -2,21 +2,22 @@
 
 English | [简体中文](Distributed-Judging.zh-CN.md)
 
-## Deployment layouts
+## Architecture and deployment layouts
 
 For full AI execution, use `--role all` on the web node, keeping its local judge/AI worker, then add remote judges for ordinary submissions. For complete separation, use `--role web`; it does not build local rootfs, so remote judges handle ordinary submissions.
 
 ```mermaid
 flowchart LR
-    Users[Browser] --> Web[Nginx and backend]
-    Web --> DB[Local MariaDB and Redis]
-    Web --> Store[Local MinIO]
-    J1[Judge 1] <-->|WebSocket /api/socket| Web
-    J2[Judge 2] <-->|WebSocket /api/socket| Web
-    J3[Judge N] <-->|WebSocket /api/socket| Web
-    J1 -->|Signed /storage/ downloads| Web
-    J2 -->|Signed /storage/ downloads| Web
-    Web -->|Complete mode: UNIX socket| LocalAI[Local AI sandbox worker]
+    Browser[Browser] --> Nginx[Nginx]
+    Nginx --> Frontend[Frontend assets]
+    Nginx --> Backend[Backend]
+    Backend --> DB[MariaDB]
+    Backend --> Redis[Redis]
+    Backend --> MinIO[MinIO]
+    Judges[Local or remote judges] <-->|Authenticated WebSocket /api/socket| Backend
+    Judges --> Sandbox[Per-node simple-sandbox and rootfs]
+    Judges -->|Signed /storage/ downloads| Nginx
+    Backend -->|all mode: local UNIX socket| AIWorker[Local AI sandbox worker]
 ```
 
 Judges initiate connections and need no inbound web port. They do not hold database, Redis or MinIO administrator credentials. They receive tasks, download/cache test files through signed URLs and return results. This deployment uses a single backend, not a highly available backend/database cluster.
@@ -72,9 +73,7 @@ Submit a simple C++ program and confirm downloading, compilation, execution and 
 
 ## AI limitation
 
-Backend model calls, editing, translation and search can still be configured. Reference-solution validation/test-data generation use local sockets/private directories; there is no cross-machine AI worker protocol. Remote ordinary judges do not automatically replace that worker.
-
-For full AI execution, keep `all` plus remote judges. With `web`, accept the unavailable local execution actions. Do not replace the private socket with an open TCP service or uncontrolled shared directory.
+Backend model calls, editing, translation and search can still be configured. AI reference-solution validation and test-data generation currently use a local UNIX socket and private shared directories on the web server; there is no cross-machine AI worker protocol. Adding remote judges for ordinary submissions does not move these actions off the web server. They need the local worker retained by `all` and are unavailable with `web`. Do not replace the private socket with an open TCP service or uncontrolled shared directory.
 
 ## Troubleshooting
 

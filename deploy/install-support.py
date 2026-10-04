@@ -173,9 +173,19 @@ def apparmor(args):
     for service, filenames in candidates.items():
         for filename in filenames:
             profile = Path("/etc/apparmor.d") / filename
-            if not profile.is_file() or not profile.read_text().strip():
+            if not profile.is_file():
                 continue
-            match = re.search(r'(?:#?include)(?:\s+if\s+exists)?\s*[<"](local/[A-Za-z0-9_.-]+)[>"]', profile.read_text())
+            # Ubuntu's MariaDB package can ship a comment-only placeholder. A
+            # hash-prefixed include is an AppArmor directive, not a comment.
+            active_lines = [line.strip() for line in profile.read_text().splitlines()
+                            if line.strip() and (not line.lstrip().startswith("#") or
+                                                 re.match(r"^[ \t]*#[ \t]*include\b", line))]
+            if not active_lines:
+                continue
+            # Match a directive at the start of a line; examples in comments
+            # must not authorize appending rules to an unrelated local file.
+            match = re.search(r'^(?:#[ \t]*)?include(?:[ \t]+if[ \t]+exists)?[ \t]*[<"](local/[A-Za-z0-9_.-]+)[>"]',
+                              "\n".join(active_lines), re.M)
             if not match:
                 fail(f"AppArmor profile {profile} has no local include; add one before retrying")
             local = Path("/etc/apparmor.d") / match[1]

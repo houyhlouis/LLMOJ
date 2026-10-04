@@ -6,7 +6,7 @@ AI configuration belongs to the signed-in user. Features include statement impor
 
 ## Configure a provider
 
-Use the AI configuration UI to enter your model endpoint, model name and key, configure search/MCP as needed, and test the connection. External providers require HTTPS by default; requests reject redirects, credential-bearing URLs and private destinations. For an intentional trusted local provider, the administrator can set `HYHOJ_AI_PRIVATE_HOSTS` to its exact hostname in the backend service environment and restart the backend.
+Use the AI configuration UI to enter your model endpoint, model name and key, configure search/MCP as needed, and test the connection. Model, search and MCP endpoints support HTTP/HTTPS, including hostnames, private networks and loopback addresses. No `HYHOJ_AI_PRIVATE_HOSTS` setting is required. Hostnames are resolved normally and each connection uses that lookup result. Redirects and credential-bearing Base URLs remain rejected. Users with AI configuration permission can configure these endpoints without exposing their saved keys.
 
 Provider keys use AES-256-GCM encryption. Reading configuration reveals only whether a key is present. The master key is `data/ai/master.key` inside the installation, with directory mode `0700` and file mode `0600`. Back up an encrypted database together with its matching master key. Neither belongs in a source repository; a different key cannot decrypt the old configuration.
 

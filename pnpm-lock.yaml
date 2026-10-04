@@ -451,8 +451,8 @@ importers:
         specifier: ^1.2.0
         version: 1.2.0
       systeminformation:
-        specifier: ^5.12.6
-        version: 5.12.6
+        specifier: 5.33.15
+        version: 5.33.15
       toposort:
         specifier: ^2.0.2
         version: 2.0.2
@@ -7005,9 +7005,9 @@ packages:
     resolution: {integrity: sha512-1goXnDYNJlKwCM37f5MTzRwo+8SqutgVtg2d37D6YnHHT4E3IhQMRfKiGdfTZU7LBlI6T8inCQUxnMBFHrbqWw==}
     engines: {node: ^14.18.0 || >=16.0.0}
 
-  systeminformation@5.12.6:
-    resolution: {integrity: sha512-FkCvT5BOuH1OE3+8lFM25oXIYJ0CM8kq4Wgvz2jyBTrsOIgha/6gdJXgbF4rv+g0j/5wJqQLDKan7kc/p7uIvw==}
-    engines: {node: '>=8.0.0'}
+  systeminformation@5.33.15:
+    resolution: {integrity: sha512-s5RloL0F7xhN0ZjfHtLGnbf7EW74EI0N8NFL+1xR7Oxz9QA33obNZsl7lyfnJOhN04E/kGFPoJPlvY7TZ5fzmw==}
+    engines: {node: '>=10.0.0'}
     os: [darwin, linux, win32, freebsd, openbsd, netbsd, sunos, android]
     hasBin: true
 
@@ -14341,7 +14341,7 @@ snapshots:
       '@pkgr/utils': 2.3.0
       tslib: 2.4.0
 
-  systeminformation@5.12.6: {}
+  systeminformation@5.33.15: {}
 
   systemjs@6.12.1: {}
 

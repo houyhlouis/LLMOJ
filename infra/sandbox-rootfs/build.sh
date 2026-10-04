@@ -33,7 +33,11 @@ docker buildx build \
     --output "type=tar,dest=$TEMPORARY_DIRECTORY/rootfs.tar" \
     "$REPOSITORY_ROOT"
 
-gzip -n -9 "$TEMPORARY_DIRECTORY/rootfs.tar"
+# Archiving a local rootfs should not spend minutes on maximum compression.
+# dd reports input bytes/rate on stderr; stdout remains machine-readable below.
+printf 'Compressing rootfs archive (gzip level 1): %s bytes\n' "$(stat -c %s "$TEMPORARY_DIRECTORY/rootfs.tar")" >&2
+dd if="$TEMPORARY_DIRECTORY/rootfs.tar" bs=4M status=progress | gzip -n -1 > "$TEMPORARY_DIRECTORY/rootfs.tar.gz"
+printf 'Rootfs compression complete; writing archive and SHA-256 checksum.\n' >&2
 mv "$TEMPORARY_DIRECTORY/rootfs.tar.gz" "$OUTPUT_DIRECTORY/$ARCHIVE"
 
 (

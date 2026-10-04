@@ -49,11 +49,13 @@ sudo bash /tmp/llmoj-install.zh-CN.sh --repository houyhlouis/LLMOJ \
   --yes --port 8080 --public-url http://oj.example.com:8080 --site-name "AI Practice"
 ```
 
+安装器为 Redis 后台持久化设置 `vm.overcommit_memory=1`，并保存到 `/etc/sysctl.d/99-libreoj-redis.conf`；已有同名自定义文件不被覆盖。单机 MinIO 的“主机故障会使数据不可用”提示说明该部署没有多节点冗余，独立备份仍然必要。
+
 脚本不会修改防火墙或云安全组；请允许所选站点端口。数据库、Redis、MinIO、后端和监控均只监听本机，勿为它们建立公网入口。默认是 HTTP，正式公网部署按 [HTTPS](HTTPS.zh-CN.md) 设置 TLS。
 
 ## 管理员、服务与重试
 
-成功后输出全权限 `admin` 和随机 32 字符密码，凭据保存为 `config/admin-credentials.json`，root 所有、0600。不要上传或公开终端密码输出。重试保持原密码。
+安装成功的最后会直接在控制终端打印全权限 `admin`、随机 32 字符密码和凭据文件绝对路径。即使构建日志重定向到文件，凭据仍显示在控制终端；没有控制终端时输出到标准输出。服务器同时保存 `config/admin-credentials.json`（root 所有、0600）。重试先核验保存的密码；用户已改密或原密码记录缺失时不会显示过期密码，也不会重置账号。不要上传或公开密码输出。
 
 ```bash
 sudo systemctl status libreoj.target
@@ -65,6 +67,6 @@ sudo journalctl -u libreoj-backend -u libreoj-judge -u libreoj-nginx -n 100 --no
 
 安装失败后解决报错，使用首次执行的同一目录、模式、站名、origin、监听地址、端口、并发和 Docker 源参数重跑。不要删除配置或安装状态来绕过冲突。已完成实例不会被安装器当作升级目标；更新前须备份数据库与 AI 主密钥，并制定迁移方案。
 
-配置及各独立构建环节有测试，但尚未完整实测全新服务器一键安装。
-
 Docker 参数在需要构建 rootfs 时使用；留空镜像源不会覆盖现有配置。应用镜像源变更会重启 Docker，见 [Docker 源](Docker-Sources.zh-CN.md)。
+
+已在 Ubuntu 24.04 amd64 完成实际部署和浏览器基础功能测试，覆盖账号与权限、题目管理、四种题型、全部 12 种已配置提交语言、评测与重评、比赛、讨论及题单。该次部署对发现的阻断问题采用了绕行措施；后续修复已有回归检查，但尚未对修复版再次执行全新安装。Ubuntu 26.04、使用真实服务凭据的完整 AI 流程，以及真实多机部署尚未完成端到端验收。

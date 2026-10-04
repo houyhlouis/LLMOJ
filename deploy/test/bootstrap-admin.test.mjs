@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
-import { bootstrapAdmin, fileCredentialStore, generatePassword, readPermissionDefinitions, verifySavedCredentials } from "../bootstrap-admin.mjs";
+import { bootstrapAdmin, fileCredentialStore, generatePassword, readPermissionDefinitions, verifySavedCredentials, showAdminCredentials } from "../bootstrap-admin.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const require = createRequire(path.join(root, "apps/backend/package.json"));
@@ -20,6 +20,7 @@ function fixture(initial = {}, options = {}) {
   let committed = false;
   const calls = [];
   const credentialStore = {
+    filename: "/synthetic-install/config/admin-credentials.json",
     load: async () => saved,
     write: async value => { if (options.failWrite) throw new Error("disk full"); saved = structuredClone(value); },
     remove: async () => { saved = null; }
@@ -133,6 +134,103 @@ test("a changed password is never displayed as the current installation password
   await f.run();
   f.state().auth.password = await bcrypt.hash(generatePassword(), 10);
   assert.equal(await verifySavedCredentials({ ...f, bcrypt }), null);
+});
+
+const noTerminal = async () => { throw Object.assign(new Error("No controlling terminal"), { code: "ENXIO" }); };
+
+function outputFixture() {
+  const chunks = [];
+  return { stdout: { write: text => chunks.push(text) }, text: () => chunks.join("") };
+}
+
+test("fresh and repeated successful installs display verified login details and file location in both languages", async () => {
+  const f = fixture();
+  const first = await f.run();
+  for (const language of ["en", "zh-CN"]) {
+    for (const rerun of [false, true]) {
+      if (rerun) await f.run({ makePassword: () => { throw new Error("must retain the saved password"); } });
+      const output = outputFixture();
+      const result = await showAdminCredentials({ ...f, bcrypt, language, openTerminal: noTerminal,
+        environment: {}, stdout: output.stdout });
+      assert.deepEqual(result, { verified: true, destination: "stdout" });
+      assert(output.text().includes(language === "zh-CN" ? "管理员用户名: admin" : "Administrator username: admin"));
+      assert(output.text().includes(`${language === "zh-CN" ? "管理员密码" : "Administrator password"}: ${first.credentials.password}`));
+      assert(output.text().includes(f.credentialStore.filename));
+      assert(output.text().includes("0600"));
+      assert.equal(f.saved().password, first.credentials.password);
+    }
+  }
+});
+
+test("a controlling terminal receives the final block even when ordinary stdout is redirected", async () => {
+  const f = fixture();
+  await f.run();
+  const output = outputFixture();
+  let displayed = "";
+  let closed = false;
+  const result = await showAdminCredentials({ ...f, bcrypt, language: "en",
+    environment: { JOURNAL_STREAM: "synthetic:stream" }, stdout: output.stdout,
+    openTerminal: async () => ({
+      writeFile: async text => { displayed += text; },
+      close: async () => { closed = true; }
+    }) });
+  assert.deepEqual(result, { verified: true, destination: "terminal" });
+  assert(displayed.includes(f.saved().password));
+  assert(displayed.includes(f.credentialStore.filename));
+  assert.equal(output.text(), "");
+  assert.equal(closed, true);
+});
+
+test("a changed password is neither displayed nor reset when final login details are requested", async () => {
+  const f = fixture();
+  await f.run();
+  const initial = f.saved().password;
+  const current = generatePassword();
+  f.state().auth.password = await bcrypt.hash(current, 10);
+  const hash = f.state().auth.password;
+  const output = outputFixture();
+  const callCount = f.calls.length;
+  const result = await showAdminCredentials({ ...f, bcrypt, language: "zh-CN",
+    openTerminal: noTerminal, environment: {}, stdout: output.stdout });
+  assert.equal(result.verified, false);
+  assert(output.text().includes("未显示过期密码，未重置"));
+  assert(!output.text().includes(initial));
+  assert(!output.text().includes(current));
+  assert.equal(f.state().auth.password, hash);
+  assert.equal(f.saved().password, initial);
+  assert(f.calls.slice(callCount).every(call => call.sql.startsWith("SELECT")));
+});
+
+test("missing original credentials produce an explanation and file location without resetting the account", async () => {
+  const hash = await bcrypt.hash(generatePassword(), 10);
+  const f = fixture({ user: { id: 7, username: "admin", isAdmin: true }, auth: { userId: 7, password: hash } });
+  const output = outputFixture();
+  const result = await showAdminCredentials({ ...f, bcrypt, language: "en",
+    openTerminal: noTerminal, environment: {}, stdout: output.stdout });
+  assert.equal(result.verified, false);
+  assert(output.text().includes("initial credentials are missing or no longer current"));
+  assert(output.text().includes(f.credentialStore.filename));
+  assert.equal(f.state().auth.password, hash);
+  assert.equal(f.saved(), null);
+  assert(f.calls.every(call => call.sql.startsWith("SELECT")));
+});
+
+test("unverified credentials and journal-only execution never emit a password", async () => {
+  const f = fixture();
+  await f.run();
+  for (const environment of [{ INVOCATION_ID: "synthetic" }, { JOURNAL_STREAM: "synthetic:stream" }]) {
+    const output = outputFixture();
+    await assert.rejects(showAdminCredentials({ ...f, bcrypt, openTerminal: noTerminal,
+      environment, stdout: output.stdout }), /systemd journal/);
+    assert.equal(output.text(), "");
+  }
+  const output = outputFixture();
+  const broken = fixture({}, { failQuery: "SELECT u.id" });
+  let opened = false;
+  await assert.rejects(showAdminCredentials({ ...broken, bcrypt,
+    openTerminal: async () => { opened = true; }, environment: {}, stdout: output.stdout }));
+  assert.equal(output.text(), "");
+  assert.equal(opened, false);
 });
 
 test("credential storage is owner-only, refuses symlinks and rejects readable files", async () => {

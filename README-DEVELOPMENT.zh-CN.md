@@ -2,12 +2,12 @@
 
 [English](README-DEVELOPMENT.md) | 简体中文
 
-项目基于 LibreOJ，主体采用 MIT；各组件原声明必须保留。项目介绍见 [README](README.zh-CN.md)，部署见 [Wiki](wiki/Home.zh-CN.md)。
+项目基于 LibreOJ，主体采用 MIT；各组件原声明必须保留。项目介绍见 [README](README.md)，部署见 [Wiki](wiki/Home.zh-CN.md)。
 
 ## 工具链
 
 - Node.js 至少 22.13；一键安装固定使用 24.21.0。
-- 使用 `package.json` 指定的 pnpm 11.13.0。
+- 使用 `package.json` 指定的 pnpm 11.13.1。
 - Linux amd64、CMake、C++ 编译器、libfmt；实际沙盒执行还需 namespaces 与 cgroup v2。
 
 ```bash
@@ -37,6 +37,10 @@ python3 deploy/test/github-entry.test.py
 sudo python3 deploy/test/install-support.test.py
 sudo python3 deploy/test/install-network.test.py
 sudo python3 deploy/test/judge-config.test.py
+sudo python3 deploy/test/admin-output.test.py
+python3 deploy/test/install-flow.test.py
+sudo python3 deploy/test/redis-host.test.py
+sudo python3 deploy/test/sandbox-staging.test.py
 python3 deploy/prepare-github.py --archive release/llmoj-source.tar.gz
 ```
 

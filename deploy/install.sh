@@ -149,7 +149,7 @@ if [[ "$MODE" == plan ]]; then
 3. 安装锁定依赖，编译后端与前端；all 模式还构建原生沙盒。
 4. all 模式：按所选 Docker 源构建、验证原版 LibreOJ rootfs。
 5. 生成私有配置、权限、systemd 单元和 AppArmor 配置。
-6. 初始化本实例的 MariaDB、Redis 和私有 MinIO 存储桶。
+6. 持久化 Redis 所需的 vm.overcommit_memory=1；初始化 MariaDB、Redis 和私有 MinIO 存储桶。
 7. 启动后端，创建全权限 admin 和随机密码。
 8. all 模式：注册、验证并启动本机评测；启动 Nginx 并检查状态。
 9. 设置开机启动，保存完成标记，向终端输出管理员凭据。
@@ -161,7 +161,7 @@ PLAN_ZH
 3. Install locked pnpm dependencies; compile backend/frontend; native sandbox for role all.
 4. For role all: build and validate original LibreOJ rootfs (NOI Linux is not used).
 5. Generate private configuration and systemd units; prepare ownership and AppArmor.
-6. Initialize this instance's MariaDB, Redis and private MinIO bucket.
+6. Persist Redis host setting vm.overcommit_memory=1; initialize MariaDB, Redis and private MinIO bucket.
 7. Start backend; create random-password admin with all permissions.
 8. For role all: register/test/start local judge. Start Nginx; check health.
 9. Enable systemd startup; save completion marker; print admin credentials in terminal.
@@ -226,14 +226,15 @@ if [[ -f "$PROJECT_ROOT/config/install-complete.json" ]]; then
     step 'Verify existing installation (retain credentials and configuration)'
     NODE="$PROJECT_ROOT/runtime/node/bin/node"
     support verify-network
+    "$PYTHON" "$SOURCE_ROOT/deploy/configure-redis-host.py"
     systemctl start libreoj.target
     wait_http http://127.0.0.1:2002/docs-json
     wait_http "http://127.0.0.1:$PUBLIC_PORT/"
     [[ "$INSTALL_ROLE" != all ]] || wait_judge
-    "$NODE" "$PROJECT_ROOT/deploy/bootstrap-admin.mjs" --root "$PROJECT_ROOT"
+    "$NODE" "$SOURCE_ROOT/deploy/bootstrap-admin.mjs" --root "$PROJECT_ROOT"
     INSTALL_SUCCESS=1
-    say '\nSite URL: %s\n' "$PUBLIC_ORIGIN"
-    "$NODE" "$PROJECT_ROOT/deploy/bootstrap-admin.mjs" --root "$PROJECT_ROOT" --show-credentials
+    say '\nInstallation complete. Site URL: %s\n' "$PUBLIC_ORIGIN"
+    "$NODE" "$SOURCE_ROOT/deploy/bootstrap-admin.mjs" --root "$PROJECT_ROOT" --show-credentials
     exit 0
 fi
 
@@ -301,7 +302,7 @@ tar -xJf "$NODE_ARCHIVE" -C "$PROJECT_ROOT/runtime"
 ln -sfn "node-v$NODE_VERSION-linux-x64" "$PROJECT_ROOT/runtime/node"
 NODE="$PROJECT_ROOT/runtime/node/bin/node"
 export PATH="$PROJECT_ROOT/runtime/node/bin:$PROJECT_ROOT/runtime/tooling/node_modules/.bin:$PATH"
-npm install --prefix "$PROJECT_ROOT/runtime/tooling" --no-audit --no-fund --ignore-scripts pnpm@11.13.0
+npm install --prefix "$PROJECT_ROOT/runtime/tooling" --no-audit --no-fund --ignore-scripts pnpm@11.13.1
 export CMAKE_BUILD_PARALLEL_LEVEL=2
 export npm_config_nodedir="$PROJECT_ROOT/runtime/node"
 export NODE_OPTIONS=--max-old-space-size=2300
@@ -429,6 +430,7 @@ for unit in "${UNIT_FILES[@]}"; do install -m 0644 "$unit" "/etc/systemd/system/
 systemctl daemon-reload
 
 step 'Initialize this instance database, Redis and object storage'
+"$PYTHON" "$PROJECT_ROOT/deploy/configure-redis-host.py"
 ROLLBACK_STARTED=1
 if [[ ! -d "$PROJECT_ROOT/data/mariadb/mysql" ]]; then
     mariadb-install-db --no-defaults --user=mysql --datadir="$PROJECT_ROOT/data/mariadb" \
@@ -473,8 +475,6 @@ systemctl start libreoj.target
 support finish
 INSTALL_SUCCESS=1
 say '\nInstallation complete. Site URL: %s\n' "$PUBLIC_ORIGIN"
-"$NODE" deploy/bootstrap-admin.mjs --root "$PROJECT_ROOT" --show-credentials
-say 'Initial credentials: %s/config/admin-credentials.json (root only)\n' "$PROJECT_ROOT"
 say 'Nginx listener: %s:%s. Internal services remain on loopback.\n' "$LISTEN_ADDRESS" "$PUBLIC_PORT"
 if [[ "$LISTEN_ADDRESS" == 0.0.0.0 ]]; then
     say 'Allow the selected website port in your firewall/cloud security group. TLS is configured separately.\n'
@@ -482,3 +482,5 @@ else
     say 'Use an SSH tunnel or an existing reverse proxy for remote access.\n'
 fi
 [[ "$INSTALL_ROLE" != web ]] || say 'Web-only deployment: add remote judges using wiki/Distributed-Judging.md. Local AI sandbox actions are unavailable.\n'
+# Print verified login details last, after every installation and health check.
+"$NODE" "$PROJECT_ROOT/deploy/bootstrap-admin.mjs" --root "$PROJECT_ROOT" --show-credentials

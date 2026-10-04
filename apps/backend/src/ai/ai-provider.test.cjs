@@ -220,7 +220,7 @@ test("errors never expose upstream response or secrets", async () => {
   await assert.rejects(generateText({ ...config("chat"), apiKey: "" }, "", ""), /LLM_NOT_CONFIGURED/);
   await assert.rejects(searchWeb({ type: "tavily", baseUrl, apiKey: "" }, ""), /SEARCH_NOT_CONFIGURED/);
 });
-test("SSRF and credential URL validation", async () => {
+test("private providers are permitted while credential URL validation remains enforced", async () => {
   for (const url of [
     "file:///etc/passwd",
     "https://u:p@example.org",
@@ -229,7 +229,7 @@ test("SSRF and credential URL validation", async () => {
   ])
     assert.throws(() => validateBaseUrl(url), /INVALID_BASE_URL/);
   delete process.env.HYHOJ_AI_PRIVATE_HOSTS;
-  await assert.rejects(providerRequest(`${baseUrl}/models`, {}), /PRIVATE_ENDPOINT_BLOCKED/);
+  assert.deepEqual((await providerRequest(`${baseUrl}/models`, {})).data.data, [{ id: "model-a" }]);
   process.env.HYHOJ_AI_PRIVATE_HOSTS = "127.0.0.1";
 });
 test("strict JSON output accepts fences but rejects surrounding text", () => {

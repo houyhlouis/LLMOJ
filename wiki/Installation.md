@@ -46,11 +46,13 @@ sudo bash /tmp/llmoj-install.sh --repository houyhlouis/LLMOJ \
 
 Docker options apply when rootfs must be built. Package source changes do not replace an already installed Docker. Applying changed registry mirrors restarts Docker; other settings are preserved and the previous file is backed up. See [Docker sources](Docker-Sources.md).
 
+For Redis background saves, the installer applies `vm.overcommit_memory=1` and persists it in `/etc/sysctl.d/99-libreoj-redis.conf`; an existing custom file of that name is not overwritten. The single-node MinIO warning about host failure describes the absence of multi-node redundancy; keep independent backups.
+
 The installer does not change firewall/cloud security-group rules. Allow only the chosen website port. Database, Redis, MinIO, backend and metrics remain on loopback. Configure [HTTPS](HTTPS.md) for a public deployment.
 
 ## Admin, services and retries
 
-Success prints full-permission `admin` and a random 32-character password. The root-owned credential file is `config/admin-credentials.json`, mode `0600`. Save it privately and change the password after login. Retrying does not reset it.
+At the end of a successful installation, the controlling terminal shows the full-permission `admin` username, its random 32-character password and the absolute credential-file path. This remains visible when build output is redirected; without a controlling terminal, it falls back to standard output. The server also retains `config/admin-credentials.json`, owned by root with mode `0600`. Retries verify the recorded password before displaying it. A changed password or missing record is never replaced or presented as a valid old password. Keep terminal output private.
 
 ```bash
 sudo systemctl status libreoj.target
@@ -62,4 +64,4 @@ sudo journalctl -u libreoj-backend -u libreoj-judge -u libreoj-nginx -n 100 --no
 
 After a failed installation, fix the error and rerun with the original directory, role, site name, origin, listener, port, slots and Docker source options. Do not delete private config/state to bypass a mismatch. Completed installations are not automatically upgraded; back up the database and matching AI master key before planning a migration.
 
-Configuration and build steps have checks; a complete installation on a fresh server remains unverified end to end.
+An actual deployment and basic browser testing have been completed on Ubuntu 24.04 amd64. Testing covered accounts and permissions, problem management, all four problem types, all 12 configured submission languages, judging and rejudging, contests, discussions and study lists. Deployment required workarounds for the blockers found during that run. Subsequent fixes have regression checks, but the fixed version has not undergone another fresh installation. Ubuntu 26.04, complete AI workflows with real provider credentials, and real multi-machine deployment have not been validated end to end.

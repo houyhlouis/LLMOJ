@@ -10,7 +10,7 @@ Excluded: real passwords/API keys, databases, problem/user data, logs, backups, 
 | --- | --- |
 | MariaDB, Redis, Nginx and build packages | Server's configured Ubuntu repositories |
 | Node 24.21.0 | nodejs.org; fixed checksum |
-| pnpm 11.13.0 and locked dependencies | npm registry |
+| pnpm 11.13.1 and locked dependencies | npm registry |
 | Go 1.26.8 | go.dev; fixed checksum |
 | Pinned MinIO source | GitHub codeload; fixed commit/checksum, built locally |
 | Twemoji/Hack and some native dependency resources | Their upstream GitHub projects |

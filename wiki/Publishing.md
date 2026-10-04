@@ -2,7 +2,7 @@
 
 English | [简体中文](Publishing.zh-CN.md)
 
-These steps are for the repository owner. Local packaging does not create repositories, push Git or publish releases. The project name is LLMOJ; English is the default README/Wiki language with links to Chinese versions.
+These steps are for the repository owner. Local packaging does not create repositories, push Git or publish releases. The project name is LLMOJ; the default README is Chinese, with English in `README.en.md`. The Wiki provides both languages.
 
 ## 1. Make a clean source directory
 
@@ -43,7 +43,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The version is an example. Pin both the downloaded script URL and `--ref` to the same release tag. This project is currently in preparation; fresh-server and multi-machine validation remain outstanding.
+The version is an example. Pin both the downloaded script URL and `--ref` to the same release tag. Deployment and core functionality have been verified on Ubuntu 24.04 amd64. Validate your release and deployment layout before publishing; real multi-machine acceptance testing remains separate.
 
 ## 3. Publish both Wiki languages
 
