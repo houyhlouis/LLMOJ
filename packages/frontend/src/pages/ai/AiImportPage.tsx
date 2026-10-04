@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Button, Form, Header, Message, Progress } from "semantic-ui-react";
 import { observer } from "mobx-react";
 import { appState } from "@/appState";
 import { defineRoute } from "@/AppRouter";
 import { Link } from "@/utils/hooks";
+import { readBrowserFile } from "@/utils/readBrowserFile";
 import { aiCall, aiText, uploadAiAttachment } from "./api";
 import AiJobs from "./AiJobs";
 import style from "./Ai.module.less";
@@ -22,70 +23,146 @@ export const AiImportPage = observer(function AiImportPage() {
     [pending, setPending] = useState(false),
     [error, setError] = useState(""),
     [refreshKey, setRefreshKey] = useState(0);
+  const [readingStatement, setReadingStatement] = useState(false),
+    [readingAttachment, setReadingAttachment] = useState(false);
+  const mounted = useRef(false);
+  const reads = useRef<{ statement?: AbortController; attachment?: AbortController }>({});
+  const activeImport = useRef<AbortController>(null);
   useEffect(() => {
+    mounted.current = true;
     appState.enterNewPage(aiText("一键导入题目", "Import problem with AI"), "problem_set");
-  }, []);
-  const readFile = async (file: File) => {
-    if (!file) return;
-    setError("");
-    if (file.size > 10 * 1024 * 1024) {
-      setError(aiText("文件不能超过 10 MiB。", "File must not exceed 10 MiB."));
-      return;
-    }
-    if (/\.(md|markdown|txt)$/i.test(file.name)) {
-      setMarkdown(await file.text());
-      setImage("");
-      setFilename(file.name);
-      return;
-    }
-    if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type)) {
-      setError(
-        aiText(
-          "仅支持 Markdown 和 PNG/JPEG/WebP/GIF 图片。",
-          "Only Markdown and PNG/JPEG/WebP/GIF images are supported."
-        )
-      );
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setImage(String(reader.result));
-      setFilename(file.name);
+    const cancel = () => {
+      activeImport.current?.abort();
+      reads.current.statement?.abort();
+      reads.current.attachment?.abort();
     };
-    reader.readAsDataURL(file);
+    window.addEventListener("pagehide", cancel);
+    return () => {
+      mounted.current = false;
+      cancel();
+      window.removeEventListener("pagehide", cancel);
+    };
+  }, []);
+  const readFile = async (input: HTMLInputElement, kind: "statement" | "attachment") => {
+    const file = input.files?.[0];
+    if (!file) return;
+    reads.current[kind]?.abort();
+    const controller = new AbortController();
+    reads.current[kind] = controller;
+    const isCurrent = () => mounted.current && !controller.signal.aborted && reads.current[kind] === controller;
+    const setReading = kind === "statement" ? setReadingStatement : setReadingAttachment;
+    setReading(true);
+    setError("");
+    try {
+      if (kind === "attachment") {
+        setAttachment(null);
+        setAttachmentToken(null);
+        if (!/\.zip$/i.test(file.name) || file.size > 64 * 1024 * 1024) {
+          setError(aiText("请选择不超过 64 MiB 的 ZIP 压缩包。", "Select a ZIP archive no larger than 64 MiB."));
+          return;
+        }
+        // Keep the input mounted and unchanged until Firefox has read the File.
+        // A memory-backed copy remains valid after clearing/replacing the input.
+        const bytes = await readBrowserFile(file, "arrayBuffer", { signal: controller.signal });
+        if (isCurrent())
+          setAttachment(new File([bytes], file.name, { type: file.type, lastModified: file.lastModified }));
+        return;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        setError(aiText("文件不能超过 10 MiB。", "File must not exceed 10 MiB."));
+        return;
+      }
+      if (/\.(md|markdown|txt)$/i.test(file.name)) {
+        const text = await readBrowserFile(file, "text", { signal: controller.signal });
+        if (isCurrent()) {
+          setMarkdown(text);
+          setImage("");
+          setFilename(file.name);
+        }
+        return;
+      }
+      if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type)) {
+        setError(
+          aiText(
+            "仅支持 Markdown 和 PNG/JPEG/WebP/GIF 图片。",
+            "Only Markdown and PNG/JPEG/WebP/GIF images are supported."
+          )
+        );
+        return;
+      }
+      const imageData = await readBrowserFile(file, "dataURL", { signal: controller.signal });
+      if (isCurrent()) {
+        setImage(imageData);
+        setFilename(file.name);
+      }
+    } catch {
+      if (isCurrent())
+        setError(aiText("无法读取文件，请重新选择文件后重试。", "Unable to read the file. Select it again and retry."));
+    } finally {
+      if (reads.current[kind] === controller) {
+        reads.current[kind] = undefined;
+        // Do not invalidate the original File while a read is in progress.
+        input.value = "";
+        if (mounted.current) setReading(false);
+      }
+    }
   };
   const start = async () => {
+    // A ref also prevents a second click before React renders the loading state.
+    if (activeImport.current || reads.current.statement || reads.current.attachment) return;
+    const controller = new AbortController();
+    activeImport.current = controller;
+    const isCurrent = () => mounted.current && !controller.signal.aborted && activeImport.current === controller;
     setPending(true);
     setError("");
     try {
       let token = attachmentToken;
       if (attachment && !token) {
-        token = await uploadAiAttachment(attachment, value => {
-          setUploadProgress(Math.round(value.progress * 100));
-          setUploadPhase(value.status);
-        });
+        token = await uploadAiAttachment(
+          attachment,
+          value => {
+            if (isCurrent()) {
+              setUploadProgress(Math.round(value.progress * 100));
+              setUploadPhase(value.status);
+            }
+          },
+          controller.signal
+        );
+        if (!isCurrent()) return;
         setAttachmentToken(token);
       }
-      await aiCall("start", {
-        action: "import",
-        markdown,
-        image: image || undefined,
-        count,
-        ...(problemType !== "auto" ? { problemType } : {}),
-        ...(problemType === "Communication" && communicationMode !== "auto" ? { communicationMode } : {}),
-        ...(token ? { attachmentToken: token } : {})
-      });
+      if (!isCurrent()) return;
+      setUploadProgress(null);
+      await aiCall(
+        "start",
+        {
+          action: "import",
+          markdown,
+          image: image || undefined,
+          count,
+          ...(problemType !== "auto" ? { problemType } : {}),
+          ...(problemType === "Communication" && communicationMode !== "auto" ? { communicationMode } : {}),
+          ...(token ? { attachmentToken: token } : {})
+        },
+        { signal: controller.signal, timeout: 30000 }
+      );
+      if (!isCurrent()) return;
       setRefreshKey(value => value + 1);
       setMarkdown("");
       setImage("");
       setFilename("");
       setAttachment(null);
       setAttachmentToken(null);
-    } catch (e) {
-      setError(e.message);
+    } catch (error) {
+      if (isCurrent()) setError(error.message);
     } finally {
-      setPending(false);
-      setUploadProgress(null);
+      if (activeImport.current === controller) {
+        activeImport.current = null;
+        if (mounted.current) {
+          setPending(false);
+          setUploadProgress(null);
+        }
+      }
     }
   };
   return (
@@ -101,6 +178,12 @@ export const AiImportPage = observer(function AiImportPage() {
         <Link href="/ai/configuration">{aiText("AI API 配置", "AI API Configuration")}</Link>
       </p>
       {error && <Message negative>{error}</Message>}
+      {(readingStatement || readingAttachment) && <Message info>{aiText("正在读取文件…", "Reading file…")}</Message>}
+      {pending && uploadProgress != null && (
+        <Button type="button" onClick={() => activeImport.current?.abort()}>
+          {aiText("取消上传", "Cancel upload")}
+        </Button>
+      )}
       {pending && uploadProgress != null && (
         <Progress
           active
@@ -150,11 +233,8 @@ export const AiImportPage = observer(function AiImportPage() {
           type="file"
           label={aiText("题面文件", "Statement file")}
           accept=".md,.markdown,.txt,image/png,image/jpeg,image/webp,image/gif"
-          onChange={event => {
-            const file = event.currentTarget.files?.[0];
-            event.currentTarget.value = "";
-            void readFile(file);
-          }}
+          disabled={pending || readingStatement}
+          onChange={event => void readFile(event.currentTarget, "statement")}
         />
         {filename && (
           <p>
@@ -173,6 +253,7 @@ export const AiImportPage = observer(function AiImportPage() {
         )}
         <Form.TextArea
           rows={14}
+          disabled={pending || readingStatement}
           label={aiText("Markdown 题面", "Markdown statement")}
           value={markdown}
           onChange={(_e, { value }) => setMarkdown(String(value))}
@@ -184,22 +265,11 @@ export const AiImportPage = observer(function AiImportPage() {
           )}
         </p>
         <Form.Input
-          key={attachment?.name || "no-attachment"}
           type="file"
           accept=".zip,application/zip"
           label={aiText("附加文件 ZIP（可选，最多 64 MiB）", "Attachment ZIP (optional, up to 64 MiB)")}
-          onChange={event => {
-            const file = event.currentTarget.files?.[0];
-            event.currentTarget.value = "";
-            if (!file) return;
-            if (!/\.zip$/i.test(file.name) || file.size > 64 * 1024 * 1024) {
-              setError(aiText("请选择不超过 64 MiB 的 ZIP 压缩包。", "Select a ZIP archive no larger than 64 MiB."));
-              return;
-            }
-            setError("");
-            setAttachment(file);
-            setAttachmentToken(null);
-          }}
+          disabled={pending || readingAttachment}
+          onChange={event => void readFile(event.currentTarget, "attachment")}
         />
         {attachment && (
           <p>
@@ -234,7 +304,15 @@ export const AiImportPage = observer(function AiImportPage() {
         <Button
           primary
           type="button"
-          disabled={(!markdown.trim() && !image) || !Number.isInteger(count) || count < 5 || count > 1000}
+          disabled={
+            pending ||
+            readingStatement ||
+            readingAttachment ||
+            (!markdown.trim() && !image) ||
+            !Number.isInteger(count) ||
+            count < 5 ||
+            count > 1000
+          }
           onClick={start}
         >
           {aiText("导入并一键执行", "Import and run all")}

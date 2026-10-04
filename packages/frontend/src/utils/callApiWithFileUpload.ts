@@ -24,6 +24,10 @@ interface CallApiWithFileUploadOptions<
   file: Blob;
   onProgress?: (progress: FileUploadApiProgress) => void;
   onCancelAvailable?: (cancel: () => void) => void;
+  signal?: AbortSignal;
+  // Optional to preserve existing large-file upload behavior.
+  uploadTimeoutMs?: number;
+  uploadAttempts?: number;
 }
 
 // Workaround: xdomain's FormData doesn't set [Symbol.toStringTag] to "FormData"
@@ -35,100 +39,104 @@ export async function callApiWithFileUpload<
   Request extends { uploadInfo?: ApiTypes.FileUploadInfoDto },
   Response extends { error?: string; signedUploadRequest?: ApiTypes.SignedFileUploadRequestDto }
 >(options: CallApiWithFileUploadOptions<Request, Response>): Promise<ApiResponseWithUploadResult<Response>> {
-  if (options.onProgress) options.onProgress({ status: "Requesting", progress: 0 });
+  const cancelTokenSource = Axios.CancelToken.source();
+  let isCancelled = false;
+  let finished = false;
+  let cancelRetryDelay: (() => void) | undefined;
+  const cancel = () => {
+    if (isCancelled || finished) return;
+    isCancelled = true;
+    cancelTokenSource.cancel();
+    cancelRetryDelay?.();
+  };
+  const progress = (value: FileUploadApiProgress) => {
+    if (!isCancelled && !finished) options.onProgress?.(value);
+  };
+  options.signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    if (options.signal?.aborted) cancel();
+    options.onCancelAvailable?.(cancel);
+    if (isCancelled) return { uploadCancelled: true };
+    progress({ status: "Requesting", progress: 0 });
+    if (isCancelled) return { uploadCancelled: true };
 
-  const result =
-    options.file && options.prepareUploadApi
-      ? await options.prepareUploadApi(options.request, options.file)
-      : await options.api({
-          ...options.request,
-          uploadInfo: options.file
-            ? {
-                size: options.file.size,
-                uuid: null
-              }
-            : null
-        } as Request);
-  if (result.requestCancelled) return { uploadCancelled: true };
-  if (result.requestError) return result;
+    const result =
+      options.file && options.prepareUploadApi
+        ? await options.prepareUploadApi(options.request, options.file)
+        : await options.api({
+            ...options.request,
+            uploadInfo: options.file ? { size: options.file.size, uuid: null } : null
+          } as Request);
+    if (isCancelled || result.requestCancelled) return { uploadCancelled: true };
+    if (result.requestError) return result;
+    if (!result.response?.signedUploadRequest) return result;
 
-  if (result.response.signedUploadRequest) {
-    // Upload is required
-
-    const cancelTokenSource = Axios.CancelToken.source();
-    let isCancelled = false;
-    const cancelFunction = () => {
-      if (isCancelled) return;
-      isCancelled = true;
-      cancelTokenSource.cancel();
-    };
-
-    if (options.onCancelAvailable) options.onCancelAvailable(cancelFunction);
-
-    let error = false;
-    function onUploadProgress(e: ProgressEvent<EventTarget>) {
-      // setTimeout is a workaround for Axios triggers a "progress" event with 100% loaded after error
-
-      if (options.onProgress)
-        setTimeout(() => {
-          if (error) return;
-
-          options.onProgress({ status: "Uploading", progress: e.loaded / e.total });
-        }, 0);
-    }
-
-    const UPLOAD_RETRY_TIMES = 5;
-    const UPLOAD_RETRY_DEALY_MAX = 5;
-    for (let i = 0; i < UPLOAD_RETRY_TIMES; i++) {
+    const signed = result.response.signedUploadRequest;
+    const attempts = Number.isFinite(options.uploadAttempts) ? Math.max(1, Math.floor(options.uploadAttempts)) : 5;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      if (isCancelled) return { uploadCancelled: true };
+      let uploadActive = true;
+      const config = {
+        cancelToken: cancelTokenSource.token,
+        timeout: options.uploadTimeoutMs ?? 0,
+        onUploadProgress: (event: ProgressEvent<EventTarget>) => {
+          // Axios can report a final progress event after an upload has failed.
+          setTimeout(() => {
+            if (uploadActive && event.total > 0)
+              progress({ status: "Uploading", progress: event.loaded / event.total });
+          }, 0);
+        }
+      };
       try {
-        if (result.response.signedUploadRequest.method === "PUT") {
-          await Axios.put(result.response.signedUploadRequest.url, options.file, {
-            cancelToken: cancelTokenSource.token,
-            onUploadProgress
-          });
+        let uploaded;
+        if (signed.method === "PUT") {
+          uploaded = await Axios.put(signed.url, options.file, config);
         } else {
           const formData = new FormData();
-          Object.entries(result.response.signedUploadRequest.extraFormData).forEach(([key, value]) =>
-            formData.append(key, value as string)
-          );
-
-          formData.append(result.response.signedUploadRequest.fileFieldName, options.file);
-          await Axios.post(result.response.signedUploadRequest.url, formData, {
-            cancelToken: cancelTokenSource.token,
-            onUploadProgress
-          });
+          Object.entries(signed.extraFormData || {}).forEach(([key, value]) => formData.append(key, value as string));
+          formData.append(signed.fileFieldName, options.file);
+          uploaded = await Axios.post(signed.url, formData, config);
         }
-
-        // Success, break retry loop
+        if (isCancelled) return { uploadCancelled: true };
+        // Axios 0.x can resolve XHR status 0 during navigation. Only a confirmed
+        // HTTP success may trigger the completion API (or start an AI job).
+        if (!uploaded || !(uploaded.status >= 200 && uploaded.status < 300))
+          throw new Error("The file upload did not receive a successful HTTP response.");
         break;
-      } catch (e) {
-        if (isCancelled) {
-          // Cancelled, don't retry
-          error = true;
-          return { uploadCancelled: true };
-        } else if (i === UPLOAD_RETRY_TIMES - 1) {
-          // Failed after all retries
-          error = true;
-          return { uploadError: e };
-        } else {
-          // Retry after a delay
-          if (options.onProgress) options.onProgress({ status: "Retrying", progress: 0 });
-          await new Promise(resolve => setTimeout(resolve, UPLOAD_RETRY_DEALY_MAX * 1000 * Math.random()));
-        }
+      } catch (error) {
+        if (isCancelled || Axios.isCancel(error)) return { uploadCancelled: true };
+        if (attempt === attempts - 1) return { uploadError: error };
+        uploadActive = false;
+        progress({ status: "Retrying", progress: 0 });
+        if (isCancelled) return { uploadCancelled: true };
+        await new Promise<void>(resolve => {
+          const timer = setTimeout(() => {
+            cancelRetryDelay = undefined;
+            resolve();
+          }, 5000 * Math.random());
+          cancelRetryDelay = () => {
+            clearTimeout(timer);
+            cancelRetryDelay = undefined;
+            resolve();
+          };
+        });
+      } finally {
+        uploadActive = false;
       }
     }
-
-    if (options.onProgress) options.onProgress({ status: "Requesting", progress: 0 });
-
+    if (isCancelled) return { uploadCancelled: true };
+    progress({ status: "Requesting", progress: 0 });
+    if (isCancelled) return { uploadCancelled: true };
     const completionResult = await options.api({
       ...options.request,
-      uploadInfo: {
-        size: options.file.size,
-        uuid: result.response.signedUploadRequest.uuid
-      }
+      uploadInfo: { size: options.file.size, uuid: signed.uuid }
     } as Request);
-    return completionResult.requestCancelled ? { uploadCancelled: true } : completionResult;
+    return isCancelled || completionResult.requestCancelled ? { uploadCancelled: true } : completionResult;
+  } catch (error) {
+    if (isCancelled || Axios.isCancel(error)) return { uploadCancelled: true };
+    throw error;
+  } finally {
+    finished = true;
+    options.signal?.removeEventListener("abort", cancel);
   }
-  // Upload is not required
-  else return result;
 }

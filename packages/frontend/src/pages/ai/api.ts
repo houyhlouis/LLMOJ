@@ -54,6 +54,10 @@ const errors: Record<string, [string, string]> = {
     "导入任务必须创建新题目，不能指定已有题目。",
     "Import creates a new problem; an existing problem ID is not allowed."
   ],
+  GENERATOR_COMPILE_REPAIR_ATTEMPTED: [
+    "生成器编译失败，已尝试一次自动修复。",
+    "Generator compilation failed; one automatic repair was attempted."
+  ],
   GENERATOR_FILENAME_CONFLICT: [
     "已有附加源码正在使用 make.cpp、std.cpp、validator.cpp 或 data.yaml，请先重命名冲突文件。",
     "Existing extra source files use make.cpp, std.cpp, validator.cpp or data.yaml. Rename the conflicting file first."
@@ -91,7 +95,10 @@ const errors: Record<string, [string, string]> = {
     "The generated input/output filenames do not match the statement. Please check the statement."
   ],
   INVALID_AI_TRANSLATION: ["AI 返回的翻译格式无效。", "The AI returned an invalid translation."],
-  INVALID_AI_TUTORIAL: ["AI 返回的中英题解格式无效。", "The AI returned an invalid bilingual tutorial."],
+  INVALID_AI_TUTORIAL: [
+    "AI 返回的题解未通过格式或事实校验，请重试生成。",
+    "The tutorial failed format or factual validation. Retry generation."
+  ],
   INVALID_GENERATED_CODE: ["AI 生成的 C++ 源码无效或过大。", "The generated C++ source is invalid or too large."],
   INVALID_GENERATED_JUDGE_INFO: ["生成的评测配置未通过校验。", "The generated judge configuration failed validation."],
   INVALID_SANDBOX_FILE: ["沙箱产物不符合文件或大小要求。", "A sandbox output failed file or size validation."],
@@ -232,6 +239,18 @@ const errors: Record<string, [string, string]> = {
 };
 export function aiError(value: string) {
   const [code, detail = ""] = String(value || "INTERNAL_ERROR").split(/:\s*/, 2);
+  if (code === "INVALID_AI_TUTORIAL") {
+    if (detail === "UNSUPPORTED_NO_PARTIAL_SCORE_CLAIM")
+      return aiText(
+        "题解中的部分分说明缺少依据，请重试生成。",
+        "The tutorial makes an unsupported claim about partial scoring. Retry generation."
+      );
+    if (detail === "UNVERIFIED_SOURCE_PROVENANCE_CLAIM")
+      return aiText(
+        "题解中的原题来源说明缺少依据，请重试生成。",
+        "The tutorial makes an unverified claim about the original source. Retry generation."
+      );
+  }
   const status = /^\d{3}$/.test(detail) ? Number(detail) : undefined;
   if (code === "PROVIDER_HTTP_ERROR" && status) {
     const messages: Record<number, [string, string]> = {
@@ -306,14 +325,31 @@ function validationError(data: any) {
   );
 }
 
-export async function aiCall<T = any>(method: string, body: any = {}): Promise<T> {
+export async function aiCall<T = any>(
+  method: string,
+  body: any = {},
+  options: { signal?: AbortSignal; timeout?: number } = {}
+): Promise<T> {
+  if (options.signal?.aborted) throw new DOMException("AI request cancelled.", "AbortError");
   let response;
   try {
     response = await axios.post(window.apiEndpoint + `api/ai/${method}`, body, {
       headers: { Authorization: appState.token ? `Bearer ${appState.token}` : undefined },
-      validateStatus: () => true
+      validateStatus: () => true,
+      signal: options.signal,
+      timeout: options.timeout
     });
-  } catch {
+  } catch (error) {
+    if (options.signal?.aborted || axios.isCancel(error)) throw new DOMException("AI request cancelled.", "AbortError");
+    if (["ECONNABORTED", "ETIMEDOUT"].includes(error?.code))
+      throw new Error(
+        method === "start"
+          ? aiText(
+              "创建任务的请求超时，请先检查任务列表，避免重复导入。",
+              "The job request timed out. Check the job list before importing again."
+            )
+          : aiText("OJ 请求超时，请稍后重试。", "The OJ request timed out. Please retry later.")
+      );
     throw new Error(
       aiText(
         "无法连接到 OJ 服务器，请检查网络后重试。",
@@ -321,6 +357,7 @@ export async function aiCall<T = any>(method: string, body: any = {}): Promise<T
       )
     );
   }
+  if (options.signal?.aborted) throw new DOMException("AI request cancelled.", "AbortError");
   const { status, data } = response;
   if (status === 400) throw new Error(validationError(data) + " (HTTP 400)");
   const httpErrors: Record<number, [string, string]> = {
@@ -357,21 +394,38 @@ export async function aiCall<T = any>(method: string, body: any = {}): Promise<T
 }
 export async function uploadAiAttachment(
   file: File,
-  onProgress: (value: FileUploadApiProgress) => void
+  onProgress: (value: FileUploadApiProgress) => void,
+  signal?: AbortSignal
 ): Promise<string> {
   let attachmentToken: string;
   const result = await callApiWithFileUpload<any, any>({
     api: async request => {
       if (request.uploadInfo?.uuid) return { response: { attachmentToken } };
-      const prepared = await aiCall("prepareAttachment", { filename: file.name, size: file.size });
+      const prepared = await aiCall(
+        "prepareAttachment",
+        { filename: file.name, size: file.size },
+        { signal, timeout: 30000 }
+      );
+      if (!prepared.signedUploadRequest || !prepared.attachmentToken)
+        throw new Error(
+          aiText("附加文件上传准备失败，请重试。", "Attachment upload preparation failed. Please retry.")
+        );
       attachmentToken = prepared.attachmentToken;
       return { response: prepared };
     },
     request: {},
     file,
-    onProgress
+    onProgress,
+    signal,
+    uploadTimeoutMs: 120000,
+    uploadAttempts: 1
   });
-  if (result.uploadError || result.uploadCancelled || result.requestError || !attachmentToken)
+  if (signal?.aborted || result.uploadCancelled) throw new DOMException("Attachment upload cancelled.", "AbortError");
+  if (["ECONNABORTED", "ETIMEDOUT"].includes(result.uploadError?.code))
+    throw new Error(
+      aiText("附加文件上传超时，请检查网络后重试。", "Attachment upload timed out. Check your connection and retry.")
+    );
+  if (result.uploadError || result.requestError || !attachmentToken)
     throw new Error(aiText("附加文件上传失败，请重试。", "Attachment upload failed. Please retry."));
   return attachmentToken;
 }
@@ -434,6 +488,7 @@ export const actionName = (name: string) =>
     validator: aiText("生成输入校验器", "Generate input validator"),
     compile: aiText("编译", "Compile"),
     "compile-make": aiText("编译 make.cpp", "Compile make.cpp"),
+    "repair-make": aiText("修复生成器编译错误", "Repair generator compilation"),
     "compile-std": aiText("编译 std.cpp", "Compile std.cpp"),
     "compile-checker": aiText("编译 SPJ", "Compile SPJ"),
     "compile-validator": aiText("编译输入校验器", "Compile input validator"),
