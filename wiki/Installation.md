@@ -23,21 +23,26 @@ Interactive installation asks for role, listener, HTTP port, directory, site nam
 
 ## Options
 
-| Option | Meaning |
+| Option | Default and constraints |
 | --- | --- |
-| `--repository OWNER/REPO` | Public repository; download entry point only |
-| `--ref TAG_OR_COMMIT` | Source version; download entry point only; defaults to main |
-| `--role all` / `web` | Complete server / web-only node |
-| `--port 80` | Website HTTP port |
-| `--listen 0.0.0.0` / `127.0.0.1` | Public / local listener |
-| `--public-url https://oj.example.com` | Final browser/download origin; does not create TLS certificates |
-| `--prefix /opt/LibreOJ` | Instance directory; one instance per server |
-| `--site-name LLMOJ` | Display name |
-| `--judge-slots 2` | Local execution slots, 1–7 within machine capacity; all mode only |
-| `--docker-source https://download.docker.com` | Package source base URL; appends `/linux/ubuntu` |
-| `--docker-mirrors https://mirror.example.com` | Comma-separated HTTPS Docker Hub mirrors; empty preserves existing defaults |
-| `--yes` / `--interactive` | Non-interactive / force terminal prompts |
-| `--plan` / `--check` | Read-only plan / environment checks |
+| `--repository OWNER/REPO` | Required by download entry; public repository |
+| `--ref BRANCH_OR_TAG_OR_COMMIT` | Default `main`; branch, tag, or commit; download entry only |
+| `--prefix PATH` | Default `/opt/LibreOJ`; dedicated absolute path without spaces/special characters; one instance per host |
+| `--role all\|web` | Default `all`; full site or web-only; web has no local AI worker |
+| `--port NUMBER` | Default `80`; 1–65535, excluding internal ports 2002, 2020, 13306, 16379, 19000, 19001 |
+| `--listen ADDRESS` | Default `0.0.0.0`; only that address or `127.0.0.1` is accepted |
+| `--public-url ORIGIN` | Guessed from interface IP and port; HTTP(S) origin without path, query, fragment, or credentials; does not configure TLS |
+| `--site-name TEXT` | Default `LLMOJ`; 1–60 printable characters, not all whitespace |
+| `--judge-slots NUMBER` | Omit for automatic selection (internal value 0; explicit 0 is also accepted); explicit slots 1–7 within CPU/RAM capacity; all only |
+| `--docker-source URL` | Default `https://download.docker.com`; HTTPS package-source base, with `/linux/ubuntu` appended |
+| `--docker-mirrors URL[,URL]` | Default empty, retaining existing settings; comma-separated HTTPS mirrors; see Docker source validation rules |
+| `--yes` / `--non-interactive` | Aliases; use supplied/default values without prompts |
+| `--interactive` | Force interaction; requires a terminal; default prompts only for installation with a terminal |
+| `--check` | Check environment; download entry still fetches temporary source; no installation/service start |
+| `--plan` | Show plan; download entry still fetches temporary source; no installation/service start |
+| `--help` / `-h` | Show help for the current entry point without installing |
+
+The local `deploy/install.sh` does not accept `--repository` or `--ref`; these belong to the outer download entry.
 
 ```bash
 sudo bash /tmp/llmoj-install.sh --repository houyhlouis/LLMOJ \
@@ -64,4 +69,10 @@ sudo journalctl -u libreoj-backend -u libreoj-judge -u libreoj-nginx -n 100 --no
 
 After a failed installation, fix the error and rerun with the original directory, role, site name, origin, listener, port, slots and Docker source options. Do not delete private config/state to bypass a mismatch. Completed installations are not automatically upgraded; back up the database and matching AI master key before planning a migration.
 
-An actual deployment and basic browser testing have been completed on Ubuntu 24.04 amd64. Testing covered accounts and permissions, problem management, all four problem types, all 12 configured submission languages, judging and rejudging, contests, discussions and study lists. Deployment required workarounds for the blockers found during that run. Subsequent fixes have regression checks, but the fixed version has not undergone another fresh installation. Ubuntu 26.04, complete AI workflows with real provider credentials, and real multi-machine deployment have not been validated end to end.
+## Post-install configuration
+
+Adding CPU cores or RAM does not automatically increase judge capacity. Use [Judge configuration and resizing](Judge-Configuration.md); changing installation metadata or rerunning `--judge-slots` is not a supported resize procedure. See [Configuration overview](Configuration.md) for the full inventory and [Operations](Operations-Configuration.md) for services, ports, mail, and storage.
+
+## Validation scope
+
+Deployment and browser-based functional validation have been performed on Ubuntu 24.04 amd64, including accounts/permissions, problem management, four problem types, all 12 configured submission languages, judging/rejudging, contests, discussions, and problem sets. Subsequent AI business and multi-user permission tests used real DeepSeek/Tavily configurations; this does not establish equivalent behavior for other providers. Reported issues received fixes and targeted regression checks. A fresh installation of the fixed revision, Ubuntu 26.04, and real multi-machine deployment still require separate acceptance testing. This Wiki audit is not a new deployment or a complete business test run.

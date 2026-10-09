@@ -62,6 +62,19 @@ git push
 
 导出脚本只写本地 Markdown，不执行 Git 命令或联网；它把仓库内 `.md` 链接转换成对应 GitHub Wiki 页面链接，并生成侧栏。已有同名 Wiki 页面会被这些文档替换，因此先检查 `git diff`。后续更新用同样流程。
 
+## 使用 GitHub Desktop 更新已有文档
+
+如果拿到的是只包含文档的更新包，不需要重新发布源码：
+
+1. 在 GitHub Desktop 打开 `houyhlouis/LLMOJ` 的本地仓库，先同步远程更新。
+2. 把包中的 `wiki/` 内容合并到仓库同名目录；保留包中未包含的原有页面。查看 Changes，确认只包含预期 Markdown 文档，再填写 summary、commit 并 Push origin。压缩包、校验记录和部署机私密配置不应一起提交。
+3. 这只更新 Code 页中的文档。若还要更新 GitHub 的 **Wiki 标签页**，需要单独处理 `https://github.com/houyhlouis/LLMOJ.wiki.git`：先在 GitHub 网页创建首个 Wiki 页面，再在 Desktop 的 File → Clone Repository → URL 输入该地址。界面拒绝特殊 Wiki 地址时，可按上面的命令克隆，再通过 File → Add Local Repository 加入 Desktop。
+4. 在源码仓库运行上节 `export-wiki.py`，将 `--output` 指向 Wiki 仓库目录。检查 Wiki 仓库的 Changes，再单独 commit/push。也可以使用更新包提供的已导出页面，复制其目录**内部**的 `.md` 文件到 Wiki 仓库根目录；不要嵌套一层 `wiki/`。
+
+两个仓库的提交相互独立。源码文档应保留相对 `.md` 链接，Wiki 导出版使用页面 URL 并带 `_Sidebar.md`；不要把两套文件相互覆盖。导出范围内的同名页面会更新，人工额外页面需自行保留。
+
+操作参考：[GitHub Wiki 本地编辑](https://docs.github.com/en/communities/documenting-your-project-with-wikis/adding-or-editing-wiki-pages)、[GitHub Desktop 克隆仓库](https://docs.github.com/en/desktop/adding-and-cloning-repositories/cloning-and-forking-repositories-from-github-desktop)。
+
 ## 4. 分发范围与许可
 
 主体源码为 MIT，原版 rootfs 配方为 Unlicense。MinIO、数据库、编译器、字体和其他组件各自适用原许可。发布此源码仓库不会让这些第三方软件统一变成 MIT；不要删掉 LICENSE 或第三方版权说明。

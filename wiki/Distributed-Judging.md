@@ -84,3 +84,7 @@ Backend model calls, editing, translation and search can still be configured. AI
 - AI execution fails despite remote judges: check whether the web node retains a local worker.
 
 Real multi-machine deployment has not yet been validated end to end; complete the on-site tests above.
+
+## CPU and existing-node capacity
+
+See [Judge configuration](Judge-Configuration.md) for every YAML field, consumers versus execution/download queues, the 8 CPU/8 GiB example, and resizing/rollback while retaining keys. Maintain and verify one node at a time. More remote slots do not increase the web node's local AI worker capacity. Do not change installer metadata or rerun with a different `--judge-slots` as a substitute.

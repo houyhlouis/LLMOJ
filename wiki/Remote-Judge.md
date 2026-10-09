@@ -92,6 +92,8 @@ Alternatively, build the identical recipe on a trusted build machine and copy `r
 Register the node using [Distributed-Judging](Distributed-Judging.md). Put its key on a single line using an editor, keeping it out of command history:
 
 
+Create the key file below only on first setup; if `/root/judge-01.key` already exists, retain it instead of overwriting it.
+
 ```bash
 sudo install -m 0600 /dev/null /root/judge-01.key
 sudoedit /root/judge-01.key
@@ -103,7 +105,7 @@ sudo env HYHOJ_ROOT=/opt/LibreOJ NODE_BINARY=/opt/LibreOJ/runtime/node/bin/node 
   python3 deploy/configure-judge.py
 ```
 
-The server URL must be an origin without `/api`. The key file must be regular, root-owned and `0600`; its contents are not printed. Slots range from 1–7 within machine capacity; omitting `OJ_JUDGE_SLOTS` chooses automatically.
+The server URL must be an origin without `/api`. The key file must be regular, root-owned and `0600`; its contents are not printed. Initial generation supports 1–7 slots within machine capacity; omitting `OJ_JUDGE_SLOTS` chooses automatically. This is a generator limit, not a seven-CPU kernel limit. Changing it does not resize existing YAML. See [Judge configuration](Judge-Configuration.md) for every field, thread-pool sizing and existing-node resizing.
 
 The generated `config/judge.yaml` is also root-only. Remote mode disables the local AI socket and creates `libreoj-judge.target`. Reruns retain config and reject a different server/key; rotate credentials explicitly after stopping the judge.
 
@@ -122,7 +124,7 @@ sudo install -m 0644 deploy/systemd/libreoj-judge.service \
   deploy/systemd/libreoj-judge.target "${OJ_JUDGE_MOUNTS[@]}" /etc/systemd/system/
 sudo systemctl daemon-reload
 for OJ_JUDGE_MOUNT in "${OJ_JUDGE_MOUNTS[@]}"; do
-  sudo systemctl start "$(basename "$OJ_JUDGE_MOUNT")"
+  sudo systemctl enable --now "$(basename "$OJ_JUDGE_MOUNT")"
 done
 sudo systemd-run --unit=libreoj-install-sandbox-check --wait --pipe --collect \
   --property='Delegate=cpu memory pids' --property=DelegateSubgroup=supervisor \

@@ -86,6 +86,8 @@ sudo env LIBREOJ_X32_SUPPORTED=0 unshare --net --mount --propagation private -- 
 
 先按 [分布式教程](Distributed-Judging.zh-CN.md) 注册该节点，取得独立 key。用编辑器把 key 单独一行写入文件，避免出现在命令历史中：
 
+以下创建 key 文件的命令仅用于首次准备；已有 `/root/judge-01.key` 时不要覆盖，用原文件。
+
 ```bash
 sudo install -m 0600 /dev/null /root/judge-01.key
 sudoedit /root/judge-01.key
@@ -97,7 +99,7 @@ sudo env HYHOJ_ROOT=/opt/LibreOJ NODE_BINARY=/opt/LibreOJ/runtime/node/bin/node 
   python3 deploy/configure-judge.py
 ```
 
-网页 URL 必须是 origin，不带 `/api`。key 文件必须为 root 所有、`0600` 的普通文件；脚本不输出 key。并发范围为 1–7，省略 `OJ_JUDGE_SLOTS` 时按资源自动选择。
+网页 URL 必须是 origin，不带 `/api`。key 文件必须为 root 所有、`0600` 的普通文件；脚本不输出 key。首次生成的并发范围为 1–7，省略 `OJ_JUDGE_SLOTS` 时按资源自动选择。这是生成器支持范围，不是内核只能用 7 个 CPU；已有 YAML 不会因该变量改变而自动扩容。完整字段、线程池与已有节点扩缩容见 [评测端配置](Judge-Configuration.zh-CN.md)。
 
 生成的 `config/judge.yaml` 同样仅 root 可读；远程模式关闭本机 AI socket，并生成独立 `libreoj-judge.target`。再次生成会核对原配置，不覆盖不同服务器或 key；轮换密钥需停机后明确更新私有配置。
 
@@ -115,7 +117,7 @@ sudo install -m 0644 deploy/systemd/libreoj-judge.service \
   deploy/systemd/libreoj-judge.target "${OJ_JUDGE_MOUNTS[@]}" /etc/systemd/system/
 sudo systemctl daemon-reload
 for OJ_JUDGE_MOUNT in "${OJ_JUDGE_MOUNTS[@]}"; do
-  sudo systemctl start "$(basename "$OJ_JUDGE_MOUNT")"
+  sudo systemctl enable --now "$(basename "$OJ_JUDGE_MOUNT")"
 done
 sudo systemd-run --unit=libreoj-install-sandbox-check --wait --pipe --collect \
   --property='Delegate=cpu memory pids' --property=DelegateSubgroup=supervisor \

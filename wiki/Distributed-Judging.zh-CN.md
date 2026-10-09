@@ -86,3 +86,7 @@ fetch('/api/judgeClient/listJudgeClients', {
 - 增加节点后 AI 执行仍失败：检查网页节点是否保留本机 worker，分布式普通评测不能替代它。
 
 尚未完成真实多机端到端验收；部署前应完成上述现场验证。
+
+## CPU 与现有节点容量
+
+逐项 YAML 配置、消费者/执行槽/下载队列区别、8 CPU/8 GiB 示例和保留 key 的扩缩容/回滚流程见 [评测端配置](Judge-Configuration.zh-CN.md)。先对一台节点维护并验收，再逐台处理；远程节点扩槽不增加网页节点本机 AI worker 的容量。不要改安装 metadata 或以不同 `--judge-slots` 重跑安装器来代替此流程。

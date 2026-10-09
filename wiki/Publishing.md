@@ -62,6 +62,19 @@ git push
 
 The exporter only writes local Markdown; it does not run Git or access the network. It converts page links and generates a bilingual sidebar. `Home` is English; `Home.zh-CN` is Chinese. Existing matching pages are replaced, so inspect the diff before pushing. Use the same process for updates.
 
+## Updating existing documentation with GitHub Desktop
+
+A documentation-only update package does not require republishing the source release:
+
+1. Open the local `houyhlouis/LLMOJ` repository in GitHub Desktop and synchronize remote changes.
+2. Merge the package's `wiki/` contents into the same directory, retaining original pages absent from the package. Review Changes for the expected Markdown files, enter a summary, commit, and Push origin. Do not commit the ZIP, audit records, or private server configuration.
+3. This updates documentation under Code. The GitHub **Wiki tab** uses the separate `https://github.com/houyhlouis/LLMOJ.wiki.git` repository. Create its first page on GitHub, then use Desktop's File → Clone Repository → URL. If the special Wiki URL is rejected, clone using the command above and use File → Add Local Repository in Desktop.
+4. Run `export-wiki.py` from the source repository with `--output` pointing to the Wiki repository. Review, commit, and push that repository separately. If the update package includes exported pages, copy the `.md` files **inside** that export directory into the Wiki repository root, without an extra `wiki/` directory.
+
+The repositories have independent commits. Source pages retain relative `.md` links; exported Wiki pages use page URLs and include `_Sidebar.md`. Keep these sets separate. Export updates same-name pages within its scope; retain any additional manually maintained pages.
+
+References: [local Wiki editing](https://docs.github.com/en/communities/documenting-your-project-with-wikis/adding-or-editing-wiki-pages), [cloning with GitHub Desktop](https://docs.github.com/en/desktop/adding-and-cloning-repositories/cloning-and-forking-repositories-from-github-desktop).
+
 ## 4. Distribution and licenses
 
 Main source is MIT; the original rootfs recipe is Unlicense. MinIO, databases, compilers, fonts and other components retain their own licenses. A source release does not relicense them; preserve licenses/notices.

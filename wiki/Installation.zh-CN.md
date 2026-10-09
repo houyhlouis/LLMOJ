@@ -23,22 +23,24 @@ sudo bash /tmp/llmoj-install.zh-CN.sh --repository houyhlouis/LLMOJ
 
 ## 参数
 
-| 参数 | 说明 |
+| 参数 | 默认值与限制 |
 | --- | --- |
-| `--repository OWNER/REPO` | GitHub 入口使用的公开仓库 |
-| `--ref TAG_OR_COMMIT` | GitHub 入口版本；默认 main，正式部署推荐固定版本 |
-| `--role all` / `--role web` | 完整站点 / 仅网页节点 |
-| `--port 80` | HTTP 端口；80 无需浏览器端口后缀 |
-| `--listen 0.0.0.0` / `127.0.0.1` | 公网 / 本机监听 |
-| `--public-url https://oj.example.com` | 浏览器及签名下载链接使用的最终 origin；不配置 TLS |
-| `--prefix /opt/LibreOJ` | 实例目录；不支持同一服务器多个实例 |
-| `--site-name "My AI OJ"` | 站点展示名 |
-| `--judge-slots 2` | 本机执行槽数量；仅 all 模式，不能超过机器能力 |
-| `--docker-source https://download.docker.com` | Docker 软件包源的基础 URL，追加 `/linux/ubuntu` |
-| `--docker-mirrors HTTPS_URL[,URL]` | Docker Hub 加速源，留空保留现有设置 |
-| `--yes` | 非交互执行，采用提供的参数与默认值 |
-| `--interactive` | 强制交互，要求终端 |
-| `--plan` / `--check` | 流程展示 / 环境检查，不安装或启动站点 |
+| `--repository OWNER/REPO` | 入口必填；公开仓库 |
+| `--ref BRANCH_OR_TAG_OR_COMMIT` | 默认 `main`；分支、标签或提交；仅下载入口 |
+| `--prefix PATH` | 默认 `/opt/LibreOJ`；专用绝对目录，不含空格／特殊字符；不支持同机多实例 |
+| `--role all\|web` | 默认 `all`；完整安装／仅网页；web 无本机 AI worker |
+| `--port NUMBER` | 默认 `80`；1–65535，排除内部端口 2002、2020、13306、16379、19000、19001 |
+| `--listen ADDRESS` | 默认 `0.0.0.0`；只接受它或 `127.0.0.1` |
+| `--public-url ORIGIN` | 默认根据接口 IP 和端口推测；HTTP(S) origin，无路径、查询、片段或账号；不配置 TLS |
+| `--site-name TEXT` | 默认 `LLMOJ`；1–60 个可打印字符，不得全空白 |
+| `--judge-slots NUMBER` | 省略为自动（内部值 0，也接受显式 0）；显式槽数 1–7 且不超过 CPU／内存能力；仅 all |
+| `--docker-source URL` | 默认 `https://download.docker.com`；HTTPS 软件包源基础地址，追加 `/linux/ubuntu` |
+| `--docker-mirrors URL[,URL]` | 默认空，保留现有配置；逗号分隔 HTTPS 镜像源；见 Docker 源页的校验规则 |
+| `--yes` / `--non-interactive` | 等价；不提问，使用传入值和默认值 |
+| `--interactive` | 强制交互，必须有可用终端；默认仅在有终端且执行安装时交互 |
+| `--check` | 只检查环境；下载入口仍下载临时源码，不安装／启动服务 |
+| `--plan` | 展示流程；下载入口仍下载临时源码，不安装／启动服务 |
+| `--help` / `-h` | 显示当前入口帮助，不执行安装 |
 
 本地源码安装器不接收 `--repository` 或 `--ref`；这些是外层下载入口的参数。
 
@@ -69,4 +71,10 @@ sudo journalctl -u libreoj-backend -u libreoj-judge -u libreoj-nginx -n 100 --no
 
 Docker 参数在需要构建 rootfs 时使用；留空镜像源不会覆盖现有配置。应用镜像源变更会重启 Docker，见 [Docker 源](Docker-Sources.zh-CN.md)。
 
-已在 Ubuntu 24.04 amd64 完成实际部署和浏览器基础功能测试，覆盖账号与权限、题目管理、四种题型、全部 12 种已配置提交语言、评测与重评、比赛、讨论及题单。该次部署对发现的阻断问题采用了绕行措施；后续修复已有回归检查，但尚未对修复版再次执行全新安装。Ubuntu 26.04、使用真实服务凭据的完整 AI 流程，以及真实多机部署尚未完成端到端验收。
+## 安装后修改配置
+
+CPU／内存升级后不会自动扩容。请使用 [评测配置与扩缩容](Judge-Configuration.zh-CN.md)，不要通过修改安装记录或重跑 `--judge-slots` 调整已安装实例。完整参数索引见 [配置总览](Configuration.zh-CN.md)，服务、端口、邮件与存储见 [安装后运维](Operations-Configuration.zh-CN.md)。
+
+## 验证范围
+
+已在 Ubuntu 24.04 amd64 完成实际部署和浏览器基础功能测试，覆盖账号与权限、题目管理、四种题型、全部 12 种已配置提交语言、评测与重评、比赛、讨论及题单。后续也使用真实 DeepSeek／Tavily 配置进行了 AI 业务和多用户权限测试；不能据此保证其他模型提供方的行为相同。发现的问题已形成修复及针对性回归检查。修复版尚未再次完成全新安装验收，Ubuntu 26.04 和真实多机部署也仍需单独验收。本次 Wiki 配置核对不是一次新的部署或完整业务测试。
