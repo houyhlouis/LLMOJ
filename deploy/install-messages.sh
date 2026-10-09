@@ -12,6 +12,14 @@ translate() {
         'HTTP port (80 needs no port suffix in the browser)') message='HTTP 端口（80 无需在浏览器地址加端口）' ;;
         'Installation directory') message='安装目录' ;;
         'Website name') message='站点名称' ;;
+        'Existing judge.yaml is retained; retry with the original installation options. Use resize-judge.sh to change capacity.\n') printf '%s' '保留现有 judge.yaml；重试请使用原安装参数。调整容量请使用 resize-judge.sh。\n' ;;
+        'Cannot determine judge capacity') message='无法读取评测可用资源' ;;
+        'Judge execution slots (Enter or 0 = automatic)') message='评测实例数／执行槽数（回车或 0 使用自动值）' ;;
+        'Judge slots: automatic CPU-2 default %s; current CPU/RAM maximum %s.\n') message='评测实例数：按有效逻辑 CPU 数减 2，默认 %s；当前 CPU／内存最多支持 %s。\n' ;;
+        'The automatic count exceeds available resources; enter a smaller positive count.\n') message='自动数量超过可用资源，请明确输入较小的正整数。\n' ;;
+        'Enter a positive integer, or 0 for automatic.\n') message='请输入正整数，或输入 0 使用自动值。\n' ;;
+        'Requested judge slots: %s (0 = automatic; existing judge.yaml is retained).\n') message='请求的评测实例数：%s（0 为自动；保留已有 judge.yaml 配置）。\n' ;;
+
         'Browser hostname/IP (behind NAT, enter the real public IP or domain)') message='浏览器使用的域名/IP（NAT 环境请输入真实公网地址）' ;;
         'Docker package source base URL (HTTPS, official by default)') message='Docker 软件包源的基础 URL（HTTPS，默认官方源）' ;;
         'Docker Hub mirrors (comma-separated HTTPS URLs; blank keeps Docker defaults; changes restart Docker)') message='Docker Hub 镜像加速源（HTTPS，多个用逗号分隔；留空保留默认；修改会重启 Docker）' ;;

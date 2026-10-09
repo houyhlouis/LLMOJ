@@ -38,6 +38,8 @@
 | `character-set-server`, `collation-server` | `utf8mb4`、`utf8mb4_unicode_ci`；改默认不会自动转换现有表 |
 | `innodb-buffer-pool-size`, `max-connections`, `skip-name-resolve` | `128M`、`60`、启用；依据内存和连接负载规划，不等于后端连接池配置 |
 
+初始化现在以 mysql 身份在私有暂存目录进行，校验系统表后再发布；已有目录不会因存在 `mysql/` 就被判定为完整。AppArmor 的 Err13 机制、保留失败数据及重试边界见 [安装排错](Installation.zh-CN.md#mariadb-初始化失败与安全重试)。不要通过关闭 AppArmor、添加 DAC 绕过能力或删除数据库来跳过检查。
+
 ## MinIO：config/minio.env 与服务单元
 
 | 参数 | 生成值与作用 |

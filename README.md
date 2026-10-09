@@ -4,7 +4,7 @@
 
 **LLMOJ 是基于 LibreOJ 的在线评测平台，面向算法竞赛、日常训练与 AI 辅助出题。** 它将题库、比赛、评测和用户权限管理整合在一起，并提供题面整理、翻译、来源检索及测试数据生成等 AI 工作流。
 
-[使用文档](wiki/Home.zh-CN.md) · [AI 配置](wiki/AI.zh-CN.md) · [分布式评测](wiki/Distributed-Judging.zh-CN.md) · [问题反馈](https://github.com/houyhlouis/LLMOJ/issues)
+[使用文档](wiki/Home.md) · [AI 配置](wiki/AI.zh-CN.md) · [分布式评测](wiki/Distributed-Judging.zh-CN.md) · [问题反馈](https://github.com/houyhlouis/LLMOJ/issues)
 
 ## 功能特性
 
@@ -32,6 +32,8 @@ AI 生成内容需要审核。标程验证和测试数据生成的执行环节�
 
 ## 一键安装
 
+本次新增的容量策略、数据库初始化修复及扩缩容脚本属于待提交修订；只有对应文件合并发布后，下面的 `main` 下载入口才会包含这些更新。
+
 ### 环境要求
 
 | 项目 | 要求 |
@@ -51,6 +53,8 @@ curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/install.zh-CN
 脚本会交互设置部署模式、端口、域名、站名、安装目录和 Docker 源，随后安装依赖、构建应用并配置服务。完整模式还会构建评测 rootfs，首次安装需要等待下载和编译完成。
 
 默认安装到 `/opt/LibreOJ`，站点监听 `0.0.0.0:80`，浏览器访问 `http://服务器IP`。自定义端口、镜像源、无人值守安装及固定版本方法见 [安装教程](wiki/Installation.zh-CN.md)。
+
+完整模式首次生成评测配置且未指定槽数时，会询问评测实例数（执行槽），默认是有效 CPU 数减 2、最低 1；槽数不是 OS 线程数。内存不足会要求明确选择更少数量，已有安装请使用 [扩缩容脚本教程](wiki/Judge-Configuration.zh-CN.md)。Ubuntu 26.04 的数据库初始化问题已有隔离复现与修复流程，完整新装仍未验收，详见 [安装与排错](wiki/Installation.zh-CN.md)。
 
 ### 安装后
 
@@ -78,7 +82,7 @@ curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/install.zh-CN
 | [AI 功能](wiki/AI.zh-CN.md) · [HTTPS](wiki/HTTPS.zh-CN.md) | 模型配置、执行环境与站点加密访问 |
 | [开发说明](README-DEVELOPMENT.zh-CN.md) · [源码包](deploy/SOURCE-PACKAGE.zh-CN.md) | 构建、测试与发布文件范围 |
 
-完整文档见 [中文 Wiki](wiki/Home.zh-CN.md) / [English Wiki](wiki/Home.md)。
+完整文档见 [中文 Wiki](wiki/Home.md) / [English Wiki](wiki/Home.en.md)。
 
 ## 许可与致谢
 

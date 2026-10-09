@@ -4,7 +4,7 @@
 
 **LLMOJ is an online judge based on LibreOJ for programming contests, everyday practice and AI-assisted problem authoring.** It brings together problems, contests, judging and user permissions, with AI workflows for statement preparation, translation, source discovery and test-data generation.
 
-[Documentation](wiki/Home.md) · [AI configuration](wiki/AI.md) · [Distributed judging](wiki/Distributed-Judging.md) · [Report an issue](https://github.com/houyhlouis/LLMOJ/issues)
+[Documentation](wiki/Home.en.md) · [AI configuration](wiki/AI.md) · [Distributed judging](wiki/Distributed-Judging.md) · [Report an issue](https://github.com/houyhlouis/LLMOJ/issues)
 
 ## Features
 
@@ -32,6 +32,8 @@ Review AI-generated content. Executing reference solutions and test-data generat
 
 ## Quick installation
 
+The new capacity policy, database initialization fix and resize script belong to the pending revision. The `main` download entry below includes them only after the matching changes are merged and published.
+
 ### Requirements
 
 | Item | Requirement |
@@ -51,6 +53,8 @@ curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/install.sh -o
 The installer prompts for deployment mode, port, hostname, site name, installation directory and Docker sources, then installs dependencies, builds the application and configures services. Full mode also builds the judging rootfs; allow time for downloads and compilation on the first run.
 
 The default directory is `/opt/LibreOJ`, with the site listening on `0.0.0.0:80` at `http://SERVER_IP`. See the [installation guide](wiki/Installation.md) for custom ports, mirrors, unattended installation and version pinning.
+
+When first creating judge configuration without an explicit slot count, all mode asks for judge instances (execution slots), defaulting to effective CPUs minus two, minimum one. Slots are not OS threads. Insufficient RAM requires an explicit smaller choice; existing deployments use the [resize guide](wiki/Judge-Configuration.md). The Ubuntu 26.04 database-init failure has an isolated reproduction and fix workflow; fresh 26.04 installation remains unverified. See [installation and troubleshooting](wiki/Installation.md).
 
 ### After installation
 
@@ -78,7 +82,7 @@ Use `all` on the web node for AI reference-solution validation and test-data gen
 | [AI features](wiki/AI.md) · [HTTPS](wiki/HTTPS.md) | Model configuration, execution environment and encrypted site access |
 | [Development](README-DEVELOPMENT.md) · [Source package](deploy/SOURCE-PACKAGE.md) | Builds, tests and source distribution scope |
 
-Browse the full [English Wiki](wiki/Home.md) / [中文 Wiki](wiki/Home.zh-CN.md). 
+Browse the full [English Wiki](wiki/Home.en.md) / [中文 Wiki](wiki/Home.md). 
 
 ## License and acknowledgements
 

@@ -1,6 +1,6 @@
 # Complete backend configuration reference
 
-[中文](Backend-Configuration.zh-CN.md) · [Wiki home](Home.md)
+[中文](Backend-Configuration.zh-CN.md) · [Wiki home](Home.en.md)
 
 Audited against `43a88bdd62fbf200889b36932fa921439a293190`. This page covers all 110 leaf fields of `AppConfig`, its structural objects and open dictionaries. It documents server-wide `backend.yaml`, not every problem or contest business setting.
 

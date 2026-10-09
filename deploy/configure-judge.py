@@ -12,6 +12,9 @@ from urllib.parse import urlsplit
 
 import yaml
 
+from judge_capacity import discover_capacity, validate_slots, select_cpu_ids, CapacityError
+from judge_units import render_units, workspace_paths
+
 if os.geteuid() != 0:
     raise SystemExit("Run as root after creating the libreoj service group")
 
@@ -62,19 +65,17 @@ rootfs = root / "runtime/sandbox-rootfs"
 rootfs_id = (rootfs / "etc/libreoj-rootfs-id").read_text().strip()
 if not re.fullmatch(r"[0-9a-f]{64}", rootfs_id):
     raise SystemExit("Installed LibreOJ rootfs ID must be a SHA-256 hex digest")
-available_cpus = sorted(os.sched_getaffinity(0))
-# Leave one CPU available to the web/database services when the host has several.
-judge_cpus = available_cpus if remote or len(available_cpus) == 1 else available_cpus[1:]
-meminfo = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
-memory_mib = int(meminfo["MemTotal"].split()[0]) // 1024
-memory_slots = max(1, (memory_mib - (1024 if remote else 2048)) // 512)
-slots = min(7, len(judge_cpus), memory_slots)
+capacity = discover_capacity(remote)
+available_cpus = capacity["cpu_ids"]
 requested_slots = os.environ.get("OJ_JUDGE_SLOTS", os.environ.get("HYHOJ_JUDGE_SLOTS"))
-if requested_slots is not None:
-    slots = int(requested_slots)
-    if not 1 <= slots <= min(7, len(judge_cpus), memory_slots):
-        raise SystemExit("Judge slots exceed available CPU/RAM capacity (one 512 MiB tmpfs per slot)")
-judge_cpus = judge_cpus[:slots]
+slots = capacity["default_slots"] if requested_slots is None else int(requested_slots)
+# Existing YAML is retained. Validate its actual capacity below, not a new default.
+if not (root / "config/judge.yaml").exists():
+    try:
+        validate_slots(slots, capacity)
+    except CapacityError as error:
+        raise SystemExit(str(error)) from None
+judge_cpus = select_cpu_ids(slots, capacity) if not (root / "config/judge.yaml").exists() else []
 consumers = min(3, max(1, slots // 2))
 config_directory = root / "config"
 if config_directory.is_symlink():
@@ -114,47 +115,25 @@ else:
 config_file.chmod(0o600)
 os.chown(config_file, 0, 0)
 slots = len(c["taskWorkingDirectories"])
+try:
+    validate_slots(slots, capacity)
+except CapacityError as error:
+    raise SystemExit("Existing/configured judge capacity is invalid; YAML and installation metadata are retained. " + str(error)) from None
 if slots < 1 or c["maxConcurrentTasks"] != slots:
     raise SystemExit("Judge concurrency must equal its number of task workspaces")
 judge_cpus = sorted({cpu for values in c["cpuAffinity"].values() for cpu in values})
 if not judge_cpus or not set(judge_cpus).issubset(available_cpus):
     raise SystemExit("Existing judge CPU affinity contains CPUs unavailable on this host")
+# Render and validate everything before replacing generated unit files.
+rendered = render_units(root, node, c, remote)
 units = root / "deploy/systemd"
 units.mkdir(parents=True, exist_ok=True)
-# These source examples were generated for seven slots. Replace only this project's
-# workspace definitions, so a smaller server does not acquire stale extra mounts.
 for path in units.glob("*.mount"):
     if "Description=LibreOJ judge workspace\n" in path.read_text():
         path.unlink()
-for workdir in c["taskWorkingDirectories"]:
-    work_path = absolute_path(workdir, "Judge work directory").resolve()
-    if not work_path.is_relative_to(root / "data/judge/work") or work_path == root / "data/judge/work":
-        raise SystemExit("Judge workspaces must be children of HYHOJ_ROOT/data/judge/work")
+for work_path in workspace_paths(root, c):
     work_path.mkdir(mode=0o755, parents=True, exist_ok=True)
-    name = subprocess.check_output(["systemd-escape", "--path", "--suffix=mount", str(work_path)], text=True).strip()
-    target = "libreoj-judge.target" if remote else "libreoj.target"
-    (units / name).write_text(f"[Unit]\nDescription=LibreOJ judge workspace\nPartOf={target}\n\n[Mount]\n"
-        f"What=tmpfs\nWhere={work_path}\nType=tmpfs\nOptions=size=512m,mode=0755,nodev,nosuid\n\n[Install]\nWantedBy={target}\n")
-# DelegateSubgroup is supported since systemd 254 (Ubuntu 24.04 ships 255).
-# The manager runs in supervisor; native sandbox children use sibling cgroups.
-threadpool = max(4, slots * 2 + 2)
-target = "libreoj-judge.target" if remote else "libreoj.target"
-dependencies = "After=network-online.target\nWants=network-online.target\n" if remote else "After=libreoj-backend.service\nRequires=libreoj-backend.service\n"
-(units / "libreoj-judge.service").write_text("[Unit]\n"
-    f"Description=LibreOJ judge ({slots} execution slots, {c['taskConsumingThreads']} submissions)\n"
-    + dependencies + f"PartOf={target}\n"
-    "RequiresMountsFor=" + " ".join(c["taskWorkingDirectories"]) + "\n\n[Service]\n"
-    f"WorkingDirectory={root}/apps/judge\nEnvironment=NODE_ENV=production\n"
-    f"Environment=PATH={node.parent}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
-    f"Environment=LIBREOJ_JUDGE_CONFIG_FILE={config_file}\nEnvironment=UV_THREADPOOL_SIZE={threadpool}\n"
-    "Environment=NODE_OPTIONS=--max-old-space-size=512\n"
-    f"Environment=HYHOJ_AI_SAMPLE_INPUTS_DIR={root}/data/ai-sample-inputs\n"
-    f"ExecStart={node} -r @swc-node/register index.mjs\nDelegate=cpu memory pids\nDelegateSubgroup=supervisor\n"
-    "OOMPolicy=continue\nAllowedCPUs=" + " ".join(str(cpu) for cpu in judge_cpus) + "\n"
-    "TasksMax=2048\nRestart=on-failure\nRestartSec=3\nTimeoutStopSec=30\nUMask=0022\nLimitCORE=0\n"
-    f"StandardOutput=journal\nStandardError=journal\n\n[Install]\nWantedBy={target}\n")
-if remote:
-    (units / target).write_text("[Unit]\nDescription=LibreOJ remote judge\nWants=libreoj-judge.service\n"
-        "After=network-online.target\n\n[Install]\nWantedBy=multi-user.target\n")
+for name, contents in rendered.items():
+    (units / name).write_text(contents)
 print(f"Judge: {slots} execution slots, {c['taskConsumingThreads']} submission consumers, "
       f"CPUs {','.join(str(cpu) for cpu in judge_cpus)}; 512 MiB maximum tmpfs per slot (secrets withheld).")

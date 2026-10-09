@@ -4,7 +4,7 @@
 
 适用于安装器生成的 Ubuntu/systemd 部署，配置入口为 `/opt/LibreOJ/config/judge.yaml`（自定义 prefix 请替换）。本页覆盖当前评测端的所有 YAML 字段；后端下发限制、宿主环境变量和安装器生成值另行标明。
 
-来源固定为 `43a88bdd62fbf200889b36932fa921439a293190`：[config.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/config.ts), [config-example.yaml](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/config-example.yaml), [configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-judge.py), [executionCapacity.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/executionCapacity.ts), [taskQueue.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/taskQueue.ts), [aiRunner.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/aiRunner.ts).
+未变更字段来源固定为 `43a88bdd62fbf200889b36932fa921439a293190`；修改后的容量生成器使用 `main` 链接，对应待提交修订：[config.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/config.ts), [config-example.yaml](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/config-example.yaml), [configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-judge.py), [executionCapacity.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/executionCapacity.ts), [taskQueue.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/taskQueue.ts), [aiRunner.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/aiRunner.ts).
 
 ## 读取规则与完整字段
 
@@ -47,7 +47,7 @@
 
 - `LIBREOJ_JUDGE_CONFIG_FILE`：必填路径；systemd 生成值为 `<root>/config/judge.yaml`。
 - `LIBREOJ_JUDGE_LOG_LEVEL`：未设置为 `info`；排错可暂用 `verbose`/`debug`，避免公开包含签名下载地址的日志。
-- `UV_THREADPOOL_SIZE`：在 Node 启动前设置，整数范围为 `2 × 实际执行槽 + 2` 到 `1024`。Node 默认 4 只够 1 槽；3 槽至少 8，7 槽至少 16。原生沙盒等待占 libuv worker，交互题每槽可能同时等待两个进程，另留两个文件系统 worker。安装生成 `max(4, slots*2+2)`，修改后必须重启 judge；写到 `sandbox.environments` 无效。
+- `UV_THREADPOOL_SIZE`：在 Node 启动前设置，整数范围为 `2 × 实际执行槽 + 2` 到 `1024`。Node 默认 4 只够 1 槽；3 槽至少 8，6 槽至少 14。原生沙盒等待占 libuv worker，交互题每槽可能同时等待两个进程，另留两个文件系统 worker。安装生成 `max(4, slots*2+2)`，修改后必须重启 judge；写到 `sandbox.environments` 无效。
 - `NODE_OPTIONS=--max-old-space-size=512` 是安装服务的 Node 堆设置，不是用户程序内存上限；`PATH` 指向安装的 Node 和宿主工具。
 - `HYHOJ_AI_SAMPLE_INPUTS_DIR`：宿主 AI 输入样例目录，代码缺省 `/opt/LibreOJ/data/ai-sample-inputs`，服务生成 `<root>/data/ai-sample-inputs`；与后端必须一致，不能当作公共静态目录。
 
@@ -55,13 +55,27 @@
 
 后端认证时下发 `limit.compilerMessage`、`limit.outputSize`、`limit.dataDisplay`、`limit.dataDisplayForSubmitAnswer`、`limit.stderrDisplay`，这些不是 judge.yaml 键。代码对 compilerMessage 超过 1 MiB、dataDisplay 超过 1 KiB、stderrDisplay 超过 10 KiB 发警告；binaryCacheMaxSize 小于 outputSize 为致命错误。题目/语言本身的时间与内存限制也来自后端。
 
-安装器的资源估算：使用 `os.sched_getaffinity(0)` 的可用逻辑 CPU；本机 all 模式在有多个 CPU 时保留排序后的第一个给站点，remote 不保留这一个。按总 RAM 减去 all 模式 2048 MiB、remote 模式 1024 MiB 后，每 512 MiB 预算一个槽，再取 CPU 数、内存槽数和 7 的最小值。生成器内存槽数最低取 1；下面维护例子更保守，预算连 1 槽都不足时拒绝。3 GiB 是安装最低要求，不等于适合高并发。
+## 默认容量与内存预算
 
-每槽 512 MiB **tmpfs 最大容量**，不是预先分配 512 MiB，也不是该槽所有进程内存的上限。编译器、程序、页缓存、AI 数据、数据库同时占 RAM；高内存题、交互题和 AI 生成应减少槽数，监测 OOM、可用内存和评测耗时。容器/服务的 `memory.max`、`CPUQuota`、父 cgroup 可能比宿主资源更小，以下计算不能替代这些额度检查。
+首次安装会询问“评测实例数（执行槽）”。它表示同时执行编译/测试点的工作位置数量，不是安装多套 OJ，也不是操作系统线程数。一个 judge 服务使用多个工作目录和沙盒进程；`taskConsumingThreads` 是领取提交的消费者并发，`UV_THREADPOOL_SIZE` 则是 Node 原生等待/文件操作线程池，三者含义不同。
 
-`lscpu -e=CPU,CORE,SOCKET,ONLINE` 可分辨逻辑 CPU 与物理核；SMT 的两个逻辑 CPU 共享一个物理核，8 个逻辑 CPU 不保证 8 核独占吞吐。CPU ID 也不保证连续；以当前可用集合为准。`cpuAffinity` 四组与 systemd 的 `AllowedCPUs`/父 cgroup 共同限制调度；生成器把四组并集写入 `AllowedCPUs`，并非每个槽独占绑定。
+默认槽数为 `max(1, 有效 CPU 数 - 2)`，本机 all 与远程 judge 使用相同公式。有效 CPU 数同时考虑进程 affinity、cgroup 有效 cpuset 和各级 CPU quota；有限 quota 向下取整且至少计 1，不只读取宿主 `nproc`。默认从允许集合末尾选择所需 CPU ID，因此 CPU ID 不连续时也不会假定 0..N。
 
-**8 个可用逻辑 CPU、8 GiB RAM 的 all 示例**：若 CPU ID 为 0–7，则使用 1–7 的 7 槽，消费者 3、下载并发 4、工作目录 1–7、线程池 16。内存公式允许此配置，但应先用实际题目观察负载；remote 同样最多生成 7 槽，可默认取 0–6。**7 是安装器/生成器支持上限，不是评测内核硬限制**。自行超过 7 要独立规划 mount、CPU、内存、线程池并验证，不能绕过安装器校验就视为受支持配置。
+内存使用宿主 RAM 与适用 cgroup `memory.max` 的较小值；all 预留 2048 MiB，remote 预留 1024 MiB，每槽再预算 512 MiB。实际允许的最大值是有效 CPU 数、内存槽数与 libuv 上限 511 的最小值。**不再有 7 槽上限；默认值超过内存预算或 511 时会明确报错，要求选择较少槽数，不会悄悄降低。** 显式槽数可使用全部有效 CPU，但必须通过容量校验。
+
+| 有效 CPU 数 | 默认执行槽（内存足够时） |
+| --- | --- |
+| 1 / 2 / 3 | 1 |
+| 4 | 2 |
+| 8 | 6 |
+| 16 | 14 |
+| 32 | 30 |
+
+**8 个有效逻辑 CPU、8 GiB RAM 的 all 示例**：若允许 ID 为 0–7，则默认使用 2–7 的 6 槽、3 个消费者、4 个下载并发、工作目录 1–6、线程池 14。8 CPU 但只有 4 GiB 可用内存时，all 最多预算 4 槽；默认 6 会报错，应明确选择 4 或更少。不要只凭 CPU 数决定高内存题或 AI 工作负载的并发。
+
+每槽 512 MiB 是 **tmpfs 最大容量**，不是预分配，也不是进程内存上限。编译器、选手程序、页缓存、AI、数据库同时占 RAM。`TasksMax`、父 cgroup、CPU quota 和物理核心共享仍可能形成瓶颈。`lscpu -e=CPU,CORE,SOCKET,ONLINE` 可分辨逻辑 CPU 与物理核；SMT 不等于独占物理核，`cpuAffinity` 与 systemd `AllowedCPUs` 也不会自动给每槽分配独占核心。
+
+容量算法由 [judge_capacity.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/judge_capacity.py) 在安装和扩缩容中共用。该新文件及本节新策略属于待提交修订；发布前须确认部署版本已包含它，不能用旧提交的源码链接冒充已发布实现。
 
 ## 生成的 systemd 服务与 tmpfs 挂载
 
@@ -106,201 +120,57 @@
 sudo systemctl show libreoj-judge.service -p CPUAccounting -p MemoryAccounting -p TasksAccounting -p LimitCORE -p TasksMax
 ```
 
-## 现有安装扩容或缩容
+## 使用正式脚本扩容或缩容
 
-本节不会重新安装或重新生成 key。`--judge-slots` 属于首次安装选项且记入 installer metadata；用不同值重跑可能被“metadata differs”拒绝，已完成分支也不会重建评测配置。`configure-judge.py` 对已存在 `judge.yaml` 只核对实例信息并保留其字段，单独改 `OJ_JUDGE_SLOTS` 不会替换已有 YAML。**不要删除 YAML、secrets、安装元数据或修改 metadata 来强行扩容。**
+使用包含本次修改的 [resize-judge.sh](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/resize-judge.sh)，不再复制长段维护程序。新脚本属于待提交修订，旧安装不存在该文件时，先按更新包说明部署匹配版本。已有实例的安装器参数用于首次安装；不要通过改安装元数据、删除 YAML/key 或以不同 `--judge-slots` 重跑安装来强行扩容。
 
-先确认 `libreoj-judge.service` 存在且此节点已经安装 judge；`--role web` 不适用直接扩槽，需另行部署 [远程评测机](Remote-Judge.zh-CN.md)，或规划完整 all 部署。local `all` 保留本机 AI worker；remote 只调普通评测，并使用 `libreoj-judge.target`。本例要求安装器的标准 `work/1..N` 路径；有自定义 mount、service symlink 或 drop-in 时先人工核对。
+脚本要求已安装 `libreoj-judge.service`、标准 `work/1..N` 工作目录及受管理的服务/挂载单元。纯 web 节点没有本机 judge 可扩；可部署 [远程评测机](Remote-Judge.zh-CN.md)。本机 all 保留 AI worker，remote 使用 `libreoj-judge.target`。模式默认 `--mode auto`，从已安装服务推断；`--mode all` 或 `--mode remote` 仅用于明确并核验模式，不会把网页节点转换为远程节点。
 
-1. 安排维护窗口，暂停新提交、重测、测试运行与 AI 任务入口，等待**所有用户**的运行/排队任务结束，不能只看自己的 AI 列表。本版没有通用的 judge drain 命令；只看“CPU 空闲”不表示队列已空。管理员可检查提交列表 Pending、评测日志，AI 任务存储中的 queued/running 状态；确认无工作后才执行 apply。无法限制新请求时仍存在竞态，应停留在 plan。
-2. 只读检查服务覆盖项和资源：下面命令仅显示指定属性，不输出完整环境或 key。若上层 CPU/内存额度较小，先降低目标槽数；有自定义 drop-in 时需保证其线程池/CPU 绑定不会覆盖新单元。
+入口调用同目录的 `resize-judge.py` 实现并原样传递参数，不下载远程脚本。主单元直接设置的 `MemoryMax` / `CPUQuota`、任意相关 drop-in 或不属于该 prefix 的服务也会被拒绝，需先人工审查。
 
-```bash
-lscpu -e=CPU,CORE,SOCKET,ONLINE
-free -h
-sudo systemctl show libreoj-judge.service -p DropInPaths -p AllowedCPUs -p EffectiveCPUs -p MemoryMax -p CPUQuotaPerSecUSec
-```
-
-3. 以下完整块默认仅输出 plan，不写任何文件也不停止服务。`OJ_ROOT` 可替换安装 prefix，`OJ_RESIZE_SLOTS=7` 可改成较小值实现缩容；remote 节点将 `OJ_RESIZE_MODE=all` 改成 `remote`。确认排空后，重执行同一完整块，仅把 `OJ_RESIZE_APPLY=0` 改为 `1`。如需挑选非相邻物理核对应的逻辑 CPU，可额外给 `OJ_RESIZE_CPUS=1,2,3,4,5,6,7`，数量须等于槽数。
-
-apply 会先私有备份 YAML、已安装关联单元及生成模板，然后仅停 judge。它保留 key、URL、rootfs 和 AI 设置，只改容量字段；远程 generator 的 URL 和私有 key 副本均取自原配置，绝不创建新身份。随后生成、校验、安装 service/mount，停用并移除旧的多余 mount 单元，启用新增 mount，重新加载 systemd，通过沙盒检查后启动。不会重启网页/数据库，也不卸载仍使用的工作目录。不要在其他终端同时执行本块。
+### 1. 查看计划
 
 ```bash
-sudo env OJ_ROOT=/opt/LibreOJ OJ_RESIZE_MODE=all OJ_RESIZE_SLOTS=7 OJ_RESIZE_APPLY=0 python3 - <<'PY'
-import datetime, json, os, re, shutil, subprocess, sys
-from pathlib import Path
-import yaml
-
-root = Path(os.environ.get('OJ_ROOT', '/opt/LibreOJ'))
-mode = os.environ.get('OJ_RESIZE_MODE', 'all')  # all or remote
-slots = int(os.environ.get('OJ_RESIZE_SLOTS', '7'))
-apply = os.environ.get('OJ_RESIZE_APPLY', '0') == '1'
-if os.geteuid() != 0 or mode not in ('all', 'remote'):
-    raise SystemExit('Run with sudo; mode must be all or remote')
-if not root.is_absolute() or root == Path('/') or not re.fullmatch(r'/[A-Za-z0-9_./-]+', str(root)):
-    raise SystemExit('Use a valid absolute installation prefix')
-root = root.resolve()
-config = root / 'config/judge.yaml'
-if config.is_symlink() or not config.is_file():
-    raise SystemExit('judge.yaml must be a regular file')
-try:
-    c = yaml.safe_load(config.read_text())
-except yaml.YAMLError:
-    raise SystemExit('Cannot parse judge.yaml (private key withheld)') from None
-available = sorted(os.sched_getaffinity(0))
-candidates = available if mode == 'remote' or len(available) == 1 else available[1:]
-mem = dict(line.split(':', 1) for line in Path('/proc/meminfo').read_text().splitlines())
-ram_mib = int(mem['MemTotal'].split()[0]) // 1024
-reserve_mib = 1024 if mode == 'remote' else 2048
-maximum = min(7, len(candidates), max(0, (ram_mib - reserve_mib) // 512))
-if not 1 <= slots <= maximum:
-    raise SystemExit(f'Requested slots exceed CPU/RAM budget; maximum here is {maximum}')
-cpus = candidates[:slots]
-if os.environ.get('OJ_RESIZE_CPUS'):
-    cpus = [int(x) for x in os.environ['OJ_RESIZE_CPUS'].split(',')]
-if len(set(cpus)) != slots or len(cpus) != slots or not set(cpus) <= set(candidates):
-    raise SystemExit('Choose one distinct allowed logical CPU per slot')
-work = root / 'data/judge/work'
-old_dirs = [Path(x) for x in c['taskWorkingDirectories']]
-if old_dirs != [work / str(i) for i in range(1, len(old_dirs) + 1)]:
-    raise SystemExit('This example requires standard work/1..N paths; review custom layouts separately')
-if any(p.is_symlink() for p in [root/'config', work, *old_dirs]):
-    raise SystemExit('Configuration/work directories must not be symlinks')
-new_dirs = [work / str(i) for i in range(1, slots + 1)]
-if any(p.is_symlink() for p in new_dirs):
-    raise SystemExit('New workspace must not be a symlink')
-def run(*args):
-    return subprocess.run(list(args), check=True)
-def mount_name(p):
-    return subprocess.check_output(['systemd-escape', '--path', '--suffix=mount', str(p)], text=True).strip()
-old_mounts, new_mounts = [mount_name(p) for p in old_dirs], [mount_name(p) for p in new_dirs]
-target = 'libreoj-judge.target' if mode == 'remote' else 'libreoj.target'
-service = 'libreoj-judge.service'
-extra = ['libreoj-judge.target'] if mode == 'remote' else []
-installed = Path('/etc/systemd/system')
-source_units = root / 'deploy/systemd'
-print(f'Plan: {len(old_dirs)} -> {slots} slots; CPUs={cpus}; RAM={ram_mib}MiB; reserve={reserve_mib}MiB')
-print(f'UV_THREADPOOL_SIZE={slots*2+2}; target={target}; key and other configuration retained')
-if not apply:
-    print('Read-only plan. Drain all submissions/AI jobs, then rerun with OJ_RESIZE_APPLY=1.')
-    sys.exit(0)
-# Nothing below runs in plan mode. Keep the backup private; it contains a judge key.
-backup = Path('/var/backups/libreoj-judge') / datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-backup.mkdir(parents=True, mode=0o700)
-backup.chmod(0o700)
-shutil.copy2(config, backup/'judge.yaml')
-(backup/'judge.yaml').chmod(0o600)
-(backup/'installed').mkdir(mode=0o700)
-shutil.copytree(source_units, backup/'generated')
-names = [service, *extra, *old_mounts]
-for name in set(names + new_mounts):
-    if (installed/name).is_symlink():
-        raise SystemExit('Custom symlink unit requires manual review: ' + name)
-for name in names:
-    p = installed/name
-    if p.is_symlink():
-        raise SystemExit('Custom symlink unit requires manual review: ' + name)
-    if p.exists(): shutil.copy2(p, backup/'installed'/name)
-enabled = {name: subprocess.run(['systemctl', 'is-enabled', '--quiet', name]).returncode == 0 for name in old_mounts}
-manifest = {'root':str(root), 'mode':mode, 'old_mounts':old_mounts, 'new_mounts':new_mounts,
-            'extra':extra, 'enabled':enabled}
-(backup/'manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
-print('PRIVATE BACKUP:', backup, flush=True)
-run('systemctl', 'stop', service)
-try:
-    # Only capacity-related YAML values change; key/rootfs/server/AI settings are untouched.
-    c.update(maxConcurrentTasks=slots, taskWorkingDirectories=list(map(str, new_dirs)),
-             taskConsumingThreads=min(3, max(1, slots//2)), maxConcurrentDownloads=min(4, slots))
-    c['cpuAffinity'] = {name:cpus for name in ('compiler', 'userProgram', 'interactor', 'checker')}
-    temporary = config.with_name('judge.yaml.resize-new')
-    fd = os.open(temporary, os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, 'w') as f: yaml.safe_dump(c, f, sort_keys=False)
-    os.replace(temporary, config)
-    env = dict(os.environ, HYHOJ_ROOT=str(root), NODE_BINARY=str(root/'runtime/node/bin/node'),
-               OJ_JUDGE_REMOTE='1' if mode == 'remote' else '0', OJ_JUDGE_SLOTS=str(slots))
-    if mode == 'remote':
-        # A private copy of the existing key supplies the generator; no key in argv/logs.
-        key_file = backup/'remote.key'
-        key_file.write_text(c['key']+'\n'); key_file.chmod(0o600)
-        env.update(OJ_JUDGE_SERVER=c['serverUrl'], OJ_JUDGE_KEY_FILE=str(key_file))
-    subprocess.run(['python3', str(root/'deploy/configure-judge.py')], env=env, check=True)
-    new_names = [service, *extra, *new_mounts]
-    run('systemd-analyze', 'verify', *[str(source_units/name) for name in new_names])
-    for name in sorted(set(old_mounts)-set(new_mounts)):
-        run('systemctl', 'disable', '--now', name)
-        (installed/name).unlink(missing_ok=True)
-    for name in new_names:
-        shutil.copy2(source_units/name, installed/name)
-        (installed/name).chmod(0o644)
-    run('systemctl', 'daemon-reload')
-    for name in new_mounts: run('systemctl', 'enable', '--now', name)
-    # No web/database restart. Verify the sandbox before restarting this judge.
-    run('systemd-run', '--unit=libreoj-resize-check', '--wait', '--pipe', '--collect',
-        '--property=Delegate=cpu memory pids', '--property=DelegateSubgroup=supervisor',
-        '--property=LimitCORE=0', '--property=RuntimeMaxSec=120', '--property=TimeoutStopSec=15',
-        '--property=WorkingDirectory='+str(root/'apps/judge'),
-        str(root/'runtime/node/bin/node'), str(root/'deploy/sandbox/verify-installed.mjs'), '--root', str(root))
-    run('systemctl', 'start', service)
-    run('systemctl', 'is-active', '--quiet', service)
-    print('Judge started. Verify online status and submissions; retain PRIVATE BACKUP:', backup)
-except Exception:
-    subprocess.run(['systemctl', 'stop', service], check=False)
-    print('Resize failed; judge left stopped. Use the rollback block with PRIVATE BACKUP:', backup, file=sys.stderr)
-    raise SystemExit(1) from None
-PY
+sudo bash /opt/LibreOJ/deploy/resize-judge.sh --prefix /opt/LibreOJ --plan
+# 指定目标：数字为示例，必须满足本机 CPU／内存预算
+sudo bash /opt/LibreOJ/deploy/resize-judge.sh --prefix /opt/LibreOJ --slots 6 --plan
 ```
 
-4. 检查打印的备份路径；其中包含密钥，保留 root 私有权限，不放进公开报告。失败时本块尽量将 judge 留在停止状态；不要继续下一步，使用下面回滚。若进程被强制杀死/宿主重启，先停止 judge 并按备份恢复。成功后执行：
+`--plan` 不写配置、不停服务。检查旧/新槽数、CPU 集合、内存预算和线程池；自定义安装路径替换 `--prefix`。脚本会拒绝需要人工审查的服务 drop-in 或非标准布局，不会删除这些设置来绕过校验。
+
+### 2. 排空并应用
+
+安排维护时间，阻止新的提交、重评、测试运行及 AI 任务，确认**所有用户**的排队/运行任务结束；CPU 空闲或只看自己的 AI 列表不能证明已排空。脚本的 `--drained` 是操作者确认，不是自动排空队列的功能。
+
+默认交互方式会用中文展示容量和排空要求，只询问实例数。**提交该数字（或按回车接受默认值）即表示已经排空，并立即执行维护，没有第二次确认。** 未排空时按 Ctrl+C 退出：
 
 ```bash
-sudo systemctl status libreoj-judge.service --no-pager
-sudo systemctl show libreoj-judge.service -p AllowedCPUs -p EffectiveCPUs
-sudo findmnt -t tmpfs
-sudo journalctl -u libreoj-judge.service -n 50 --no-pager
+sudo bash /opt/LibreOJ/deploy/resize-judge.sh --prefix /opt/LibreOJ
 ```
 
-核对日志认证成功、实际 work/1..N 挂载、后端节点在线；提交正确 C++、错误程序、交互题和（all 模式）一个现有 AI 验证任务做验收。检查 AC/WA、超时/内存限制、队列与资源曲线后恢复入口。不需重新构建源码。不要通过“导入 config.ts 来验证 YAML”：它会在启动期间清空工作目录和二进制缓存。
-
-## 从本次私有备份回滚
-
-把下面路径替换为 resize 实际打印的目录。本块停止 judge、停用新增 mount、恢复原 YAML 和已备份 service/mount/生成模板、恢复原挂载启用状态，再启动旧配置。它不修改安装 metadata、不删题库、不删缓存根或物理工作目录。随后重复上面的在线/提交验收。
+已排空后的非交互示例：
 
 ```bash
-sudo env OJ_RESIZE_BACKUP=/var/backups/libreoj-judge/REPLACE_WITH_PRINTED_DIRECTORY python3 - <<'PY'
-import json, os, shutil, subprocess
-from pathlib import Path
-backup = Path(os.environ['OJ_RESIZE_BACKUP']).resolve()
-if os.geteuid() != 0 or not backup.is_relative_to('/var/backups/libreoj-judge'):
-    raise SystemExit('Use sudo and the exact private backup directory printed by resize')
-m = json.loads((backup/'manifest.json').read_text())
-root, installed = Path(m['root']), Path('/etc/systemd/system')
-def run(*args): subprocess.run(list(args), check=True)
-run('systemctl', 'stop', 'libreoj-judge.service')
-for name in sorted(set(m['new_mounts'])-set(m['old_mounts'])):
-    # A failure before installation may mean that this unit does not exist yet.
-    if (installed/name).exists():
-        run('systemctl', 'disable', '--now', name)
-        (installed/name).unlink()
-shutil.copy2(backup/'judge.yaml', root/'config/judge.yaml')
-(root/'config/judge.yaml').chmod(0o600)
-for name in ['libreoj-judge.service', *m['extra'], *m['old_mounts']]:
-    saved = backup/'installed'/name
-    if saved.exists(): shutil.copy2(saved, installed/name)
-# Restore only generator-managed files; do not delete other project/service units.
-generated = root/'deploy/systemd'
-for p in generated.glob('*.mount'):
-    if 'Description=LibreOJ judge workspace\n' in p.read_text(): p.unlink()
-for p in (backup/'generated').iterdir():
-    if p.is_file() and (p.suffix == '.mount' or p.name in ['libreoj-judge.service', *m['extra']]):
-        shutil.copy2(p, generated/p.name)
-run('systemctl', 'daemon-reload')
-for name in m['old_mounts']:
-    run('systemctl', 'enable' if m['enabled'][name] else 'disable', name)
-    run('systemctl', 'start', name)
-run('systemctl', 'start', 'libreoj-judge.service')
-run('systemctl', 'is-active', '--quiet', 'libreoj-judge.service')
-print('Old judge configuration and units restored; verify online status and submissions.')
-PY
+sudo bash /opt/LibreOJ/deploy/resize-judge.sh --prefix /opt/LibreOJ --slots 6 --apply --drained
 ```
 
-相关：[独立评测机](Remote-Judge.zh-CN.md) · [分布式评测](Distributed-Judging.zh-CN.md)。本页命令经语法与隔离临时 fixture 校验；没有为编写文档调整在线机器或真实队列。
+脚本先将私有 judge YAML、受管理单元及状态备份到 `<prefix>/backups/judge-resize/<UTC时间>/`，打印该私有目录，再只停止 judge，更新槽数、工作目录、CPU affinity、消费者/下载并发、线程池、挂载和服务单元；不会重新生成节点 key、改变服务器 URL、rootfs 或 AI 配置。它会检查 systemd 单元并执行真实沙盒探针；原来运行的 judge 恢复运行并核对实际 CPU/线程池，原来停止的 judge 保持停止。验证失败会尝试恢复备份；若自动恢复也失败则保持 judge 停止，报告供人工回滚的目录。保管备份目录，不要把含 key 的 YAML 放入公开报告。
+
+### 3. 验收与回滚
+
+应用完成后确认服务正常、网页评测节点在线，再实际提交普通题、交互/通信题及所需语言。使用本机 AI 时再验证小型 AI 数据任务；命令成功不等于全部业务通过。
+
+```bash
+sudo systemctl is-active libreoj-judge.service
+sudo systemctl show libreoj-judge.service -p AllowedCPUs -p EffectiveCPUs -p TasksMax
+```
+
+需要回退时，先阻止新任务并再次排空，将下面路径替换为脚本实际输出的私有备份目录：
+
+```bash
+sudo bash /opt/LibreOJ/deploy/resize-judge.sh --prefix /opt/LibreOJ --rollback /path/to/private-backup --drained
+```
+
+回滚恢复备份中的配置/单元及记录的运行、挂载状态；不是题库或数据库备份恢复，也不会撤回扩容后已完成的提交。回滚后同样检查节点在线和真实提交结果。
+
+本文介绍待提交修订的接口与隔离回归范围，不宣称当前运行服务器已经完成扩容或 Ubuntu 26.04 全新部署验收。相关内容：[独立评测机](Remote-Judge.zh-CN.md) · [分布式评测](Distributed-Judging.zh-CN.md)。

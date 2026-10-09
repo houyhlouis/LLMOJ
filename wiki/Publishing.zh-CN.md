@@ -60,7 +60,7 @@ git commit -m "Add deployment documentation"
 git push
 ```
 
-导出脚本只写本地 Markdown，不执行 Git 命令或联网；它把仓库内 `.md` 链接转换成对应 GitHub Wiki 页面链接，并生成侧栏。已有同名 Wiki 页面会被这些文档替换，因此先检查 `git diff`。后续更新用同样流程。
+导出脚本只写本地 Markdown，不执行 Git 命令或联网；它把仓库内 `.md` 链接转换成对应 GitHub Wiki 页面链接，并生成中文在前的双语侧栏。`Home.md` 是中文首页，`Home.en.md` 是英文首页，`Home.zh-CN.md` 保留为旧链接兼容入口。已有同名 Wiki 页面会被这些文档替换，因此先检查 `git diff`。后续更新用同样流程。
 
 ## 使用 GitHub Desktop 更新已有文档
 

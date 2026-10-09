@@ -2,7 +2,7 @@
 
 [English](Remote-Judge.md) | 简体中文
 
-本教程只安装 judge，不安装网页、数据库、Redis 或 MinIO。每台评测机使用独立 key，主动连接网页服务器。推荐 Ubuntu 24.04 / 26.04 amd64、systemd 254+、统一 cgroup v2，至少 3 GiB 内存、30 GiB 空闲空间。使用普通虚拟机或物理机；限制 namespaces、挂载或 cgroup 委托的容器不适用。
+本教程只安装 judge，不安装网页、数据库、Redis 或 MinIO。每台评测机使用独立 key，主动连接网页服务器。目标为 Ubuntu 24.04 / 26.04 amd64（26.04 完整安装未验收）、systemd 254+、统一 cgroup v2，至少 3 GiB 内存、30 GiB 空闲空间。使用普通虚拟机或物理机；限制 namespaces、挂载或 cgroup 委托的容器不适用。
 
 ## 1. 下载同版本源码
 
@@ -99,7 +99,7 @@ sudo env HYHOJ_ROOT=/opt/LibreOJ NODE_BINARY=/opt/LibreOJ/runtime/node/bin/node 
   python3 deploy/configure-judge.py
 ```
 
-网页 URL 必须是 origin，不带 `/api`。key 文件必须为 root 所有、`0600` 的普通文件；脚本不输出 key。首次生成的并发范围为 1–7，省略 `OJ_JUDGE_SLOTS` 时按资源自动选择。这是生成器支持范围，不是内核只能用 7 个 CPU；已有 YAML 不会因该变量改变而自动扩容。完整字段、线程池与已有节点扩缩容见 [评测端配置](Judge-Configuration.zh-CN.md)。
+网页 URL 必须是 origin，不带 `/api`。key 文件必须为 root 所有、`0600` 的普通文件；脚本不输出 key。首次生成显式槽数须符合有效 CPU、内存和 libuv 的 511 上限；省略 `OJ_JUDGE_SLOTS` 时默认为 `max(1, 有效 CPU 数-2)`，内存不足时要求明确选择更少槽数。已有 YAML 不会因该变量改变而自动扩容，请使用正式 resize 脚本。完整字段、线程池与已有节点扩缩容见 [评测端配置](Judge-Configuration.zh-CN.md)。
 
 生成的 `config/judge.yaml` 同样仅 root 可读；远程模式关闭本机 AI socket，并生成独立 `libreoj-judge.target`。再次生成会核对原配置，不覆盖不同服务器或 key；轮换密钥需停机后明确更新私有配置。
 

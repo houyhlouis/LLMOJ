@@ -39,7 +39,7 @@ class InstallerBoundaries(unittest.TestCase):
                 ("--public-url", "http://host/path"), ("--prefix", "/"),
                 ("--prefix", "/tmp/bad path"),
                 ("--listen", "::"), ("--role", "judge"),
-                ("--judge-slots", "8"), ("--site-name", ""),
+                ("--judge-slots", "-1"), ("--judge-slots", "512"), ("--site-name", ""),
                 ("--docker-source", "http://untrusted.invalid"),
                 ("--docker-source", "https://host\nSuites: injected"),
                 ("--docker-mirrors", "https://user:password@mirror.invalid"),
@@ -49,6 +49,44 @@ class InstallerBoundaries(unittest.TestCase):
                     result = self.plan("--prefix", str(root), *case)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertFalse(root.exists())
+
+    def test_plan_accepts_auto_and_thirty_slots_without_creating_files(self):
+        with tempfile.TemporaryDirectory() as parent:
+            for slots in ("0", "30"):
+                with self.subTest(slots=slots):
+                    root = Path(parent) / "new-instance"
+                    result = self.plan("--prefix", str(root), "--judge-slots", slots)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertFalse(root.exists())
+
+    def test_validation_does_not_query_machine_capacity(self):
+        module = support.judge_capacity_module()
+        with mock.patch.object(module, "discover_capacity", side_effect=AssertionError("validation queried resources")), \
+                mock.patch.object(support, "judge_capacity_module", return_value=module), \
+                mock.patch.object(support.sys, "argv", ["install-support.py", "validate", "--root", "/tmp/llmoj-plan",
+                                                     "--origin", "http://example.invalid", "--port", "80", "--judge-slots", "30"]):
+            support.main()
+
+    def test_initial_capacity_failure_is_reported_without_silently_lowering_default(self):
+        module = support.judge_capacity_module()
+        capacity = {"default_slots": 30, "effective_cpu_count": 32, "memory_slots": 2,
+                    "reserve_memory_mib": 2048, "memory_mib": 3072}
+        args = argparse.Namespace(root=Path("/tmp/no-libreoj-capacity-fixture"), role="all", judge_slots=0)
+        with mock.patch.object(module, "discover_capacity", return_value=capacity), \
+                mock.patch.object(support, "judge_capacity_module", return_value=module):
+            with self.assertRaisesRegex(support.InstallerError, "Requested 30 slots"):
+                support.check_initial_judge_capacity(args)
+            args.judge_slots = 2
+            support.check_initial_judge_capacity(args)
+
+    def test_existing_judge_config_and_web_do_not_reapply_initial_default(self):
+        with tempfile.TemporaryDirectory() as parent:
+            root = Path(parent)
+            (root / "config").mkdir()
+            (root / "config/judge.yaml").write_text("preserve existing slots")
+            with mock.patch.object(support, "judge_capacity_module", side_effect=AssertionError("unexpected resource query")):
+                support.check_initial_judge_capacity(argparse.Namespace(root=root, role="all", judge_slots=0))
+                support.check_initial_judge_capacity(argparse.Namespace(root=root, role="web", judge_slots=0))
 
     def test_public_port_80_and_web_role_plans_do_not_install(self):
         result = self.plan("--public-url", "http://example.invalid", "--site-name", "AI Test")
@@ -231,6 +269,33 @@ class AppArmorProfiles(unittest.TestCase):
             self.assertEqual(local.read_text().count(f"# LibreOJ installer: {args.root}"), 1)
             self.assertEqual(parser.call_count, 2)
             self.assertEqual(profile.read_text(), content)
+
+    def test_ubuntu26_named_profile_gets_scoped_staging_rules_without_capabilities(self):
+        content = 'include <tunables/global>\nprofile mariadbd /usr/sbin/mariadbd flags=(attach_disconnected) {\n include if exists <local/mariadbd>\n}\n'
+        with self.fixture(content, "mariadbd") as (args, profiles, profile, parser):
+            support.apparmor(args)
+            local = (profiles / "local/mariadbd").read_text()
+            self.assertIn(f'"{args.root}/data/mariadb-init/" r,', local)
+            self.assertIn(f'"{args.root}/data/mariadb-init/**" rwk,', local)
+            self.assertNotIn("capability", local)
+            self.assertNotIn("complain", local)
+            self.assertEqual(profile.read_text(), content)
+
+    def test_previous_installer_marker_is_upgraded_without_duplicate_old_rules(self):
+        content = 'profile mariadbd {\n include if exists <local/mariadbd>\n}\n'
+        with self.fixture(content, "mariadbd") as (args, profiles, profile, parser):
+            local = profiles / "local/mariadbd"
+            local.parent.mkdir()
+            old_rule = f'"{args.root}/data/mariadb/**" rwk,'
+            old = f'# LibreOJ installer: {args.root}\n{old_rule}\n# administrator\n/keep r,\n'
+            local.write_text(old)
+            support.apparmor(args)
+            first = local.read_bytes()
+            support.apparmor(args)
+            self.assertEqual(local.read_bytes(), first)
+            self.assertEqual(local.read_text().count(old_rule), 1)
+            self.assertIn(f'"{args.root}/data/mariadb-init/**" rwk,', local.read_text())
+            self.assertTrue(local.read_text().startswith(old))
 
     def test_local_include_symlink_is_rejected_without_changing_its_target(self):
         with self.fixture('#include <local/usr.sbin.mariadbd>\n') as (args, profiles, profile, parser):

@@ -2,7 +2,7 @@
 
 English | [简体中文](Remote-Judge.zh-CN.md)
 
-This guide installs only judge, without web/database/Redis/MinIO services. Each judge has its own key and initiates the web-server connection. Use Ubuntu 24.04 / 26.04 amd64, systemd 254+, unified cgroup v2, at least 3 GiB RAM and 30 GiB free disk. Restricted namespace/mount/cgroup containers are unsupported.
+This guide installs only judge, without web/database/Redis/MinIO services. Each judge has its own key and initiates the web-server connection. Use Ubuntu 24.04 / 26.04 amd64 (fresh 26.04 deployment remains unverified), systemd 254+, unified cgroup v2, at least 3 GiB RAM and 30 GiB free disk. Restricted namespace/mount/cgroup containers are unsupported.
 
 ## 1. Download the same source version
 
@@ -105,7 +105,7 @@ sudo env HYHOJ_ROOT=/opt/LibreOJ NODE_BINARY=/opt/LibreOJ/runtime/node/bin/node 
   python3 deploy/configure-judge.py
 ```
 
-The server URL must be an origin without `/api`. The key file must be regular, root-owned and `0600`; its contents are not printed. Initial generation supports 1–7 slots within machine capacity; omitting `OJ_JUDGE_SLOTS` chooses automatically. This is a generator limit, not a seven-CPU kernel limit. Changing it does not resize existing YAML. See [Judge configuration](Judge-Configuration.md) for every field, thread-pool sizing and existing-node resizing.
+The server URL must be an origin without `/api`. The key file must be regular, root-owned and `0600`; its contents are not printed. Initial explicit slots must fit effective CPU/RAM capacity and the 511 libuv limit. Omitting `OJ_JUDGE_SLOTS` defaults to `max(1, effective CPUs-2)`; insufficient RAM requires an explicit smaller count. This variable does not resize existing YAML; use the maintained resize script. See [Judge configuration](Judge-Configuration.md) for every field, thread-pool sizing and existing-node resizing.
 
 The generated `config/judge.yaml` is also root-only. Remote mode disables the local AI socket and creates `libreoj-judge.target`. Reruns retain config and reject a different server/key; rotate credentials explicitly after stopping the judge.
 

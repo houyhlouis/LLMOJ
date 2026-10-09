@@ -1,6 +1,6 @@
 # 后端配置完整参考
 
-[English](Backend-Configuration.md) · [Wiki 首页](Home.zh-CN.md)
+[English](Backend-Configuration.md) · [Wiki 首页](Home.md)
 
 本页核对版本 `43a88bdd62fbf200889b36932fa921439a293190`，覆盖 `AppConfig` 的全部 110 个末级字段、结构对象和开放字典。它解释服务器级 `backend.yaml`，不把每道题或每场比赛的业务参数当作全站配置。
 

@@ -49,7 +49,10 @@ esac
             python = directory / "python-substitute"
             python.write_text('''#!/bin/bash
 printf 'python|%s\\n' "$*" >> "$FLOW_TRACE"
-if [[ "$FLOW_FAIL" == host-setting ]]; then exit 18; fi
+case "$*" in
+  *configure-redis-host.py*) [[ "$FLOW_FAIL" != host-setting ]] || exit 18 ;;
+  *initialize-mariadb.py*) [[ "$FLOW_FAIL" != database-init ]] || exit 19 ;;
+esac
 ''')
             python.chmod(0o700)
             trace_file = directory / "calls.txt"
@@ -114,11 +117,15 @@ cd "$PROJECT_ROOT"
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(result.stdout.count("SYNTHETIC_VERIFIED_ADMIN_PASSWORD"), 1)
                     setting = [event for event in events if event.startswith("python|")]
-                    self.assertEqual(setting, [f"python|{source if branch == 'complete' else project}/deploy/configure-redis-host.py"])
+                    expected = [f"python|{source if branch == 'complete' else project}/deploy/configure-redis-host.py"]
+                    if branch == "first":
+                        expected.append(f"python|{project}/deploy/initialize-mariadb.py --root {project}")
+                    self.assertEqual(setting, expected)
                     starts = [event for event in events if event.startswith("systemctl|start")
                               and ("libreoj.target" in event or "libreoj-redis.service" in event)]
                     self.assertTrue(starts)
-                    self.assertLess(events.index(setting[0]), events.index(starts[0]))
+                    for operation in setting:
+                        self.assertLess(events.index(operation), events.index(starts[0]))
                     bootstrap = [event for event in events if event.startswith("node|") and "bootstrap-admin.mjs" in event]
                     self.assertEqual(len(bootstrap), 2)
                     self.assertNotIn("--show-credentials", bootstrap[0])
@@ -139,14 +146,14 @@ cd "$PROJECT_ROOT"
         for branch in ("first", "complete"):
             failures = ["host-setting", "service-start", "health", "judge", "admin"]
             if branch == "first":
-                failures += ["sandbox", "finish"]
+                failures += ["database-init", "sandbox", "finish"]
             for failure in failures:
                 with self.subTest(branch=branch, failure=failure):
                     result, events, _, _ = self.run_flow(branch, fail=failure)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertNotIn("SYNTHETIC_VERIFIED_ADMIN_PASSWORD", result.stdout + result.stderr)
                     self.assertFalse(any("--show-credentials" in event for event in events))
-                    if failure == "host-setting":
+                    if failure in ("host-setting", "database-init"):
                         self.assertFalse(any(event.startswith("systemctl|start") for event in events))
 
 

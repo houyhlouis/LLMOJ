@@ -3,6 +3,7 @@
 import argparse
 import datetime
 import grp
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -71,6 +72,27 @@ def check_state(args):
     return complete_file.exists()
 
 
+def judge_capacity_module():
+    # Also works when tests load this file by spec without deploy/ on sys.path.
+    spec = importlib.util.spec_from_file_location("libreoj_judge_capacity", Path(__file__).with_name("judge_capacity.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def check_initial_judge_capacity(args):
+    if args.role != "all" or (args.root / "config/judge.yaml").exists():
+        return
+    capacity_module = judge_capacity_module()
+    try:
+        capacity = capacity_module.discover_capacity()
+        slots = args.judge_slots or capacity["default_slots"]
+        capacity_module.validate_slots(slots, capacity)
+    except capacity_module.CapacityError as error:
+        fail(str(error))
+    print(f"Initial judge capacity verified: {slots} slots, {capacity['effective_cpu_count']} effective CPUs, {capacity['memory_mib']} MiB RAM")
+
+
 def preflight(args):
     os_info = platform.freedesktop_os_release()
     if os_info.get("ID") != "ubuntu" or os_info.get("VERSION_ID") not in ("24.04", "26.04"):
@@ -91,6 +113,8 @@ def preflight(args):
     if mem < 3 * 1024**3:
         fail("At least 3 GiB RAM is required; 8 GiB is recommended for compilation")
     complete = check_state(args)
+    if not complete:
+        check_initial_judge_capacity(args)
     existing = args.root
     while not existing.exists():
         existing = existing.parent
@@ -164,7 +188,8 @@ def apparmor(args):
     root = str(args.root)
     rules = {
         "mariadb": [f'"{root}/config/mariadb.cnf" r,', f'"{root}/data/mariadb/" r,',
-                    f'"{root}/data/mariadb/**" rwk,', f'"{root}/logs/mariadb/" r,', f'"{root}/logs/mariadb/**" rw,'],
+                    f'"{root}/data/mariadb/**" rwk,', f'"{root}/data/mariadb-init/" r,',
+                    f'"{root}/data/mariadb-init/**" rwk,', f'"{root}/logs/mariadb/" r,', f'"{root}/logs/mariadb/**" rw,'],
         "nginx": [f'"{root}/config/nginx.conf" r,', f'"{root}/public/" r,', f'"{root}/public/**" r,',
                   f'"{root}/data/nginx/" rw,', f'"{root}/data/nginx/**" rw,',
                   f'"{root}/logs/nginx/" rw,', f'"{root}/logs/nginx/**" rw,'],
@@ -195,7 +220,10 @@ def apparmor(args):
             old = local.read_text() if local.exists() else ""
             marker = f"# LibreOJ installer: {root}"
             block = marker + "\n" + "\n".join(rules[service]) + "\n"
-            if marker not in old:
+            if marker not in old or any(rule not in old.splitlines() for rule in rules[service]):
+                # Older installs have the marker but lack staged-bootstrap rules.
+                # Append only missing instance rules; preserve administrator policy.
+                block = marker + "\n" + "\n".join(rule for rule in rules[service] if rule not in old.splitlines()) + "\n"
                 with local.open("a") as stream:
                     stream.write("\n" + block)
             subprocess.run(["apparmor_parser", "-r", str(profile)], check=True)
@@ -277,8 +305,8 @@ def main():
         fail("Use a canonical, absolute installation directory such as /opt/LibreOJ")
     if args.port in (2002, 2020, 13306, 16379, 19000, 19001) or not 1 <= args.port <= 65535:
         fail("The public port is invalid or conflicts with an internal service")
-    if not 0 <= args.judge_slots <= 7 or (args.role == "web" and args.judge_slots):
-        fail("Judge slots must be 0 (automatic) or 1..7, and only apply to role all")
+    if not 0 <= args.judge_slots <= judge_capacity_module().MAX_SLOTS or (args.role == "web" and args.judge_slots):
+        fail("Judge slots must be 0 (automatic) or 1..511, and only apply to role all")
     if not args.site_name.strip() or len(args.site_name) > 60 or not args.site_name.isprintable():
         fail("Website name must contain 1..60 printable characters")
     from urllib.parse import urlsplit

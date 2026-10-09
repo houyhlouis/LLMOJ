@@ -60,7 +60,7 @@ git commit -m "Add bilingual deployment documentation"
 git push
 ```
 
-The exporter only writes local Markdown; it does not run Git or access the network. It converts page links and generates a bilingual sidebar. `Home` is English; `Home.zh-CN` is Chinese. Existing matching pages are replaced, so inspect the diff before pushing. Use the same process for updates.
+The exporter only writes local Markdown; it does not run Git or access the network. It converts page links and generates a bilingual sidebar. `Home` is Chinese and `Home.en` is English. `Home.zh-CN` remains a compatibility entry. The Chinese sidebar section comes first. Existing matching pages are replaced, so inspect the diff before pushing. Use the same process for updates.
 
 ## Updating existing documentation with GitHub Desktop
 

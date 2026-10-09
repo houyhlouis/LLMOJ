@@ -37,7 +37,7 @@ These are helper inputs; they do not override existing private configuration.
 | `OJ_JUDGE_REMOTE` | Judge generator uses remote mode only for `1`; default `0` |
 | `OJ_JUDGE_SERVER` | Required remote HTTP(S) site origin; local internal connection is generated |
 | `OJ_JUDGE_KEY_FILE` | Required remote key-file absolute path; root-owned mode 0600; contains node key |
-| `OJ_JUDGE_SLOTS` | Initial judge slot override 1–7; absent calculates automatically, environment value `0` is rejected; does not replace existing YAML |
+| `OJ_JUDGE_SLOTS` | Positive initial slot override; absent uses `max(1, effective CPUs-2)`, environment `0` is rejected; CPU/RAM and 511 limit apply; existing YAML is retained |
 | `HYHOJ_JUDGE_SLOTS` | Legacy alias read only when `OJ_JUDGE_SLOTS` is absent; same constraints |
 | `LLMOJ_INSTALL_LANG` | Installer/helper language: `zh-CN` selects Chinese, otherwise English; entry scripts select it |
 | `OJ_SOURCE_REPOSITORY` | Download-entry source repository metadata; internal provenance, not credentials or runtime configuration |
@@ -100,6 +100,9 @@ Sources: [discussion boundaries](https://github.com/houyhlouis/LLMOJ/blob/43a88b
 
 | Tool | Arguments and behavior |
 | --- | --- |
+| `deploy/resize-judge.sh` (implementation: `resize-judge.py`) | Maintained existing-judge entry: `--prefix` (default `/opt/LibreOJ`), `--slots`, `--plan`, `--apply --drained`, `--rollback PRIVATE_BACKUP --drained`, `--mode auto\|all\|remote`; default Chinese interaction; see [resizing](Judge-Configuration.md) |
+| `deploy/judge_capacity.py` | Read-only capacity check: `--remote`, `--json`, `--slots N`; reads affinity/cgroup/RAM, without creating workspaces or changing services |
+| `deploy/initialize-mariadb.py` | Internal installer tool, required `--root`; stages initialization as mysql and validates system tables, preserving and checking nonempty existing databases; not an online upgrade/reset interface |
 | `deploy/bootstrap-admin.mjs` | `--root`, `--config`, `--email`, `--show-credentials`; root/config flags override their environment fallbacks; email defaults to `admin@localhost.invalid` for initialization; credentials are verified before display, not a password-reset interface |
 | `deploy/bootstrap-services.mjs` | Required `--root` and `--phase storage\|judge\|verify-judge`; `--help`; creates storage, registers local judge, or verifies connection |
 | `deploy/sandbox/verify-installed.mjs` | Optional `--root` (default `/opt/LibreOJ`); runs real sandbox probes, not a read-only YAML validator |
@@ -111,4 +114,6 @@ Sources: [discussion boundaries](https://github.com/houyhlouis/LLMOJ/blob/43a88b
 | `deploy/prepare-github.py` | Optional `--archive PATH`; source selection/archive helper requiring a readable Git file list; refuses to replace an archive |
 | `deploy/backup.sh` | No arguments; currently fixed to `/opt/LibreOJ`; stops services, backs up, restores target; custom prefixes need a matching backup procedure |
 
-Audited sources: [deploy/configure-local.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py), [deploy/configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-judge.py), [deploy/install.sh](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/install.sh), [deploy/build-frontend-offline.mjs](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/build-frontend-offline.mjs), [apps/backend/src/main.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/main.ts), [apps/backend/src/migration/migration-config.schema.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/migration/migration-config.schema.ts), [apps/judge/src/config.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/config.ts).
+Audited sources: [deploy/configure-local.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py), [deploy/configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-judge.py), [deploy/install.sh](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/install.sh), [deploy/build-frontend-offline.mjs](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/build-frontend-offline.mjs), [apps/backend/src/main.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/main.ts), [apps/backend/src/migration/migration-config.schema.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/migration/migration-config.schema.ts), [apps/judge/src/config.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/config.ts).
+
+The new capacity, database initialization and resize tools belong to the pending revision; verify that their `main` links match the deployed release after publication.

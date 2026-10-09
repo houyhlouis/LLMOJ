@@ -38,6 +38,8 @@ These tables cover infrastructure settings emitted by project templates/generato
 | `character-set-server`, `collation-server` | `utf8mb4`, `utf8mb4_unicode_ci`; changes do not convert existing tables automatically |
 | `innodb-buffer-pool-size`, `max-connections`, `skip-name-resolve` | `128M`, `60`, enabled; size against memory/connection load, distinct from backend pool settings |
 
+Initialization now runs as mysql in private staging and publishes only after system-table checks; the presence of `mysql/` alone is insufficient. See [installation troubleshooting](Installation.md#mariadb-initialization-failures-and-safe-retries) for AppArmor Err13, retained failed data and retries. Do not bypass checks by disabling AppArmor, adding DAC-bypass capabilities or deleting the database.
+
 ## MinIO: config/minio.env and service unit
 
 | Setting | Generated value and purpose |

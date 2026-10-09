@@ -18,6 +18,7 @@ DOCKER_MIRRORS_GIVEN=0
 export LLMOJ_INSTALL_LANG="${LLMOJ_INSTALL_LANG:-en}"
 source "$SOURCE_ROOT/deploy/install-messages.sh"
 JUDGE_SLOTS=0
+JUDGE_SLOTS_GIVEN=0
 INTERACTIVE=auto
 PORT_GIVEN=0
 ORIGIN_GIVEN=0
@@ -39,11 +40,12 @@ usage() {
         cat <<'USAGE_ZH'
 用法：sudo bash deploy/install.zh-CN.sh [--prefix /opt/LibreOJ] [--port 80]
       [--listen 0.0.0.0|127.0.0.1] [--public-url https://oj.example.com]
-      [--site-name LLMOJ] [--role all|web] [--judge-slots 1..7]
+      [--site-name LLMOJ] [--role all|web] [--judge-slots N]
       [--docker-source https://download.docker.com] [--docker-mirrors HTTPS镜像源]
       [--yes | --interactive] [--check | --plan]
 Ubuntu 24.04 / 26.04 amd64、systemd >=254、cgroup v2；每台服务器一个实例。
-终端安装会询问选项；--yes 使用提供的参数和默认值。
+终端安装会询问选项和评测实例数；默认有效逻辑 CPU 数减 2，最少 1。
+--judge-slots N 显式选择；0 为自动。--yes 使用提供的参数和默认值。
 默认公网 HTTP 80 端口；内部服务仅回环监听。防火墙和 TLS 需单独配置。
 Docker 源仅在需要构建 rootfs 时使用。修改镜像加速源会重启 Docker。
 --check 只检查环境，--plan 只显示流程；均不安装或启动服务。
@@ -54,14 +56,15 @@ USAGE_ZH
     cat <<'USAGE'
 Usage: sudo bash deploy/install.sh [--prefix /opt/LibreOJ] [--port 80]
        [--listen 0.0.0.0|127.0.0.1] [--public-url https://oj.example.com]
-       [--site-name LLMOJ] [--role all|web] [--judge-slots 1..7]
+       [--site-name LLMOJ] [--role all|web] [--judge-slots N]
        [--docker-source https://download.docker.com] [--docker-mirrors https://mirror.example.com]
        [--yes | --interactive] [--check | --plan]
 Ubuntu 24.04 / 26.04 amd64, systemd >=254, cgroup v2; one instance per server.
 --check: read-only environment/resource/port checks; does not install anything.
 --plan:  read-only list of installation steps; does not install anything.
 Private credentials stay under config/. The admin password is printed after success.
-Interactive terminal installs ask for options. --yes uses supplied/default options.
+Interactive installs ask for judge slots; default is effective logical CPUs minus 2 (minimum 1).
+--judge-slots N selects a count; 0 means automatic. --yes uses supplied/default options.
 Nginx defaults to public HTTP on port 80. Internal services remain loopback-only.
 The installer does not change firewall rules or configure TLS certificates.
 See deploy/INSTALL.md for SSH tunneling, reverse proxies and restart instructions.
@@ -80,7 +83,7 @@ while (($#)); do
                 --listen) LISTEN_ADDRESS="$2"; LISTEN_GIVEN=1 ;;
                 --role) INSTALL_ROLE="$2"; ROLE_GIVEN=1 ;;
                 --site-name) SITE_NAME="$2"; NAME_GIVEN=1 ;;
-                --judge-slots) JUDGE_SLOTS="$2" ;;
+                --judge-slots) JUDGE_SLOTS="$2"; JUDGE_SLOTS_GIVEN=1 ;;
                 --docker-source) DOCKER_SOURCE="${2%/}"; DOCKER_SOURCE_GIVEN=1 ;;
                 --docker-mirrors) DOCKER_MIRRORS="$2"; DOCKER_MIRRORS_GIVEN=1 ;;
             esac
@@ -98,6 +101,35 @@ ask() {
     read -r -p "$(translate "$prompt") [$default]: " answer || die "Input ended; use --yes for non-interactive installation"
     printf -v "$destination" '%s' "${answer:-$default}"
 }
+ask_judge_slots() {
+    local capacity default maximum answer
+    if [[ -e "$PROJECT_ROOT/config/judge.yaml" || -L "$PROJECT_ROOT/config/judge.yaml" ]]; then
+        # A retry keeps the existing YAML and historical automatic (0) option.
+        # Explicit original --judge-slots values already bypass this function.
+        say 'Existing judge.yaml is retained; retry with the original installation options. Use resize-judge.sh to change capacity.\n'
+        return
+    fi
+    capacity="$("$PYTHON" "$SOURCE_ROOT/deploy/judge_capacity.py" --json)" || die "Cannot determine judge capacity"
+    read -r default maximum < <("$PYTHON" -c 'import json,sys; c=json.loads(sys.argv[1]); print(c["default_slots"],c["maximum_slots"])' "$capacity")
+    say 'Judge slots: automatic CPU-2 default %s; current CPU/RAM maximum %s.\n' "$default" "$maximum"
+    if (( default > maximum )); then
+        say 'The automatic count exceeds available resources; enter a smaller positive count.\n'
+    fi
+    while true; do
+        read -r -p "$(translate 'Judge execution slots (Enter or 0 = automatic)') [$default]: " answer || die "Input ended; use --yes for non-interactive installation"
+        # Keep the historical 0 metadata value for automatic selection, so an
+        # installation retry does not become incompatible with its initial state.
+        JUDGE_SLOTS="${answer:-0}"
+        if [[ "$JUDGE_SLOTS" =~ ^[0-9]{1,6}$ ]]; then
+            JUDGE_SLOTS=$((10#$JUDGE_SLOTS))
+            if "$PYTHON" "$SOURCE_ROOT/deploy/judge_capacity.py" --slots "$([[ "$JUDGE_SLOTS" == 0 ]] && printf '%s' "$default" || printf '%s' "$JUDGE_SLOTS")" >/dev/null; then
+                return
+            fi
+        else
+            say 'Enter a positive integer, or 0 for automatic.\n'
+        fi
+    done
+}
 if [[ "$MODE" == install && ( "$INTERACTIVE" == yes || ( "$INTERACTIVE" == auto && -t 0 ) ) ]]; then
     [[ -t 0 ]] || die "Interactive installation needs a terminal; download the script to a file and run it"
     say '\nLLMOJ installation options (press Enter to keep defaults)\n'
@@ -111,6 +143,7 @@ if [[ "$MODE" == install && ( "$INTERACTIVE" == yes || ( "$INTERACTIVE" == auto 
     [[ "$PREFIX_GIVEN" == 1 ]] || ask PROJECT_ROOT 'Installation directory' "$PROJECT_ROOT"
     [[ "$NAME_GIVEN" == 1 ]] || ask SITE_NAME 'Website name' "$SITE_NAME"
     if [[ "$INSTALL_ROLE" == all ]]; then
+        [[ "$JUDGE_SLOTS_GIVEN" == 1 ]] || ask_judge_slots
         [[ "$DOCKER_SOURCE_GIVEN" == 1 ]] || ask DOCKER_SOURCE 'Docker package source base URL (HTTPS, official by default)' "$DOCKER_SOURCE"
         [[ "$DOCKER_MIRRORS_GIVEN" == 1 ]] || ask DOCKER_MIRRORS 'Docker Hub mirrors (comma-separated HTTPS URLs; blank keeps Docker defaults; changes restart Docker)' "$DOCKER_MIRRORS"
     fi
@@ -142,6 +175,10 @@ SUPPORT_ARGS=(--root "$PROJECT_ROOT" --origin "$PUBLIC_ORIGIN" --port "$PUBLIC_P
 if [[ "$MODE" == plan ]]; then
     say 'Directory: %s\nSite origin: %s\nListen address: %s:%s\nRole: %s\nSite name: %s\n' "$PROJECT_ROOT" "$PUBLIC_ORIGIN" "$LISTEN_ADDRESS" "$PUBLIC_PORT" "$INSTALL_ROLE" "$SITE_NAME"
     say 'Docker package source: %s/linux/ubuntu\nDocker Hub mirrors: %s\n' "$DOCKER_SOURCE" "${DOCKER_MIRRORS:-$(translate 'official/default')}"
+    if [[ "$INSTALL_ROLE" == all ]]; then
+        "$PYTHON" "$SOURCE_ROOT/deploy/judge_capacity.py"
+        say 'Requested judge slots: %s (0 = automatic; existing judge.yaml is retained).\n' "$JUDGE_SLOTS"
+    fi
     if [[ "$LLMOJ_INSTALL_LANG" == zh-CN ]]; then
         cat <<'PLAN_ZH'
 1. 检查 Ubuntu、systemd/cgroup v2、资源、端口和已有实例。
@@ -413,7 +450,10 @@ try {
 }' "$PROJECT_ROOT/apps/backend/package.json"
 support permissions
 if [[ "$INSTALL_ROLE" == all ]]; then
-    [[ "$JUDGE_SLOTS" == 0 ]] || export HYHOJ_JUDGE_SLOTS="$JUDGE_SLOTS"
+    # CLI options own initial capacity selection; do not inherit stale aliases.
+    unset OJ_JUDGE_SLOTS HYHOJ_JUDGE_SLOTS
+    export OJ_JUDGE_REMOTE=0
+    [[ "$JUDGE_SLOTS" == 0 ]] || export OJ_JUDGE_SLOTS="$JUDGE_SLOTS"
     "$PYTHON" deploy/configure-judge.py
 fi
 support apparmor
@@ -432,10 +472,7 @@ systemctl daemon-reload
 step 'Initialize this instance database, Redis and object storage'
 "$PYTHON" "$PROJECT_ROOT/deploy/configure-redis-host.py"
 ROLLBACK_STARTED=1
-if [[ ! -d "$PROJECT_ROOT/data/mariadb/mysql" ]]; then
-    mariadb-install-db --no-defaults --user=mysql --datadir="$PROJECT_ROOT/data/mariadb" \
-        --auth-root-authentication-method=socket --skip-test-db >/dev/null
-fi
+"$PYTHON" "$PROJECT_ROOT/deploy/initialize-mariadb.py" --root "$PROJECT_ROOT"
 systemctl start libreoj-mariadb.service libreoj-redis.service libreoj-minio.service
 DB_READY=0
 for ((attempt=0; attempt<90; attempt++)); do
