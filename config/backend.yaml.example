@@ -54,8 +54,10 @@ security:
     durationSeconds: 10
 preference:
   siteName: LLMOJ
-  copyrightNotice: LibreOJ Open Source Project
+  copyrightNotice: LLMOJ
   security:
+    # open: register immediately; approval: administrator review; closed: no new signups
+    registrationMode: open
     requireEmailVerification: true
     allowUserChangeUsername: true
     allowEveryoneCreateProblem: true

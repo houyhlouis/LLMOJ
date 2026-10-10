@@ -173,6 +173,8 @@ export class UserController {
         error: UpdateUserProfileResponseError.PERMISSION_DENIED
       };
 
+    if (user.isAdmin && !currentUser.isAdmin) return { error: UpdateUserProfileResponseError.PERMISSION_DENIED };
+
     const isUserSelf = currentUser.id === user.id;
     if (
       isUserSelf &&
@@ -570,6 +572,8 @@ export class UserController {
       return {
         error: UpdateUserPasswordResponseError.PERMISSION_DENIED
       };
+
+    if (user.isAdmin && !currentUser.isAdmin) return { error: UpdateUserPasswordResponseError.PERMISSION_DENIED };
 
     const isUserSelf = currentUser.id === user.id;
     const hasPrivilege = await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageUser);

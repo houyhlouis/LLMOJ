@@ -11,6 +11,7 @@ Variables are grouped by their consumers. Historical `LIBREOJ_`, `HYHOJ_`, and `
 | `LIBREOJ_CONFIG_FILE` | Required backend YAML path; installed as `<root>/config/backend.yaml` |
 | `LIBREOJ_JUDGE_CONFIG_FILE` | Required judge YAML path; installed as `<root>/config/judge.yaml` |
 | `LIBREOJ_JUDGE_LOG_LEVEL` | Judge log level; fallback `info`; Winston levels such as error, warn, info, debug |
+| `LIBREOJ_SCHEMA_SYNC` | Exactly `0` disables automatic schema synchronization at backend startup. Unset/other values preserve legacy behavior. The updater applies checked DDL first and installs a dedicated systemd drop-in setting this to 0. Do not enable synchronization to bypass upgrade checks. |
 | `LIBREOJ_LOG_SQL` | Backend SQL logging; any nonempty string enables it, including `0` and `false`; remove or empty to disable |
 | `NODE_ENV` | Services use `production`; backend production logging selects warn/error; also affects frontend build mode |
 | `NODE_OPTIONS` | Generated services use `--max-old-space-size=512`; build scripts use `--max-old-space-size=2300`; MiB of V8 heap, not total process/sandbox memory |
@@ -75,6 +76,7 @@ The additional backend regression variables below are also test-only. Database s
 
 | Variable | Default / purpose | Consumer test |
 | --- | --- | --- |
+| `LLMOJ_REGISTRATION_TEST_DATABASE` | Private JSON for the isolated registration-review database test; unset skips it. See the development guide for socket/database guards. | `registration-review.mariadb.test.cjs` |
 | `HYHOJ_DISCUSSION_TEST_DB_CONFIG` | Backend YAML path containing `services.database`; unset skips the real MariaDB discussion-boundary suite | `discussion-boundaries.mariadb.test.cjs` |
 | `HYHOJ_DISCUSSION_TEST_EVIDENCE` | Optional JSON evidence path for boundary cases and temporary-table cleanup | Same suite |
 | `HYHOJ_COUNT_TEST_SERVICE_BASELINE` | Optional baseline source root preserving the `apps/backend/src/...` layout; substitutes only loaded `discussion.service.ts` and `group.service.ts`. Unset uses current source | `group-discussion-counts.mariadb.test.cjs` |
@@ -100,6 +102,7 @@ Sources: [discussion boundaries](https://github.com/houyhlouis/LLMOJ/blob/43a88b
 
 | Tool | Arguments and behavior |
 | --- | --- |
+| `upgrade.zh-CN.sh` / `upgrade.sh` → `deploy/upgrade.sh` | `--prefix`, `--plan`, `--ref`, `--source`, `--source-sha256`, `--apply --drained`, `--rollback BACKUP --drained`; see [Upgrade](Upgrade.md) for compatibility, maintenance and rollback rules |
 | `deploy/resize-judge.sh` (implementation: `resize-judge.py`) | Maintained existing-judge entry: `--prefix` (default `/opt/LibreOJ`), `--slots`, `--plan`, `--apply --drained`, `--rollback PRIVATE_BACKUP --drained`, `--mode auto\|all\|remote`; default Chinese interaction; see [resizing](Judge-Configuration.md) |
 | `deploy/judge_capacity.py` | Read-only capacity check: `--remote`, `--json`, `--slots N`; reads affinity/cgroup/RAM, without creating workspaces or changing services |
 | `deploy/initialize-mariadb.py` | Internal installer tool, required `--root`; stages initialization as mysql and validates system tables, preserving and checking nonempty existing databases; not an online upgrade/reset interface |

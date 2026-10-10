@@ -2,7 +2,7 @@
 
 [English](Backend-Configuration.md) · [Wiki 首页](Home.md)
 
-本页核对版本 `43a88bdd62fbf200889b36932fa921439a293190`，覆盖 `AppConfig` 的全部 110 个末级字段、结构对象和开放字典。它解释服务器级 `backend.yaml`，不把每道题或每场比赛的业务参数当作全站配置。
+原有字段核对版本 `43a88bdd62fbf200889b36932fa921439a293190`，本次在 `20dec6f` 基础上增加注册模式，覆盖 `AppConfig` 的全部 111 个末级字段、结构对象和开放字典。它解释服务器级 `backend.yaml`，不把每道题或每场比赛的业务参数当作全站配置。
 
 ## 文件、默认值与生效方式
 
@@ -12,7 +12,7 @@
 
 配置 schema 没有为所有对象使用 `IsDefined`，也没有开启配置对象的未知字段白名单剔除。不能把“拼错键没有立即报错”理解为生效；缺失对象也可能到消费者初始化时才失败。不要加入未文档化的字段，尤其不要把秘密放在公开的 `preference` 中。
 
-依据：[字段 schema](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/config/config.schema.ts)、[关系校验](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/config/config-relation.decorator.ts)、[源码示例](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/config/backend.yaml.example)、[安装配置生成器](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py)。
+依据：[字段 schema](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/config/config.schema.ts)、[关系校验](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/config/config-relation.decorator.ts)、[源码示例](https://github.com/houyhlouis/LLMOJ/blob/main/config/backend.yaml.example)、[安装配置生成器](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py)。
 
 ## 示例值与首次安装值并不相同
 
@@ -125,9 +125,10 @@
 | 完整字段 | 类型 / 是否必填 | 源码示例值（非默认） | 作用、约束和回退 |
 | --- | --- | --- | --- |
 | `preference.siteName` | `string`; 必填 | `LLMOJ` | 公开的网站名称，用于页面、邮件和事件通知；安装取 --site-name（默认 LLMOJ）。 |
-| `preference.copyrightNotice` | `string`; 必填 | `LibreOJ Open Source Project` | 公开页脚署名/版权文字；只是显示设置，不改变项目许可证。 |
+| `preference.copyrightNotice` | `string`; 必填 | `LLMOJ` | 公开页脚署名/版权文字；旧内置值 `LibreOJ Open Source Project` 在新版前端显示为 `LLMOJ`，其他自定义文案保留，配置文件不自动改写；不改变项目许可证。 |
 | `preference.security.captchaEnabled` | `boolean`; 派生，不手填 | 自动派生 | 公开派生字段：实际输出由 security.captcha 是否配置任一提供商决定；这里手填 true/false 会被覆盖。 |
 | `preference.security.turnstileSiteKey` | `string`; 派生，不手填 | 自动派生 | 公开派生字段：由 security.captcha.turnstile.siteKey 复制；不要把 secretKey 填到这里。 |
+| `preference.security.registrationMode` | `"open" \| "approval" \| "closed"`; 可选 | `open` | 新注册开放／待人工审核／关闭；省略或 null 默认 open。切换模式不改变已有申请状态，见 [注册审核](Registration-Approval.zh-CN.md)。 |
 | `preference.security.requireEmailVerification` | `boolean`; 必填 | `true` | 注册是否验证邮箱验证码。示例 true、安装生成 false；设 true 前先配置并验证邮件投递。false 并不关闭密码重置/改邮箱等邮件需求，也不是关闭注册。 |
 | `preference.security.allowUserChangeUsername` | `boolean`; 必填 | `true` | 允许普通用户修改自己的用户名；仍须有 EditOwnProfile。ManageUser 权限可走管理路径。 |
 | `preference.security.allowEveryoneCreateProblem` | `boolean`; 必填 | `true` | 已登录用户建题的默认回退；不是允许访客建题，显式 CreateProblem 允许/拒绝规则仍参与判定。 |
@@ -260,7 +261,7 @@
 
 本站 schema 没有 `registrationEnabled`、邮件域名白名单、任意 `permissions.*` 或每接口限流字典，不能通过添加自创 YAML 键实现这些功能。`requireEmailVerification` 只控制注册验证码验证；用户名规则等仍由业务校验控制。
 
-用户级允许/拒绝、管理员权限和题目/讨论/组 ACL 存在数据库中，不是本文件的子树。`allowEveryone*` 提供默认回退，不等于越过显式拒绝；`ManagePermissions` 仍只允许站点管理员。AI 的 `ManageAiConfiguration`、`UseAi`、`GenerateTestdata`、`ImportProblem` 及每账号提供商密钥也不在本 schema；参考 [AI 配置](AI.zh-CN.md)。业务权限变化通常按请求从数据库读取，无需为此改 YAML 或重启。依据：[权限判定](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/user/user-privilege.service.ts)、[题目授权](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/problem/problem.service.ts)。
+用户级允许/拒绝、管理员权限和题目/讨论/组 ACL 存在数据库中，不是本文件的子树。`allowEveryone*` 提供默认回退，不等于越过显式拒绝；`ManagePermissions` 仍只允许站点管理员；`ManageRegistrationReviews` 默认关闭，可由管理员逐用户授权审核注册申请，不会授予权限管理能力，见 [注册审核](Registration-Approval.zh-CN.md)。AI 的 `ManageAiConfiguration`、`UseAi`、`GenerateTestdata`、`ImportProblem` 及每账号提供商密钥也不在本 schema；参考 [AI 配置](AI.zh-CN.md)。业务权限变化通常按请求从数据库读取，无需为此改 YAML 或重启。依据：[权限判定](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/user/user-privilege.service.ts)、[题目授权](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/problem/problem.service.ts)。
 
 `security.rateLimit` 在 HTTP 层按 `req.ip` 计数，必须配合准确的 `server.trustProxy`；代理配置错误会使多个用户共用一个 IP 配额。PoW 和第三方验证码是另外两层保护：将验证码提供商置 null 不会关闭 PoW。当前 PoW 挑战有效期 5 分钟，发放限制为每 IP/已登录用户 10 秒内 20 次，这些是代码常量，不是此 YAML 的字段。不要把调整全局 `maxRequests` 误认为能改变它们。参见 [HTTP 限流](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/main.ts)、[PoW 实现](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/proof-of-work/proof-of-work.service.ts)。
 

@@ -154,10 +154,10 @@
   "eslintConfig": {
     "extends": "react-app"
   },
-  "description": "The web frontend of LibreOJ",
+  "description": "The web frontend of LLMOJ",
   "repository": {
     "type": "git",
-    "url": "https://github.com/LibreOJ/LibreOJ.git",
+    "url": "https://github.com/houyhlouis/LLMOJ.git",
     "directory": "packages/frontend"
   },
   "author": "Menci",

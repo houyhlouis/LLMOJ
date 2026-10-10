@@ -76,7 +76,8 @@ enum Privilege {
   GenerateTestdata = "GenerateTestdata",
   ImportProblem = "ImportProblem",
   ManagePermissions = "ManagePermissions",
-  SkipRecaptcha = "SkipRecaptcha"
+  SkipRecaptcha = "SkipRecaptcha",
+  ManageRegistrationReviews = "ManageRegistrationReviews"
 }
 
 interface PrevilegeViewProps {

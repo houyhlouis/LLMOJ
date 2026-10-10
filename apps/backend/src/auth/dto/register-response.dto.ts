@@ -1,6 +1,7 @@
 import { ApiProperty } from "@nestjs/swagger";
 
 export enum RegisterResponseError {
+  REGISTRATION_CLOSED = "REGISTRATION_CLOSED",
   ALREADY_LOGGEDIN = "ALREADY_LOGGEDIN",
   DUPLICATE_USERNAME = "DUPLICATE_USERNAME",
   DUPLICATE_EMAIL = "DUPLICATE_EMAIL",
@@ -10,6 +11,9 @@ export enum RegisterResponseError {
 export class RegisterResponseDto {
   @ApiProperty({ enum: RegisterResponseError })
   error?: RegisterResponseError;
+
+  @ApiProperty({ enum: ["pending", "approved"] })
+  registrationStatus?: "pending" | "approved";
 
   @ApiProperty()
   token?: string;

@@ -235,6 +235,11 @@ class SecurityConfig {
 
 // These config items will be sent to client
 class PreferenceConfigSecurity {
+  @IsOptional()
+  @IsIn(["open", "approval", "closed"])
+  @ApiProperty({ enum: ["open", "approval", "closed"], required: false, default: "open" })
+  readonly registrationMode?: "open" | "approval" | "closed";
+
   @IsBoolean()
   @IsOptional()
   @ApiProperty()

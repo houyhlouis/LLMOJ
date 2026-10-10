@@ -1,11 +1,13 @@
 # LLMOJ Wiki
 
-[简体中文](Home.md) | English
+[简体中文](Home.md) | English | [Repository](https://github.com/houyhlouis/LLMOJ)
 
 LLMOJ is an AI-assisted online judge based on LibreOJ. Start with [Configuration overview](Configuration.md) to find a setting, or the installation guide for a new deployment. After changing CPU or RAM capacity, follow [Judge configuration and resizing](Judge-Configuration.md) to update execution slots, CPU affinity, and systemd units together.
 
 | Topic | Page |
 | --- | --- |
+| Registration policy and delegated review | [Registration approval](Registration-Approval.md) |
+| Preserve configuration/data while upgrading; compatibility and rollback | [Upgrade](Upgrade.md) |
 | Installation entry points, every flag, and retries | [Installation](Installation.md) |
 | Backend YAML: accounts, security, database, mail, storage, contests, and presentation | [Backend-Configuration](Backend-Configuration.md) |
 | Judge YAML, CPU/RAM resizing, service units, verification, and rollback | [Judge-Configuration](Judge-Configuration.md) |
@@ -22,4 +24,4 @@ LLMOJ is an AI-assisted online judge based on LibreOJ. Start with [Configuration
 
 The full installation includes the website, storage, and a local judge, with optional remote judges. `--role web` does not build a local rootfs; remote submission judging currently does not replace the local worker required for AI verification and data generation.
 
-Existing configuration fields retain their audited references. The CPU-minus-two capacity policy, database initialization fix and maintained resize script are pending changes based on `f302111a01fdfd11a0ab555d9470233edea06d76`; new-file links use `main` until published. Deployment and functional validation have been performed on Ubuntu 24.04 amd64; see [Installation](Installation.md) for version and test boundaries. The main project uses MIT; upstream components retain their own licenses.
+Registration approval and the upgrader extend baseline `20dec6f86213e886e79859187b9ef599bd33ec25`; new files must be published together with their release. Deployment and functional validation have been performed on Ubuntu 24.04 amd64; each revision’s test report defines its verified scope. The main project uses MIT; upstream components retain their licenses.

@@ -19,6 +19,7 @@ return {
       groups: "My groups",
       edit_profile: "Edit profile",
       preference: "Preference",
+      registration_reviews: "Registration reviews",
       logout: "Logout"
     }
   },
@@ -33,7 +34,7 @@ return {
   footer: {
     judge_machine: "Judge Machine",
     locale: "Language",
-    github: "Open source"
+    github: "LLMOJ on GitHub"
   },
   invalid_url: "Invalid URL.",
   request_error: {

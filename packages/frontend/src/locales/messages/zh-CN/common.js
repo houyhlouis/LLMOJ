@@ -19,6 +19,7 @@ return {
       groups: "我的用户组",
       edit_profile: "编辑资料",
       preference: "偏好设置",
+      registration_reviews: "注册审核",
       logout: "注销"
     }
   },
@@ -32,7 +33,7 @@ return {
   footer: {
     judge_machine: "评测机状态",
     locale: "语言",
-    github: "开源项目"
+    github: "LLMOJ 开源项目（GitHub）"
   },
   invalid_url: "无效的 URL。",
   request_error: {

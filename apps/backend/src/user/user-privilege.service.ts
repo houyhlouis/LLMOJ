@@ -85,7 +85,16 @@ export class UserPrivilegeService {
   ): Promise<SetUserPrivilegesResponseError> {
     if (!(await this.userService.userExists(userId))) return SetUserPrivilegesResponseError.NO_SUCH_USER;
 
-    await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
+    return await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
+      // Share the per-user serialization point used by detailed permission edits
+      // and registration review transactions before changing either grant table.
+      if (
+        !(await transactionalEntityManager.findOne(UserEntity, {
+          where: { id: userId },
+          lock: { mode: "pessimistic_write" }
+        }))
+      )
+        return SetUserPrivilegesResponseError.NO_SUCH_USER;
       await transactionalEntityManager.delete(UserPrivilegeEntity, {
         userId
       });
@@ -113,8 +122,7 @@ export class UserPrivilegeService {
         userPrivilege.userId = userId;
         await transactionalEntityManager.save(userPrivilege); // eslint-disable-line no-await-in-loop
       }
+      return null;
     });
-
-    return null;
   }
 }

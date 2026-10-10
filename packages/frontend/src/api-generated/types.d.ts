@@ -443,6 +443,7 @@ declare namespace ApiTypes {
       | "ImportProblem"
       | "ManagePermissions"
       | "SkipRecaptcha"
+      | "ManageRegistrationReviews"
     )[];
     userPreference?: ApiTypes.UserPreferenceDto;
     serverPreference: ApiTypes.PreferenceConfig;
@@ -557,6 +558,7 @@ declare namespace ApiTypes {
       | "ImportProblem"
       | "ManagePermissions"
       | "SkipRecaptcha"
+      | "ManageRegistrationReviews"
     )[];
   }
   export interface GetUserPreferenceRequestDto {
@@ -689,7 +691,13 @@ declare namespace ApiTypes {
     password: string;
   }
   export interface LoginResponseDto {
-    error?: "ALREADY_LOGGEDIN" | "NO_SUCH_USER" | "WRONG_PASSWORD" | "USER_NOT_MIGRATED";
+    error?:
+      | "REGISTRATION_PENDING"
+      | "REGISTRATION_REJECTED"
+      | "ALREADY_LOGGEDIN"
+      | "NO_SUCH_USER"
+      | "WRONG_PASSWORD"
+      | "USER_NOT_MIGRATED";
     token?: string;
     username?: string;
   }
@@ -754,6 +762,7 @@ declare namespace ApiTypes {
     discussionRepliesMore: number;
   }
   export interface PreferenceConfigSecurity {
+    registrationMode?: "open" | "approval" | "closed";
     captchaEnabled: boolean;
     turnstileSiteKey?: string;
     requireEmailVerification: boolean;
@@ -1010,6 +1019,36 @@ declare namespace ApiTypes {
     migrated?: boolean;
     usernameMustChange?: boolean;
   }
+  export interface RegistrationReviewDto {
+    applicationId: number;
+    userId: number | null;
+    username: string;
+    email: string;
+    registrationTime: string; // date-time
+    status: "pending" | "approved" | "rejected";
+    reviewedAt: string | null; // date-time
+    reviewedBy: number | null;
+    reason: string | null;
+  }
+  export interface ListRegistrationReviewsRequestDto {
+    status?: "pending" | "approved" | "rejected";
+    skipCount?: number;
+    takeCount?: number;
+  }
+  export interface ListRegistrationReviewsResponseDto {
+    error?: "PERMISSION_DENIED" | "NO_SUCH_APPLICATION" | "ALREADY_REVIEWED" | "DUPLICATE_USERNAME" | "DUPLICATE_EMAIL";
+    reviews?: ApiTypes.RegistrationReviewDto[];
+    count?: number;
+  }
+  export interface ReviewRegistrationRequestDto {
+    applicationId: number;
+    decision: "approved" | "rejected";
+    reason?: string;
+  }
+  export interface ReviewRegistrationResponseDto {
+    error?: "PERMISSION_DENIED" | "NO_SUCH_APPLICATION" | "ALREADY_REVIEWED" | "DUPLICATE_USERNAME" | "DUPLICATE_EMAIL";
+    review?: ApiTypes.RegistrationReviewDto;
+  }
   export interface RegisterRequestDto {
     username: string;
     email: string;
@@ -1017,7 +1056,13 @@ declare namespace ApiTypes {
     password: string;
   }
   export interface RegisterResponseDto {
-    error?: "ALREADY_LOGGEDIN" | "DUPLICATE_USERNAME" | "DUPLICATE_EMAIL" | "INVALID_EMAIL_VERIFICATION_CODE";
+    error?:
+      | "REGISTRATION_CLOSED"
+      | "ALREADY_LOGGEDIN"
+      | "DUPLICATE_USERNAME"
+      | "DUPLICATE_EMAIL"
+      | "INVALID_EMAIL_VERIFICATION_CODE";
+    registrationStatus?: "pending" | "approved";
     token?: string;
   }
   export interface RejudgeSubmissionRequestDto {
@@ -1076,7 +1121,12 @@ declare namespace ApiTypes {
     newPassword: string;
   }
   export interface ResetPasswordResponseDto {
-    error?: "ALREADY_LOGGEDIN" | "NO_SUCH_USER" | "INVALID_EMAIL_VERIFICATION_CODE";
+    error?:
+      | "REGISTRATION_PENDING"
+      | "REGISTRATION_REJECTED"
+      | "ALREADY_LOGGEDIN"
+      | "NO_SUCH_USER"
+      | "INVALID_EMAIL_VERIFICATION_CODE";
     token?: string;
   }
   namespace Responses {
@@ -1121,6 +1171,9 @@ declare namespace ApiTypes {
   }
   export interface SendEmailVerificationCodeResponseDto {
     error?:
+      | "REGISTRATION_PENDING"
+      | "REGISTRATION_REJECTED"
+      | "REGISTRATION_CLOSED"
       | "PERMISSION_DENIED"
       | "DUPLICATE_EMAIL"
       | "NO_SUCH_USER"
@@ -1270,6 +1323,7 @@ declare namespace ApiTypes {
       | "ImportProblem"
       | "ManagePermissions"
       | "SkipRecaptcha"
+      | "ManageRegistrationReviews"
     )[];
   }
   export interface SetUserPrivilegesResponseDto {

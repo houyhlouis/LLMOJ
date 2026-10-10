@@ -51,6 +51,7 @@ export class ConfigService {
     const preference = JSON.parse(JSON.stringify(this.config.preference)) as PreferenceConfig;
 
     Object.assign(preference.security, {
+      registrationMode: this.config.preference.security.registrationMode || "open",
       captchaEnabled: !!(this.config.security.captcha.turnstile || this.config.security.captcha.tencentCaptcha),
       turnstileSiteKey: this.config.security.captcha.turnstile?.siteKey
     });

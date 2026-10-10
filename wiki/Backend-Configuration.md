@@ -2,7 +2,7 @@
 
 [中文](Backend-Configuration.zh-CN.md) · [Wiki home](Home.en.md)
 
-Audited against `43a88bdd62fbf200889b36932fa921439a293190`. This page covers all 110 leaf fields of `AppConfig`, its structural objects and open dictionaries. It documents server-wide `backend.yaml`, not every problem or contest business setting.
+Existing fields were audited against `43a88bdd62fbf200889b36932fa921439a293190`; registration mode is added on baseline `20dec6f`. This page covers all 111 leaf fields of `AppConfig`, its structural objects and open dictionaries. It documents server-wide `backend.yaml`, not every problem or contest business setting.
 
 ## File, defaults and activation
 
@@ -12,7 +12,7 @@ All fields are read at process startup; there is no file hot reload. Restart the
 
 The schema does not use `IsDefined` for every object and configuration validation does not strip unknown keys through a whitelist. A typo not immediately rejected is not evidence that it works; missing objects may fail when a consumer initializes. Do not add undocumented keys or place secrets in public `preference` data.
 
-Sources: [schema](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/config/config.schema.ts), [relationship validation](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/config/config-relation.decorator.ts), [source example](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/config/backend.yaml.example), [installer generator](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py).
+Sources: [schema](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/config/config.schema.ts), [relationship validation](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/config/config-relation.decorator.ts), [source example](https://github.com/houyhlouis/LLMOJ/blob/main/config/backend.yaml.example), [installer generator](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py).
 
 ## Example values differ from first-install values
 
@@ -125,9 +125,10 @@ The installer creates configuration only when absent and preserves existing file
 | Full field | Type / requirement | Source example (not default) | Purpose, constraints and fallback |
 | --- | --- | --- | --- |
 | `preference.siteName` | `string`; required | `LLMOJ` | Public site name used by pages, mail and event reports; installer takes --site-name (default LLMOJ). |
-| `preference.copyrightNotice` | `string`; required | `LibreOJ Open Source Project` | Public footer attribution/copyright text; this display setting does not change the project license. |
+| `preference.copyrightNotice` | `string`; required | `LLMOJ` | Public footer text. The new frontend displays the legacy built-in value `LibreOJ Open Source Project` as `LLMOJ`; other custom text is preserved and the configuration file is not rewritten. Project licenses are unchanged. |
 | `preference.security.captchaEnabled` | `boolean`; derived; do not set | derived | Derived public field: actual output is based on whether security.captcha configures a provider. A manually supplied value is overwritten. |
 | `preference.security.turnstileSiteKey` | `string`; derived; do not set | derived | Derived public field copied from security.captcha.turnstile.siteKey. Never place a secretKey here. |
+| `preference.security.registrationMode` | `"open" \| "approval" \| "closed"`; optional | `open` | New registrations: immediate activation, reviewer approval, or disabled. Missing/null defaults to open; existing applications keep their state. See [Registration approval](Registration-Approval.md). |
 | `preference.security.requireEmailVerification` | `boolean`; required | `true` | Whether registration verifies an emailed code. Template true, installer false. Configure and verify mail delivery before enabling. False does not remove mail requirements from reset-password/change-email flows and does not disable registration. |
 | `preference.security.allowUserChangeUsername` | `boolean`; required | `true` | Allows ordinary users to change their own username, still subject to EditOwnProfile; ManageUser provides the administrative path. |
 | `preference.security.allowEveryoneCreateProblem` | `boolean`; required | `true` | Default fallback for logged-in users creating problems; it does not permit guests. Explicit CreateProblem allow/deny rules still participate. |
@@ -260,7 +261,7 @@ The installer creates configuration only when absent and preserves existing file
 
 This schema has no `registrationEnabled`, email-domain allowlist, arbitrary `permissions.*`, or per-endpoint rate-limit dictionary. Adding invented YAML keys does not enable such features. `requireEmailVerification` controls registration-code verification; username rules still belong to business validation.
 
-Per-user allow/deny rules, administrator privileges and problem/discussion/group ACLs are stored in the database, not a subtree of this file. `allowEveryone*` supplies a fallback rather than bypassing explicit denials; `ManagePermissions` remains administrator-only. AI permissions `ManageAiConfiguration`, `UseAi`, `GenerateTestdata`, `ImportProblem`, and per-account provider keys also live outside this schema; see [AI configuration](AI.md). Business permission changes are generally read from the database per request and do not require YAML edits/restarts. Sources: [permission decisions](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/user/user-privilege.service.ts), [problem authorization](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/problem/problem.service.ts).
+Per-user allow/deny rules, administrator privileges and problem/discussion/group ACLs are stored in the database, not a subtree of this file. `allowEveryone*` supplies a fallback rather than bypassing explicit denials; `ManagePermissions` remains administrator-only. `ManageRegistrationReviews` defaults to false and can be granted per user to review applications without permission-management authority; see [Registration approval](Registration-Approval.md). AI permissions `ManageAiConfiguration`, `UseAi`, `GenerateTestdata`, `ImportProblem`, and per-account provider keys also live outside this schema; see [AI configuration](AI.md). Business permission changes are generally read from the database per request and do not require YAML edits/restarts. Sources: [permission decisions](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/user/user-privilege.service.ts), [problem authorization](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/problem/problem.service.ts).
 
 `security.rateLimit` counts HTTP requests by `req.ip`, so configure `server.trustProxy` accurately; an incorrect proxy setup can combine many users into one IP quota. PoW and third-party CAPTCHA are separate protections: null CAPTCHA providers do not disable PoW. PoW challenges currently expire after five minutes and issuance is limited to 20 per ten seconds per IP/authenticated user. These are code constants, not YAML fields; global `maxRequests` does not change them. See [HTTP limiting](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/main.ts) and [PoW implementation](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/proof-of-work/proof-of-work.service.ts).
 

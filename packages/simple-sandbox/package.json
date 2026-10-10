@@ -1,7 +1,7 @@
 {
   "name": "simple-sandbox",
   "version": "0.3.25",
-  "description": "The native Linux process sandbox used by LibreOJ.",
+  "description": "The native Linux process sandbox used by LLMOJ.",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "author": "t123yh",
@@ -9,7 +9,7 @@
   "private": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/LibreOJ/LibreOJ.git",
+    "url": "https://github.com/houyhlouis/LLMOJ.git",
     "directory": "packages/simple-sandbox"
   },
   "keywords": [

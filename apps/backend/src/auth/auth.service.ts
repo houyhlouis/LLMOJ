@@ -4,6 +4,10 @@ import { InjectRepository, InjectDataSource } from "@nestjs/typeorm";
 import { Repository, DataSource, EntityManager } from "typeorm";
 import * as bcrypt from "bcrypt";
 
+import { RegistrationReviewStatus } from "./registration-review.entity";
+import { RegistrationApplicationEntity } from "./registration-application.entity";
+import { createRegisteredUser } from "./create-registered-user";
+
 import { UserAuthEntity } from "./user-auth.entity";
 
 import { AuthEmailVerificationCodeService } from "./auth-email-verification-code.service";
@@ -12,8 +16,6 @@ import { RegisterResponseError } from "./dto";
 
 import { UserEntity } from "../user/user.entity";
 import { UserService } from "../user/user.service";
-import { UserInformationEntity } from "../user/user-information.entity";
-import { UserPreferenceEntity } from "../user/user-preference.entity";
 import { ConfigService } from "../config/config.service";
 import { delay, DELAY_FOR_SECURITY } from "../common/delay";
 
@@ -48,6 +50,9 @@ export class AuthService {
     emailVerificationCode: string,
     password: string
   ): Promise<[error: RegisterResponseError, user: UserEntity]> {
+    const registrationMode = this.configService.config.preference.security.registrationMode || "open";
+    if (registrationMode === "closed") return [RegisterResponseError.REGISTRATION_CLOSED, null];
+
     // There's a race condition on user inserting. If we do checking before inserting,
     // inserting will still fail if another with same username is inserted after we check
 
@@ -58,42 +63,28 @@ export class AuthService {
         return [RegisterResponseError.INVALID_EMAIL_VERIFICATION_CODE, null];
     }
 
+    if (!(await this.userService.checkUsernameAvailability(username)))
+      return [RegisterResponseError.DUPLICATE_USERNAME, null];
+    if (!(await this.userService.checkEmailAvailability(email))) return [RegisterResponseError.DUPLICATE_EMAIL, null];
+    const passwordHash = await this.hashPassword(password);
     try {
-      let user: UserEntity;
-      await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
-        user = new UserEntity();
-        user.username = username;
-        user.email = email;
-        user.publicEmail = true;
-        user.nickname = "";
-        user.bio = "";
-        user.avatarInfo = "gravatar:";
-        user.isAdmin = false;
-        user.submissionCount = 0;
-        user.acceptedProblemCount = 0;
-        user.rating = 0;
-        user.registrationTime = new Date();
-        await transactionalEntityManager.save(user);
-
-        const userAuth = new UserAuthEntity();
-        userAuth.userId = user.id;
-        userAuth.password = await this.hashPassword(password);
-        await transactionalEntityManager.save(userAuth);
-
-        const userInformation = new UserInformationEntity();
-        userInformation.userId = user.id;
-        userInformation.organization = "";
-        userInformation.location = "";
-        userInformation.url = "";
-        userInformation.telegram = "";
-        userInformation.qq = "";
-        userInformation.github = "";
-        await transactionalEntityManager.save(userInformation);
-
-        const userPreference = new UserPreferenceEntity();
-        userPreference.userId = user.id;
-        userPreference.preference = {};
-        await transactionalEntityManager.save(userPreference);
+      let user: UserEntity = null;
+      await this.connection.transaction("READ COMMITTED", async manager => {
+        if (registrationMode === "approval") {
+          // No user row or user-ID allocation occurs before administrative approval.
+          await manager.save(RegistrationApplicationEntity, {
+            username,
+            email,
+            reservedUsername: username,
+            reservedEmail: email,
+            passwordHash,
+            status: RegistrationReviewStatus.Pending,
+            createdAt: new Date(),
+            userId: null
+          });
+        } else {
+          user = await createRegisteredUser(manager, username, email, passwordHash, true);
+        }
       });
 
       if (this.configService.config.preference.security.requireEmailVerification) {

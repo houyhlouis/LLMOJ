@@ -1,11 +1,11 @@
 {
   "name": "@libreoj/backend",
   "version": "0.0.1",
-  "description": "The backend service of LibreOJ",
+  "description": "The backend service of LLMOJ",
   "private": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/LibreOJ/LibreOJ.git",
+    "url": "https://github.com/houyhlouis/LLMOJ.git",
     "directory": "apps/backend"
   },
   "license": "MIT",

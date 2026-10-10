@@ -1,6 +1,11 @@
 import { Module, forwardRef } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
 
+import { RegistrationApplicationEntity } from "./registration-application.entity";
+
+import { RegistrationReviewEntity } from "./registration-review.entity";
+import { RegistrationReviewService } from "./registration-review.service";
+
 import { UserAuthEntity } from "./user-auth.entity";
 
 import { AuthService } from "./auth.service";
@@ -22,7 +27,7 @@ import { MigrationModule } from "../migration/migration.module";
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([UserAuthEntity]),
+    TypeOrmModule.forFeature([UserAuthEntity, RegistrationReviewEntity, RegistrationApplicationEntity]),
     forwardRef(() => UserModule),
     forwardRef(() => GroupModule),
     forwardRef(() => RedisModule),
@@ -30,8 +35,20 @@ import { MigrationModule } from "../migration/migration.module";
     forwardRef(() => AuditModule),
     forwardRef(() => MigrationModule)
   ],
-  providers: [AuthService, AuthEmailVerificationCodeService, AuthSessionService, AuthIpLocationService],
+  providers: [
+    RegistrationReviewService,
+    AuthService,
+    AuthEmailVerificationCodeService,
+    AuthSessionService,
+    AuthIpLocationService
+  ],
   controllers: [AuthController],
-  exports: [AuthService, AuthEmailVerificationCodeService, AuthSessionService, AuthIpLocationService]
+  exports: [
+    RegistrationReviewService,
+    AuthService,
+    AuthEmailVerificationCodeService,
+    AuthSessionService,
+    AuthIpLocationService
+  ]
 })
 export class AuthModule {}

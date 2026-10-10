@@ -1,11 +1,13 @@
 # LLMOJ Wiki
 
-简体中文 | [English](Home.en.md)
+简体中文 | [English](Home.en.md) | [项目仓库](https://github.com/houyhlouis/LLMOJ)
 
 LLMOJ 是基于 LibreOJ 的 AI 辅助在线评测平台。从 [配置总览](Configuration.zh-CN.md) 查找配置项，首次部署从安装教程开始。CPU 核心数或内存调整后，请按 [评测配置与扩缩容](Judge-Configuration.zh-CN.md) 同步更新执行槽、CPU 绑定和 systemd 单元。
 
 | 场景 | 页面 |
 | --- | --- |
+| 注册方式、委派审核、待审核申请限制 | [注册审核](Registration-Approval.zh-CN.md) |
+| 保留配置与数据升级、兼容检查和回滚 | [一键升级](Upgrade.zh-CN.md) |
 | 安装入口、全部参数和安装重试 | [Installation](Installation.zh-CN.md) |
 | 后端 YAML：账号、安全、数据库、邮件、存储、比赛和显示偏好 | [Backend-Configuration](Backend-Configuration.zh-CN.md) |
 | 评测 YAML、CPU／内存扩缩容、服务单元、验证和回滚 | [Judge-Configuration](Judge-Configuration.zh-CN.md) |
@@ -22,4 +24,4 @@ LLMOJ 是基于 LibreOJ 的 AI 辅助在线评测平台。从 [配置总览](Con
 
 默认完整安装保留网页、存储和本机评测，可额外连接远程评测机。`--role web` 不构建本机 rootfs；目前远程提交评测不能替代 AI 验证／数据生成所需的本机 worker。
 
-现有配置字段沿用已核对源码；新增 CPU-2 容量策略、数据库初始化修复和正式 resize 脚本属于基于 `f302111a01fdfd11a0ab555d9470233edea06d76` 的待提交修订，新文件链接暂用 `main`。Ubuntu 24.04 amd64 已通过实际部署与功能验证；具体版本和测试边界见 [安装说明](Installation.zh-CN.md)。项目主体采用 MIT；各上游组件保留各自许可。
+注册审核与升级工具基于 `20dec6f86213e886e79859187b9ef599bd33ec25` 扩展；新增文件须随对应版本发布。Ubuntu 24.04 amd64 已通过实际部署与功能验证；各次修订的验证范围以测试报告为准。项目主体采用 MIT；各上游组件保留各自许可。

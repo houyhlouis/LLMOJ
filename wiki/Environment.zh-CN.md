@@ -11,6 +11,7 @@
 | `LIBREOJ_CONFIG_FILE` | 后端必填：完整 YAML 路径（建议绝对路径）；安装器设为 `<root>/config/backend.yaml` |
 | `LIBREOJ_JUDGE_CONFIG_FILE` | 评测端必填：完整 YAML 路径；安装器设为 `<root>/config/judge.yaml` |
 | `LIBREOJ_JUDGE_LOG_LEVEL` | 评测日志级别，缺省 `info`；采用 Winston 等级（如 error、warn、info、debug） |
+| `LIBREOJ_SCHEMA_SYNC` | 值恰为 `0` 时禁止后端启动时自动同步数据库结构；未设或其它值保留旧行为。升级器先执行受控迁移，再用独立 systemd drop-in 固定为 0；不要靠开启自动同步绕过升级检查。 |
 | `LIBREOJ_LOG_SQL` | 后端 SQL 日志；任意非空字符串都开启，包括 `0` 和 `false`；关闭应移除或留空 |
 | `NODE_ENV` | 服务设为 `production`；后端仅输出 warn/error 等生产日志；也影响前端构建模式 |
 | `NODE_OPTIONS` | 服务生成值 `--max-old-space-size=512`，构建脚本设为 `--max-old-space-size=2300`；单位 MiB，仅 V8 堆，不是总进程或沙盒上限 |
@@ -75,6 +76,7 @@ AI 运行变量 `HYHOJ_AI_STATE_DIR`、`HYHOJ_AI_GENERATED_DIR`、`HYHOJ_AI_SAMP
 
 | 变量 | 默认 / 用途 | 读取它的测试 |
 | --- | --- | --- |
+| `LLMOJ_REGISTRATION_TEST_DATABASE` | 审核并发集成测试的私有 JSON，含隔离 socket 与测试库连接；未设则跳过；详见开发文档 | `registration-review.mariadb.test.cjs` |
 | `HYHOJ_DISCUSSION_TEST_DB_CONFIG` | 含 `services.database` 的后端 YAML 路径；未设置则跳过真实 MariaDB 讨论边界测试 | `discussion-boundaries.mariadb.test.cjs` |
 | `HYHOJ_DISCUSSION_TEST_EVIDENCE` | 可选 JSON 证据文件路径，记录边界用例及临时表清理结果 | 同上 |
 | `HYHOJ_COUNT_TEST_SERVICE_BASELINE` | 可选基线源码根目录；保留 `apps/backend/src/...` 层级，只替换加载的 `discussion.service.ts`、`group.service.ts`；未设置使用当前源码 | `group-discussion-counts.mariadb.test.cjs` |
@@ -100,6 +102,7 @@ AI 运行变量 `HYHOJ_AI_STATE_DIR`、`HYHOJ_AI_GENERATED_DIR`、`HYHOJ_AI_SAMP
 
 | 工具 | 参数与作用 |
 | --- | --- |
+| `upgrade.zh-CN.sh` / `upgrade.sh` → `deploy/upgrade.sh` | `--prefix`、`--plan`、`--ref`、`--source`、`--source-sha256`、`--apply --drained`、`--rollback BACKUP --drained`；完整兼容范围、维护确认与回滚规则见 [升级教程](Upgrade.zh-CN.md) |
 | `deploy/resize-judge.sh`（实现 `resize-judge.py`） | 已有 judge 的正式维护入口；`--prefix`（默认 `/opt/LibreOJ`）、`--slots`、`--plan`、`--apply --drained`、`--rollback PRIVATE_BACKUP --drained`、`--mode auto\|all\|remote`；默认中文交互，详情见 [扩缩容教程](Judge-Configuration.zh-CN.md) |
 | `deploy/judge_capacity.py` | 只读容量检查；`--remote`、`--json`、`--slots N`；读取 affinity/cgroup/内存，不创建工作目录或改变服务 |
 | `deploy/initialize-mariadb.py` | 内部安装工具，必填 `--root`；使用 mysql 身份暂存初始化及系统表验证，已有非空数据库保留并验证；不是在线升级/重置接口 |

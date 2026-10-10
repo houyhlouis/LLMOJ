@@ -1,11 +1,11 @@
 {
   "name": "@libreoj/judge",
   "version": "1.0.0",
-  "description": "The judge service of LibreOJ",
+  "description": "The judge service of LLMOJ",
   "private": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/LibreOJ/LibreOJ.git",
+    "url": "https://github.com/houyhlouis/LLMOJ.git",
     "directory": "apps/judge"
   },
   "license": "MIT",

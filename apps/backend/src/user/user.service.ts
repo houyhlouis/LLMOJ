@@ -33,6 +33,7 @@ import { SubmissionService } from "../submission/submission.service";
 import { SubmissionEntity } from "../submission/submission.entity";
 import { ConfigService } from "../config/config.service";
 import { AuthEmailVerificationCodeService } from "../auth/auth-email-verification-code.service";
+import { RegistrationApplicationEntity } from "../auth/registration-application.entity";
 import { AuditLogObjectType, AuditService } from "../audit/audit.service";
 import { delay, DELAY_FOR_SECURITY } from "../common/delay";
 
@@ -162,7 +163,8 @@ export class UserService {
     return (
       (await this.userRepository.countBy({
         username
-      })) === 0
+      })) === 0 &&
+      (await this.connection.manager.countBy(RegistrationApplicationEntity, { reservedUsername: username })) === 0
     );
   }
 
@@ -170,7 +172,8 @@ export class UserService {
     return (
       (await this.userRepository.countBy({
         email
-      })) === 0
+      })) === 0 &&
+      (await this.connection.manager.countBy(RegistrationApplicationEntity, { reservedEmail: email })) === 0
     );
   }
 

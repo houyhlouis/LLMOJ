@@ -30,15 +30,21 @@ cd /opt/LibreOJ
 sudo env PATH=/opt/LibreOJ/runtime/node/bin:/opt/LibreOJ/runtime/tooling/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin   OJ_SITE_NAME="AI Practice"   /opt/LibreOJ/runtime/node/bin/node deploy/build-frontend-offline.mjs --build
 ```
 
+## Project links and display names
+
+The website footer links to [houyhlouis/LLMOJ](https://github.com/houyhlouis/LLMOJ). Initial page titles, loading-error messages and new-installation footer defaults use LLMOJ. Custom site names, footer text and home-page content remain effective. The frontend displays the exact legacy built-in footer value `LibreOJ Open Source Project` as LLMOJ without rewriting backend configuration. Original copyright, licenses and upstream attribution remain intact.
+
+Without a URL argument, `packages/frontend/scripts/generate-api.js` reads local Swagger at `http://127.0.0.1:2002/docs-json`. Pass the full Swagger URL for a different backend. This development API endpoint serves a different purpose from the project repository link.
+
 ## Optional upstream CDN/bootstrap path
 
-`packages/bootstrap-config/settings.json` belongs to a separate bootstrap deployment system and is not read by local one-click installation. Its example values reference upstream services: replace them before independent deployment or requests/assets will point to someone else's site. This legacy path received a structural documentation review, not a deployment acceptance test.
+`packages/bootstrap-config/settings.json` belongs to a separate bootstrap deployment system and is not read by local one-click installation. Its display title is LLMOJ; its API and asset examples still reference the upstream publishing services: replace them before independent deployment or requests/assets will point to someone else's site. This legacy path received a structural documentation review, not a deployment acceptance test.
 
 `env` is a JSON dictionary, **not process environment**. The builder expands `${name}` references in order, allowing later values to refer to earlier keys. All 15 current example keys are listed below; custom string keys can be added for substitutions.
 
 | Key | Example (not local default) | Purpose |
 | --- | --- | --- |
-| `env.title` | `LibreOJ` | Initial page title |
+| `env.title` | `LLMOJ` | Initial page title |
 | `env.cdnRoot` | `https://static.cdn.menci.xyz/libreoj-frontend` | Frontend asset base |
 | `env.apiEndpoint` | `https://api.loj.ac` | Default-region backend address |
 | `env.apiEndpointCN` | `https://api.loj.ac` | CN-region backend address |
@@ -73,4 +79,4 @@ Rebuild bootstrap-config and the relevant bootstrap application, then deploy HTM
 
 The Cloudflare variant requires `CLOUDFLARE_WORKER_NAME` and `CLOUDFLARE_ACCOUNT_ID` to generate `wrangler.toml`. The OSS variant requires `ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, `ALIYUN_OSS_BUCKET`, and `ALIYUN_OSS_ENDPOINT` and publishes CN-region pages. Neither is part of one-click deployment. Keep credentials out of settings.json and the Wiki; see [Environment](Environment.md).
 
-Sources: [deploy/build-frontend-offline.mjs](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/build-frontend-offline.mjs), [packages/bootstrap-config/settings.json](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/bootstrap-config/settings.json), [packages/bootstrap-config/src/build.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/bootstrap-config/src/build.ts), [apps/bootstrap-cloudflare/config.mjs](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/bootstrap-cloudflare/config.mjs), [apps/bootstrap-static/deploy-oss.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/bootstrap-static/deploy-oss.ts).
+Sources: [deploy/build-frontend-offline.mjs](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/build-frontend-offline.mjs), [packages/bootstrap-config/settings.json](https://github.com/houyhlouis/LLMOJ/blob/main/packages/bootstrap-config/settings.json), [packages/bootstrap-config/src/build.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/bootstrap-config/src/build.ts), [apps/bootstrap-cloudflare/config.mjs](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/bootstrap-cloudflare/config.mjs), [apps/bootstrap-static/deploy-oss.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/bootstrap-static/deploy-oss.ts).

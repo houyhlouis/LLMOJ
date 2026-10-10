@@ -4,7 +4,7 @@
 
 **LLMOJ 是基于 LibreOJ 的在线评测平台，面向算法竞赛、日常训练与 AI 辅助出题。** 它将题库、比赛、评测和用户权限管理整合在一起，并提供题面整理、翻译、来源检索及测试数据生成等 AI 工作流。
 
-[使用文档](wiki/Home.md) · [AI 配置](wiki/AI.zh-CN.md) · [分布式评测](wiki/Distributed-Judging.zh-CN.md) · [问题反馈](https://github.com/houyhlouis/LLMOJ/issues)
+[项目仓库](https://github.com/houyhlouis/LLMOJ) · [使用文档](wiki/Home.md) · [AI 配置](wiki/AI.zh-CN.md) · [分布式评测](wiki/Distributed-Judging.zh-CN.md) · [问题反馈](https://github.com/houyhlouis/LLMOJ/issues)
 
 ## 功能特性
 
@@ -13,6 +13,7 @@
 - 中英文界面与浏览器代码编辑器，支持题目管理、题单、讨论及提交记录查询。
 - 支持 NOI、IOI、ICPC 赛制，提供比赛权限、排行榜和重评功能。
 - 支持多用户、用户组、题目与讨论授权，以及比赛和管理功能的权限控制。
+- 新用户注册可设为开放、审核或关闭；管理员可授权普通用户审核，已拒绝申请可改为通过，旧账号保持可用。
 
 ### 多语言评测与扩展
 
@@ -31,8 +32,6 @@
 AI 生成内容需要审核。标程验证和测试数据生成的执行环节依赖网页节点上的本机沙盒；部署模式和配置方法见下文及 [AI 文档](wiki/AI.zh-CN.md)。
 
 ## 一键安装
-
-本次新增的容量策略、数据库初始化修复及扩缩容脚本属于待提交修订；只有对应文件合并发布后，下面的 `main` 下载入口才会包含这些更新。
 
 ### 环境要求
 
@@ -64,6 +63,19 @@ curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/install.zh-CN
 
 公网使用请配置 [HTTPS](wiki/HTTPS.zh-CN.md)，并在防火墙或云安全组中放行选定的网站端口。安装器不会自动修改防火墙规则。
 
+## 注册审核与版本升级
+
+需要审核新账号时，在现有 `config/backend.yaml` 的 `preference.security` 中设置 `registrationMode: approval`，重启后端并刷新页面。管理员或获授 `ManageRegistrationReviews` 权限的审核者从用户菜单进入“注册审核”；普通用户默认无此权限。申请独立保存，通过审核时才创建账户并分配用户 ID；已拒绝申请可再批准，历史审核日志保留，已通过申请不能反转。省略该字段默认为 `open`，`closed` 可关闭新注册。完整步骤、邮件验证与状态规则见 [注册审核](wiki/Registration-Approval.zh-CN.md)。
+
+已有官方一键安装实例可使用独立升级入口：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/upgrade.zh-CN.sh -o /tmp/llmoj-upgrade.zh-CN.sh && \
+  sudo bash /tmp/llmoj-upgrade.zh-CN.sh --prefix /opt/LibreOJ
+```
+
+脚本检查兼容性、在暂存目录构建、备份并在确认维护窗口后切换版本，保留账号、题库、API Key、配置和评测槽数。先加 `--plan` 可只读检查。它支持已知兼容的官方 `all` / `web` 布局；依赖、运行时或数据库结构不兼容时会停止，不保证跨越任意历史版本。维护前须暂停新提交、等待本机及远程评测和 AI 任务结束。首次使用本功能时，先确认本次修改包已经上传到 GitHub；升级流程、参数和回滚见 [升级教程](wiki/Upgrade.zh-CN.md)。
+
 ## 部署模式
 
 | 模式 | 包含内容与用途 |
@@ -79,6 +91,7 @@ curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/install.zh-CN
 | --- | --- |
 | [安装与配置](wiki/Installation.zh-CN.md) · [Docker 源](wiki/Docker-Sources.zh-CN.md) | 安装参数、镜像源、服务管理与重试 |
 | [分布式评测](wiki/Distributed-Judging.zh-CN.md) · [独立评测机](wiki/Remote-Judge.zh-CN.md) | 系统架构、网页与评测分离、节点接入 |
+| [注册审核](wiki/Registration-Approval.zh-CN.md) · [安全升级](wiki/Upgrade.zh-CN.md) | 注册策略、委派审核、保留配置升级与回滚 |
 | [AI 功能](wiki/AI.zh-CN.md) · [HTTPS](wiki/HTTPS.zh-CN.md) | 模型配置、执行环境与站点加密访问 |
 | [开发说明](README-DEVELOPMENT.zh-CN.md) · [源码包](deploy/SOURCE-PACKAGE.zh-CN.md) | 构建、测试与发布文件范围 |
 

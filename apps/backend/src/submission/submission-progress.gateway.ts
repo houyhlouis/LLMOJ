@@ -90,6 +90,7 @@ export class SubmissionProgressGateway implements OnGatewayConnection, OnGateway
     private readonly metricsService: MetricsService,
     @Inject(forwardRef(() => AuthSessionService))
     private readonly authSessionService: AuthSessionService,
+    @Inject(forwardRef(() => UserPrivilegeService))
     private readonly userPrivilegeService: UserPrivilegeService,
     @Inject(forwardRef(() => ProblemService))
     private readonly problemService: ProblemService

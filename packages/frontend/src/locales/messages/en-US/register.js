@@ -25,7 +25,16 @@ return {
   email_unavailable_message: "You can't register with this email.",
   invalid_password_message: "Invalid password.",
   passwords_do_not_match_message: "Two passwords don't match.",
+  approval_notice:
+    "New accounts require approval by an authorized reviewer. After registering, wait for approval before signing in.",
+  pending_title: "Registration application submitted",
+  pending_message:
+    "{username}, your registration application is awaiting review. A site account and user ID will be created only after approval. You can then sign in with the password you registered with.",
+  registration_closed: "New registrations are currently closed. Existing accounts can still sign in.",
+  unexpected_response: "Unable to confirm registration. Try signing in later or contact an administrator.",
   errors: {
+    REGISTRATION_CLOSED: "New registrations are currently closed.",
+
     ALREADY_LOGGEDIN: "You have already logged in.",
     DUPLICATE_USERNAME: "Username already taken.",
     DUPLICATE_EMAIL: "Email already used.",

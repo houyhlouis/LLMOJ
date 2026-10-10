@@ -55,8 +55,8 @@ security:
     maxRequests: 200
     durationSeconds: 10
 preference:
-  siteName: LibreOJ
-  copyrightNotice: LibreOJ Open Source Project
+  siteName: LLMOJ
+  copyrightNotice: LLMOJ
   security:
     requireEmailVerification: true
     allowUserChangeUsername: true

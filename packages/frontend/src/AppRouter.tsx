@@ -108,6 +108,7 @@ const AppRouter: React.FC = () => {
           "/contest": getRoute(() => import("./pages/contest"), "contest"),
           "/summaries": lazy(() => import("./pages/summaries")),
           "/permissions": lazy(() => import("./pages/access")),
+          "/registration-reviews": lazy(() => import("./pages/registration-review")),
           "/ai/configuration": lazy(() => import("./pages/ai/AiConfigurationPage")),
           "/ai/import": lazy(() => import("./pages/ai/AiImportPage")),
           "/s": getRoute(() => import("./pages/submission"), "s"),

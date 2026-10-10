@@ -4,7 +4,7 @@ const fs = require("fs-extra");
 
 const apiUrl =
   process.argv.filter(arg => arg.toLowerCase().startsWith("http://") || arg.toLowerCase().startsWith("https://"))[0] ||
-  "http://api.libreoj.test/docs-json";
+  "http://127.0.0.1:2002/docs-json";
 
 if (!apiUrl) {
   console.error("Usage: node scripts/generate-api.js <url>");

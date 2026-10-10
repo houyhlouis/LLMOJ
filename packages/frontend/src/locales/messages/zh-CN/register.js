@@ -25,7 +25,15 @@ return {
   email_unavailable_message: "邮箱不可用。",
   invalid_password_message: "密码无效。",
   passwords_do_not_match_message: "两次输入的密码不一致。",
+  approval_notice: "本站的新账户需要审核。提交注册后，请等待审核通过再登录。",
+  pending_title: "注册申请已提交",
+  pending_message:
+    "{username}，你的注册申请正在等待审核。审核通过后才会创建站点账户并分配用户 ID，届时可使用注册时的密码登录。",
+  registration_closed: "本站暂时关闭新用户注册。已有账户仍可正常登录。",
+  unexpected_response: "未能确认注册结果，请稍后尝试登录或联系管理员。",
   errors: {
+    REGISTRATION_CLOSED: "本站暂时关闭新用户注册。",
+
     ALREADY_LOGGEDIN: "你已经登陆过。",
     DUPLICATE_USERNAME: "用户名已被使用。",
     DUPLICATE_EMAIL: "邮箱已被使用。",

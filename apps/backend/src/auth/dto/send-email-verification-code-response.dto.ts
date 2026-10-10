@@ -1,6 +1,9 @@
 import { ApiProperty } from "@nestjs/swagger";
 
 export enum SendEmailVerificationCodeResponseError {
+  REGISTRATION_PENDING = "REGISTRATION_PENDING",
+  REGISTRATION_REJECTED = "REGISTRATION_REJECTED",
+  REGISTRATION_CLOSED = "REGISTRATION_CLOSED",
   PERMISSION_DENIED = "PERMISSION_DENIED", // Change email
   DUPLICATE_EMAIL = "DUPLICATE_EMAIL", // Change email
   NO_SUCH_USER = "NO_SUCH_USER", // Reset password

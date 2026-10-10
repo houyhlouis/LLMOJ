@@ -336,6 +336,13 @@ export const permissionCatalog = [
     defaultValue: true
   },
   {
+    key: "ManageRegistrationReviews",
+    category: "management",
+    zh: "管理注册审核（含拒绝后批准）",
+    en: "Manage registration reviews (including approval after rejection)",
+    defaultValue: false
+  },
+  {
     key: "ManagePermissions",
     category: "management",
     zh: "详细权限管理（仅管理员）",

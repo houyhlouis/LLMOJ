@@ -13,7 +13,7 @@ export const databaseProviders = [
       database: configService.config.services.database.database,
       entities: [`${__dirname}/../**/*.entity{.ts,.js}`],
       logging: !!process.env.LIBREOJ_LOG_SQL,
-      synchronize: true
+      synchronize: process.env.LIBREOJ_SCHEMA_SYNC !== "0"
     }),
     inject: [ConfigService]
   })

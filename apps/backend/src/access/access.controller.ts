@@ -86,6 +86,10 @@ export class AccessController {
       throw new BadRequestException("Invalid permission rule");
     if (!(await this.db.getRepository(UserEntity).countBy({ id: body.userId }))) throw new NotFoundException();
     await this.db.transaction(async manager => {
+      // Serialize permission changes with registration-review authorization,
+      // including insertion of a deny where no explicit rule existed before.
+      if (!(await manager.findOne(UserEntity, { where: { id: body.userId }, lock: { mode: "pessimistic_write" } })))
+        throw new NotFoundException();
       for (const [permission, allowed] of Object.entries(body.overrides)) {
         // eslint-disable-next-line no-await-in-loop -- Permission decisions depend on the current user and are evaluated in order.
         if (allowed === null) await manager.delete(UserPermissionRuleEntity, { userId: body.userId, permission });

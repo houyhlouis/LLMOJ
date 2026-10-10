@@ -6,6 +6,8 @@ import { Injectable } from "@nestjs/common";
 import jwt from "jsonwebtoken";
 import { Redis } from "ioredis";
 
+import { RegistrationReviewService } from "./registration-review.service";
+
 import { UserEntity } from "../user/user.entity";
 import { ConfigService } from "../config/config.service";
 import { UserService } from "../user/user.service";
@@ -34,7 +36,8 @@ export class AuthSessionService {
   constructor(
     private readonly configService: ConfigService,
     private readonly userService: UserService,
-    private readonly redisService: RedisService
+    private readonly redisService: RedisService,
+    private readonly registrationReviews: RegistrationReviewService
   ) {
     this.redis = this.redisService.getClient() as RedisWithSessionManager;
     this.redis.defineCommand("callSessionManager", {
@@ -44,6 +47,7 @@ export class AuthSessionService {
   }
 
   async newSession(user: UserEntity, loginIp: string, userAgent: string): Promise<string> {
+    await this.registrationReviews.requireApproved(user);
     const timeStamp = +new Date();
     const sessionInfo: SessionInfoInternal = {
       loginIp,
@@ -85,7 +89,9 @@ export class AuthSessionService {
       const success = await this.redis.callSessionManager("access", +new Date(), userId, sessionId);
       if (!success) return [null, null];
 
-      return [sessionId, await this.userService.findUserById(userId)];
+      const user = await this.userService.findUserById(userId);
+      await this.registrationReviews.requireApproved(user);
+      return [sessionId, user];
     } catch (e) {
       return [null, null];
     }
@@ -94,7 +100,14 @@ export class AuthSessionService {
   // Subscription credentials carry the issuing session's IDs, never its login token.
   async accessSessionById(userId: number, sessionId: number): Promise<UserEntity> {
     const success = await this.redis.callSessionManager("access", Date.now(), userId, sessionId);
-    return success ? await this.userService.findUserById(userId) : null;
+    if (!success) return null;
+    const user = await this.userService.findUserById(userId);
+    try {
+      await this.registrationReviews.requireApproved(user);
+      return user;
+    } catch {
+      return null;
+    }
   }
 
   async listUserSessions(userId: number): Promise<SessionInfo[]> {

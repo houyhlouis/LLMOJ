@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { Header, Segment, Input, Button, Form, Icon, Ref } from "semantic-ui-react";
+import { Header, Segment, Message, Input, Button, Form, Icon, Ref } from "semantic-ui-react";
 import { route } from "navi";
 import { useCurrentRoute } from "react-navi";
 import { observer } from "mobx-react";
@@ -39,6 +39,7 @@ let ForgetPage: React.FC = () => {
   const [password, setPassword] = useState("");
   const [retypePassword, setRetypePassword] = useState("");
   const [resetPasswordPending, setResetPasswordPending] = useState(false);
+  const [registrationError, setRegistrationError] = useState<string>(null);
 
   const refEmailInput = useRef<HTMLInputElement>();
   const refEmailVerificationCodeInput = useRef<HTMLInputElement>();
@@ -79,6 +80,7 @@ let ForgetPage: React.FC = () => {
   async function onSubmit() {
     if (resetPasswordPending) return;
     setResetPasswordPending(true);
+    setRegistrationError(null);
 
     if (!(await waitForEmailCheck())) {
       toast.error(_(".email_invalid_message"));
@@ -102,6 +104,13 @@ let ForgetPage: React.FC = () => {
       if (requestError) toast.error(requestError(_));
       else if (response.error) {
         switch (response.error) {
+          case "REGISTRATION_PENDING":
+          case "REGISTRATION_REJECTED":
+            setRegistrationError(response.error);
+            break;
+          case "ALREADY_LOGGEDIN":
+            toast.error(_(`.errors.${response.error}`));
+            break;
           case "NO_SUCH_USER":
             toast.error(_(`.errors.${response.error}`));
             refEmailInput.current.focus();
@@ -145,6 +154,7 @@ let ForgetPage: React.FC = () => {
   async function onSendEmailVerificationCode() {
     if (sendEmailVerificationCodePending) return;
     setSendEmailVerificationCodePending(true);
+    setRegistrationError(null);
 
     if (!(await waitForEmailCheck())) {
       toast.error(_(".email_invalid_message"));
@@ -157,7 +167,9 @@ let ForgetPage: React.FC = () => {
         locale: appState.locale
       });
       if (requestError) toast.error(requestError(_));
-      else if (response.error) toast.error(_(`.errors.${response.error}`, { errorMessage: response.errorMessage }));
+      else if (response.error === "REGISTRATION_PENDING" || response.error === "REGISTRATION_REJECTED") {
+        setRegistrationError(response.error);
+      } else if (response.error) toast.error(_(`.errors.${response.error}`, { errorMessage: response.errorMessage }));
       else {
         toast.success(_(".email_verification_code_sent"));
         setSendEmailVerificationCodeTimeout(61);
@@ -181,6 +193,7 @@ let ForgetPage: React.FC = () => {
           {logo}
           {_(".reset_your_password")}
         </Header>
+        {registrationError && <Message warning role="alert" content={_(`.errors.${registrationError}`)} />}
         <Form size="large" ref={refForm}>
           <Segment>
             {/* email */}

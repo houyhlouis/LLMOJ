@@ -111,9 +111,11 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
       <Button className={style.loginAndRegisterButton} onClick={() => onLoginOrRegisterClick("login")}>
         {_(".header.user.login")}
       </Button>
-      <Button className={style.loginAndRegisterButton} primary onClick={() => onLoginOrRegisterClick("register")}>
-        {_(".header.user.register")}
-      </Button>
+      {appState.serverPreference.security.registrationMode !== "closed" && (
+        <Button className={style.loginAndRegisterButton} primary onClick={() => onLoginOrRegisterClick("register")}>
+          {_(".header.user.register")}
+        </Button>
+      )}
     </>
   );
 
@@ -163,6 +165,12 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
             {appState.locale === "zh_CN" ? "权限管理" : "Permissions"}
           </Dropdown.Item>
         )}
+        {appState.currentUserHasPrivilege("ViewSite") && appState.currentUserHasPrivilege("ManageRegistrationReviews") && (
+          <Dropdown.Item as={Link} href="/registration-reviews">
+            <Icon name="users" />
+            {_(".header.user.registration_reviews")}
+          </Dropdown.Item>
+        )}
         {appState.currentUserHasPrivilege("ManageAiConfiguration") && (
           <Dropdown.Item as={Link} href="/ai/configuration">
             <Icon name="settings" />
@@ -197,7 +205,11 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
       <Segment vertical className={className}>
         <Container textAlign="center">
           <EmojiRenderer>
-            <div>{appState.serverPreference.copyrightNotice}</div>
+            <div>
+              {appState.serverPreference.copyrightNotice === "LibreOJ Open Source Project"
+                ? "LLMOJ"
+                : appState.serverPreference.copyrightNotice}
+            </div>
           </EmojiRenderer>
           <div id={style.footerVersion} className="monospace">
             <span>
@@ -229,7 +241,12 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
                 ))}
               </Dropdown.Menu>
             </Dropdown>
-            <Link href="https://github.com/LibreOJ" title="GitHub" target="_blank" rel="noreferrer noopener">
+            <Link
+              href="https://github.com/houyhlouis/LLMOJ"
+              title={_(".footer.github")}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
               <Icon name="github" />
             </Link>
           </div>

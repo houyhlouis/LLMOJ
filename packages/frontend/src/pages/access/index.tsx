@@ -66,6 +66,12 @@ const AccessPage = observer(() => {
               "Set defaults, grants, or denials for each user. Rules are enforced by the server. Private study lists, summaries, and API keys remain owner-only. Administrators retain administration access."
             )}
           </p>
+          <p className={style.notes}>
+            {t(
+              "“管理注册审核”允许查看所有注册申请的邮箱和审核备注、通过或拒绝待审申请，以及重新批准已拒绝的申请。此权限默认关闭，且仍须具有“访问站点”权限。它不授予权限管理能力；只有管理员可以分配。",
+              "Manage registration reviews grants access to all application emails and review notes, approval or rejection of pending applications, and approval after rejection. It is disabled by default, still requires Access the site, and does not grant permission management; only administrators can assign it."
+            )}
+          </p>
           <UserSearch onResultSelect={x => select(x.id)} />
           {error && <Message negative content={error} />}
           {saved && <Message positive content={t("权限已保存。", "Permissions saved.")} />}

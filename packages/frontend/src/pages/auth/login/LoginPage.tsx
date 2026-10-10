@@ -57,6 +57,7 @@ let LoginPage: React.FC = () => {
   const [usernameOrEmail, setUsernameOrEmail] = useState("");
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
+  const [registrationError, setRegistrationError] = useState<string>(null);
 
   const refUsernameInput = useRef<HTMLInputElement>();
   const refPasswordInput = useRef<HTMLInputElement>();
@@ -125,6 +126,11 @@ let LoginPage: React.FC = () => {
 
   function handleCommonError(error: string) {
     switch (error) {
+      case "REGISTRATION_PENDING":
+      case "REGISTRATION_REJECTED":
+        setError(null, null);
+        setRegistrationError(error);
+        break;
       case "NO_SUCH_USER":
         setError("usernameOrEmail", _(".no_such_user"));
         refUsernameInput.current.focus();
@@ -182,6 +188,7 @@ let LoginPage: React.FC = () => {
   async function onSubmit() {
     if (pending) return;
     setPending(true);
+    setRegistrationError(null);
 
     if (usernameOrEmail.length === 0) {
       setError("usernameOrEmail", _(".empty_username_or_email"));
@@ -237,6 +244,7 @@ let LoginPage: React.FC = () => {
           {logo}
           {_(".login_to_your_account")}
         </Header>
+        {registrationError && <Message warning role="alert" content={_(`.errors.${registrationError}`)} />}
         <Form size="large">
           <Segment>
             <Ref innerRef={field => field && (refUsernameInput.current = field.querySelector("input"))}>
@@ -304,8 +312,14 @@ let LoginPage: React.FC = () => {
           </Segment>
         </Form>
         <Message className={style.message}>
-          {_(".new_user")}
-          <PseudoLink onClick={() => navigateTo("register")}>{_(".register")}</PseudoLink>
+          {appState.serverPreference.security.registrationMode === "closed" ? (
+            _(".registration_closed")
+          ) : (
+            <>
+              {_(".new_user")}
+              <PseudoLink onClick={() => navigateTo("register")}>{_(".register")}</PseudoLink>
+            </>
+          )}
         </Message>
       </div>
     </>

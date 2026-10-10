@@ -39,3 +39,12 @@ export const revokeUserSession = createPostApi<
   ApiTypes.RevokeUserSessionRequestDto,
   ApiTypes.RevokeUserSessionResponseDto
 >("auth/revokeUserSession", {});
+
+export const listRegistrationReviews = createPostApi<
+  ApiTypes.ListRegistrationReviewsRequestDto,
+  ApiTypes.ListRegistrationReviewsResponseDto
+>("auth/listRegistrationReviews", {});
+export const reviewRegistration = createPostApi<
+  ApiTypes.ReviewRegistrationRequestDto,
+  ApiTypes.ReviewRegistrationResponseDto
+>("auth/reviewRegistration", {});

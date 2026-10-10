@@ -1,0 +1,30 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+.tableContainer {
+  overflow-x: auto;
+}
+.reason {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 32rem;
+}
+
+.status {
+  font-weight: 600;
+  white-space: nowrap;
+
+  &[data-registration-status="pending"] {
+    color: #9a6700;
+  }
+  &[data-registration-status="approved"] {
+    color: #137333;
+  }
+  &[data-registration-status="rejected"] {
+    color: #c5221f;
+  }
+}

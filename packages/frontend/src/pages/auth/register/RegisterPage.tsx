@@ -41,6 +41,10 @@ let RegisterPage: React.FC = () => {
   }, [appState.locale]);
 
   const [successMessage, setSuccessMessage] = useState<string>(null);
+  const [awaitingApproval, setAwaitingApproval] = useState(false);
+  const [registrationClosed, setRegistrationClosed] = useState(false);
+  const registrationMode = appState.serverPreference.security.registrationMode || "open";
+  const isClosed = registrationClosed || registrationMode === "closed";
 
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -121,7 +125,7 @@ let RegisterPage: React.FC = () => {
   const [emailVerificationCodeError, setEmailVerificationCodeError] = useState(false);
 
   async function onSubmit() {
-    if (registerPending) return;
+    if (registerPending || awaitingApproval || isClosed) return;
     setRegisterPending(true);
 
     if (!(await waitForUsernameCheck())) {
@@ -151,6 +155,9 @@ let RegisterPage: React.FC = () => {
       if (requestError) toast.error(requestError(_));
       else if (response.error) {
         switch (response.error) {
+          case "REGISTRATION_CLOSED":
+            setRegistrationClosed(true);
+            break;
           case "ALREADY_LOGGEDIN":
             toast.error(_(`.errors.${response.error}`));
             break;
@@ -172,7 +179,12 @@ let RegisterPage: React.FC = () => {
             refEmailVerificationCodeInput.current.focus();
             break;
         }
-      } else {
+      } else if (response.registrationStatus === "pending") {
+        // An application does not grant a session. Stay here until the user chooses to leave.
+        setAwaitingApproval(true);
+        setPassword("");
+        setRetypePassword("");
+      } else if (response.token) {
         // Register success
         appState.token = response.token;
 
@@ -186,6 +198,8 @@ let RegisterPage: React.FC = () => {
         }
 
         return;
+      } else {
+        toast.error(_(".unexpected_response"));
       }
     }
 
@@ -203,7 +217,7 @@ let RegisterPage: React.FC = () => {
   }, []);
 
   async function onSendEmailVerificationCode() {
-    if (sendEmailVerificationCodePending) return;
+    if (sendEmailVerificationCodePending || awaitingApproval || isClosed) return;
     setSendEmailVerificationCodePending(true);
 
     if (!(await waitForEmailCheck())) {
@@ -217,6 +231,7 @@ let RegisterPage: React.FC = () => {
         locale: appState.locale
       });
       if (requestError) toast.error(requestError(_));
+      else if (response.error === "REGISTRATION_CLOSED") setRegistrationClosed(true);
       else if (response.error) toast.error(_(`.errors.${response.error}`, { errorMessage: response.errorMessage }));
       else {
         toast.success(_(".email_verification_code_sent"));
@@ -241,168 +256,179 @@ let RegisterPage: React.FC = () => {
           {logo}
           {_(".register_new_account")}
         </Header>
-        <Form size="large" ref={refForm}>
-          <Segment>
-            {/* username */}
-            <Ref innerRef={field => field && (refUsernameInput.current = field.querySelector("input"))}>
-              <Form.Field
-                control={Input}
-                error={
-                  getUsernameUIValidateStatus() === "error" && {
-                    content: getUsernameUIHelp(),
-                    pointing: "left"
-                  }
-                }
-                loading={getUsernameUIValidateStatus() === "validating"}
-                fluid
-                icon="user"
-                iconPosition="left"
-                placeholder={_(".username")}
-                value={username}
-                autoComplete="username"
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUsername(e.target.value)}
-                onBlur={() => checkUsername()}
-                onKeyPress={onEnterPress(() => refEmailInput.current.focus())}
-              />
-            </Ref>
-
-            {/* email */}
-            <Ref innerRef={field => field && (refEmailInput.current = field.querySelector("input"))}>
-              <Form.Field
-                control={Input}
-                error={
-                  getEmailUIValidateStatus() === "error" && {
-                    content: getEmailUIHelp(),
-                    pointing: "left"
-                  }
-                }
-                loading={getEmailUIValidateStatus() === "validating"}
-                fluid
-                icon="envelope"
-                iconPosition="left"
-                placeholder={_(".email")}
-                value={email}
-                autoComplete="email"
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
-                onBlur={() => checkEmail()}
-                onKeyPress={onEnterPress(() => {
-                  if (appState.serverPreference.security.requireEmailVerification) {
-                    refEmailVerificationCodeInput.current.focus();
-                    if (sendEmailVerificationCodeTimeout === 0) onSendEmailVerificationCode();
-                  } else refPasswordInput.current.focus();
-                })}
-              />
-            </Ref>
-
-            {
-              /* email verification code */
-              appState.serverPreference.security.requireEmailVerification && (
-                <Ref
-                  innerRef={field => field && (refEmailVerificationCodeInput.current = field.querySelector("input"))}
-                >
+        {awaitingApproval ? (
+          <Message positive role="status" header={_(".pending_title")} content={_(".pending_message", { username })} />
+        ) : isClosed ? (
+          <Message info role="status" content={_(".registration_closed")} />
+        ) : (
+          <>
+            {registrationMode === "approval" && <Message info content={_(".approval_notice")} />}
+            <Form size="large" ref={refForm}>
+              <Segment>
+                {/* username */}
+                <Ref innerRef={field => field && (refUsernameInput.current = field.querySelector("input"))}>
                   <Form.Field
                     control={Input}
                     error={
-                      emailVerificationCodeError && {
-                        content: _(".invalid_email_verification_code"),
+                      getUsernameUIValidateStatus() === "error" && {
+                        content: getUsernameUIHelp(),
                         pointing: "left"
                       }
                     }
+                    loading={getUsernameUIValidateStatus() === "validating"}
                     fluid
-                    icon="shield"
+                    icon="user"
                     iconPosition="left"
-                    placeholder={_(".email_verification_code")}
-                    value={emailVerificationCode}
-                    autoComplete="off"
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChangeVerificationCode(e.target.value)}
-                    onKeyPress={onEnterPress(() => refPasswordInput.current.focus())}
-                    action={
-                      <Button
-                        tabIndex={-1}
-                        disabled={sendEmailVerificationCodeTimeout !== 0}
-                        loading={sendEmailVerificationCodePending}
-                        content={
-                          sendEmailVerificationCodeTimeout
-                            ? `${sendEmailVerificationCodeTimeout > 60 ? 60 : sendEmailVerificationCodeTimeout}s`
-                            : _(".send_email_verification_code")
-                        }
-                        onClick={onSendEmailVerificationCode}
-                      />
-                    }
+                    placeholder={_(".username")}
+                    value={username}
+                    autoComplete="username"
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUsername(e.target.value)}
+                    onBlur={() => checkUsername()}
+                    onKeyPress={onEnterPress(() => refEmailInput.current.focus())}
                   />
                 </Ref>
-              )
-            }
 
-            {/* password */}
-            <Ref innerRef={field => field && (refPasswordInput.current = field.querySelector("input"))}>
-              <Form.Field
-                control={Input}
-                error={
-                  getPasswordUIValidateStatus() === "error" && {
-                    content: getPasswordUIHelp(),
-                    pointing: "left"
-                  }
-                }
-                loading={getPasswordUIValidateStatus() === "validating"}
-                fluid
-                icon="lock"
-                iconPosition="left"
-                placeholder={_(".password")}
-                value={password}
-                type="password"
-                autoComplete="new-password"
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
-                onBlur={() => checkPassword()}
-                onKeyPress={onEnterPress(() => refRetypePasswordInput.current.focus())}
-              />
-            </Ref>
-            <Ref innerRef={field => field && (refRetypePasswordInput.current = field.querySelector("input"))}>
-              <Form.Field
-                control={Input}
-                error={
-                  getRetypePasswordUIValidateStatus() === "error" && {
-                    content: getRetypePasswordUIHelp(),
-                    pointing: "left"
-                  }
-                }
-                loading={getRetypePasswordUIValidateStatus() === "validating"}
-                fluid
-                icon="lock"
-                iconPosition="left"
-                placeholder={_(".retype_password")}
-                value={retypePassword}
-                type="password"
-                autoComplete="new-password"
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRetypePassword(e.target.value)}
-                onBlur={() => checkRetypePassword()}
-                onKeyPress={onEnterPress(() => {
-                  checkRetypePassword(); // Since the focus is not lost, forcibly re-check the field
-                  onSubmit();
-                })}
-              />
-            </Ref>
+                {/* email */}
+                <Ref innerRef={field => field && (refEmailInput.current = field.querySelector("input"))}>
+                  <Form.Field
+                    control={Input}
+                    error={
+                      getEmailUIValidateStatus() === "error" && {
+                        content: getEmailUIHelp(),
+                        pointing: "left"
+                      }
+                    }
+                    loading={getEmailUIValidateStatus() === "validating"}
+                    fluid
+                    icon="envelope"
+                    iconPosition="left"
+                    placeholder={_(".email")}
+                    value={email}
+                    autoComplete="email"
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
+                    onBlur={() => checkEmail()}
+                    onKeyPress={onEnterPress(() => {
+                      if (appState.serverPreference.security.requireEmailVerification) {
+                        refEmailVerificationCodeInput.current.focus();
+                        if (sendEmailVerificationCodeTimeout === 0) onSendEmailVerificationCode();
+                      } else refPasswordInput.current.focus();
+                    })}
+                  />
+                </Ref>
 
-            <Button
-              className={successMessage && style.successButton}
-              primary={!successMessage}
-              color={successMessage ? "green" : null}
-              fluid
-              size="large"
-              loading={registerPending && !successMessage}
-              onClick={() => onSubmit()}
-            >
-              {successMessage ? (
-                <>
-                  <Icon name="checkmark" />
-                  {successMessage}
-                </>
-              ) : (
-                _(".register")
-              )}
-            </Button>
-          </Segment>
-        </Form>
+                {
+                  /* email verification code */
+                  appState.serverPreference.security.requireEmailVerification && (
+                    <Ref
+                      innerRef={field =>
+                        field && (refEmailVerificationCodeInput.current = field.querySelector("input"))
+                      }
+                    >
+                      <Form.Field
+                        control={Input}
+                        error={
+                          emailVerificationCodeError && {
+                            content: _(".invalid_email_verification_code"),
+                            pointing: "left"
+                          }
+                        }
+                        fluid
+                        icon="shield"
+                        iconPosition="left"
+                        placeholder={_(".email_verification_code")}
+                        value={emailVerificationCode}
+                        autoComplete="off"
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChangeVerificationCode(e.target.value)}
+                        onKeyPress={onEnterPress(() => refPasswordInput.current.focus())}
+                        action={
+                          <Button
+                            tabIndex={-1}
+                            disabled={sendEmailVerificationCodeTimeout !== 0}
+                            loading={sendEmailVerificationCodePending}
+                            content={
+                              sendEmailVerificationCodeTimeout
+                                ? `${sendEmailVerificationCodeTimeout > 60 ? 60 : sendEmailVerificationCodeTimeout}s`
+                                : _(".send_email_verification_code")
+                            }
+                            onClick={onSendEmailVerificationCode}
+                          />
+                        }
+                      />
+                    </Ref>
+                  )
+                }
+
+                {/* password */}
+                <Ref innerRef={field => field && (refPasswordInput.current = field.querySelector("input"))}>
+                  <Form.Field
+                    control={Input}
+                    error={
+                      getPasswordUIValidateStatus() === "error" && {
+                        content: getPasswordUIHelp(),
+                        pointing: "left"
+                      }
+                    }
+                    loading={getPasswordUIValidateStatus() === "validating"}
+                    fluid
+                    icon="lock"
+                    iconPosition="left"
+                    placeholder={_(".password")}
+                    value={password}
+                    type="password"
+                    autoComplete="new-password"
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
+                    onBlur={() => checkPassword()}
+                    onKeyPress={onEnterPress(() => refRetypePasswordInput.current.focus())}
+                  />
+                </Ref>
+                <Ref innerRef={field => field && (refRetypePasswordInput.current = field.querySelector("input"))}>
+                  <Form.Field
+                    control={Input}
+                    error={
+                      getRetypePasswordUIValidateStatus() === "error" && {
+                        content: getRetypePasswordUIHelp(),
+                        pointing: "left"
+                      }
+                    }
+                    loading={getRetypePasswordUIValidateStatus() === "validating"}
+                    fluid
+                    icon="lock"
+                    iconPosition="left"
+                    placeholder={_(".retype_password")}
+                    value={retypePassword}
+                    type="password"
+                    autoComplete="new-password"
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRetypePassword(e.target.value)}
+                    onBlur={() => checkRetypePassword()}
+                    onKeyPress={onEnterPress(() => {
+                      checkRetypePassword(); // Since the focus is not lost, forcibly re-check the field
+                      onSubmit();
+                    })}
+                  />
+                </Ref>
+
+                <Button
+                  className={successMessage && style.successButton}
+                  primary={!successMessage}
+                  color={successMessage ? "green" : null}
+                  fluid
+                  size="large"
+                  loading={registerPending && !successMessage}
+                  onClick={() => onSubmit()}
+                >
+                  {successMessage ? (
+                    <>
+                      <Icon name="checkmark" />
+                      {successMessage}
+                    </>
+                  ) : (
+                    _(".register")
+                  )}
+                </Button>
+              </Segment>
+            </Form>
+          </>
+        )}
         <Message className={style.message}>
           {_(".already_have_account")}
           <PseudoLink onClick={() => navigateTo("login")}>{_(".login")}</PseudoLink>

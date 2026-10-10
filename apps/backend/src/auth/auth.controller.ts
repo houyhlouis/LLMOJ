@@ -11,6 +11,15 @@ import { AuthIpLocationService } from "./auth-ip-location.service";
 
 import { RequestWithSession } from "./auth.middleware";
 
+import { RegistrationReviewService } from "./registration-review.service";
+import { RegistrationReviewStatus } from "./registration-review.entity";
+import {
+  ListRegistrationReviewsRequestDto,
+  ListRegistrationReviewsResponseDto,
+  ReviewRegistrationRequestDto,
+  ReviewRegistrationResponseDto
+} from "./dto/registration-review.dto";
+
 import { AuthService } from "./auth.service";
 
 import {
@@ -70,7 +79,8 @@ export class AuthController {
     private readonly authSessionService: AuthSessionService,
     private readonly authIpLocationService: AuthIpLocationService,
     private readonly auditService: AuditService,
-    private readonly userMigrationService: UserMigrationService
+    private readonly userMigrationService: UserMigrationService,
+    private readonly registrationReviews: RegistrationReviewService
   ) {}
 
   @Get("getSessionInfo")
@@ -142,6 +152,15 @@ export class AuthController {
       ? await this.userService.findUserByUsername(request.username)
       : await this.userService.findUserByEmail(request.email);
     if (!user) {
+      const applicationStatus = await this.registrationReviews.checkApplicationPassword(
+        request.username,
+        request.email,
+        request.password
+      );
+      if (applicationStatus === RegistrationReviewStatus.Pending)
+        return { error: LoginResponseError.REGISTRATION_PENDING };
+      if (applicationStatus === RegistrationReviewStatus.Rejected)
+        return { error: LoginResponseError.REGISTRATION_REJECTED };
       if (request.username) {
         // The username may be a non-migrated old user
         const userMigrationInfo = await this.userMigrationService.findUserMigrationInfoByOldUsername(request.username);
@@ -165,6 +184,12 @@ export class AuthController {
         error: LoginResponseError.WRONG_PASSWORD
       };
     }
+
+    const registrationStatus = await this.registrationReviews.status(user);
+    if (registrationStatus === RegistrationReviewStatus.Pending)
+      return { error: LoginResponseError.REGISTRATION_PENDING };
+    if (registrationStatus === RegistrationReviewStatus.Rejected)
+      return { error: LoginResponseError.REGISTRATION_REJECTED };
 
     await this.auditService.log(user.id, "auth.login");
 
@@ -222,6 +247,8 @@ export class AuthController {
     @Body() request: SendEmailVerificationCodeRequestDto
   ): Promise<SendEmailVerificationCodeResponseDto> {
     if (request.type === EmailVerificationCodeType.Register) {
+      if (this.configService.config.preference.security.registrationMode === "closed")
+        return { error: SendEmailVerificationCodeResponseError.REGISTRATION_CLOSED };
       if (currentUser)
         return {
           error: SendEmailVerificationCodeResponseError.ALREADY_LOGGEDIN
@@ -250,10 +277,14 @@ export class AuthController {
         };
 
       const user = await this.userService.findUserByEmail(request.email);
-      if (!user)
-        return {
-          error: SendEmailVerificationCodeResponseError.NO_SUCH_USER
-        };
+      if (!user) {
+        const applicationStatus = await this.registrationReviews.applicationStatusByEmail(request.email);
+        if (applicationStatus === RegistrationReviewStatus.Pending)
+          return { error: SendEmailVerificationCodeResponseError.REGISTRATION_PENDING };
+        if (applicationStatus === RegistrationReviewStatus.Rejected)
+          return { error: SendEmailVerificationCodeResponseError.REGISTRATION_REJECTED };
+        return { error: SendEmailVerificationCodeResponseError.NO_SUCH_USER };
+      }
 
       // Audit logging
       await this.auditService.log(user.id, "auth.request_reset_password");
@@ -297,8 +328,8 @@ export class AuthController {
   @Post("register")
   @ApiBearerAuth()
   @ApiOperation({
-    summary: "Register then login.",
-    description: "Return the session token if success."
+    summary: "Register an account or submit a private application.",
+    description: "Open registration returns a session; approval mode creates no user until approved."
   })
   async register(
     @Req() req: RequestWithSession,
@@ -322,14 +353,38 @@ export class AuthController {
         error
       };
 
-    await this.auditService.log(user.id, "auth.register", {
-      username: request.username,
-      email: request.email
-    });
-
+    // An application has no user ID or session. Its creation timestamp is kept
+    // privately with the application; administrator decisions have audit records.
+    if (!user) return { registrationStatus: "pending" };
+    await this.auditService.log(user.id, "auth.register", { username: request.username, email: request.email });
     return {
+      registrationStatus: "approved",
       token: await this.authSessionService.newSession(user, req.ip, req.headers["user-agent"])
     };
+  }
+
+  @Post("listRegistrationReviews")
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "List registration applications (ManageRegistrationReviews permission required)." })
+  async listRegistrationReviews(
+    @CurrentUser() user: UserEntity,
+    @Body() request: ListRegistrationReviewsRequestDto
+  ): Promise<ListRegistrationReviewsResponseDto> {
+    return await this.registrationReviews.list(user, request);
+  }
+
+  @Post("reviewRegistration")
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      "Approve a pending/rejected application or reject a pending application (ManageRegistrationReviews required)."
+  })
+  async reviewRegistration(
+    @CurrentUser() user: UserEntity,
+    @Body() request: ReviewRegistrationRequestDto,
+    @Req() req: RequestWithSession
+  ): Promise<ReviewRegistrationResponseDto> {
+    return await this.registrationReviews.review(user, request, req.ip);
   }
 
   @ProofOfWork(ProofOfWorkAction.ResetPassword)
@@ -349,10 +404,14 @@ export class AuthController {
       };
 
     const user = await this.userService.findUserByEmail(request.email);
-    if (!user)
-      return {
-        error: ResetPasswordResponseError.NO_SUCH_USER
-      };
+    if (!user) {
+      const applicationStatus = await this.registrationReviews.applicationStatusByEmail(request.email);
+      if (applicationStatus === RegistrationReviewStatus.Pending)
+        return { error: ResetPasswordResponseError.REGISTRATION_PENDING };
+      if (applicationStatus === RegistrationReviewStatus.Rejected)
+        return { error: ResetPasswordResponseError.REGISTRATION_REJECTED };
+      return { error: ResetPasswordResponseError.NO_SUCH_USER };
+    }
 
     const userAuth = await this.authService.findUserAuthByUserId(user.id);
 
@@ -362,6 +421,12 @@ export class AuthController {
       return {
         error: ResetPasswordResponseError.INVALID_EMAIL_VERIFICATION_CODE
       };
+
+    const registrationStatus = await this.registrationReviews.status(user);
+    if (registrationStatus === RegistrationReviewStatus.Pending)
+      return { error: ResetPasswordResponseError.REGISTRATION_PENDING };
+    if (registrationStatus === RegistrationReviewStatus.Rejected)
+      return { error: ResetPasswordResponseError.REGISTRATION_REJECTED };
 
     if (this.authService.checkUserMigrated(userAuth))
       await this.authService.changePassword(userAuth, request.newPassword);

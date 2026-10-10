@@ -84,7 +84,7 @@ async function initialize(): Promise<[packageInfo: any, configService: ConfigSer
   app.set("trust proxy", configService.config.server.trustProxy);
 
   const options = new DocumentBuilder()
-    .setTitle(packageInfo.name)
+    .setTitle("LLMOJ API")
     .setDescription(packageInfo.description)
     .setVersion(appVersion)
     .addBearerAuth()

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/LibreOJ/LibreOJ.git",
+    "url": "https://github.com/houyhlouis/LLMOJ.git",
     "directory": "infra/frontend-cdn"
   },
   "author": "Menci <huanghaorui301@gmail.com>",

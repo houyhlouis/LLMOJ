@@ -10,6 +10,10 @@ return {
   submit: "Submit",
   success: "Password reset",
   errors: {
+    REGISTRATION_PENDING:
+      "Your registration application is awaiting review. No site account has been created, and resetting a password does not bypass registration review.",
+    REGISTRATION_REJECTED:
+      "Your registration application was rejected. No site account has been created. Contact an administrator if you have questions.",
     ALREADY_LOGGEDIN: "You have already logged in.",
     NO_SUCH_USER: "No such user.",
     INVALID_EMAIL_VERIFICATION_CODE: "Invalid email verification code.",

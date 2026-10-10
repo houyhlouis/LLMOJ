@@ -60,6 +60,20 @@ const { DiscussionService, DiscussionPermissionType } = load("discussion/discuss
   const user = { id: 2, isAdmin: false };
   assert.equal(await service.userHasPrivilege(user, P.ViewProblem), true);
   assert.equal(await service.userHasPrivilege(user, P.ManageProblem), false);
+  const reviewPermission = catalog.permissionCatalog.find(item => item.key === P.ManageRegistrationReviews);
+  assert.equal(reviewPermission.category, "management");
+  assert.equal(reviewPermission.defaultValue, false);
+  assert.equal(await service.userHasPrivilege(user, P.ManageRegistrationReviews), false);
+  assert.equal(await service.userHasPrivilege(null, P.ManageRegistrationReviews), false);
+  rules.set(P.ManageRegistrationReviews, true);
+  assert.equal(await service.userHasPrivilege(user, P.ManageRegistrationReviews), true);
+  rules.set(P.ManageRegistrationReviews, false);
+  assert.equal(await service.userHasPrivilege(user, P.ManageRegistrationReviews), false);
+  assert.equal(await service.userHasPrivilege({ id: 1, isAdmin: true }, P.ManageRegistrationReviews), true);
+  rules.delete(P.ManageRegistrationReviews);
+  grants.add(P.ManageRegistrationReviews);
+  assert.equal(await service.userHasPrivilege(user, P.ManageRegistrationReviews), true);
+  grants.delete(P.ManageRegistrationReviews);
   grants.add(P.ManageProblem);
   rules.set(P.ManageProblem, false);
   assert.equal(
@@ -82,11 +96,27 @@ const { DiscussionService, DiscussionPermissionType } = load("discussion/discuss
   assert.equal(await service.userHasPrivilege({ id: 1, isAdmin: true }, P.ManagePermissions), true);
   assert.equal(await service.userHasPrivilege(null, P.ViewProblem), true);
   assert.equal(await service.userHasPrivilege(null, P.CreateProblem), false);
-  assert.equal(await service.userHasPrivilege(null, P.ReadProblemData), false, "no unconditional guest test-data grant");
-  assert.equal(await service.permissionDecision(null, P.ReadProblemData, true), true, "preserve permitted anonymous public data");
-  assert.equal(await service.permissionDecision(null, P.ReadProblemData, false), false, "preserve denied object fallback");
+  assert.equal(
+    await service.userHasPrivilege(null, P.ReadProblemData),
+    false,
+    "no unconditional guest test-data grant"
+  );
+  assert.equal(
+    await service.permissionDecision(null, P.ReadProblemData, true),
+    true,
+    "preserve permitted anonymous public data"
+  );
+  assert.equal(
+    await service.permissionDecision(null, P.ReadProblemData, false),
+    false,
+    "preserve denied object fallback"
+  );
   rules.set(P.ReadProblemData, false);
-  assert.equal(await service.permissionDecision(user, P.ReadProblemData, true), false, "explicit deny still wins for data");
+  assert.equal(
+    await service.permissionDecision(user, P.ReadProblemData, true),
+    false,
+    "explicit deny still wins for data"
+  );
   rules.delete(P.ReadProblemData);
   const guard = new AccessGuard({
     userHasPrivilege: async (_u, p) => p !== P.SubmitProblem,
@@ -208,7 +238,7 @@ const { DiscussionService, DiscussionPermissionType } = load("discussion/discuss
     "secret input",
     "redaction cannot mutate cached judge progress used by authorized viewers"
   );
-  console.log("Access permissions: 30 assertions passed.");
+  console.log("Access permissions assertions passed.");
 })().catch(error => {
   console.error(error);
   process.exitCode = 1;

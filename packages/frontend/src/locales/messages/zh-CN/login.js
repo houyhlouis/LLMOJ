@@ -6,6 +6,7 @@ return {
   forgot_password: "忘记密码",
   remember: "保持登录",
   forget: "忘记密码",
+  registration_closed: "本站暂时关闭新用户注册。已有账户仍可正常登录。",
   new_user: "新用户？",
   register: "注册",
   login: "登录",
@@ -16,6 +17,8 @@ return {
   wrong_password: "密码错误",
   welcome: "欢迎回来，{username}！",
   errors: {
+    REGISTRATION_PENDING: "你的注册申请正在等待审核。通过后才会创建站点账户，届时即可登录。",
+    REGISTRATION_REJECTED: "你的注册申请未获通过，尚未创建站点账户。如有疑问，请联系管理员。",
     NO_SUCH_USER: "无此用户。",
     ALREADY_LOGGEDIN: "你已经登陆过。",
     ALREADY_MIGRATED: "系统错误，请重试。",

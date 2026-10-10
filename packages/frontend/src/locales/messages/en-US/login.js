@@ -6,6 +6,7 @@ return {
   forgot_password: "Forgot password",
   remember: "Remember me",
   forget: "Forget password",
+  registration_closed: "New registrations are currently closed. Existing accounts can still sign in.",
   new_user: "New user? ",
   register: "Register",
   login: "Login",
@@ -16,6 +17,10 @@ return {
   wrong_password: "Wrong password",
   welcome: "Welcome back, {username}!",
   errors: {
+    REGISTRATION_PENDING:
+      "Your registration application is awaiting review. A site account will be created after approval, and you can then sign in.",
+    REGISTRATION_REJECTED:
+      "Your registration application was rejected. No site account has been created. Contact an administrator if you have questions.",
     NO_SUCH_USER: "No such user.",
     ALREADY_LOGGEDIN: "You have already logged in.",
     ALREADY_MIGRATED: "System error. Please try again later.",
