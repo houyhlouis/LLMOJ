@@ -6,7 +6,7 @@ LLMOJ is an AI-assisted online judge based on LibreOJ. Start with [Configuration
 
 | Topic | Page |
 | --- | --- |
-| Registration policy and delegated review | [Registration approval](Registration-Approval.md) |
+| Website registration settings and delegated review | [Registration approval](Registration-Approval.md) |
 | Preserve configuration/data while upgrading; compatibility and rollback | [Upgrade](Upgrade.md) |
 | Installation entry points, every flag, and retries | [Installation](Installation.md) |
 | Backend YAML: accounts, security, database, mail, storage, contests, and presentation | [Backend-Configuration](Backend-Configuration.md) |

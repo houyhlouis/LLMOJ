@@ -9,6 +9,7 @@ import "noty/src/themes/semanticui.scss";
 import style from "./AppLayout.module.less";
 
 import GlobalProgressBar from "@/components/GlobalProgressBar";
+import SiteFooterBranding from "@/components/SiteFooterBranding";
 
 import { Locale } from "@/interfaces/Locale";
 import localeMeta from "@/locales/meta";
@@ -160,6 +161,12 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
           {_(".header.user.preference")}
         </Dropdown.Item>
         {appState.currentUser.isAdmin && (
+          <Dropdown.Item as={Link} href="/site-management">
+            <Icon name="settings" />
+            {_(".header.user.site_management")}
+          </Dropdown.Item>
+        )}
+        {appState.currentUser.isAdmin && (
           <Dropdown.Item as={Link} href="/permissions">
             <Icon name="shield alternate" />
             {appState.locale === "zh_CN" ? "权限管理" : "Permissions"}
@@ -205,11 +212,10 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
       <Segment vertical className={className}>
         <Container textAlign="center">
           <EmojiRenderer>
-            <div>
-              {appState.serverPreference.copyrightNotice === "LibreOJ Open Source Project"
-                ? "LLMOJ"
-                : appState.serverPreference.copyrightNotice}
-            </div>
+            <SiteFooterBranding
+              siteName={appState.serverPreference.siteName}
+              copyrightNotice={appState.serverPreference.copyrightNotice}
+            />
           </EmojiRenderer>
           <div id={style.footerVersion} className="monospace">
             <span>

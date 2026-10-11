@@ -32,7 +32,9 @@ sudo env PATH=/opt/LibreOJ/runtime/node/bin:/opt/LibreOJ/runtime/tooling/node_mo
 
 ## Project links and display names
 
-The website footer links to [houyhlouis/LLMOJ](https://github.com/houyhlouis/LLMOJ). Initial page titles, loading-error messages and new-installation footer defaults use LLMOJ. Custom site names, footer text and home-page content remain effective. The frontend displays the exact legacy built-in footer value `LibreOJ Open Source Project` as LLMOJ without rewriting backend configuration. Original copyright, licenses and upstream attribution remain intact.
+The footer dynamically displays “site name Powered by LLMOJ”, using backend `preference.siteName`. Both LLMOJ and the GitHub icon link to [houyhlouis/LLMOJ](https://github.com/houyhlouis/LLMOJ). Custom `preference.copyrightNotice` appears on a separate line; blank text and the exact defaults `LLMOJ` / `LibreOJ Open Source Project` do not add a duplicate line. Configuration is not rewritten. Initial titles and loading-error messages default to LLMOJ. Custom homepage content, original copyright, licenses and upstream attribution remain intact.
+
+The administrator user menu includes **Site management** (`/site-management`), showing the effective registration mode, server default and whether an override is active. Saving or restoring the server configuration takes effect immediately. Ordinary users and accounts granted only review or homepage-editing permissions cannot use this management feature. Refresh an already-open registration page to display the current mode; see [Registration approval](Registration-Approval.md).
 
 Without a URL argument, `packages/frontend/scripts/generate-api.js` reads local Swagger at `http://127.0.0.1:2002/docs-json`. Pass the full Swagger URL for a different backend. This development API endpoint serves a different purpose from the project repository link.
 

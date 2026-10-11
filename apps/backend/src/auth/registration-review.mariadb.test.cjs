@@ -22,6 +22,8 @@ const {
   RegistrationApplicationEntity,
   RegistrationReviewService,
   AuthService,
+  SettingsEntity,
+  RegistrationSettingsService,
   controller,
   sessionService
 } = require("./registration-test-helpers.cjs");
@@ -56,7 +58,8 @@ test(
         UserPreferenceEntity,
         AuditLogEntity,
         RegistrationReviewEntity,
-        RegistrationApplicationEntity
+        RegistrationApplicationEntity,
+        SettingsEntity
       ],
       synchronize: true,
       logging: false
@@ -74,7 +77,15 @@ test(
         connection: db,
         userRepository: users
       });
-      const auth = new AuthService(db, db.getRepository(UserAuthEntity), userService, {}, settings);
+      const registrationSettings = new RegistrationSettingsService(db, settings);
+      const auth = new AuthService(
+        db,
+        db.getRepository(UserAuthEntity),
+        userService,
+        {},
+        settings,
+        registrationSettings
+      );
       const privileges = new UserPrivilegeService(db, db.getRepository(UserPrivilegeEntity), userService);
       const permissions = new AccessController(db, privileges);
       const reviews = new RegistrationReviewService(db, privileges),
@@ -86,6 +97,7 @@ test(
         userService,
         auditService: new AuditService(audits),
         configService: settings,
+        registrationSettings,
         userMigrationService: { findUserMigrationInfoByOldUsername: async () => null },
         authEmailVerificationCodeService: { verify: async () => true }
       });

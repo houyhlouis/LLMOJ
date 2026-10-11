@@ -4,6 +4,8 @@
 
 以下按读取位置分类。环境变量名保留历史 `LIBREOJ_`、`HYHOJ_` 和 `OJ_` 前缀；不能自行统一命名。在终端 `export` 不会改变 systemd 已运行服务的环境；服务配置需 drop-in、daemon-reload 和重启。不要把秘密值粘贴到诊断输出中。
 
+网站注册方式也可由管理员在 [网站管理](Registration-Approval.zh-CN.md) 即时设置；它使用数据库 `settings` 的独立键，不增加环境变量。未保存覆盖或恢复服务器配置时，回退到 `LIBREOJ_CONFIG_FILE` 所指 YAML 中当前已加载的 `preference.security.registrationMode`。
+
 ## 服务运行环境
 
 | 变量 | 含义与默认值 |

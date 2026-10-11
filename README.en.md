@@ -14,7 +14,8 @@
 - NOI, IOI and ICPC contest rules, with contest permissions, scoreboards and rejudging.
 - Multiple users and groups, problem/discussion sharing, and permission controls for contests and administration.
 
-- Registration can be open, require approval, or be closed. Administrators can delegate reviews, and rejected applications can later be approved while retaining the audit trail. Existing accounts remain active.
+- Administrators can switch open, approval-based or closed registration in Site management. Saved changes take effect immediately without a restart. Reviews can be delegated, and rejected applications can later be approved with their audit history retained.
+- The footer displays the configured site name followed by “Powered by LLMOJ”, with custom copyright text preserved.
 
 ### Multiple languages and judge nodes
 
@@ -66,7 +67,9 @@ For public access, configure [HTTPS](wiki/HTTPS.md) and allow the chosen website
 
 ## Registration approval and upgrades
 
-To require approval, set `registrationMode: approval` under the existing `preference.security` object in `config/backend.yaml`, restart the backend and refresh the browser. Administrators and reviewers granted `ManageRegistrationReviews` open **Registration reviews** from the user menu. Ordinary users lack this permission by default. Applications stay separate from site accounts; approval creates the account and assigns its user ID. Rejected applications can later be approved without losing previous audit entries; approval cannot be reversed. Omitted defaults to `open`; `closed` disables new registrations. See [Registration approval](wiki/Registration-Approval.md) for full steps and email/state behavior.
+Administrators open **Site management** (`/site-management`) from the user menu, select open, approval-based or closed registration and save. Changes take effect immediately without a restart. The database setting overrides YAML; before saving an override or after **Restore server configuration**, the server configuration applies. Only site administrators can change this policy; review or homepage-editing permissions do not grant that authority.
+
+Administrators and reviewers granted `ManageRegistrationReviews` process applications in **Registration reviews**. Changing the registration mode never activates existing pending/rejected applications. Approval creates the account and assigns its user ID; rejected applications can later be approved with previous audit entries retained, while approval cannot be reversed. See [Registration approval](wiki/Registration-Approval.md).
 
 Existing official one-click deployments can use the separate upgrade entry:
 

@@ -89,7 +89,8 @@ test("closed registration is rejected before email codes or database writes", as
     null,
     null,
     { verify: () => assert.fail("email code checked") },
-    { config: { preference: { security: { registrationMode: "closed", requireEmailVerification: true } } } }
+    { config: { preference: { security: { registrationMode: "closed", requireEmailVerification: true } } } },
+    { getRegistrationMode: async () => "closed" }
   );
   assert.deepEqual(await auth.register("newuser", "new@example.test", "code", "secret"), ["REGISTRATION_CLOSED", null]);
 });
@@ -100,6 +101,7 @@ test("closed mode blocks registration mail but retains change-email/reset-passwo
     configService: {
       config: { preference: { security: { registrationMode: "closed", requireEmailVerification: true } } }
     },
+    registrationSettings: { getRegistrationMode: async () => "closed" },
     userService: { checkEmailAvailability: async () => true, findUserByEmail: async () => user },
     authEmailVerificationCodeService: {
       generate: async () => {

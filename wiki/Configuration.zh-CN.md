@@ -2,7 +2,7 @@
 
 [English](Configuration.md) | 简体中文 | [Wiki 首页](Home.md)
 
-本参考按 `43a88bdd62fbf200889b36932fa921439a293190` 的安装器、配置 schema、示例、实际读取位置和生成器核对。“全部配置”包括项目提供的安装参数、后端／评测 YAML、用户 AI 设置、环境变量、前端 bootstrap 设置，以及项目生成的基础服务参数。题目、比赛、题单等业务内容的逐个表单字段，以及第三方软件允许的全部扩展指令，不属于服务器配置清单；开放配置字典会明确标注并链接来源。
+本参考按 `43a88bdd62fbf200889b36932fa921439a293190` 的安装器、配置 schema、示例、实际读取位置和生成器核对。原有字段范围包括项目提供的安装参数、后端／评测 YAML、用户 AI 设置、环境变量、前端 bootstrap 设置，以及项目生成的基础服务参数；本版另补充网站管理的数据库注册设置。题目、比赛、题单等业务内容的逐个表单字段，以及第三方软件允许的全部扩展指令，不属于服务器配置清单；开放配置字典会明确标注并链接来源。
 
 ## 从哪里修改
 
@@ -10,6 +10,7 @@
 | --- | --- |
 | [Installation](Installation.zh-CN.md) | 安装入口、全部参数和安装重试 |
 | [Backend-Configuration](Backend-Configuration.zh-CN.md) | 后端 YAML：账号、安全、数据库、邮件、存储、比赛和显示偏好 |
+| [Registration-Approval](Registration-Approval.zh-CN.md) | 网站管理中的注册方式、YAML 回退与委派审核 |
 | [Judge-Configuration](Judge-Configuration.zh-CN.md) | 评测 YAML、CPU／内存扩缩容、服务单元、验证和回滚 |
 | [AI](AI.zh-CN.md) | 用户 AI 模型、搜索服务、权限和任务设置 |
 | [AI-Environment](AI-Environment.zh-CN.md) | AI 目录、沙盒通信、密钥持久化和环境变量 |
@@ -22,7 +23,7 @@
 - **程序默认值**：代码实际在缺省时采用的值。后端和评测 YAML 通常没有自动补全；不能删掉字段后期待套用示例。
 - **示例值**：仓库的 `*.example` 或上游 bootstrap 演示配置，可能是其他站点地址。
 - **安装器生成值**：首次安装按目录、端口、CPU 和内存生成，优先于示例。后续一般保留已有配置。
-- **当前生效值**：服务器实际配置文件、systemd 主单元和 drop-in 的合并结果；页面中的 AI 设置还按用户分别存储。
+- **当前生效值**：服务器实际配置文件、systemd 主单元和 drop-in 的合并结果；网站管理中的注册方式由数据库覆盖 YAML 默认值；AI 设置还按用户分别存储。
 
 文中默认目录为 `/opt/LibreOJ`。自定义 `--prefix` 时必须把所有路径替换成自己的实例目录，不能只改一个环境变量来移动实例。
 
@@ -30,7 +31,8 @@
 
 | 修改对象 | 生效方式 |
 | --- | --- |
-| `config/backend.yaml` | 校验完整 YAML 后重启 `libreoj-backend`；浏览器刷新以重新读取公共偏好 |
+| `config/backend.yaml` | 校验完整 YAML 后重启 `libreoj-backend`；浏览器刷新以重新读取公共偏好；注册模式仍以已保存的网页覆盖为优先 |
+| 网站管理的注册方式 | 管理员在网页保存或恢复服务器配置，即时生效；不需重启，不改 YAML，见 [注册审核](Registration-Approval.zh-CN.md) |
 | `config/judge.yaml` | 停止接收／等待在途评测结束，按评测指南维护；槽数、CPU、目录变更还须重新生成、安装 systemd 单元 |
 | systemd `Environment`／资源限制／drop-in | `systemctl daemon-reload` 后重启对应服务；只 reload 不会重启进程 |
 | `config/nginx.conf` | `nginx -t` 通过后 reload；域名和存储签名地址必须同步 |

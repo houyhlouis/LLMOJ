@@ -34,6 +34,8 @@ class FakeHost:
         self.review_table = False
         self.application_table = False
         self.pending_applications = 0
+        self.registration_override = None
+        self.registration_policy_corrupt = False
         self.fail_start = None
     def prop(self, unit, name):
         if (unit,name) in self.override:
@@ -77,6 +79,7 @@ class FakeHost:
             elif 'TABLE_NAME=\'registration_application\'' in query: output=str(int(self.application_table)).encode()
             elif 'FROM `registration_review`' in query: output=str(self.pending_accounts).encode()
             elif 'FROM `registration_application`' in query: output=str(self.pending_applications).encode()
+            elif "FROM `settings`" in query and "'registration-policy'" in query: output=str(int(self.registration_override is not None or self.registration_policy_corrupt)).encode()
             elif 'FROM `submission`' in query or 'FROM `ai_job`' in query: output=str(self.queued).encode()
             elif query.startswith('SELECT COUNT'): output=b'0'
         elif args[0]=='mariadb-dump': kwargs['output'].write(b'-- synthetic logical SQL backup\n'+b'x'*200)
@@ -358,6 +361,57 @@ class UpgradeTests(unittest.TestCase):
         before=len(self.host.calls)
         with self.assertRaisesRegex(u.UpgradeError,'approval gate'): self.up.rollback(manual=True)
         self.assertFalse(any(c[0]=='service' for c in self.host.calls[before:])); self.assertTrue(self.up.guard.exists())
+    def test_manual_rollback_to_yaml_only_backend_refuses_each_saved_registration_mode(self):
+        self.prepare(); self.up.activate()
+        before=len(self.host.calls)
+        for mode in ('open', 'approval', 'closed'):
+            with self.subTest(mode=mode):
+                self.host.registration_override=mode
+                with self.assertRaisesRegex(u.UpgradeError, 'saved website registration policy'):
+                    self.up.rollback(manual=True)
+        self.assertFalse(any(c[0]=='service' for c in self.host.calls[before:]))
+        self.assertEqual((self.root/'apps/backend/dist/main.js').read_text(), 'new backend')
+    def test_reset_registration_policy_allows_existing_safe_rollback(self):
+        self.prepare(); self.up.activate(); self.host.registration_override='closed'
+        with self.assertRaisesRegex(u.UpgradeError, 'saved website registration policy'):
+            self.up.rollback(manual=True)
+        self.host.registration_override=None
+        self.up.rollback(manual=True)
+        self.assertEqual(self.up.manifest['status'], 'rolled-back')
+        self.assertEqual((self.root/'apps/backend/dist/main.js').read_text(), 'old backend')
+    def test_corrupted_registration_policy_is_not_treated_as_an_explicit_reset(self):
+        self.prepare(); self.up.activate(); self.host.registration_policy_corrupt=True
+        before=len(self.host.calls)
+        with self.assertRaisesRegex(u.UpgradeError, 'saved website registration policy'):
+            self.up.rollback(manual=True)
+        self.assertFalse(any(c[0]=='service' for c in self.host.calls[before:]))
+    def test_rollback_to_policy_aware_backend_retains_override(self):
+        previous_service=self.root/'apps/backend/dist/settings/registration-settings.service.js'
+        previous_service.parent.mkdir(parents=True)
+        previous_service.write_text('old policy-aware backend')
+        self.prepare(); self.up.activate(); self.host.registration_override='approval'
+        self.up.rollback(manual=True)
+        self.assertEqual(self.up.manifest['status'], 'rolled-back')
+        self.assertEqual(self.host.registration_override, 'approval')
+        self.assertEqual(previous_service.read_text(), 'old policy-aware backend')
+    def test_automatic_rollback_keeps_new_code_when_saved_policy_would_be_ignored(self):
+        self.prepare(); self.up.activate(); self.host.registration_override='closed'
+        with self.assertRaisesRegex(u.UpgradeError, 'saved website registration policy'):
+            self.up.rollback()
+        self.assertFalse(self.host.states['libreoj-backend.service'])
+        self.assertFalse(self.host.states['libreoj-nginx.service'])
+        self.assertEqual((self.root/'apps/backend/dist/main.js').read_text(), 'new backend')
+    def test_manual_rollback_rechecks_new_saved_policy_after_stop(self):
+        self.prepare(); self.up.activate()
+        stop_apps=self.up.stop_apps
+        def stop_with_concurrent_policy_change():
+            self.host.registration_override='closed'
+            stop_apps()
+        with patch.object(self.up, 'stop_apps', side_effect=stop_with_concurrent_policy_change):
+            with self.assertRaisesRegex(u.UpgradeError, 'saved website registration policy'):
+                self.up.rollback(manual=True)
+        self.assertEqual((self.root/'apps/backend/dist/main.js').read_text(), 'new backend')
+        self.assertFalse(self.host.states['libreoj-backend.service'])
     def test_automatic_rollback_refuses_after_new_pending_account(self):
         self.prepare(); self.up.activate(); self.host.pending_accounts=1
         with self.assertRaisesRegex(u.UpgradeError,'approval gate'): self.up.rollback()

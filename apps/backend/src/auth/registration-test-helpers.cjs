@@ -34,6 +34,8 @@ const { UserPermissionRuleEntity } = require("../access/user-permission-rule.ent
 const { AccessController } = require("../access/access.controller.ts");
 const { RegistrationReviewService } = require("./registration-review.service.ts");
 const { AuthService } = require("./auth.service.ts");
+const { SettingsEntity } = require("../settings/settings.entity.ts");
+const { RegistrationSettingsService } = require("../settings/registration-settings.service.ts");
 const { AuthSessionService } = require("./auth-session.service.ts");
 const { AuthController } = require("./auth.controller.ts");
 const { UserController } = require("../user/user.controller.ts");
@@ -74,6 +76,8 @@ module.exports = {
   RegistrationReviewStatus,
   RegistrationReviewService,
   AuthService,
+  SettingsEntity,
+  RegistrationSettingsService,
   AuthSessionService,
   AuthController,
   UserController,

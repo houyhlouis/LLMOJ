@@ -699,6 +699,13 @@ class Upgrade:
         self.paused = False
 
     def assert_safe_downgrade(self):
+        # Old backends only read YAML and would silently ignore a saved website
+        # registration policy. Check before stopping and again after draining.
+        previous_backend = self.backup/'previous/apps/backend'
+        if previous_backend.exists() and not (previous_backend/'dist/settings/registration-settings.service.js').is_file():
+            overrides = self.sql("SELECT COUNT(*) FROM `settings` WHERE `key`='registration-policy' AND (COALESCE(JSON_TYPE(`value`), '') <> 'OBJECT' OR COALESCE(JSON_TYPE(JSON_EXTRACT(`value`, '$.registrationMode')), 'MISSING') <> 'NULL')", 'libreoj')
+            if int(overrides):
+                fail('Rollback refused: the saved website registration policy requires this release; restore server configuration in Website Management before downgrading, or recover the new release')
         for table in ('registration_review', 'registration_application'):
             exists = self.sql(f"SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='libreoj' AND TABLE_NAME='{table}'")
             if exists == '1' and int(self.sql(f"SELECT COUNT(*) FROM `{table}` WHERE status <> 'approved'", 'libreoj')):

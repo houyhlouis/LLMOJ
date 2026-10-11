@@ -6,7 +6,7 @@ LLMOJ 是基于 LibreOJ 的 AI 辅助在线评测平台。从 [配置总览](Con
 
 | 场景 | 页面 |
 | --- | --- |
-| 注册方式、委派审核、待审核申请限制 | [注册审核](Registration-Approval.zh-CN.md) |
+| 网页注册设置、委派审核、待审核申请限制 | [注册审核](Registration-Approval.zh-CN.md) |
 | 保留配置与数据升级、兼容检查和回滚 | [一键升级](Upgrade.zh-CN.md) |
 | 安装入口、全部参数和安装重试 | [Installation](Installation.zh-CN.md) |
 | 后端 YAML：账号、安全、数据库、邮件、存储、比赛和显示偏好 | [Backend-Configuration](Backend-Configuration.zh-CN.md) |

@@ -52,6 +52,7 @@ import { ProofOfWorkAction } from "../proof-of-work/proof-of-work-action.enum";
 
 import { appGitRepoInfo } from "../main";
 import { ConfigService } from "../config/config.service";
+import { RegistrationSettingsService } from "../settings/registration-settings.service";
 import { UserService } from "../user/user.service";
 import { CurrentUser } from "../common/user.decorator";
 import { UserEntity } from "../user/user.entity";
@@ -80,7 +81,8 @@ export class AuthController {
     private readonly authIpLocationService: AuthIpLocationService,
     private readonly auditService: AuditService,
     private readonly userMigrationService: UserMigrationService,
-    private readonly registrationReviews: RegistrationReviewService
+    private readonly registrationReviews: RegistrationReviewService,
+    private readonly registrationSettings: RegistrationSettingsService
   ) {}
 
   @Get("getSessionInfo")
@@ -95,7 +97,13 @@ export class AuthController {
     const [, user] = await this.authSessionService.accessSession(request.token);
 
     const result: GetSessionInfoResponseDto = {
-      serverPreference: this.configService.preferenceConfigToBeSentToUser,
+      serverPreference: {
+        ...this.configService.preferenceConfigToBeSentToUser,
+        security: {
+          ...this.configService.preferenceConfigToBeSentToUser.security,
+          registrationMode: await this.registrationSettings.getRegistrationMode()
+        }
+      },
       serverVersion: {
         hash: appGitRepoInfo.abbreviatedSha,
         date: appGitRepoInfo.committerDate
@@ -247,7 +255,7 @@ export class AuthController {
     @Body() request: SendEmailVerificationCodeRequestDto
   ): Promise<SendEmailVerificationCodeResponseDto> {
     if (request.type === EmailVerificationCodeType.Register) {
-      if (this.configService.config.preference.security.registrationMode === "closed")
+      if ((await this.registrationSettings.getRegistrationMode()) === "closed")
         return { error: SendEmailVerificationCodeResponseError.REGISTRATION_CLOSED };
       if (currentUser)
         return {

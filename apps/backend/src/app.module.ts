@@ -30,6 +30,7 @@ import { AccessModule } from "./access/access.module";
 import { StudyListModule } from "./study-list/study-list.module";
 import { ContestModule } from "./contest/contest.module";
 import { AiModule } from "./ai/ai.module";
+import { SiteManagementModule } from "./site-management/site-management.module";
 
 @Module({
   imports: [
@@ -55,7 +56,8 @@ import { AiModule } from "./ai/ai.module";
     AccessModule,
     StudyListModule,
     ContestModule,
-    AiModule
+    AiModule,
+    SiteManagementModule
   ],
   controllers: [AppController],
   providers: [AppService, ErrorFilter]

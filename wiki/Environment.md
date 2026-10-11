@@ -4,6 +4,8 @@ English | [简体中文](Environment.zh-CN.md) | [Configuration overview](Config
 
 Variables are grouped by their consumers. Historical `LIBREOJ_`, `HYHOJ_`, and `OJ_` prefixes remain significant; do not rename them. Exporting a variable in a shell does not change a running systemd service: use a drop-in, daemon-reload, and restart. Keep secret values out of diagnostic output.
 
+Administrators can also set registration policy immediately through [Site management](Registration-Approval.md). It uses an independent database `settings` key, with no new environment variable. Without a saved override, or after restoring server configuration, it falls back to the currently loaded `preference.security.registrationMode` in the YAML selected by `LIBREOJ_CONFIG_FILE`.
+
 ## Service environment
 
 | Variable | Meaning and default |

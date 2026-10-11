@@ -32,7 +32,9 @@ sudo env PATH=/opt/LibreOJ/runtime/node/bin:/opt/LibreOJ/runtime/tooling/node_mo
 
 ## 项目入口与显示名称
 
-网页页脚 GitHub 图标指向 [houyhlouis/LLMOJ](https://github.com/houyhlouis/LLMOJ)。页面初始标题、加载失败提示及新部署的默认页脚使用 LLMOJ；管理员自定义站名、页脚和首页内容保持有效。已有配置中恰好等于旧内置页脚 `LibreOJ Open Source Project` 的文案在前端显示为 LLMOJ，不自动改写后端配置。原始版权、许可证和上游来源说明继续保留。
+页脚动态显示“站点名称 Powered by LLMOJ”，站点名称来自后端 `preference.siteName`，其中 LLMOJ 链接和 GitHub 图标指向 [houyhlouis/LLMOJ](https://github.com/houyhlouis/LLMOJ)。自定义 `preference.copyrightNotice` 另起一行保留；空白及精确默认值 `LLMOJ`、`LibreOJ Open Source Project` 不另显示重复行，不自动改写配置。页面初始标题和加载失败提示默认使用 LLMOJ。自定义首页内容、原始版权、许可证和上游来源说明继续保留。
+
+站点管理员的用户菜单提供“网站管理”（`/site-management`），可查看当前注册方式、服务器默认值和是否启用了网页覆盖，并即时保存或恢复服务器配置。普通用户及仅获审核／首页编辑权限的用户不能进入该管理功能。已打开的注册页可刷新以显示最新模式；完整规则见 [注册审核](Registration-Approval.zh-CN.md)。
 
 `packages/frontend/scripts/generate-api.js` 无 URL 参数时读取本机 `http://127.0.0.1:2002/docs-json`；后端位于其它地址时传入对应完整 Swagger URL。这个地址用于开发时生成接口类型，与项目 GitHub 链接是不同用途。
 

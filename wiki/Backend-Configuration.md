@@ -124,11 +124,11 @@ The installer creates configuration only when absent and preserves existing file
 
 | Full field | Type / requirement | Source example (not default) | Purpose, constraints and fallback |
 | --- | --- | --- | --- |
-| `preference.siteName` | `string`; required | `LLMOJ` | Public site name used by pages, mail and event reports; installer takes --site-name (default LLMOJ). |
-| `preference.copyrightNotice` | `string`; required | `LLMOJ` | Public footer text. The new frontend displays the legacy built-in value `LibreOJ Open Source Project` as `LLMOJ`; other custom text is preserved and the configuration file is not rewritten. Project licenses are unchanged. |
+| `preference.siteName` | `string`; required | `LLMOJ` | Public site name used by pages, the dynamic footer, mail and event reports; installer takes --site-name (default LLMOJ). |
+| `preference.copyrightNotice` | `string`; required | `LLMOJ` | Custom copyright text below “site name Powered by LLMOJ”. Blank text and the exact defaults `LLMOJ` / `LibreOJ Open Source Project` do not add a duplicate line. Other text is preserved; configuration files and project licenses are unchanged. |
 | `preference.security.captchaEnabled` | `boolean`; derived; do not set | derived | Derived public field: actual output is based on whether security.captcha configures a provider. A manually supplied value is overwritten. |
 | `preference.security.turnstileSiteKey` | `string`; derived; do not set | derived | Derived public field copied from security.captcha.turnstile.siteKey. Never place a secretKey here. |
-| `preference.security.registrationMode` | `"open" \| "approval" \| "closed"`; optional | `open` | New registrations: immediate activation, reviewer approval, or disabled. Missing/null defaults to open; existing applications keep their state. See [Registration approval](Registration-Approval.md). |
+| `preference.security.registrationMode` | `"open" \| "approval" \| "closed"`; optional | `open` | Registration fallback when no website override is saved: immediate activation, reviewer approval, or disabled. Missing/null defaults to open. The database policy saved by an administrator takes precedence; existing applications keep their state. See [Registration approval](Registration-Approval.md). |
 | `preference.security.requireEmailVerification` | `boolean`; required | `true` | Whether registration verifies an emailed code. Template true, installer false. Configure and verify mail delivery before enabling. False does not remove mail requirements from reset-password/change-email flows and does not disable registration. |
 | `preference.security.allowUserChangeUsername` | `boolean`; required | `true` | Allows ordinary users to change their own username, still subject to EditOwnProfile; ManageUser provides the administrative path. |
 | `preference.security.allowEveryoneCreateProblem` | `boolean`; required | `true` | Default fallback for logged-in users creating problems; it does not permit guests. Explicit CreateProblem allow/deny rules still participate. |
@@ -258,6 +258,8 @@ The installer creates configuration only when absent and preserves existing file
 `services.mail.transport.auth.*` and `services.mail.transport.tls.*` belong to the transport dictionary, not a separate LLMOJ secret store. Transport values remain server-side. Verify delivery, sender identity and mail-domain policy before enabling registration email verification. The installer's JSON transport does not deliver codes to recipients.
 
 ## Registration, permissions and rate limits together
+
+Site administrators can change registration policy at **Site management** (`/site-management`). Saving or restoring the server configuration takes effect immediately without a restart. This independent database setting does not rewrite YAML; restoring uses the backend’s currently loaded YAML default. Direct YAML edits require a backend restart, and an active website override still takes precedence. Review or homepage-editing permissions cannot change this policy.
 
 This schema has no `registrationEnabled`, email-domain allowlist, arbitrary `permissions.*`, or per-endpoint rate-limit dictionary. Adding invented YAML keys does not enable such features. `requireEmailVerification` controls registration-code verification; username rules still belong to business validation.
 

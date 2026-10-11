@@ -43,6 +43,8 @@ Backups and private build logs remain in `<prefix>/backups/upgrade/<UTC-random>/
 
 A dedicated `/etc/systemd/system/libreoj-backend.service.d/90-libreoj-schema-sync.conf` sets `LIBREOJ_SCHEMA_SYNC=0` to disable automatic schema writes at backend startup. The updater applies checked migrations explicitly. Unknown content using that filename is never overwritten. Other units/drop-ins, Nginx configuration, credentials and judge capacity remain unchanged.
 
+Site management stores registration policy under an independent key in the existing `settings` table; it adds no table or column. Upgrading preserves both the website override and homepage content. Without an override, the YAML default continues to apply.
+
 ## Migrating the first approval release
 
 Pending/rejected applications now stay outside the site user table. Approval creates the account and assigns its site user ID. Before cutover the updater rehearses the migration on a database clone, then rechecks and applies it transactionally with application services stopped:
@@ -90,4 +92,6 @@ Rollback restores code and the updater's own guard state while preserving the da
 
 If this upgrade migrated legacy pending/rejected inactive empty accounts, ordinary code rollback using that backup is still refused even after all those applications are approved. This prevents older code from losing access to migrated applications and review history. Repair the new deployment; restoring an older release requires a separately reviewed data-recovery plan.
 
-Registration mode is preserved by upgrading. Enable `registrationMode: approval` separately using [Registration approval](Registration-Approval.md). A previous Nginx registration block must be adjusted manually.
+If a website registration override is saved and the rollback target does not support Site management settings, the updater refuses the downgrade so older code cannot ignore the database policy. First choose **Restore server configuration** in the current version’s Site management page and verify the YAML fallback before arranging rollback. Existing restrictions for pending/rejected applications and migrated data still apply; restoring the fallback does not approve applications.
+
+Registration mode is preserved by upgrading. To enable approval, an administrator can select approval-based registration in Site management and save without a restart; see [Registration approval](Registration-Approval.md). A previous Nginx registration block must be adjusted manually.

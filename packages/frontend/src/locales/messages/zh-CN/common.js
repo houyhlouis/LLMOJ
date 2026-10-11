@@ -19,6 +19,7 @@ return {
       groups: "我的用户组",
       edit_profile: "编辑资料",
       preference: "偏好设置",
+      site_management: "网站管理",
       registration_reviews: "注册审核",
       logout: "注销"
     }

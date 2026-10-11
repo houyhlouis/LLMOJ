@@ -13,7 +13,8 @@
 - 中英文界面与浏览器代码编辑器，支持题目管理、题单、讨论及提交记录查询。
 - 支持 NOI、IOI、ICPC 赛制，提供比赛权限、排行榜和重评功能。
 - 支持多用户、用户组、题目与讨论授权，以及比赛和管理功能的权限控制。
-- 新用户注册可设为开放、审核或关闭；管理员可授权普通用户审核，已拒绝申请可改为通过，旧账号保持可用。
+- 管理员可在“网站管理”网页切换开放注册、注册审核或关闭注册，保存立即生效，无需重启；也可委派审核，已拒绝申请可改为通过。
+- 页脚随站点名称显示“站点名称 Powered by LLMOJ”，保留自定义版权说明。
 
 ### 多语言评测与扩展
 
@@ -65,7 +66,9 @@ curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/install.zh-CN
 
 ## 注册审核与版本升级
 
-需要审核新账号时，在现有 `config/backend.yaml` 的 `preference.security` 中设置 `registrationMode: approval`，重启后端并刷新页面。管理员或获授 `ManageRegistrationReviews` 权限的审核者从用户菜单进入“注册审核”；普通用户默认无此权限。申请独立保存，通过审核时才创建账户并分配用户 ID；已拒绝申请可再批准，历史审核日志保留，已通过申请不能反转。省略该字段默认为 `open`，`closed` 可关闭新注册。完整步骤、邮件验证与状态规则见 [注册审核](wiki/Registration-Approval.zh-CN.md)。
+管理员从用户菜单进入“网站管理”（`/site-management`），选择开放、需审核或关闭注册并保存，立即生效，无需重启。网页设置保存在数据库并覆盖 YAML；未保存或选择“恢复服务器配置”时回退服务器配置。只有站点管理员能更改注册模式，审核权限和首页编辑权限不能代替管理员身份。
+
+管理员或获授 `ManageRegistrationReviews` 的审核者从“注册审核”处理申请。待审核和已拒绝申请独立保存，切换模式不会自动激活；通过时才创建账户并分配用户 ID，原拒绝记录保留，已通过申请不能反转。详见 [注册审核](wiki/Registration-Approval.zh-CN.md)。
 
 已有官方一键安装实例可使用独立升级入口：
 
@@ -91,7 +94,7 @@ curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/upgrade.zh-CN
 | --- | --- |
 | [安装与配置](wiki/Installation.zh-CN.md) · [Docker 源](wiki/Docker-Sources.zh-CN.md) | 安装参数、镜像源、服务管理与重试 |
 | [分布式评测](wiki/Distributed-Judging.zh-CN.md) · [独立评测机](wiki/Remote-Judge.zh-CN.md) | 系统架构、网页与评测分离、节点接入 |
-| [注册审核](wiki/Registration-Approval.zh-CN.md) · [安全升级](wiki/Upgrade.zh-CN.md) | 注册策略、委派审核、保留配置升级与回滚 |
+| [注册审核](wiki/Registration-Approval.zh-CN.md) · [安全升级](wiki/Upgrade.zh-CN.md) | 网页注册设置、委派审核、保留配置升级与回滚 |
 | [AI 功能](wiki/AI.zh-CN.md) · [HTTPS](wiki/HTTPS.zh-CN.md) | 模型配置、执行环境与站点加密访问 |
 | [开发说明](README-DEVELOPMENT.zh-CN.md) · [源码包](deploy/SOURCE-PACKAGE.zh-CN.md) | 构建、测试与发布文件范围 |
 

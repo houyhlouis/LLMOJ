@@ -2,7 +2,7 @@
 
 [简体中文](Registration-Approval.zh-CN.md) | English | [Wiki home](Home.en.md)
 
-Server administrators can choose how new accounts become active. Existing active accounts remain active and an upgrade preserves the previous registration behavior.
+Site administrators choose the registration mode in Site management, with saved changes taking effect immediately. Existing active accounts stay active; changing the mode never approves existing pending or rejected applications.
 
 | `registrationMode` | Behavior |
 | --- | --- |
@@ -10,9 +10,19 @@ Server administrators can choose how new accounts become active. Existing active
 | `approval` | Registration creates an application; an administrator or authorized reviewer must approve it before login |
 | `closed` | No new registrations; existing accounts can still log in and use password recovery with their existing mail configuration |
 
-## Enable approval
+## Set the mode in the website
 
-First update the backend, frontend and database using the [upgrade guide](Upgrade.md). Add this field under the **existing** `preference.security` object in `config/backend.yaml` (normally `/opt/LibreOJ/config/backend.yaml`):
+1. Sign in as a site administrator and open **Site management** (`/site-management`) from the user menu.
+2. Select open, approval-based or closed registration and save. Subsequent requests use the new mode immediately without restarting the backend; refresh an already-open registration page to display the current mode.
+3. Select **Restore server configuration** to clear the override and immediately use the YAML value currently loaded by the backend.
+
+Only site administrators (`isAdmin`) can read or change these settings. Ordinary users and accounts granted only `ManageRegistrationReviews` or `EditHomepage` cannot change registration policy. Delegating application reviews does not delegate site configuration.
+
+The override lives in the existing database `settings` table under the independent `registration-policy` key, separate from homepage content. Saving never rewrites `config/backend.yaml`. An absent setting uses YAML; restoring server configuration retains the row with `registrationMode: null`, meaning no override. Precedence is **saved website mode → YAML `preference.security.registrationMode` → `open`**. Restarting or upgrading preserves the database setting, and editing YAML does not supersede an active override.
+
+## Optional server default
+
+To change the fallback, set this field under the **existing** `preference.security` object in `config/backend.yaml` (normally `/opt/LibreOJ/config/backend.yaml`):
 
 ```yaml
 preference:
@@ -21,15 +31,9 @@ preference:
     # Keep all other existing security preferences.
 ```
 
-This is a partial example, not a replacement configuration. Only lowercase `open`, `approval` and `closed` are valid. Configuration is read at backend startup:
+This is a partial example, not a replacement file. Only lowercase `open`, `approval` and `closed` are valid; missing/null defaults to `open`, and an invalid value prevents startup. **Direct YAML edits still require a backend restart to load the new value**; saving or restoring the website setting does not. In a full deployment, also ensure the local judge is running after restarting the backend.
 
-```bash
-sudo systemctl restart libreoj-backend.service
-# For an all deployment with local judging enabled:
-sudo systemctl start libreoj-judge.service
-```
-
-Refresh the browser. If you previously blocked `/api/auth/register` in Nginx, manually remove that rule and validate/reload Nginx when enabling application-based registration. The updater preserves existing Nginx configuration.
+A previous Nginx block on `/api/auth/register` is independent of this setting. Review/remove that rule and validate/reload Nginx when enabling registrations. The updater preserves existing Nginx configuration.
 
 ## Review applications
 
@@ -47,7 +51,7 @@ Decisions record the reviewer, timestamp and note and are committed together wit
 
 - Existing users and accounts created in `open` mode have no review row and remain active. Site administrator accounts are exempt from the gate.
 - Independent pending/rejected applications reserve their username/email but cannot obtain an authenticated identity through login or password reset. Application IDs locate private review records and are not site user IDs.
-- Switching back to `open` does not approve existing pending applications. Switching to `closed` retains applications and administrators and authorized reviewers may still review them.
+- Switching back to `open` or restoring the server default does not approve existing pending or rejected applications. Switching to `closed` retains applications and administrators and authorized reviewers may still review them.
 - Repeating the same decision does not duplicate accounts or audit entries. Database locks serialize concurrent reviews: approval cannot be reversed, while an application rejected first can subsequently be approved.
 - A rejected application can later be approved. Only successful approval creates an account and assigns a new site user ID; a `rejected` → `approved` audit entry preserves the previous rejection history. A username/email conflict fails without changing the application status or creating an account; resolve the conflict before retrying. An approved application cannot return to rejected. Pending/rejected identities remain reserved. There is no reapply or delete-application button; do not remove database rows to bypass history.
 - Approval controls account activation. Existing public pages remain accessible to visitors; it is not a site-wide access allowlist.

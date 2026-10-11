@@ -124,11 +124,11 @@
 
 | 完整字段 | 类型 / 是否必填 | 源码示例值（非默认） | 作用、约束和回退 |
 | --- | --- | --- | --- |
-| `preference.siteName` | `string`; 必填 | `LLMOJ` | 公开的网站名称，用于页面、邮件和事件通知；安装取 --site-name（默认 LLMOJ）。 |
-| `preference.copyrightNotice` | `string`; 必填 | `LLMOJ` | 公开页脚署名/版权文字；旧内置值 `LibreOJ Open Source Project` 在新版前端显示为 `LLMOJ`，其他自定义文案保留，配置文件不自动改写；不改变项目许可证。 |
+| `preference.siteName` | `string`; 必填 | `LLMOJ` | 公开的网站名称，用于页面、动态页脚、邮件和事件通知；安装取 --site-name（默认 LLMOJ）。 |
+| `preference.copyrightNotice` | `string`; 必填 | `LLMOJ` | 自定义页脚署名/版权文字，显示在“站点名称 Powered by LLMOJ”下方。空白及精确默认值 `LLMOJ`、`LibreOJ Open Source Project` 不另显示重复行；其他文案保留，配置文件及项目许可证不变。 |
 | `preference.security.captchaEnabled` | `boolean`; 派生，不手填 | 自动派生 | 公开派生字段：实际输出由 security.captcha 是否配置任一提供商决定；这里手填 true/false 会被覆盖。 |
 | `preference.security.turnstileSiteKey` | `string`; 派生，不手填 | 自动派生 | 公开派生字段：由 security.captcha.turnstile.siteKey 复制；不要把 secretKey 填到这里。 |
-| `preference.security.registrationMode` | `"open" \| "approval" \| "closed"`; 可选 | `open` | 新注册开放／待人工审核／关闭；省略或 null 默认 open。切换模式不改变已有申请状态，见 [注册审核](Registration-Approval.zh-CN.md)。 |
+| `preference.security.registrationMode` | `"open" \| "approval" \| "closed"`; 可选 | `open` | 网页未保存覆盖时的注册默认方式：开放／待人工审核／关闭；省略或 null 默认 open。管理员在网站管理保存的数据库设置优先，切换不改变已有申请状态，见 [注册审核](Registration-Approval.zh-CN.md)。 |
 | `preference.security.requireEmailVerification` | `boolean`; 必填 | `true` | 注册是否验证邮箱验证码。示例 true、安装生成 false；设 true 前先配置并验证邮件投递。false 并不关闭密码重置/改邮箱等邮件需求，也不是关闭注册。 |
 | `preference.security.allowUserChangeUsername` | `boolean`; 必填 | `true` | 允许普通用户修改自己的用户名；仍须有 EditOwnProfile。ManageUser 权限可走管理路径。 |
 | `preference.security.allowEveryoneCreateProblem` | `boolean`; 必填 | `true` | 已登录用户建题的默认回退；不是允许访客建题，显式 CreateProblem 允许/拒绝规则仍参与判定。 |
@@ -258,6 +258,8 @@
 `services.mail.transport.auth.*` 与 `services.mail.transport.tls.*` 属于上述传输字典，并非额外的 LLMOJ secret store；所有 transport 内容留在服务端配置。配置邮件后先自行验证投递、发件人及域名策略，再开启注册邮箱验证。安装的 JSON transport 不会把验证码真正发到邮箱。
 
 ## 注册、权限与限流的组合
+
+站点管理员可在“网站管理”（`/site-management`）修改注册方式，保存或恢复服务器配置立即生效，无需重启。此设置独立保存在数据库，不修改 YAML；恢复后使用后端当前已加载的 YAML 默认值。只有直接修改 YAML 才需重启后端加载新值，且尚未清除的网页覆盖仍优先。审核权限或首页编辑权限不能更改网站注册设置。
 
 本站 schema 没有 `registrationEnabled`、邮件域名白名单、任意 `permissions.*` 或每接口限流字典，不能通过添加自创 YAML 键实现这些功能。`requireEmailVerification` 只控制注册验证码验证；用户名规则等仍由业务校验控制。
 

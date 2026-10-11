@@ -17,6 +17,7 @@ import { RegisterResponseError } from "./dto";
 import { UserEntity } from "../user/user.entity";
 import { UserService } from "../user/user.service";
 import { ConfigService } from "../config/config.service";
+import { RegistrationSettingsService } from "../settings/registration-settings.service";
 import { delay, DELAY_FOR_SECURITY } from "../common/delay";
 
 @Injectable()
@@ -31,7 +32,8 @@ export class AuthService {
     @Inject(forwardRef(() => AuthEmailVerificationCodeService))
     private readonly authEmailVerificationCodeService: AuthEmailVerificationCodeService,
     @Inject(forwardRef(() => ConfigService))
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
+    private readonly registrationSettings: RegistrationSettingsService
   ) {}
 
   private async hashPassword(password: string): Promise<string> {
@@ -50,7 +52,7 @@ export class AuthService {
     emailVerificationCode: string,
     password: string
   ): Promise<[error: RegisterResponseError, user: UserEntity]> {
-    const registrationMode = this.configService.config.preference.security.registrationMode || "open";
+    const registrationMode = await this.registrationSettings.getRegistrationMode();
     if (registrationMode === "closed") return [RegisterResponseError.REGISTRATION_CLOSED, null];
 
     // There's a race condition on user inserting. If we do checking before inserting,
@@ -69,8 +71,12 @@ export class AuthService {
     const passwordHash = await this.hashPassword(password);
     try {
       let user: UserEntity = null;
-      await this.connection.transaction("READ COMMITTED", async manager => {
-        if (registrationMode === "approval") {
+      const modeError = await this.connection.transaction("READ COMMITTED", async manager => {
+        // Configuration may change while email verification or password hashing
+        // is in progress. Serialize the final decision with administrator saves.
+        const currentMode = await this.registrationSettings.lockRegistrationMode(manager);
+        if (currentMode === "closed") return RegisterResponseError.REGISTRATION_CLOSED;
+        if (currentMode === "approval") {
           // No user row or user-ID allocation occurs before administrative approval.
           await manager.save(RegistrationApplicationEntity, {
             username,
@@ -85,7 +91,9 @@ export class AuthService {
         } else {
           user = await createRegisteredUser(manager, username, email, passwordHash, true);
         }
+        return null;
       });
+      if (modeError) return [modeError, null];
 
       if (this.configService.config.preference.security.requireEmailVerification) {
         await this.authEmailVerificationCodeService.revoke(email, emailVerificationCode);
