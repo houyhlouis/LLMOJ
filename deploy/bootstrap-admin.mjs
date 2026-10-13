@@ -208,7 +208,7 @@ export async function showAdminCredentials({ connection, bcrypt, credentialStore
 }
 
 function argumentsFor(argv) {
-  const options = { root: process.env.LIBREOJ_ROOT || "/opt/LibreOJ", showCredentials: false };
+  const options = { root: process.env.LIBREOJ_ROOT || "/opt/LLMOJ", showCredentials: false };
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index];
     if (flag === "--show-credentials") options.showCredentials = true;

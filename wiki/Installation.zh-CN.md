@@ -2,9 +2,11 @@
 
 [English](Installation.md) | 简体中文
 
+新安装默认目录为 `/opt/LLMOJ`。已有实例保留原目录；原先安装到 `/opt/LibreOJ` 的实例请明确使用 `--prefix /opt/LibreOJ`。修改默认值不会迁移文件或服务。
+
 ## 目标环境与验收范围
 
-安装预检面向 Ubuntu 24.04 / 26.04 amd64；实际完整部署记录来自 24.04，26.04 尚未完成全新安装验收。使用普通虚拟机或物理机，systemd 254+，cgroup v2 提供 cpu / memory / pids 控制器。至少 3 GiB RAM；完整模式至少 30 GiB 空闲磁盘，仅网页模式至少 10 GiB。首次编译建议 8 GiB RAM。受限 Docker / LXC 容器不在支持范围内。
+安装预检面向 Ubuntu 24.04 / 26.04 amd64；实际完整部署记录来自 24.04，26.04 尚未完成全新安装验收。使用普通虚拟机或物理机，systemd 254+，cgroup v2 提供 cpu / memory / pids 控制器。本机评测至少需要 2 个有效逻辑 CPU、256 MiB 有效内存，每槽按 256 MiB 计算且不额外预留内存；完整模式至少 30 GiB 空闲磁盘，仅网页模式至少 10 GiB。首次编译建议 8 GiB RAM。受限 Docker / LXC 容器不在支持范围内。
 
 需要访问 Ubuntu 软件源、GitHub、npm、Node、Go，以及完整模式的 Docker 镜像和配方下载源。服务器的操作系统与内核能力须预先具备。
 
@@ -19,7 +21,7 @@ sudo bash /tmp/llmoj-install.zh-CN.sh --repository houyhlouis/LLMOJ
 
 需要先安装 curl 时，可执行 `sudo apt-get update && sudo apt-get install -y curl ca-certificates`。入口会解析目标提交并下载同一提交的源码，记录源仓库和提交；不会登录 GitHub、创建仓库或发布网站源码。私有仓库不能用此匿名入口，应自行认证、克隆后运行 `sudo bash deploy/install.zh-CN.sh`。
 
-安装时询问模式、监听地址、端口、安装目录、站名和浏览器域名/IP；完整模式还询问 Docker 软件包源、镜像加速源；首次生成 judge.yaml 且未指定 --judge-slots 时询问评测实例数（执行槽，默认有效 CPU 数减 2，最低 1）。端口默认 80，直接访问 `http://服务器IP`。NAT / 云服务器应输入真实公网 IP 或域名；检测到的接口地址可能只是内网地址。
+安装时询问模式、监听地址、端口、安装目录、站名和浏览器域名/IP；完整模式还询问 Docker 软件包源、镜像加速源；首次生成 judge.yaml 且未指定 --judge-slots 时询问评测实例数（执行槽，默认与最大值均为 `min(有效 CPU 数-1, 有效内存 MiB//256, 511)`）。端口默认 80，直接访问 `http://服务器IP`。NAT / 云服务器应输入真实公网 IP 或域名；检测到的接口地址可能只是内网地址。
 
 ## 参数
 
@@ -27,13 +29,13 @@ sudo bash /tmp/llmoj-install.zh-CN.sh --repository houyhlouis/LLMOJ
 | --- | --- |
 | `--repository OWNER/REPO` | 入口必填；公开仓库 |
 | `--ref BRANCH_OR_TAG_OR_COMMIT` | 默认 `main`；分支、标签或提交；仅下载入口 |
-| `--prefix PATH` | 默认 `/opt/LibreOJ`；专用绝对目录，不含空格／特殊字符；不支持同机多实例 |
+| `--prefix PATH` | 默认 `/opt/LLMOJ`；专用绝对目录，不含空格／特殊字符；不支持同机多实例 |
 | `--role all\|web` | 默认 `all`；完整安装／仅网页；web 无本机 AI worker |
 | `--port NUMBER` | 默认 `80`；1–65535，排除内部端口 2002、2020、13306、16379、19000、19001 |
 | `--listen ADDRESS` | 默认 `0.0.0.0`；只接受它或 `127.0.0.1` |
 | `--public-url ORIGIN` | 默认根据接口 IP 和端口推测；HTTP(S) origin，无路径、查询、片段或账号；不配置 TLS |
 | `--site-name TEXT` | 默认 `LLMOJ`；1–60 个可打印字符，不得全空白 |
-| `--judge-slots NUMBER` | 省略/0 为 `max(1, 有效 CPU 数-2)`；显式正整数须符合 CPU／内存预算及 511 上限；仅 all |
+| `--judge-slots NUMBER` | 省略/0 为 `min(有效 CPU 数-1, 有效内存 MiB//256, 511)`；显式正整数不能超过该最大值，零容量拒绝本机评测；仅 all |
 | `--docker-source URL` | 默认 `https://download.docker.com`；HTTPS 软件包源基础地址，追加 `/linux/ubuntu` |
 | `--docker-mirrors URL[,URL]` | 默认空，保留现有配置；逗号分隔 HTTPS 镜像源；见 Docker 源页的校验规则 |
 | `--yes` / `--non-interactive` | 等价；不提问，使用传入值和默认值 |
@@ -57,9 +59,9 @@ sudo bash /tmp/llmoj-install.zh-CN.sh --repository houyhlouis/LLMOJ \
 
 ## 评测实例数怎么选择？
 
-“评测实例数”是执行槽数，不是 OS 线程数，也不是同机部署多套站点。完整模式在首次生成 `judge.yaml` 且没有显式 `--judge-slots` 时才提问，显示当前有效 CPU、内存最大值和默认 `max(1, 有效 CPU 数-2)`；web 模式不问。按回车或输入 `0` 保留自动选择语义；输入正整数保存明确选择。默认值不符合内存预算时，交互安装要求重新输入较少数量，不会暗中降低；无人值守首次安装则报错。已有 `judge.yaml` 且未指定该参数的重试会保留原配置和 `judgeSlots: 0` 自动语义，不再询问或以新的 CPU-2 默认阻挡合法旧配置；首次使用显式正整数的实例仍须按原参数重试。
+“评测实例数”是执行槽数，不是 OS 线程数，也不是同机部署多套站点。完整模式在首次生成 `judge.yaml` 且没有显式 `--judge-slots` 时才提问；web 模式不问。默认值和最大值均为 `min(有效 CPU 数-1, 有效内存 MiB//256, 511)`：保留 1 个有效 CPU 不用于评测，每槽按 256 MiB 计算，不额外预留内存。按回车或输入 `0` 保留自动选择语义；输入不超过最大值的正整数保存明确选择。1 个有效 CPU 或不足 256 MiB 内存时容量为 0，安装器立即拒绝本机评测，提示使用 `--role web` 或增加资源。已有 `judge.yaml` 且未指定该参数的重试会保留原配置和历史 `judgeSlots: 0` 元数据，不再询问或替换合法旧槽数；首次使用显式正整数的实例仍须按原参数重试。
 
-例如有效 CPU 为 4、8、16 且内存足够时，默认分别为 2、6、14 槽。旧的 7 槽上限已经移除；仍受有效 CPU、RAM 和 libuv 最大 511 槽限制。增加系统线程数或 AI 并发不会增加执行槽。详细预算与已有实例的一键扩缩容见 [评测配置](Judge-Configuration.zh-CN.md)。`--plan` 展示资源与流程，不等于可安装性验收；`--check` 和实际安装预检会拒绝不适合的资源配置。
+例如有效 CPU 为 4、8、16 且内存足够时，默认分别为 3、7、15 槽；至少 3 个有效 CPU、512 MiB 内存时默认与最大值均为 2 槽。旧的 7 槽上限已经移除；仍受有效 CPU、RAM 和 libuv 最大 511 槽限制。增加系统线程数或 AI 并发不会增加执行槽。详细预算与已有实例的一键扩缩容见 [评测配置](Judge-Configuration.zh-CN.md)。`--plan` 展示资源与流程，不等于可安装性验收；`--check` 和实际安装预检会拒绝不适合的资源配置。
 
 ## MariaDB 初始化失败与安全重试
 

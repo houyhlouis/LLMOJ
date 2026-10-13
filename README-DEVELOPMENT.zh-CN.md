@@ -25,7 +25,7 @@ pnpm check-types
 
 `config/*.example` 是模板。实际配置、API Key、数据库、依赖、rootfs 和构建产物不进入源码仓库。安装器生成这些文件，默认站点监听 `0.0.0.0:80`；后端与存储仅监听本机。
 
-`HYHOJ_*` 是二次开发早期采用的内部环境变量名，暂时保留以兼容已有功能代码；它们不控制站点展示名称。新部署服务使用 `libreoj-*`，站名由 `--site-name` / `OJ_SITE_NAME` 设置。
+`HYHOJ_*` 是二次开发早期采用的内部环境变量名，暂时保留以兼容已有功能代码；它们不控制站点展示名称。新部署默认目录为 `/opt/LLMOJ`，可用显式 prefix 保留已有实例目录；服务使用 `libreoj-*`，站名由 `--site-name` / `OJ_SITE_NAME` 设置。
 
 原版 rootfs 构建及验证见 [沙盒说明](deploy/sandbox/README.md)。Docker 用于构建，不参与每次提交的原生沙盒执行。
 

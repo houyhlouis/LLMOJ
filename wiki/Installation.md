@@ -2,9 +2,11 @@
 
 English | [简体中文](Installation.zh-CN.md)
 
+New installations default to `/opt/LLMOJ`. Existing installations remain in their current directory; use `--prefix /opt/LibreOJ` for an existing instance there. Changing the default does not migrate files or services.
+
 ## Target environments and acceptance scope
 
-Preflight targets Ubuntu 24.04 / 26.04 amd64. Full deployment records are from 24.04; a fresh 26.04 installation has not passed acceptance yet. Use a normal VM or physical server, systemd 254+, and unified cgroup v2 with cpu/memory/pids controllers. At least 3 GiB RAM; 30 GiB free disk for `all`, 10 GiB for `web`. Compilation is more comfortable with 8 GiB RAM. Restricted Docker/LXC containers are unsupported.
+Preflight targets Ubuntu 24.04 / 26.04 amd64. Full deployment records are from 24.04; a fresh 26.04 installation has not passed acceptance yet. Use a normal VM or physical server, systemd 254+, and unified cgroup v2 with cpu/memory/pids controllers. Local judging requires at least 2 effective logical CPUs and 256 MiB effective RAM; its slot limit uses 256 MiB per slot with no extra memory reservation. Allow 30 GiB free disk for `all`, 10 GiB for `web`. Compilation is more comfortable with 8 GiB RAM. Restricted Docker/LXC containers are unsupported.
 
 First installation needs access to Ubuntu repositories, GitHub, npm, Node and Go, plus Docker images and rootfs download sources in complete mode. The operating system and required kernel features must already be available.
 
@@ -19,7 +21,7 @@ sudo bash /tmp/llmoj-install.sh --repository houyhlouis/LLMOJ
 
 If necessary, install curl with `sudo apt-get update && sudo apt-get install -y curl ca-certificates`. The entry point resolves a commit, downloads that snapshot and records the repository/commit. It does not log in to GitHub or publish source. For private repositories, authenticate and download the source yourself, then run `sudo bash deploy/install.sh`.
 
-Interactive installation asks for role, listener, HTTP port, directory, site name and browser hostname/IP. Complete mode also asks for Docker sources and, when creating judge.yaml for the first time without --judge-slots, execution slots (effective CPUs minus two, minimum one). Port 80 needs no browser suffix. Behind NAT, enter the actual public IP/domain rather than accepting a detected private interface address.
+Interactive installation asks for role, listener, HTTP port, directory, site name and browser hostname/IP. Complete mode also asks for Docker sources and, when creating judge.yaml for the first time without --judge-slots, execution slots (default and maximum: `min(effective CPUs-1, effective RAM MiB//256, 511)`). Port 80 needs no browser suffix. Behind NAT, enter the actual public IP/domain rather than accepting a detected private interface address.
 
 ## Options
 
@@ -27,13 +29,13 @@ Interactive installation asks for role, listener, HTTP port, directory, site nam
 | --- | --- |
 | `--repository OWNER/REPO` | Required by download entry; public repository |
 | `--ref BRANCH_OR_TAG_OR_COMMIT` | Default `main`; branch, tag, or commit; download entry only |
-| `--prefix PATH` | Default `/opt/LibreOJ`; dedicated absolute path without spaces/special characters; one instance per host |
+| `--prefix PATH` | Default `/opt/LLMOJ`; dedicated absolute path without spaces/special characters; one instance per host |
 | `--role all\|web` | Default `all`; full site or web-only; web has no local AI worker |
 | `--port NUMBER` | Default `80`; 1–65535, excluding internal ports 2002, 2020, 13306, 16379, 19000, 19001 |
 | `--listen ADDRESS` | Default `0.0.0.0`; only that address or `127.0.0.1` is accepted |
 | `--public-url ORIGIN` | Guessed from interface IP and port; HTTP(S) origin without path, query, fragment, or credentials; does not configure TLS |
 | `--site-name TEXT` | Default `LLMOJ`; 1–60 printable characters, not all whitespace |
-| `--judge-slots NUMBER` | Omitted/0 uses `max(1, effective CPUs-2)`; explicit positive counts must fit CPU/RAM and the 511 runtime limit; all only |
+| `--judge-slots NUMBER` | Omitted/0 uses `min(effective CPUs-1, effective RAM MiB//256, 511)`; explicit positive counts must not exceed that maximum; zero capacity rejects local judging; all only |
 | `--docker-source URL` | Default `https://download.docker.com`; HTTPS package-source base, with `/linux/ubuntu` appended |
 | `--docker-mirrors URL[,URL]` | Default empty, retaining existing settings; comma-separated HTTPS mirrors; see Docker source validation rules |
 | `--yes` / `--non-interactive` | Aliases; use supplied/default values without prompts |
@@ -57,9 +59,9 @@ The installer does not change firewall/cloud security-group rules. Allow only th
 
 ## How many judge instances?
 
-“Judge instances” means execution slots, not OS threads or multiple OJ installations. All mode prompts only when first creating `judge.yaml` and `--judge-slots` was not explicitly supplied, showing effective CPU/RAM capacity and the default `max(1, effective CPUs-2)`; web mode does not ask. Enter or `0` keeps automatic-selection semantics; a positive number records an explicit choice. If the default exceeds memory capacity, interactive installation asks again for a smaller count instead of silently reducing it; unattended first installation fails clearly. A retry with existing `judge.yaml` and no explicit slot argument preserves the configuration and `judgeSlots: 0` automatic semantics without prompting or applying a new CPU-minus-two default to block valid old settings. An installation originally using an explicit positive value still requires that original argument when retried.
+“Judge instances” means execution slots, not OS threads or multiple OJ installations. All mode prompts only when first creating `judge.yaml` and `--judge-slots` was not explicitly supplied; web mode does not ask. The default and maximum are both `min(effective CPUs-1, effective RAM MiB//256, 511)`: keep one effective CPU outside judging and budget 256 MiB per slot, with no extra memory reservation. Enter or `0` keeps automatic-selection semantics; a positive number records an explicit choice within the maximum. One effective CPU or less than 256 MiB RAM gives zero capacity; installation immediately rejects local judging and recommends `--role web` or more resources. A retry with existing `judge.yaml` and no explicit slot argument preserves the configuration and historical `judgeSlots: 0` metadata without prompting or replacing a valid existing slot count. An installation originally using an explicit positive value still requires that original argument when retried.
 
-With 4, 8 or 16 effective CPUs and sufficient RAM, defaults are 2, 6 and 14 slots. The old seven-slot cap is removed; effective CPUs, RAM and the 511-slot libuv ceiling still apply. More OS threads or AI concurrency do not create execution slots. See [judge configuration](Judge-Configuration.md) for budgets and the maintained resize command. `--plan` displays resources/workflow without certifying installability; `--check` and installation preflight reject unsuitable resource settings.
+With 4, 8 or 16 effective CPUs and sufficient RAM, defaults are 3, 7 and 15 slots. With at least 3 effective CPUs and 512 MiB RAM, the default and maximum are 2 slots. The old seven-slot cap is removed; effective CPUs, RAM and the 511-slot libuv ceiling still apply. More OS threads or AI concurrency do not create execution slots. See [judge configuration](Judge-Configuration.md) for budgets and the maintained resize command. `--plan` displays resources/workflow without certifying installability; `--check` and installation preflight reject unsuitable resource settings.
 
 ## MariaDB initialization failures and safe retries
 

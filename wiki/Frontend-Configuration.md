@@ -26,8 +26,8 @@ Changing the name usually requires both backend `preference.siteName` and `OJ_SI
 With complete source and dependencies, the following example can run in a maintenance/build tree. It writes static files: back up the output first and substitute actual paths/name. Use the installer-compatible Node/pnpm and ownership, then verify the home page, asset loading, login, uploads, and browser caches.
 
 ```bash
-cd /opt/LibreOJ
-sudo env PATH=/opt/LibreOJ/runtime/node/bin:/opt/LibreOJ/runtime/tooling/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin   OJ_SITE_NAME="AI Practice"   /opt/LibreOJ/runtime/node/bin/node deploy/build-frontend-offline.mjs --build
+cd /opt/LLMOJ
+sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin   OJ_SITE_NAME="AI Practice"   /opt/LLMOJ/runtime/node/bin/node deploy/build-frontend-offline.mjs --build
 ```
 
 ## Project links and display names

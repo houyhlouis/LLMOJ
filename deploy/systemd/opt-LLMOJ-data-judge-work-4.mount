@@ -4,7 +4,7 @@ PartOf=libreoj.target
 
 [Mount]
 What=tmpfs
-Where=/opt/LibreOJ/data/judge/work/1
+Where=/opt/LLMOJ/data/judge/work/4
 Type=tmpfs
 Options=size=512m,mode=0755,nodev,nosuid
 

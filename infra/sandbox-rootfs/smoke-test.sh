@@ -68,7 +68,12 @@ for compiler in gcc clang; do
         "$compiler" -std="$standard" -O2 -m64 main.c -o "c-$compiler-$standard"
     done
     for optimize in 0 1 2 3 fast; do
-        "$compiler" -std=c23 "-O$optimize" -m64 main.c -o "c-$compiler-O$optimize"
+        optimization=("-O$optimize")
+        if [[ "$compiler" == clang && "$optimize" == fast ]]; then
+            # Clang 20 deprecates -Ofast; retain its optimization behavior.
+            optimization=(-O3 -ffast-math)
+        fi
+        "$compiler" -std=c23 "${optimization[@]}" -m64 main.c -o "c-$compiler-O$optimize"
     done
     "$compiler" -std=c17 -O2 -m32 main.c -o "c-$compiler-32"
     "$compiler" -std=c17 -O2 -mx32 main.c -o "c-$compiler-x32"
@@ -93,7 +98,11 @@ for compiler in g++ clang++; do
         "$compiler" -std="$standard" -O2 -m64 "${extra[@]}" main.cpp -o "cpp-${compiler/+/p}-$standard"
     done
     for optimize in 0 1 2 3 fast; do
-        "$compiler" -std=c++26 "-O$optimize" -m64 "${extra[@]}" main.cpp -o "cpp-${compiler/+/p}-O$optimize"
+        optimization=("-O$optimize")
+        if [[ "$compiler" == clang++ && "$optimize" == fast ]]; then
+            optimization=(-O3 -ffast-math)
+        fi
+        "$compiler" -std=c++26 "${optimization[@]}" -m64 "${extra[@]}" main.cpp -o "cpp-${compiler/+/p}-O$optimize"
     done
     "$compiler" -std=c++20 -O2 -m32 main.cpp -o "cpp-${compiler/+/p}-32"
     "$compiler" -std=c++20 -O2 -mx32 main.cpp -o "cpp-${compiler/+/p}-x32"
@@ -118,7 +127,12 @@ fun main() = println("OK")
 EOF
 for version in 1.5 1.6 1.7 1.8 1.9; do
     rm -rf "kotlin-$version"
-    kotlinc Main.kt -language-version "$version" -d "kotlin-$version"
+    compatibility=()
+    if [[ "$version" == 1.5 ]]; then
+        # Intentionally test legacy compatibility; keep source warnings enabled.
+        compatibility=(-Xsuppress-version-warnings)
+    fi
+    kotlinc Main.kt -language-version "$version" "${compatibility[@]}" -d "kotlin-$version"
     expect_output OK kotlin -classpath "kotlin-$version" MainKt
 done
 

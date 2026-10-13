@@ -2,6 +2,8 @@
 
 [简体中文](Upgrade.zh-CN.md) | English | [Wiki home](Home.en.md)
 
+New installations default to `/opt/LLMOJ`. Existing installations remain in their current directory; use `--prefix /opt/LibreOJ` for an existing instance there. Changing the default does not migrate files or services.
+
 The updater supports **completed official one-click `all` and `web` deployments**. It updates application code and public assets while preserving accounts, problems, submissions, objects, AI settings/encryption keys, judge slots, CPU affinity and existing service customizations. It does not rerun the installer or administrator bootstrap.
 
 ## Compatibility
@@ -20,7 +22,7 @@ Ensure the new files have been published to GitHub first:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/upgrade.sh -o /tmp/llmoj-upgrade.sh && \
-  sudo bash /tmp/llmoj-upgrade.sh --prefix /opt/LibreOJ
+  sudo bash /tmp/llmoj-upgrade.sh --prefix /opt/LLMOJ
 ```
 
 Replace the prefix for a custom installation. The entry resolves `main` to a full commit before downloading its source. Use `--ref FULL_COMMIT_SHA` to select a reviewed revision; compatibility checks still apply.
@@ -28,7 +30,7 @@ Replace the prefix for a custom installation. The entry resolves `main` to a ful
 For a read-only plan:
 
 ```bash
-sudo bash /tmp/llmoj-upgrade.sh --prefix /opt/LibreOJ --plan
+sudo bash /tmp/llmoj-upgrade.sh --prefix /opt/LLMOJ --plan
 ```
 
 A plan checks deployment/runtime and lists deferred checks. It does not build, create a database clone or stop services, so a successful plan is not a completed upgrade.
@@ -61,7 +63,7 @@ Do not replace only frontend assets or delete old review tables to upgrade. See 
 After arranging a drained maintenance window:
 
 ```bash
-sudo bash /tmp/llmoj-upgrade.sh --prefix /opt/LibreOJ --apply --drained
+sudo bash /tmp/llmoj-upgrade.sh --prefix /opt/LLMOJ --apply --drained
 ```
 
 `--drained` declares operator readiness; it does not cancel jobs automatically.
@@ -70,7 +72,7 @@ For a reviewed **complete source tree**, use its local entry:
 
 ```bash
 sudo bash /path/to/LLMOJ/deploy/upgrade.sh \
-  --prefix /opt/LibreOJ --source /path/to/LLMOJ --plan
+  --prefix /opt/LLMOJ --source /path/to/LLMOJ --plan
 ```
 
 Verify the reported `sourceSha256`, then supply both `--source` and `--source-sha256 FULL_64_HEX_DIGEST` for execution. `python3 /path/to/LLMOJ/deploy/upgrade.py --source /path/to/LLMOJ --source-digest` also computes the tree digest without writes. A hash detects changes but does not establish trust by itself. A ZIP containing only modified files is not a complete source tree.
@@ -84,8 +86,8 @@ After diagnosing the cause, retry with the same options. Known schema and applic
 For manual rollback, pause and drain again and use the printed backup from this instance:
 
 ```bash
-sudo bash /opt/LibreOJ/deploy/upgrade.sh --prefix /opt/LibreOJ \
-  --rollback /opt/LibreOJ/backups/upgrade/ACTUAL_BACKUP --drained
+sudo bash /opt/LLMOJ/deploy/upgrade.sh --prefix /opt/LLMOJ \
+  --rollback /opt/LLMOJ/backups/upgrade/ACTUAL_BACKUP --drained
 ```
 
 Rollback restores code and the updater's own guard state while preserving the database, objects and compatible review/application tables. It never imports an old dump over newer user data. This release conservatively refuses code rollback while legacy pending/rejected accounts or new pending/rejected applications exist, preventing an approval bypass; retain an approval-aware release and fix the problem instead. If unapproved accounts are detected only after stopping services, applications remain stopped until an approval-aware release is recovered. SQL backups are for separately planned disaster recovery.

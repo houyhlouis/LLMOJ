@@ -30,7 +30,7 @@ These are helper inputs; they do not override existing private configuration.
 
 | Variable | Purpose |
 | --- | --- |
-| `HYHOJ_ROOT` | Generator instance path; default `/opt/LibreOJ`; does not move existing files |
+| `HYHOJ_ROOT` | Generator and backup instance path; default `/opt/LLMOJ`; does not move existing files |
 | `NODE_BINARY` | Generator Node absolute path; default `<root>/runtime/node/bin/node` |
 | `HYHOJ_PORT` | Website generator port; default `80`; also read during local judge generation |
 | `HYHOJ_PUBLIC_ORIGIN` | Website generator origin; default loopback HTTP with port when not 80; installer passes detected/specified origin |
@@ -40,12 +40,12 @@ These are helper inputs; they do not override existing private configuration.
 | `OJ_JUDGE_REMOTE` | Judge generator uses remote mode only for `1`; default `0` |
 | `OJ_JUDGE_SERVER` | Required remote HTTP(S) site origin; local internal connection is generated |
 | `OJ_JUDGE_KEY_FILE` | Required remote key-file absolute path; root-owned mode 0600; contains node key |
-| `OJ_JUDGE_SLOTS` | Positive initial slot override; absent uses `max(1, effective CPUs-2)`, environment `0` is rejected; CPU/RAM and 511 limit apply; existing YAML is retained |
+| `OJ_JUDGE_SLOTS` | Positive initial slot override; absent uses `min(effective CPUs-1, effective RAM MiB//256, 511)`, environment `0` is rejected; no extra RAM is reserved; zero capacity rejects local judging; existing YAML is retained |
 | `HYHOJ_JUDGE_SLOTS` | Legacy alias read only when `OJ_JUDGE_SLOTS` is absent; same constraints |
 | `LLMOJ_INSTALL_LANG` | Installer/helper language: `zh-CN` selects Chinese, otherwise English; entry scripts select it |
 | `OJ_SOURCE_REPOSITORY` | Download-entry source repository metadata; internal provenance, not credentials or runtime configuration |
 | `OJ_SOURCE_COMMIT` | Resolved source commit metadata; not an installed-version override |
-| `LIBREOJ_ROOT` | Administrator bootstrap root fallback only; default `/opt/LibreOJ`; `--root` takes precedence |
+| `LIBREOJ_ROOT` | Administrator bootstrap root fallback only; default `/opt/LLMOJ`; `--root` takes precedence |
 | `INVOCATION_ID / JOURNAL_STREAM` | Provided by systemd; administrator helper uses them to avoid printing credentials to background service logs; do not spoof |
 
 ## Builds, rootfs, and optional legacy deployment
@@ -105,19 +105,19 @@ Sources: [discussion boundaries](https://github.com/houyhlouis/LLMOJ/blob/43a88b
 | Tool | Arguments and behavior |
 | --- | --- |
 | `upgrade.zh-CN.sh` / `upgrade.sh` → `deploy/upgrade.sh` | `--prefix`, `--plan`, `--ref`, `--source`, `--source-sha256`, `--apply --drained`, `--rollback BACKUP --drained`; see [Upgrade](Upgrade.md) for compatibility, maintenance and rollback rules |
-| `deploy/resize-judge.sh` (implementation: `resize-judge.py`) | Maintained existing-judge entry: `--prefix` (default `/opt/LibreOJ`), `--slots`, `--plan`, `--apply --drained`, `--rollback PRIVATE_BACKUP --drained`, `--mode auto\|all\|remote`; default Chinese interaction; see [resizing](Judge-Configuration.md) |
+| `deploy/resize-judge.sh` (implementation: `resize-judge.py`) | Maintained existing-judge entry: `--prefix` (default `/opt/LLMOJ`), `--slots`, `--plan`, `--apply --drained`, `--rollback PRIVATE_BACKUP --drained`, `--mode auto\|all\|remote`; default Chinese interaction; see [resizing](Judge-Configuration.md) |
 | `deploy/judge_capacity.py` | Read-only capacity check: `--remote`, `--json`, `--slots N`; reads affinity/cgroup/RAM, without creating workspaces or changing services |
 | `deploy/initialize-mariadb.py` | Internal installer tool, required `--root`; stages initialization as mysql and validates system tables, preserving and checking nonempty existing databases; not an online upgrade/reset interface |
 | `deploy/bootstrap-admin.mjs` | `--root`, `--config`, `--email`, `--show-credentials`; root/config flags override their environment fallbacks; email defaults to `admin@localhost.invalid` for initialization; credentials are verified before display, not a password-reset interface |
 | `deploy/bootstrap-services.mjs` | Required `--root` and `--phase storage\|judge\|verify-judge`; `--help`; creates storage, registers local judge, or verifies connection |
-| `deploy/sandbox/verify-installed.mjs` | Optional `--root` (default `/opt/LibreOJ`); runs real sandbox probes, not a read-only YAML validator |
+| `deploy/sandbox/verify-installed.mjs` | Optional `--root` (default `/opt/LLMOJ`); runs real sandbox probes, not a read-only YAML validator |
 | `deploy/build-frontend-offline.mjs` | `--assets-only` stages assets; `--build` builds first; no flag publishes existing dist; see frontend reference |
 | `deploy/docker-support.py` | `--source` defaults to official source; `--mirrors` empty; `--configure` merges/writes mirror configuration without restarting Docker; otherwise only validates arguments |
 | `deploy/install-support.py` | Internal phases `validate`, `preflight`, `claim`, `permissions`, `apparmor`, `database`, `verify-network`, `finish`; required `--root`, `--origin`, `--port`, plus `--listen`, `--role`, `--site-name`, `--docker-source`, `--docker-mirrors`, `--judge-slots` matching installer meanings; not an upgrade interface |
 | `deploy/sandbox/build.sh` | Positional `plan` (default), `build`, or `stage ABS_ARCHIVE`; environment above |
 | `deploy/export-wiki.py` | Required `--repository OWNER/REPO`, `--output DIR`; local document export only; see Publishing |
 | `deploy/prepare-github.py` | Optional `--archive PATH`; source selection/archive helper requiring a readable Git file list; refuses to replace an archive |
-| `deploy/backup.sh` | No arguments; currently fixed to `/opt/LibreOJ`; stops services, backs up, restores target; custom prefixes need a matching backup procedure |
+| `deploy/backup.sh` | `--prefix PATH` overrides `HYHOJ_ROOT`, default `/opt/LLMOJ`; stops services, backs up, restores target; specify the actual path for existing/custom installations |
 
 Audited sources: [deploy/configure-local.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py), [deploy/configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-judge.py), [deploy/install.sh](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/install.sh), [deploy/build-frontend-offline.mjs](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/build-frontend-offline.mjs), [apps/backend/src/main.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/main.ts), [apps/backend/src/migration/migration-config.schema.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/migration/migration-config.schema.ts), [apps/judge/src/config.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/config.ts).
 

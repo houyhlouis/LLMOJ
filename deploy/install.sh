@@ -5,7 +5,7 @@ umask 0077
 
 SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 PYTHON=/usr/bin/python3
-PROJECT_ROOT=/opt/LibreOJ
+PROJECT_ROOT=/opt/LLMOJ
 PUBLIC_PORT=80
 PUBLIC_ORIGIN=
 LISTEN_ADDRESS=0.0.0.0
@@ -38,13 +38,14 @@ SERVICE_UNITS=(libreoj-judge.service libreoj-nginx.service libreoj-backend.servi
 usage() {
     if [[ "$LLMOJ_INSTALL_LANG" == zh-CN ]]; then
         cat <<'USAGE_ZH'
-用法：sudo bash deploy/install.zh-CN.sh [--prefix /opt/LibreOJ] [--port 80]
+用法：sudo bash deploy/install.zh-CN.sh [--prefix /opt/LLMOJ] [--port 80]
       [--listen 0.0.0.0|127.0.0.1] [--public-url https://oj.example.com]
       [--site-name LLMOJ] [--role all|web] [--judge-slots N]
       [--docker-source https://download.docker.com] [--docker-mirrors HTTPS镜像源]
       [--yes | --interactive] [--check | --plan]
 Ubuntu 24.04 / 26.04 amd64、systemd >=254、cgroup v2；每台服务器一个实例。
-终端安装会询问选项和评测实例数；默认有效逻辑 CPU 数减 2，最少 1。
+终端安装会询问选项和评测实例数；默认与最大值均为 CPU 数减 1、内存 MiB/256 向下取整、511 的最小值。
+本机评测至少需要 2 个有效逻辑 CPU 和 256 MiB 有效内存；不额外预留内存。
 --judge-slots N 显式选择；0 为自动。--yes 使用提供的参数和默认值。
 默认公网 HTTP 80 端口；内部服务仅回环监听。防火墙和 TLS 需单独配置。
 Docker 源仅在需要构建 rootfs 时使用。修改镜像加速源会重启 Docker。
@@ -54,7 +55,7 @@ USAGE_ZH
         return
     fi
     cat <<'USAGE'
-Usage: sudo bash deploy/install.sh [--prefix /opt/LibreOJ] [--port 80]
+Usage: sudo bash deploy/install.sh [--prefix /opt/LLMOJ] [--port 80]
        [--listen 0.0.0.0|127.0.0.1] [--public-url https://oj.example.com]
        [--site-name LLMOJ] [--role all|web] [--judge-slots N]
        [--docker-source https://download.docker.com] [--docker-mirrors https://mirror.example.com]
@@ -63,7 +64,8 @@ Ubuntu 24.04 / 26.04 amd64, systemd >=254, cgroup v2; one instance per server.
 --check: read-only environment/resource/port checks; does not install anything.
 --plan:  read-only list of installation steps; does not install anything.
 Private credentials stay under config/. The admin password is printed after success.
-Interactive installs ask for judge slots; default is effective logical CPUs minus 2 (minimum 1).
+Interactive installs ask for judge slots; default/maximum is min(effective CPUs-1, RAM MiB//256, 511).
+Local judging needs at least 2 effective logical CPUs and 256 MiB effective RAM; no extra RAM is reserved.
 --judge-slots N selects a count; 0 means automatic. --yes uses supplied/default options.
 Nginx defaults to public HTTP on port 80. Internal services remain loopback-only.
 The installer does not change firewall rules or configure TLS certificates.
@@ -111,10 +113,8 @@ ask_judge_slots() {
     fi
     capacity="$("$PYTHON" "$SOURCE_ROOT/deploy/judge_capacity.py" --json)" || die "Cannot determine judge capacity"
     read -r default maximum < <("$PYTHON" -c 'import json,sys; c=json.loads(sys.argv[1]); print(c["default_slots"],c["maximum_slots"])' "$capacity")
-    say 'Judge slots: automatic CPU-2 default %s; current CPU/RAM maximum %s.\n' "$default" "$maximum"
-    if (( default > maximum )); then
-        say 'The automatic count exceeds available resources; enter a smaller positive count.\n'
-    fi
+    say 'Judge slots: automatic CPU-1 default %s; current CPU/RAM maximum %s (256 MiB per slot).\n' "$default" "$maximum"
+    (( maximum > 0 )) || die "Local judging needs at least 2 effective logical CPUs and 256 MiB effective RAM; use --role web or increase resources"
     while true; do
         read -r -p "$(translate 'Judge execution slots (Enter or 0 = automatic)') [$default]: " answer || die "Input ended; use --yes for non-interactive installation"
         # Keep the historical 0 metadata value for automatic selection, so an

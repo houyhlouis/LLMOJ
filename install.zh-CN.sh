@@ -32,7 +32,7 @@ usage() {
         cat <<'USAGE_ZH'
 用法：sudo bash install.zh-CN.sh --repository 用户名/仓库名 [--ref 标签或提交] [安装选项]
 从公开 GitHub 仓库下载固定提交源码，再运行同一套安装器（中文提示）。
-默认分支 main；无需 GitHub 登录、Token 或预装 Docker。
+默认分支 main，安装目录 /opt/LLMOJ；无需 GitHub 登录、Token 或预装 Docker。
 安装选项：--port、--listen、--public-url、--prefix、--site-name、--role all|web、
 --docker-source、--docker-mirrors、--judge-slots、--yes、--interactive、--check、--plan。
 Docker 软件包源默认 https://download.docker.com；镜像加速源默认留空，保留 Docker 默认。
@@ -43,7 +43,7 @@ USAGE_ZH
     cat <<'USAGE'
 Usage: sudo bash install.sh --repository OWNER/REPO [--ref TAG_OR_COMMIT] [installer options]
 Downloads a public GitHub source snapshot and runs deploy/install.sh from that snapshot.
-Default ref: main. No GitHub login, token or preinstalled Docker is required.
+Default ref: main; installation directory: /opt/LLMOJ. No GitHub login, token or preinstalled Docker is required.
 Installer options include --port, --listen, --public-url, --prefix, --site-name,
 --docker-source (default https://download.docker.com), --docker-mirrors (optional),
 --role all|web, --judge-slots, --yes, --interactive, --check and --plan.

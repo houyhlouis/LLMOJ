@@ -22,7 +22,7 @@
 
 ## 可选的服务器默认配置
 
-需要设置服务器回退值时，在现有 `config/backend.yaml`（默认 `/opt/LibreOJ/config/backend.yaml`）的 **已有** `preference.security` 下设置一行：
+需要设置服务器回退值时，在现有 `config/backend.yaml`（默认 `/opt/LLMOJ/config/backend.yaml`）的 **已有** `preference.security` 下设置一行：
 
 ```yaml
 preference:

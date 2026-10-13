@@ -772,7 +772,7 @@ def validate_manifest(manifest):
 
 def parser():
     result = argparse.ArgumentParser(allow_abbrev=False, description='官方 all/web 保守升级：保留配置、评测容量和数据；不支持任意历史版本。')
-    result.add_argument('--prefix', type=Path, default=Path('/opt/LibreOJ'))
+    result.add_argument('--prefix', type=Path, default=Path('/opt/LLMOJ'))
     result.add_argument('--ref', default='main')
     result.add_argument('--source', type=Path)
     result.add_argument('--source-sha256')

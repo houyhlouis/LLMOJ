@@ -2,7 +2,7 @@
 
 English | [简体中文](Operations-Configuration.zh-CN.md) | [Configuration overview](Configuration.md)
 
-These tables cover infrastructure settings emitted by project templates/generators. Other third-party directives belong to their version-specific documentation. `<root>` is the installation directory, default `/opt/LibreOJ`. Back up and record original settings before editing; plan a maintenance window for database/storage migrations.
+These tables cover infrastructure settings emitted by project templates/generators. Other third-party directives belong to their version-specific documentation. `<root>` is the installation directory, default `/opt/LLMOJ`. Back up and record original settings before editing; plan a maintenance window for database/storage migrations.
 
 ## Nginx: config/nginx.conf
 
@@ -83,7 +83,7 @@ The installer also writes `vm.overcommit_memory=1` to `/etc/sysctl.d/99-libreoj-
 Substitute the actual instance paths. If validation fails, do not reload; restore the backup and test again.
 
 ```bash
-sudo /usr/sbin/nginx -t -p /opt/LibreOJ/ -c /opt/LibreOJ/config/nginx.conf
+sudo /usr/sbin/nginx -t -p /opt/LLMOJ/ -c /opt/LLMOJ/config/nginx.conf
 # Run only after the preceding check succeeds.
 sudo systemctl reload libreoj-nginx
 ```
@@ -96,6 +96,6 @@ Restart `libreoj-backend` for backend YAML changes. Restart database/Redis/MinIO
 
 The AI state directory holds the master key; encrypted user API settings live in MariaDB `ai_configuration.encrypted`. Back up and restore the database with its matching key, and move the key when changing the state directory, as described in [AI environment](AI-Environment.md). Do not recursively chown the instance: rootfs and judge workspaces have specific UID/mount requirements.
 
-`deploy/backup.sh` currently hardcodes `/opt/LibreOJ`. It stops site services, archives `config`, `data`, and `deploy`, excludes `data/judge`, `data/tmp`, `data/nginx`, and `data/ai-generated`, then starts the target on exit. It does not include the full rootfs, runtime binaries, or `/etc/systemd/system` drop-ins; save those separately or ensure they can be rebuilt at the same version. Unpublished results in `data/ai-generated` are also excluded. It is not a universal backup for custom prefixes or remote judges. Preserve any additional required data and test restoration.
+`deploy/backup.sh` defaults to `/opt/LLMOJ`; `--prefix PATH` overrides `HYHOJ_ROOT`. Specify the actual path for an existing or custom installation. It stops site services, archives `config`, `data`, and `deploy`, excludes `data/judge`, `data/tmp`, `data/nginx`, and `data/ai-generated`, then starts the target on exit. It does not include the full rootfs, runtime binaries, or `/etc/systemd/system` drop-ins; save those separately or ensure they can be rebuilt at the same version. Unpublished results in `data/ai-generated` are also excluded. It is not a complete backup of all runtime files or remote judges. Preserve any additional required data and test restoration.
 
 Sources: [deploy/configure-local.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py), [config/nginx.conf.example](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/config/nginx.conf.example), [deploy/configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-judge.py), [deploy/backup.sh](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/backup.sh).

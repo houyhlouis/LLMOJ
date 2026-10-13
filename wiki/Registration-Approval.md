@@ -22,7 +22,7 @@ The override lives in the existing database `settings` table under the independe
 
 ## Optional server default
 
-To change the fallback, set this field under the **existing** `preference.security` object in `config/backend.yaml` (normally `/opt/LibreOJ/config/backend.yaml`):
+To change the fallback, set this field under the **existing** `preference.security` object in `config/backend.yaml` (normally `/opt/LLMOJ/config/backend.yaml`):
 
 ```yaml
 preference:

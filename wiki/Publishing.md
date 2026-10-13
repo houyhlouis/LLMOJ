@@ -9,7 +9,7 @@ These steps are for the repository owner. Local packaging does not create reposi
 Generate a source archive. Use a new filename if it exists; the tool refuses overwrites.
 
 ```bash
-cd /opt/LibreOJ
+cd /opt/LLMOJ
 python3 deploy/prepare-github.py --archive release/llmoj-source.tar.gz
 sha256sum release/llmoj-source.tar.gz
 mkdir -p ~/llmoj-publish

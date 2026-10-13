@@ -110,8 +110,6 @@ def preflight(args):
     if subprocess.run(["systemd-detect-virt", "--quiet", "--container"]).returncode == 0:
         fail("Use a normal virtual machine or physical server; container installation is unsupported")
     mem = int(re.search(r"^MemTotal:\s+(\d+)", Path("/proc/meminfo").read_text(), re.M)[1]) * 1024
-    if mem < 3 * 1024**3:
-        fail("At least 3 GiB RAM is required; 8 GiB is recommended for compilation")
     complete = check_state(args)
     if not complete:
         check_initial_judge_capacity(args)
@@ -302,7 +300,7 @@ def main():
     parser.add_argument("--judge-slots", type=int, default=0)
     args = parser.parse_args()
     if args.root != args.root.resolve() or not re.fullmatch(r"/[A-Za-z0-9_./-]+", str(args.root)) or len(args.root.parts) < 3:
-        fail("Use a canonical, absolute installation directory such as /opt/LibreOJ")
+        fail("Use a canonical, absolute installation directory such as /opt/LLMOJ")
     if args.port in (2002, 2020, 13306, 16379, 19000, 19001) or not 1 <= args.port <= 65535:
         fail("The public port is invalid or conflicts with an internal service")
     if not 0 <= args.judge_slots <= judge_capacity_module().MAX_SLOTS or (args.role == "web" and args.judge_slots):

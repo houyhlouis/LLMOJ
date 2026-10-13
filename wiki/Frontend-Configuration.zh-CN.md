@@ -26,8 +26,8 @@
 已有完整源码和依赖时，可在维护／构建目录执行下例；它会写入静态文件，先备份输出目录，并按实际路径和站名替换。用与安装器一致的 Node／pnpm 和文件所有权，构建完成后验证首页、资源加载、登录、上传和浏览器缓存。
 
 ```bash
-cd /opt/LibreOJ
-sudo env PATH=/opt/LibreOJ/runtime/node/bin:/opt/LibreOJ/runtime/tooling/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin   OJ_SITE_NAME="AI Practice"   /opt/LibreOJ/runtime/node/bin/node deploy/build-frontend-offline.mjs --build
+cd /opt/LLMOJ
+sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin   OJ_SITE_NAME="AI Practice"   /opt/LLMOJ/runtime/node/bin/node deploy/build-frontend-offline.mjs --build
 ```
 
 ## 项目入口与显示名称

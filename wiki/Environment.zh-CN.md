@@ -30,7 +30,7 @@ AI 运行变量 `HYHOJ_AI_STATE_DIR`、`HYHOJ_AI_GENERATED_DIR`、`HYHOJ_AI_SAMP
 
 | 变量 | 用途 |
 | --- | --- |
-| `HYHOJ_ROOT` | 生成器实例目录，缺省 `/opt/LibreOJ`；不迁移现有文件 |
+| `HYHOJ_ROOT` | 生成器与备份实例目录，缺省 `/opt/LLMOJ`；不迁移现有文件 |
 | `NODE_BINARY` | 生成器 Node 绝对路径，缺省 `<root>/runtime/node/bin/node` |
 | `HYHOJ_PORT` | 网页生成器端口，缺省 `80`；本机评测配置生成时也读取 |
 | `HYHOJ_PUBLIC_ORIGIN` | 网页生成器 origin；缺省回环 HTTP 地址，非 80 时附带端口；安装入口会传入检测／指定值 |
@@ -40,12 +40,12 @@ AI 运行变量 `HYHOJ_AI_STATE_DIR`、`HYHOJ_AI_GENERATED_DIR`、`HYHOJ_AI_SAMP
 | `OJ_JUDGE_REMOTE` | 评测生成器只有值 `1` 表示远程，其余为本机；缺省 `0` |
 | `OJ_JUDGE_SERVER` | 远程模式必填 HTTP(S) 站点 origin；本机内部连接自动生成 |
 | `OJ_JUDGE_KEY_FILE` | 远程模式必填，root 所有且 0600 的绝对路径文件；内容为节点密钥 |
-| `OJ_JUDGE_SLOTS` | 首次评测生成显式正整数槽数；变量不存在时为 `max(1, 有效 CPU-2)`，环境值 `0` 会报错；CPU／内存及 511 上限校验，已有 YAML 不被覆盖 |
+| `OJ_JUDGE_SLOTS` | 首次评测生成显式正整数槽数；变量不存在时为 `min(有效 CPU 数-1, 有效内存 MiB//256, 511)`，环境值 `0` 会报错；不额外预留内存，零容量拒绝本机评测，已有 YAML 不被覆盖 |
 | `HYHOJ_JUDGE_SLOTS` | 兼容旧名；仅没有 `OJ_JUDGE_SLOTS` 时读取，限制相同 |
 | `LLMOJ_INSTALL_LANG` | 安装／辅助工具语言：`zh-CN` 中文，其他值走英文；中英文入口会选定语言 |
 | `OJ_SOURCE_REPOSITORY` | 下载入口写入源仓库元数据；内部记录用途，不是认证信息或运行参数 |
 | `OJ_SOURCE_COMMIT` | 下载入口解析后的源提交记录；不是覆盖现有安装版本的开关 |
-| `LIBREOJ_ROOT` | 仅管理员初始化工具的根目录后备值，缺省 `/opt/LibreOJ`；`--root` 优先 |
+| `LIBREOJ_ROOT` | 仅管理员初始化工具的根目录后备值，缺省 `/opt/LLMOJ`；`--root` 优先 |
 | `INVOCATION_ID / JOURNAL_STREAM` | systemd 自动注入；管理员工具据此避免向后台服务日志打印凭据，不应手动伪造 |
 
 ## 构建、rootfs 与可选旧发布路径
@@ -105,19 +105,19 @@ AI 运行变量 `HYHOJ_AI_STATE_DIR`、`HYHOJ_AI_GENERATED_DIR`、`HYHOJ_AI_SAMP
 | 工具 | 参数与作用 |
 | --- | --- |
 | `upgrade.zh-CN.sh` / `upgrade.sh` → `deploy/upgrade.sh` | `--prefix`、`--plan`、`--ref`、`--source`、`--source-sha256`、`--apply --drained`、`--rollback BACKUP --drained`；完整兼容范围、维护确认与回滚规则见 [升级教程](Upgrade.zh-CN.md) |
-| `deploy/resize-judge.sh`（实现 `resize-judge.py`） | 已有 judge 的正式维护入口；`--prefix`（默认 `/opt/LibreOJ`）、`--slots`、`--plan`、`--apply --drained`、`--rollback PRIVATE_BACKUP --drained`、`--mode auto\|all\|remote`；默认中文交互，详情见 [扩缩容教程](Judge-Configuration.zh-CN.md) |
+| `deploy/resize-judge.sh`（实现 `resize-judge.py`） | 已有 judge 的正式维护入口；`--prefix`（默认 `/opt/LLMOJ`）、`--slots`、`--plan`、`--apply --drained`、`--rollback PRIVATE_BACKUP --drained`、`--mode auto\|all\|remote`；默认中文交互，详情见 [扩缩容教程](Judge-Configuration.zh-CN.md) |
 | `deploy/judge_capacity.py` | 只读容量检查；`--remote`、`--json`、`--slots N`；读取 affinity/cgroup/内存，不创建工作目录或改变服务 |
 | `deploy/initialize-mariadb.py` | 内部安装工具，必填 `--root`；使用 mysql 身份暂存初始化及系统表验证，已有非空数据库保留并验证；不是在线升级/重置接口 |
 | `deploy/bootstrap-admin.mjs` | `--root`、`--config`、`--email`、`--show-credentials`；root 优先于 `LIBREOJ_ROOT`，config 优先于 `LIBREOJ_CONFIG_FILE`；email 默认 `admin@localhost.invalid`，仅初始化；显示凭据前核验，不是重置密码接口 |
 | `deploy/bootstrap-services.mjs` | `--root` 必填；`--phase storage\|judge\|verify-judge` 必填；`--help`；用于创建存储、登记本机评测或检查连接 |
-| `deploy/sandbox/verify-installed.mjs` | 可选 `--root`（默认 `/opt/LibreOJ`）；会运行真实沙盒探针，不是无副作用的 YAML 校验 |
+| `deploy/sandbox/verify-installed.mjs` | 可选 `--root`（默认 `/opt/LLMOJ`）；会运行真实沙盒探针，不是无副作用的 YAML 校验 |
 | `deploy/build-frontend-offline.mjs` | `--assets-only` 只准备依赖；`--build` 先构建；省略则发布已有 dist；见前端页 |
 | `deploy/docker-support.py` | `--source` 默认官方源；`--mirrors` 默认空；`--configure` 合并写入镜像配置（不自行重启 Docker），省略仅校验参数 |
 | `deploy/install-support.py` | 内部阶段 `validate`、`preflight`、`claim`、`permissions`、`apparmor`、`database`、`verify-network`、`finish`；`--root`、`--origin`、`--port` 必填，另有 `--listen`、`--role`、`--site-name`、`--docker-source`、`--docker-mirrors`、`--judge-slots`，与安装入口同义；不要单独运行阶段来升级 |
 | `deploy/sandbox/build.sh` | 位置参数 `plan`（默认）、`build` 或 `stage ABS_ARCHIVE`；环境变量见上表 |
 | `deploy/export-wiki.py` | 必填 `--repository OWNER/REPO`、`--output DIR`；只导出本地文档，见发布页 |
 | `deploy/prepare-github.py` | 可选 `--archive PATH`；源码发布筛选／打包工具，需可读取 Git 清单；已有归档不覆盖 |
-| `deploy/backup.sh` | 无参数；当前固定 `/opt/LibreOJ`，停服务、备份后恢复 target；自定义安装目录不能直接照用 |
+| `deploy/backup.sh` | `--prefix PATH` 优先于 `HYHOJ_ROOT`，默认 `/opt/LLMOJ`；停服务、备份后恢复 target；旧安装或自定义目录须指定实际路径 |
 
 核对来源：[deploy/configure-local.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py), [deploy/configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-judge.py), [deploy/install.sh](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/install.sh), [deploy/build-frontend-offline.mjs](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/build-frontend-offline.mjs), [apps/backend/src/main.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/main.ts), [apps/backend/src/migration/migration-config.schema.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/migration/migration-config.schema.ts), [apps/judge/src/config.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/config.ts).
 

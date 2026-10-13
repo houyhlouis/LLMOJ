@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 MAX_SLOTS = 511  # UV_THREADPOOL_SIZE >= slots * 2 + 2, and <= 1024.
-SLOT_MEMORY_MIB = 512
+SLOT_MEMORY_MIB = 256
 
 
 class CapacityError(ValueError):
@@ -52,7 +52,7 @@ def _cgroup_directory(proc, mount):
 
 def discover_capacity(remote=False, *, proc_root=Path('/proc'), cgroup_root=Path('/sys/fs/cgroup'),
                       affinity=None, extra_cgroup=None):
-    """Return a non-sensitive dict. Default is CPU-2; RAM never silently lowers it.
+    """Return a non-sensitive dict, reserving one CPU and 256 MiB per slot.
 
     extra_cgroup can be a service's parent slice, excluding its old AllowedCPUs.
     Test-only path arguments are explicit Python parameters, never env overrides.
@@ -90,28 +90,32 @@ def discover_capacity(remote=False, *, proc_root=Path('/proc'), cgroup_root=Path
     if not cpus or (quota is not None and quota <= 0):
         raise CapacityError('No effective CPU capacity is available')
     effective = min(len(cpus), max(1, math.floor(quota))) if quota is not None else len(cpus)
-    reserve = 1024 if remote else 2048
     memory_mib = memory_bytes // (1024 * 1024)
-    memory_slots = max(0, (memory_mib - reserve) // SLOT_MEMORY_MIB)
-    default = max(1, effective - 2)
-    maximum = min(effective, memory_slots, MAX_SLOTS)
+    cpu_slots = max(0, effective - 1)
+    memory_slots = memory_mib // SLOT_MEMORY_MIB
+    maximum = min(cpu_slots, memory_slots, MAX_SLOTS)
     return {'cpu_ids': sorted(cpus), 'logical_cpu_count': len(cpus), 'cpu_quota': quota,
             'effective_cpu_count': effective, 'memory_mib': memory_mib,
-            'reserve_memory_mib': reserve, 'slot_memory_mib': SLOT_MEMORY_MIB,
-            'memory_slots': memory_slots, 'default_slots': default, 'maximum_slots': maximum,
-            'default_fits': default <= maximum, 'runtime_max_slots': MAX_SLOTS,
+            'cpu_slots': cpu_slots, 'reserve_memory_mib': 0, 'slot_memory_mib': SLOT_MEMORY_MIB,
+            'memory_slots': memory_slots, 'default_slots': maximum, 'maximum_slots': maximum,
+            'default_fits': True, 'runtime_max_slots': MAX_SLOTS,
             'remote': remote, 'warnings': warnings}
 
 
 def validate_slots(slots, capacity):
+    if capacity['maximum_slots'] < 1:
+        raise CapacityError(f"No judge capacity: at least 2 effective CPUs and {SLOT_MEMORY_MIB} MiB RAM are required; "
+                            f"available {capacity['effective_cpu_count']} CPUs and {capacity['memory_mib']} MiB / "
+                            f"无可用评测容量：至少需要 2 个有效 CPU 和 {SLOT_MEMORY_MIB} MiB 内存；请增加资源或仅安装网站（--role web）")
     if type(slots) is not int or slots < 1:
         raise CapacityError('Judge slots must be a positive integer / 评测槽数必须为正整数')
-    if slots > capacity['effective_cpu_count']:
-        raise CapacityError(f"Requested {slots} slots exceed effective CPU capacity {capacity['effective_cpu_count']} / 槽数超过有效 CPU 容量")
+    if slots > capacity['cpu_slots']:
+        raise CapacityError(f"Requested {slots} slots exceed CPU capacity {capacity['cpu_slots']} "
+                            f"({capacity['effective_cpu_count']} effective CPUs minus 1) / 槽数不能超过有效 CPU 核心数减 1")
     if slots > MAX_SLOTS:
         raise CapacityError(f'Judge slots exceed libuv capacity {MAX_SLOTS}')
     if slots > capacity['memory_slots']:
-        raise CapacityError(f"Requested {slots} slots need at least {capacity['reserve_memory_mib'] + slots*SLOT_MEMORY_MIB} MiB; effective RAM {capacity['memory_mib']} MiB permits at most {capacity['memory_slots']} slots / 内存预算不足，请明确选择较少槽数")
+        raise CapacityError(f"Requested {slots} slots need at least {slots*SLOT_MEMORY_MIB} MiB; effective RAM {capacity['memory_mib']} MiB permits at most {capacity['memory_slots']} slots / 每个评测实例需要 {SLOT_MEMORY_MIB} MiB 内存，请选择较少槽数")
     return slots
 
 

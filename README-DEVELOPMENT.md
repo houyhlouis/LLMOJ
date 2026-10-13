@@ -21,7 +21,7 @@ Source archives include testlib. Run `git submodule update --init --recursive` o
 
 ## Runtime configuration
 
-config/*.example are templates. Real config, credentials, data, dependencies, rootfs and build output stay out of source releases. The installer generates them, defaulting to 0.0.0.0:80; internal services stay local. Services retain libreoj-* names and /opt/LibreOJ paths. HYHOJ_* variables remain for existing code compatibility; display names use --site-name / OJ_SITE_NAME.
+config/*.example are templates. Real config, credentials, data, dependencies, rootfs and build output stay out of source releases. The installer generates them, defaulting to 0.0.0.0:80; internal services stay local. Services retain libreoj-* names; new installations default to /opt/LLMOJ, while an explicit prefix supports existing instance paths. HYHOJ_* variables remain for existing code compatibility; display names use --site-name / OJ_SITE_NAME.
 
 Docker builds rootfs; native simple-sandbox executes submissions. Both installer entry points share the same backend logic, selecting English or Chinese messages. Their standalone bootstrap code is checked for equivalence. See [Docker sources](wiki/Docker-Sources.md).
 

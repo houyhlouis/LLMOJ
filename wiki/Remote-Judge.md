@@ -2,7 +2,7 @@
 
 English | [简体中文](Remote-Judge.zh-CN.md)
 
-This guide installs only judge, without web/database/Redis/MinIO services. Each judge has its own key and initiates the web-server connection. Use Ubuntu 24.04 / 26.04 amd64 (fresh 26.04 deployment remains unverified), systemd 254+, unified cgroup v2, at least 3 GiB RAM and 30 GiB free disk. Restricted namespace/mount/cgroup containers are unsupported.
+This guide installs only judge, without web/database/Redis/MinIO services. Each judge has its own key and initiates the web-server connection. Use Ubuntu 24.04 / 26.04 amd64 (fresh 26.04 deployment remains unverified), systemd 254+, unified cgroup v2, at least 2 effective logical CPUs and 256 MiB effective RAM for one execution slot, and 30 GiB free disk. Building on the judge needs additional RAM; 8 GiB is recommended for compilation. Restricted namespace/mount/cgroup containers are unsupported.
 
 ## 1. Download the same source version
 
@@ -13,8 +13,8 @@ Read `sourceCommit` in the web node's `config/install-complete.json`, or select 
 sudo apt-get update
 sudo apt-get install -y ca-certificates curl git xz-utils build-essential cmake \
   libfmt-dev python3 python3-yaml util-linux pkg-config
-sudo git clone https://github.com/houyhlouis/LLMOJ.git /opt/LibreOJ
-cd /opt/LibreOJ
+sudo git clone https://github.com/houyhlouis/LLMOJ.git /opt/LLMOJ
+cd /opt/LLMOJ
 sudo git checkout WEB_SERVER_COMMIT_OR_TAG
 # Source archives include testlib; initialize only if testlib.h is absent:
 if [ ! -f apps/judge/vendor/testlib/testlib.h ]; then
@@ -36,16 +36,16 @@ printf '%s  %s\n' \
   fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6 \
   "$OJ_NODE_STAGE/node.tar.xz" | sha256sum --check
 # Continue only after the checksum succeeds:
-sudo install -d -m 0755 /opt/LibreOJ/runtime
-sudo tar -xJf "$OJ_NODE_STAGE/node.tar.xz" -C /opt/LibreOJ/runtime
-sudo ln -sfn node-v24.21.0-linux-x64 /opt/LibreOJ/runtime/node
+sudo install -d -m 0755 /opt/LLMOJ/runtime
+sudo tar -xJf "$OJ_NODE_STAGE/node.tar.xz" -C /opt/LLMOJ/runtime
+sudo ln -sfn node-v24.21.0-linux-x64 /opt/LLMOJ/runtime/node
 rm -r -- "$OJ_NODE_STAGE"
 
-sudo env PATH=/opt/LibreOJ/runtime/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-  npm install --prefix /opt/LibreOJ/runtime/tooling --ignore-scripts --no-audit --no-fund pnpm@11.13.1
+sudo env PATH=/opt/LLMOJ/runtime/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  npm install --prefix /opt/LLMOJ/runtime/tooling --ignore-scripts --no-audit --no-fund pnpm@11.13.1
 
-sudo env PATH=/opt/LibreOJ/runtime/node/bin:/opt/LibreOJ/runtime/tooling/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-  npm_config_nodedir=/opt/LibreOJ/runtime/node CMAKE_BUILD_PARALLEL_LEVEL=2 \
+sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  npm_config_nodedir=/opt/LLMOJ/runtime/node CMAKE_BUILD_PARALLEL_LEVEL=2 \
   NODE_OPTIONS=--max-old-space-size=2300 pnpm install --frozen-lockfile --store-dir runtime/pnpm-store
 ```
 
@@ -53,8 +53,8 @@ Continue building with the same tool path:
 
 
 ```bash
-sudo env PATH=/opt/LibreOJ/runtime/node/bin:/opt/LibreOJ/runtime/tooling/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-  npm_config_nodedir=/opt/LibreOJ/runtime/node CMAKE_BUILD_PARALLEL_LEVEL=2 \
+sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  npm_config_nodedir=/opt/LLMOJ/runtime/node CMAKE_BUILD_PARALLEL_LEVEL=2 \
   NODE_OPTIONS=--max-old-space-size=2300 pnpm_config_verify_deps_before_run=false bash -e -c '
     pnpm build:artifacts
     pnpm --filter simple-sandbox build
@@ -82,7 +82,7 @@ Use the actual `ROOTFS_ID` and archive path printed by the plan/build. The follo
 
 ```bash
 sudo env LIBREOJ_X32_SUPPORTED=0 unshare --net --mount --propagation private -- \
-  bash deploy/sandbox/build.sh stage /opt/LibreOJ/runtime/sandbox-archives/rootfs-ACTUAL_ROOTFS_ID.tar.gz
+  bash deploy/sandbox/build.sh stage /opt/LLMOJ/runtime/sandbox-archives/rootfs-ACTUAL_ROOTFS_ID.tar.gz
 ```
 
 Alternatively, build the identical recipe on a trusted build machine and copy `rootfs-<ID>.tar.gz` plus its `.sha256` file to the judge for staging and language verification. This avoids Docker on the judge itself. Do not mix versions. Docker is for building; submissions execute in native `simple-sandbox`.
@@ -97,15 +97,15 @@ Create the key file below only on first setup; if `/root/judge-01.key` already e
 ```bash
 sudo install -m 0600 /dev/null /root/judge-01.key
 sudoedit /root/judge-01.key
-sudo install -d -m 0751 /opt/LibreOJ/data
-sudo install -d -m 0700 /opt/LibreOJ/data/judge /opt/LibreOJ/data/judge/testdata /opt/LibreOJ/data/judge/cache
-sudo env HYHOJ_ROOT=/opt/LibreOJ NODE_BINARY=/opt/LibreOJ/runtime/node/bin/node \
+sudo install -d -m 0751 /opt/LLMOJ/data
+sudo install -d -m 0700 /opt/LLMOJ/data/judge /opt/LLMOJ/data/judge/testdata /opt/LLMOJ/data/judge/cache
+sudo env HYHOJ_ROOT=/opt/LLMOJ NODE_BINARY=/opt/LLMOJ/runtime/node/bin/node \
   OJ_JUDGE_REMOTE=1 OJ_JUDGE_SERVER=https://oj.example.com \
   OJ_JUDGE_KEY_FILE=/root/judge-01.key OJ_JUDGE_SLOTS=2 \
   python3 deploy/configure-judge.py
 ```
 
-The server URL must be an origin without `/api`. The key file must be regular, root-owned and `0600`; its contents are not printed. Initial explicit slots must fit effective CPU/RAM capacity and the 511 libuv limit. Omitting `OJ_JUDGE_SLOTS` defaults to `max(1, effective CPUs-2)`; insufficient RAM requires an explicit smaller count. This variable does not resize existing YAML; use the maintained resize script. See [Judge configuration](Judge-Configuration.md) for every field, thread-pool sizing and existing-node resizing.
+The server URL must be an origin without `/api`. The key file must be regular, root-owned and `0600`; its contents are not printed. Initial explicit slots must fit effective CPU/RAM capacity and the 511 libuv limit. Omitting `OJ_JUDGE_SLOTS` uses `min(effective CPUs-1, effective RAM MiB//256, 511)` for both default and maximum, with no extra memory reservation. One effective CPU or less than 256 MiB RAM gives zero capacity and is rejected. This variable does not resize existing YAML; use the maintained resize script. See [Judge configuration](Judge-Configuration.md) for every field, thread-pool sizing and existing-node resizing.
 
 The generated `config/judge.yaml` is also root-only. Remote mode disables the local AI socket and creates `libreoj-judge.target`. Reruns retain config and reject a different server/key; rotate credentials explicitly after stopping the judge.
 
@@ -129,8 +129,8 @@ done
 sudo systemd-run --unit=libreoj-install-sandbox-check --wait --pipe --collect \
   --property='Delegate=cpu memory pids' --property=DelegateSubgroup=supervisor \
   --property=LimitCORE=0 --property=RuntimeMaxSec=120 --property=TimeoutStopSec=15 \
-  --property=WorkingDirectory=/opt/LibreOJ/apps/judge \
-  /opt/LibreOJ/runtime/node/bin/node /opt/LibreOJ/deploy/sandbox/verify-installed.mjs --root /opt/LibreOJ
+  --property=WorkingDirectory=/opt/LLMOJ/apps/judge \
+  /opt/LLMOJ/runtime/node/bin/node /opt/LLMOJ/deploy/sandbox/verify-installed.mjs --root /opt/LLMOJ
 # Start judging only after the sandbox check succeeds:
 sudo systemctl enable --now libreoj-judge.target
 sudo systemctl status libreoj-judge.service

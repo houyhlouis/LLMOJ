@@ -6,7 +6,7 @@
 
 ## 文件、默认值与生效方式
 
-后端从环境变量 `LIBREOJ_CONFIG_FILE` 指定的文件读取配置；一键安装通常为 `/opt/LibreOJ/config/backend.yaml`。[ConfigService](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/config/config.service.ts) 只做 YAML 读取、类型转换、字段校验和跨字段关系校验，**不与示例文件合并，也没有通用默认值填充**。因此下表“示例值”不是“省略即可得到的默认值”；除标明可选或派生的项外，应保留完整配置。
+后端从环境变量 `LIBREOJ_CONFIG_FILE` 指定的文件读取配置；一键安装通常为 `/opt/LLMOJ/config/backend.yaml`。[ConfigService](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/config/config.service.ts) 只做 YAML 读取、类型转换、字段校验和跨字段关系校验，**不与示例文件合并，也没有通用默认值填充**。因此下表“示例值”不是“省略即可得到的默认值”；除标明可选或派生的项外，应保留完整配置。
 
 所有项均在进程启动时读取，没有文件热重载。调整后要按运维流程重启后端；`preference`（除 `serverSideOnly`）经 `auth/getSessionInfo` 返回浏览器，后端重启后还需刷新浏览器或重新初始化应用。修改这些运行时偏好一般无需重新构建前端。`judge.limit` 在评测客户端连接时下发，应确认评测端重新连接后采用新值。不要把后端 `server.clusters` 当成评测槽数。
 

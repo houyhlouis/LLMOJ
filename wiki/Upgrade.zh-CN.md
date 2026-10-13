@@ -2,6 +2,8 @@
 
 简体中文 | [English](Upgrade.md) | [Wiki 首页](Home.md)
 
+新安装默认目录为 `/opt/LLMOJ`。已有实例保留原目录；原先安装到 `/opt/LibreOJ` 的实例请明确使用 `--prefix /opt/LibreOJ`。修改默认值不会迁移文件或服务。
+
 本工具用于**已完成官方一键安装的 `all` 或 `web` 实例**，更新应用代码和网页资源，同时保留已有账号、题目、提交、对象存储、AI 配置及主密钥、评测槽数、CPU 绑定和原有服务定制。它不会重新运行安装器或初始化管理员。
 
 ## 适用范围
@@ -20,7 +22,7 @@
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/upgrade.zh-CN.sh -o /tmp/llmoj-upgrade.zh-CN.sh && \
-  sudo bash /tmp/llmoj-upgrade.zh-CN.sh --prefix /opt/LibreOJ
+  sudo bash /tmp/llmoj-upgrade.zh-CN.sh --prefix /opt/LLMOJ
 ```
 
 自定义安装目录请替换 `--prefix`。脚本将 `main` 解析为固定的完整提交，再下载该提交的完整源码，避免下载期间分支变化混用版本。可通过 `--ref 完整提交SHA` 选择已审阅的提交；这不能绕过兼容性检查。
@@ -28,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/upgrade.zh-CN
 只读预检：
 
 ```bash
-sudo bash /tmp/llmoj-upgrade.zh-CN.sh --prefix /opt/LibreOJ --plan
+sudo bash /tmp/llmoj-upgrade.zh-CN.sh --prefix /opt/LLMOJ --plan
 ```
 
 `--plan` 检查部署与运行时，并列出尚未完成的检查；它不会构建、创建数据库副本或停服务，因此**预检通过不等于升级已完成**。完整源码的构建和数据库副本迁移验证在实际升级的暂存阶段进行。
@@ -71,7 +73,7 @@ sudo bash /tmp/llmoj-upgrade.zh-CN.sh --prefix /opt/LibreOJ --plan
 确认维护窗口已排空后，无交互运行可用：
 
 ```bash
-sudo bash /tmp/llmoj-upgrade.zh-CN.sh --prefix /opt/LibreOJ --apply --drained
+sudo bash /tmp/llmoj-upgrade.zh-CN.sh --prefix /opt/LLMOJ --apply --drained
 ```
 
 `--drained` 是操作者对维护状态的明确声明，不是自动取消任务的指令。不要对仍有用户操作、远程评测或 AI 作业的站点添加这个参数。
@@ -80,7 +82,7 @@ sudo bash /tmp/llmoj-upgrade.zh-CN.sh --prefix /opt/LibreOJ --apply --drained
 
 ```bash
 sudo bash /path/to/LLMOJ/deploy/upgrade.sh \
-  --prefix /opt/LibreOJ --source /path/to/LLMOJ --plan
+  --prefix /opt/LLMOJ --source /path/to/LLMOJ --plan
 ```
 
 预检显示 `sourceSha256`。核对来源及文件内容后，在实际执行时同时提供 `--source /path/to/LLMOJ --source-sha256 完整64位哈希`。也可用 `python3 /path/to/LLMOJ/deploy/upgrade.py --source /path/to/LLMOJ --source-digest` 只读计算源码树哈希。哈希用于发现内容变化，本身不能证明未经核验的源码可信。
@@ -94,8 +96,8 @@ sudo bash /path/to/LLMOJ/deploy/upgrade.sh \
 需要手动回滚时，先排空并暂停业务，使用日志中的**本实例备份目录**：
 
 ```bash
-sudo bash /opt/LibreOJ/deploy/upgrade.sh --prefix /opt/LibreOJ \
-  --rollback /opt/LibreOJ/backups/upgrade/实际备份目录 --drained
+sudo bash /opt/LLMOJ/deploy/upgrade.sh --prefix /opt/LLMOJ \
+  --rollback /opt/LLMOJ/backups/upgrade/实际备份目录 --drained
 ```
 
 回滚代码和升级器自身的服务配置，保留数据库、对象存储及兼容的新增审核／申请表，**不会把旧 SQL 备份覆盖到现在的数据库**，因此不会主动丢弃升级后的提交。存在待审核或被拒绝的旧账号或新版申请时，本版会保守拒绝代码回滚，防止旧代码绕过审核门槛；应保留支持审核的版本并修复问题。如果在停服务后的复查中发现新产生的未激活账号，服务会保持停止，须恢复支持审核的版本后再开放。SQL 备份用于独立灾难恢复，不是日常降级按钮。

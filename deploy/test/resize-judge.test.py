@@ -27,11 +27,11 @@ resize=importlib.util.module_from_spec(spec);spec.loader.exec_module(resize)
 
 
 def capacity(cpus=32,ram=65536):
+    maximum=min(max(0,cpus-1),ram//256,511)
     return {'cpu_ids':list(range(cpus)),'logical_cpu_count':cpus,'cpu_quota':None,
-            'effective_cpu_count':cpus,'memory_mib':ram,'reserve_memory_mib':2048,
-            'slot_memory_mib':512,'memory_slots':max(0,(ram-2048)//512),
-            'default_slots':max(1,cpus-2),'maximum_slots':min(cpus,max(0,(ram-2048)//512),511),
-            'default_fits':max(1,cpus-2)<=min(cpus,max(0,(ram-2048)//512),511),
+            'effective_cpu_count':cpus,'memory_mib':ram,'reserve_memory_mib':0,
+            'cpu_slots':max(0,cpus-1),'slot_memory_mib':256,'memory_slots':ram//256,
+            'default_slots':maximum,'maximum_slots':maximum,'default_fits':True,
             'runtime_max_slots':511,'warnings':[]}
 
 
@@ -120,16 +120,16 @@ class ResizeTests(unittest.TestCase):
         for k,v in self.initial_enable.items():self.assertEqual(self.host.enable[k],v)
         self.assertNotIn(self.secret,self.output.getvalue())
 
-    def test_plan_no_writes_and_default_32_cpu_30_slots(self):
-        m=self.manager();p=m.plan();self.assertEqual(p['new']['maxConcurrentTasks'],30)
+    def test_plan_no_writes_and_default_32_cpu_31_slots(self):
+        m=self.manager();p=m.plan();self.assertEqual(p['new']['maxConcurrentTasks'],31)
         self.assertFalse((self.root/'backups').exists());self.assertFalse(self.host.events);self.assert_restored()
 
     def test_32_and_64_cpu_apply_and_precise_rollback(self):
-        for cpus,slots in [(32,30),(64,62),(34,32)]:
+        for cpus,slots in [(32,31),(64,63),(34,33)]:
             with self.subTest(cpus=cpus):
                 m=self.manager(cpus);plan=m.plan();backup=m.apply(plan)
                 c=yaml.safe_load((self.root/'config/judge.yaml').read_text())
-                self.assertEqual(c['maxConcurrentTasks'],slots);self.assertEqual(c['cpuAffinity']['userProgram'],list(range(2,cpus)))
+                self.assertEqual(c['maxConcurrentTasks'],slots);self.assertEqual(c['cpuAffinity']['userProgram'],list(range(1,cpus)))
                 for name in ('key','serverUrl','sandbox','aiRunnerSocket','aiGeneratedDirectory','aiRunnerGid'):
                     self.assertEqual(c[name],plan['old'][name])
                 self.assertEqual(backup.stat().st_mode&0o777,0o700)
@@ -151,8 +151,16 @@ class ResizeTests(unittest.TestCase):
         m.restore(backup);self.assert_restored()
 
     def test_low_memory_and_cpu_rejected_before_snapshot(self):
-        for m,slots in [(self.manager(ram=8192),30),(self.manager(cpus=4),30)]:
+        for m,slots in [(self.manager(ram=512),3),(self.manager(cpus=4),4)]:
             with self.assertRaises(CapacityError):m.plan(slots)
+        self.assertFalse((self.root/'backups').exists());self.assertFalse(self.host.events);self.assert_restored()
+
+    def test_512_mib_defaults_to_two_slots_and_zero_capacity_has_no_snapshot(self):
+        plan=self.manager(cpus=3,ram=512).plan()
+        self.assertEqual(plan['new']['maxConcurrentTasks'],2)
+        self.assertEqual(plan['new']['cpuAffinity']['userProgram'],[1,2])
+        for manager in (self.manager(cpus=1),self.manager(ram=255)):
+            with self.assertRaisesRegex(CapacityError,'No judge capacity'):manager.plan()
         self.assertFalse((self.root/'backups').exists());self.assertFalse(self.host.events);self.assert_restored()
 
     def test_dropin_and_main_unit_resource_limits_are_not_deleted(self):
@@ -229,9 +237,37 @@ class ResizeTests(unittest.TestCase):
             resize.main()
         self.assertEqual(prompt.call_count,1);self.assertEqual(yaml.safe_load((self.root/'config/judge.yaml').read_text())['maxConcurrentTasks'],30)
 
+    def test_interactive_zero_capacity_fails_before_prompt_or_service_changes(self):
+        m=self.manager(cpus=1)
+        with patch.object(resize,'Resize',lambda *args,**kwargs:m),patch.object(sys,'argv',['resize-judge.py','--prefix',str(self.root)]),patch.object(sys.stdin,'isatty',return_value=True),patch('builtins.input') as prompt:
+            with self.assertRaises(SystemExit):resize.main()
+        prompt.assert_not_called()
+        self.assertIn('at least 2 effective CPUs and 256 MiB RAM',self.output.getvalue())
+        self.assertFalse(self.host.events);self.assert_restored()
+
 
 @unittest.skipUnless(os.geteuid()==0,'private ownership fixtures require sudo')
 class GeneratorTests(unittest.TestCase):
+    def test_small_memory_new_config_and_zero_capacity_rejection(self):
+        for cpus,ram,slots in [(3,512,2),(2,512,1),(1,512,0),(3,255,0)]:
+            with self.subTest(cpus=cpus,ram=ram),tempfile.TemporaryDirectory(prefix='libreoj-configure-test-') as directory:
+                root=Path(directory);(root/'config').mkdir();(root/'apps/judge').mkdir(parents=True);(root/'runtime/sandbox-rootfs/etc').mkdir(parents=True)
+                (root/'apps/judge/config-example.yaml').write_bytes((DEPLOY.parent/'apps/judge/config-example.yaml').read_bytes())
+                (root/'runtime/sandbox-rootfs/etc/libreoj-rootfs-id').write_text('a'*64)
+                (root/'config/secrets.json').write_text(json.dumps({'judge':base64.b64encode(b'Y'*30).decode()}))
+                env={'HYHOJ_ROOT':str(root),'NODE_BINARY':'/usr/bin/node'}
+                with patch.dict(os.environ,env,clear=True),patch('judge_capacity.discover_capacity',return_value=capacity(cpus,ram)),patch('grp.getgrnam',return_value=types.SimpleNamespace(gr_gid=1234)),contextlib.redirect_stdout(io.StringIO()):
+                    if not slots:
+                        with self.assertRaisesRegex(SystemExit,'at least 2 effective CPUs and 256 MiB RAM'):
+                            runpy.run_path(str(DEPLOY/'configure-judge.py'),run_name='__main__')
+                        self.assertFalse((root/'config/judge.yaml').exists())
+                        self.assertFalse((root/'deploy/systemd').exists())
+                    else:
+                        runpy.run_path(str(DEPLOY/'configure-judge.py'),run_name='__main__')
+                        config=yaml.safe_load((root/'config/judge.yaml').read_text())
+                        self.assertEqual(config['maxConcurrentTasks'],slots)
+                        self.assertEqual(len(list((root/'deploy/systemd').glob('*.mount'))),slots)
+
     def test_new_default_and_existing_large_capacity_generate_without_overwrite(self):
         with tempfile.TemporaryDirectory(prefix='libreoj-configure-test-') as directory:
             root=Path(directory);(root/'config').mkdir();(root/'apps/judge').mkdir(parents=True);(root/'runtime/sandbox-rootfs/etc').mkdir(parents=True)
@@ -243,11 +279,11 @@ class GeneratorTests(unittest.TestCase):
                 with patch.dict(os.environ,env,clear=True),patch('judge_capacity.discover_capacity',return_value=cap),patch('grp.getgrnam',return_value=types.SimpleNamespace(gr_gid=1234)),contextlib.redirect_stdout(io.StringIO()):
                     runpy.run_path(str(DEPLOY/'configure-judge.py'),run_name='__main__')
             generate(capacity(32));config=root/'config/judge.yaml';before=config.read_bytes();c=yaml.safe_load(before)
-            self.assertEqual(c['maxConcurrentTasks'],30)
-            self.assertEqual(len(list((root/'deploy/systemd').glob('*.mount'))),30)
-            self.assertIn('UV_THREADPOOL_SIZE=62',(root/'deploy/systemd/libreoj-judge.service').read_text())
+            self.assertEqual(c['maxConcurrentTasks'],31)
+            self.assertEqual(len(list((root/'deploy/systemd').glob('*.mount'))),31)
+            self.assertIn('UV_THREADPOOL_SIZE=64',(root/'deploy/systemd/libreoj-judge.service').read_text())
             generate(capacity(64));self.assertEqual(config.read_bytes(),before)
-            with self.assertRaises(SystemExit):generate(capacity(32,8192))
+            with self.assertRaises(SystemExit):generate(capacity(32,512))
             self.assertEqual(config.read_bytes(),before)
 
 

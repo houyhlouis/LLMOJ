@@ -3,6 +3,7 @@
 import argparse
 from contextlib import contextmanager
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -55,7 +56,7 @@ class InstallerBoundaries(unittest.TestCase):
             for slots in ("0", "30"):
                 with self.subTest(slots=slots):
                     root = Path(parent) / "new-instance"
-                    result = self.plan("--prefix", str(root), "--judge-slots", slots)
+                    result = self.plan("--prefix", str(root), "--public-url", "http://example.invalid", "--judge-slots", slots)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertFalse(root.exists())
 
@@ -67,17 +68,55 @@ class InstallerBoundaries(unittest.TestCase):
                                                      "--origin", "http://example.invalid", "--port", "80", "--judge-slots", "30"]):
             support.main()
 
-    def test_initial_capacity_failure_is_reported_without_silently_lowering_default(self):
+    def test_initial_capacity_defaults_to_memory_limit_and_rejects_excess(self):
         module = support.judge_capacity_module()
-        capacity = {"default_slots": 30, "effective_cpu_count": 32, "memory_slots": 2,
-                    "reserve_memory_mib": 2048, "memory_mib": 3072}
+        capacity = {"default_slots": 2, "maximum_slots": 2, "effective_cpu_count": 32,
+                    "cpu_slots": 31, "memory_slots": 2, "memory_mib": 512}
         args = argparse.Namespace(root=Path("/tmp/no-libreoj-capacity-fixture"), role="all", judge_slots=0)
         with mock.patch.object(module, "discover_capacity", return_value=capacity), \
                 mock.patch.object(support, "judge_capacity_module", return_value=module):
-            with self.assertRaisesRegex(support.InstallerError, "Requested 30 slots"):
-                support.check_initial_judge_capacity(args)
-            args.judge_slots = 2
             support.check_initial_judge_capacity(args)
+            args.judge_slots = 3
+            with self.assertRaisesRegex(support.InstallerError, "Requested 3 slots need at least 768 MiB"):
+                support.check_initial_judge_capacity(args)
+
+    def test_initial_zero_capacity_requires_resources_or_web_role(self):
+        module = support.judge_capacity_module()
+        for cpus,memory in ((1,512),(3,255)):
+            capacity = {"default_slots": 0, "maximum_slots": 0,
+                        "effective_cpu_count": cpus, "memory_mib": memory}
+            args = argparse.Namespace(root=Path("/tmp/no-libreoj-capacity-fixture"), role="all", judge_slots=0)
+            with mock.patch.object(module, "discover_capacity", return_value=capacity), \
+                    mock.patch.object(support, "judge_capacity_module", return_value=module):
+                with self.assertRaisesRegex(support.InstallerError, "at least 2 effective CPUs and 256 MiB RAM"):
+                    support.check_initial_judge_capacity(args)
+
+    def test_preflight_accepts_512_mib_without_old_three_gib_floor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "systemd").mkdir()
+            (root / "comm").write_text("systemd\n")
+            (root / "controllers").write_text("cpu memory pids\n")
+            (root / "meminfo").write_text("MemTotal: 524288 kB\n")
+            paths = {"/run/systemd/system": root / "systemd", "/proc/1/comm": root / "comm",
+                     "/sys/fs/cgroup/cgroup.controllers": root / "controllers", "/proc/meminfo": root / "meminfo"}
+            args = argparse.Namespace(root=root, role="all", judge_slots=0, port=80, listen_address="127.0.0.1")
+            module = support.judge_capacity_module()
+            capacity = {"default_slots": 2, "maximum_slots": 2, "effective_cpu_count": 3,
+                        "cpu_slots": 2, "memory_slots": 2, "memory_mib": 512}
+            with mock.patch.object(support, "Path", side_effect=lambda value: paths.get(value, Path(value))), \
+                    mock.patch.object(support.platform, "freedesktop_os_release", return_value={"ID": "ubuntu", "VERSION_ID": "24.04"}), \
+                    mock.patch.object(support.platform, "machine", return_value="x86_64"), \
+                    mock.patch.object(support.subprocess, "check_output", return_value="systemd 255\n"), \
+                    mock.patch.object(support.subprocess, "run", return_value=argparse.Namespace(returncode=1, stdout="")), \
+                    mock.patch.object(support, "check_state", return_value=False), \
+                    mock.patch.object(support.shutil, "disk_usage", return_value=argparse.Namespace(free=40*1024**3)), \
+                    mock.patch.object(support.socket, "socket"), \
+                    mock.patch.object(module, "discover_capacity", return_value=capacity), \
+                    mock.patch.object(support, "judge_capacity_module", return_value=module), \
+                    mock.patch.object(support.sys, "stdout", new_callable=io.StringIO) as output:
+                support.preflight(args)
+                self.assertIn("2 slots, 3 effective CPUs, 512 MiB RAM", output.getvalue())
 
     def test_existing_judge_config_and_web_do_not_reapply_initial_default(self):
         with tempfile.TemporaryDirectory() as parent:

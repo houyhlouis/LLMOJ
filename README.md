@@ -39,7 +39,7 @@ AI 生成内容需要审核。标程验证和测试数据生成的执行环节�
 | 项目 | 要求 |
 | --- | --- |
 | 已验证系统 | Ubuntu 24.04 amd64，普通虚拟机或物理机 |
-| 内存 | 至少 3 GiB，编译建议 8 GiB |
+| 评测资源 | 至少 2 个有效逻辑 CPU；每个执行槽按 256 MiB 有效内存计算，编译建议 8 GiB |
 | 空闲磁盘 | 完整安装至少 30 GiB，建议 40 GiB；仅网页模式至少 10 GiB |
 | 系统与网络 | systemd 254+、cgroup v2；能够访问软件源、GitHub 及构建依赖下载源 |
 
@@ -52,13 +52,13 @@ curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/install.zh-CN
 
 脚本会交互设置部署模式、端口、域名、站名、安装目录和 Docker 源，随后安装依赖、构建应用并配置服务。完整模式还会构建评测 rootfs，首次安装需要等待下载和编译完成。
 
-默认安装到 `/opt/LibreOJ`，站点监听 `0.0.0.0:80`，浏览器访问 `http://服务器IP`。自定义端口、镜像源、无人值守安装及固定版本方法见 [安装教程](wiki/Installation.zh-CN.md)。
+默认安装到 `/opt/LLMOJ`，站点监听 `0.0.0.0:80`，浏览器访问 `http://服务器IP`。自定义端口、镜像源、无人值守安装及固定版本方法见 [安装教程](wiki/Installation.zh-CN.md)。
 
-完整模式首次生成评测配置且未指定槽数时，会询问评测实例数（执行槽），默认是有效 CPU 数减 2、最低 1；槽数不是 OS 线程数。内存不足会要求明确选择更少数量，已有安装请使用 [扩缩容脚本教程](wiki/Judge-Configuration.zh-CN.md)。Ubuntu 26.04 的数据库初始化问题已有隔离复现与修复流程，完整新装仍未验收，详见 [安装与排错](wiki/Installation.zh-CN.md)。
+完整模式首次生成评测配置且未指定槽数时，会询问评测实例数（执行槽）；默认值和最大值均为 `min(有效 CPU 数-1, 有效内存 MiB//256, 511)`，不额外预留内存，默认不会超过最大值。例如至少 3 个有效 CPU、512 MiB 内存时默认 2 槽；1 核或内存不足 256 MiB 时不能本机评测，可使用仅网页模式。槽数不是 OS 线程数，已有安装请使用 [扩缩容脚本教程](wiki/Judge-Configuration.zh-CN.md)。Ubuntu 26.04 的数据库初始化问题已有隔离复现与修复流程，完整新装仍未验收，详见 [安装与排错](wiki/Installation.zh-CN.md)。
 
 ### 安装后
 
-1. **登录管理账号：** 安装成功后，终端直接打印 `admin` 与随机密码；服务器同时保存 `config/admin-credentials.json`（默认位于 `/opt/LibreOJ`，仅 root 可读）。首次登录后修改密码，重跑安装不会重置账号密码。
+1. **登录管理账号：** 安装成功后，终端直接打印 `admin` 与随机密码；服务器同时保存 `config/admin-credentials.json`（默认位于 `/opt/LLMOJ`，仅 root 可读）。首次登录后修改密码，重跑安装不会重置账号密码。
 2. **开始使用：** 创建用户、配置权限并添加题目，提交一个简单程序确认评测结果，再按需创建题单或比赛。
 3. **配置 AI：** 具有 AI 配置权限的用户填写自己的服务地址、模型和 API Key，并执行连接测试；项目不提供共享 Key 或预付费服务。
 
@@ -74,7 +74,7 @@ curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/install.zh-CN
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/upgrade.zh-CN.sh -o /tmp/llmoj-upgrade.zh-CN.sh && \
-  sudo bash /tmp/llmoj-upgrade.zh-CN.sh --prefix /opt/LibreOJ
+  sudo bash /tmp/llmoj-upgrade.zh-CN.sh --prefix /opt/LLMOJ
 ```
 
 脚本检查兼容性、在暂存目录构建、备份并在确认维护窗口后切换版本，保留账号、题库、API Key、配置和评测槽数。先加 `--plan` 可只读检查。它支持已知兼容的官方 `all` / `web` 布局；依赖、运行时或数据库结构不兼容时会停止，不保证跨越任意历史版本。维护前须暂停新提交、等待本机及远程评测和 AI 任务结束。首次使用本功能时，先确认本次修改包已经上传到 GitHub；升级流程、参数和回滚见 [升级教程](wiki/Upgrade.zh-CN.md)。

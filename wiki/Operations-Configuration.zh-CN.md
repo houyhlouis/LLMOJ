@@ -2,7 +2,7 @@
 
 [English](Operations-Configuration.md) | 简体中文 | [配置总览](Configuration.zh-CN.md)
 
-本文列出项目模板／生成器写入的基础服务配置，第三方软件其他可选指令以其对应版本文档为准。表中 `<root>` 为安装目录，默认 `/opt/LibreOJ`。修改配置前先备份并记录原值；数据库或存储迁移须规划维护窗口。
+本文列出项目模板／生成器写入的基础服务配置，第三方软件其他可选指令以其对应版本文档为准。表中 `<root>` 为安装目录，默认 `/opt/LLMOJ`。修改配置前先备份并记录原值；数据库或存储迁移须规划维护窗口。
 
 ## Nginx：config/nginx.conf
 
@@ -83,7 +83,7 @@
 以下示例只适用于默认目录，先按实际路径替换。配置检查失败不要 reload，恢复备份后重新检查。
 
 ```bash
-sudo /usr/sbin/nginx -t -p /opt/LibreOJ/ -c /opt/LibreOJ/config/nginx.conf
+sudo /usr/sbin/nginx -t -p /opt/LLMOJ/ -c /opt/LLMOJ/config/nginx.conf
 # Run only after the preceding check succeeds.
 sudo systemctl reload libreoj-nginx
 ```
@@ -96,6 +96,6 @@ sudo systemctl reload libreoj-nginx
 
 AI 状态目录保存主密钥，用户 API 配置密文保存于 MariaDB 的 `ai_configuration.encrypted`；数据库与主密钥的备份、恢复必须配套，修改目录路径还需迁移对应主密钥，见 [AI 环境](AI-Environment.zh-CN.md)。不要递归 chown 整个实例来修复权限，rootfs 和评测工作区有特定 UID／挂载权限要求。
 
-`deploy/backup.sh` 当前硬编码 `/opt/LibreOJ`，停掉站点服务后备份 `config`、`data`、`deploy`，排除 `data/judge`、`data/tmp`、`data/nginx`、`data/ai-generated`，并在退出时启动 target。它不包含完整 rootfs、运行时二进制和 `/etc/systemd/system` drop-in；这些需另存或能够按同一版本重建。`data/ai-generated` 中未发布的生成结果也不会进入该备份。自定义 prefix 或远程评测节点不能把它当作完整通用备份；保存额外数据后进行恢复演练。
+`deploy/backup.sh` 默认目录为 `/opt/LLMOJ`，可用 `HYHOJ_ROOT` 或优先级更高的 `--prefix PATH` 指定旧安装／自定义实例的实际路径；停掉站点服务后备份 `config`、`data`、`deploy`，排除 `data/judge`、`data/tmp`、`data/nginx`、`data/ai-generated`，并在退出时启动 target。它不包含完整 rootfs、运行时二进制和 `/etc/systemd/system` drop-in；这些需另存或能够按同一版本重建。`data/ai-generated` 中未发布的生成结果也不会进入该备份。它仍不是完整运行环境或远程评测节点的备份；保存额外数据后进行恢复演练。
 
 来源：[deploy/configure-local.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py), [config/nginx.conf.example](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/config/nginx.conf.example), [deploy/configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-judge.py), [deploy/backup.sh](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/backup.sh).

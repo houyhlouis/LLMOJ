@@ -15,8 +15,8 @@ translate() {
         'Existing judge.yaml is retained; retry with the original installation options. Use resize-judge.sh to change capacity.\n') printf '%s' '保留现有 judge.yaml；重试请使用原安装参数。调整容量请使用 resize-judge.sh。\n' ;;
         'Cannot determine judge capacity') message='无法读取评测可用资源' ;;
         'Judge execution slots (Enter or 0 = automatic)') message='评测实例数／执行槽数（回车或 0 使用自动值）' ;;
-        'Judge slots: automatic CPU-2 default %s; current CPU/RAM maximum %s.\n') message='评测实例数：按有效逻辑 CPU 数减 2，默认 %s；当前 CPU／内存最多支持 %s。\n' ;;
-        'The automatic count exceeds available resources; enter a smaller positive count.\n') message='自动数量超过可用资源，请明确输入较小的正整数。\n' ;;
+        'Judge slots: automatic CPU-1 default %s; current CPU/RAM maximum %s (256 MiB per slot).\n') message='评测实例数：有效逻辑 CPU 数减 1 后按内存容量限制，默认 %s；当前 CPU／内存最多支持 %s（每槽 256 MiB）。\n' ;;
+        'Local judging needs at least 2 effective logical CPUs and 256 MiB effective RAM; use --role web or increase resources') message='本机评测至少需要 2 个有效逻辑 CPU 和 256 MiB 有效内存；请使用 --role web 或增加资源' ;;
         'Enter a positive integer, or 0 for automatic.\n') message='请输入正整数，或输入 0 使用自动值。\n' ;;
         'Requested judge slots: %s (0 = automatic; existing judge.yaml is retained).\n') message='请求的评测实例数：%s（0 为自动；保留已有 judge.yaml 配置）。\n' ;;
 

@@ -21,7 +21,7 @@ REPO = 'houyhlouis/LLMOJ'
 args = sys.argv[1:]
 options = argparse.ArgumentParser(allow_abbrev=False, description='Upgrade a completed official all/web installation; preserve configuration and data.')
 options.add_argument('--ref', action='append', default=[])
-options.add_argument('--prefix', default='/opt/LibreOJ')
+options.add_argument('--prefix', default='/opt/LLMOJ')
 options.add_argument('--plan', action='store_true')
 options.add_argument('--apply', action='store_true')
 options.add_argument('--drained', action='store_true')

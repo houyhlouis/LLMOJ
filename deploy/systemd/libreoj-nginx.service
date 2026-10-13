@@ -5,8 +5,8 @@ PartOf=libreoj.target
 
 [Service]
 Type=simple
-ExecStart=/usr/sbin/nginx -p /opt/LibreOJ/ -c /opt/LibreOJ/config/nginx.conf -g "daemon off;"
-ExecReload=/usr/sbin/nginx -p /opt/LibreOJ/ -c /opt/LibreOJ/config/nginx.conf -s reload
+ExecStart=/usr/sbin/nginx -p /opt/LLMOJ/ -c /opt/LLMOJ/config/nginx.conf -g "daemon off;"
+ExecReload=/usr/sbin/nginx -p /opt/LLMOJ/ -c /opt/LLMOJ/config/nginx.conf -s reload
 KillSignal=SIGQUIT
 Restart=on-failure
 RestartSec=3

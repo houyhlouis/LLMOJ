@@ -26,7 +26,7 @@ def absolute_path(value: str, name: str) -> Path:
     return path
 
 
-root = absolute_path(os.environ.get("HYHOJ_ROOT", "/opt/LibreOJ"), "HYHOJ_ROOT").resolve()
+root = absolute_path(os.environ.get("HYHOJ_ROOT", "/opt/LLMOJ"), "HYHOJ_ROOT").resolve()
 if root == Path("/"):
     raise SystemExit("HYHOJ_ROOT must not be /")
 node = absolute_path(os.environ.get("NODE_BINARY", str(root / "runtime/node/bin/node")), "NODE_BINARY")
@@ -110,7 +110,7 @@ create_private(config / "minio.env", "MINIO_ROOT_USER=" + s["minioAccess"] + "\n
 create_private(config / "redis.conf", "bind 127.0.0.1\nport 16379\nprotected-mode yes\nrequirepass " + s["redis"] +
                f"\ndir {root}/data/redis\nappendonly yes\nappendfsync everysec\nsave 900 1\nsave 300 10\n"
                'maxmemory 192mb\nmaxmemory-policy noeviction\nlogfile ""\ndaemonize no\n', 0o640, redis_gid)
-nginx = (config / "nginx.conf.example").read_text().replace("/opt/LibreOJ", str(root)).replace("listen 0.0.0.0:80;", f"listen {listen_address}:{port};")
+nginx = (config / "nginx.conf.example").read_text().replace("/opt/LLMOJ", str(root)).replace("listen 0.0.0.0:80;", f"listen {listen_address}:{port};")
 create_private(config / "nginx.conf", nginx, 0o644)
 create_private(config / "mariadb.cnf", f"[mysqld]\nuser=mysql\nbind-address=127.0.0.1\nport=13306\n"
                f"datadir={root}/data/mariadb\nsocket={root}/data/mariadb/mysql.sock\npid-file={root}/data/mariadb/mysql.pid\n"

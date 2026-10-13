@@ -2,7 +2,7 @@
 
 [English](Judge-Configuration.md) | 简体中文
 
-适用于安装器生成的 Ubuntu/systemd 部署，配置入口为 `/opt/LibreOJ/config/judge.yaml`（自定义 prefix 请替换）。本页覆盖当前评测端的所有 YAML 字段；后端下发限制、宿主环境变量和安装器生成值另行标明。
+适用于安装器生成的 Ubuntu/systemd 部署，配置入口为 `/opt/LLMOJ/config/judge.yaml`（自定义 prefix 请替换）。本页覆盖当前评测端的所有 YAML 字段；后端下发限制、宿主环境变量和安装器生成值另行标明。
 
 未变更字段来源固定为 `43a88bdd62fbf200889b36932fa921439a293190`；修改后的容量生成器使用 `main` 链接，对应待提交修订：[config.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/config.ts), [config-example.yaml](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/config-example.yaml), [configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-judge.py), [executionCapacity.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/executionCapacity.ts), [taskQueue.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/taskQueue.ts), [aiRunner.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/aiRunner.ts).
 
@@ -49,7 +49,7 @@
 - `LIBREOJ_JUDGE_LOG_LEVEL`：未设置为 `info`；排错可暂用 `verbose`/`debug`，避免公开包含签名下载地址的日志。
 - `UV_THREADPOOL_SIZE`：在 Node 启动前设置，整数范围为 `2 × 实际执行槽 + 2` 到 `1024`。Node 默认 4 只够 1 槽；3 槽至少 8，6 槽至少 14。原生沙盒等待占 libuv worker，交互题每槽可能同时等待两个进程，另留两个文件系统 worker。安装生成 `max(4, slots*2+2)`，修改后必须重启 judge；写到 `sandbox.environments` 无效。
 - `NODE_OPTIONS=--max-old-space-size=512` 是安装服务的 Node 堆设置，不是用户程序内存上限；`PATH` 指向安装的 Node 和宿主工具。
-- `HYHOJ_AI_SAMPLE_INPUTS_DIR`：宿主 AI 输入样例目录，代码缺省 `/opt/LibreOJ/data/ai-sample-inputs`，服务生成 `<root>/data/ai-sample-inputs`；与后端必须一致，不能当作公共静态目录。
+- `HYHOJ_AI_SAMPLE_INPUTS_DIR`：宿主 AI 输入样例目录，代码缺省 `/opt/LLMOJ/data/ai-sample-inputs`，服务生成 `<root>/data/ai-sample-inputs`；与后端必须一致，不能当作公共静态目录。
 
 普通提交消费者由 `taskConsumingThreads` 控制；编译/测试点和本机 AI 验证共用 `min(maxConcurrentTasks, 工作目录数)` 的执行槽；文件下载另有 `maxConcurrentDownloads` 队列。AI runner 还有固定 3 个生成管线并发、最多 8 个已接收的未完成请求（包含等待），它们不是额外的 3/8 个 CPU 槽，也没有对应 YAML 调节项；后端 AI 并发又是另一层限制。不要仅增加消费者或后台 AI 并发来“扩 CPU”。
 
@@ -59,19 +59,21 @@
 
 首次安装会询问“评测实例数（执行槽）”。它表示同时执行编译/测试点的工作位置数量，不是安装多套 OJ，也不是操作系统线程数。一个 judge 服务使用多个工作目录和沙盒进程；`taskConsumingThreads` 是领取提交的消费者并发，`UV_THREADPOOL_SIZE` 则是 Node 原生等待/文件操作线程池，三者含义不同。
 
-默认槽数为 `max(1, 有效 CPU 数 - 2)`，本机 all 与远程 judge 使用相同公式。有效 CPU 数同时考虑进程 affinity、cgroup 有效 cpuset 和各级 CPU quota；有限 quota 向下取整且至少计 1，不只读取宿主 `nproc`。默认从允许集合末尾选择所需 CPU ID，因此 CPU ID 不连续时也不会假定 0..N。
+默认槽数与最大值均为 `min(max(0, 有效 CPU 数-1), 有效内存 MiB//256, 511)`，本机 all 与远程 judge 使用相同公式。至少 2 个有效 CPU、256 MiB 内存才有 1 槽；零容量拒绝本机评测。有效 CPU 数同时考虑进程 affinity、cgroup 有效 cpuset 和各级 CPU quota；有限 quota 向下取整且至少计 1，不只读取宿主 `nproc`。默认从允许集合末尾选择所需 CPU ID，因此 CPU ID 不连续时也不会假定 0..N。
 
-内存使用宿主 RAM 与适用 cgroup `memory.max` 的较小值；all 预留 2048 MiB，remote 预留 1024 MiB，每槽再预算 512 MiB。实际允许的最大值是有效 CPU 数、内存槽数与 libuv 上限 511 的最小值。**不再有 7 槽上限；默认值超过内存预算或 511 时会明确报错，要求选择较少槽数，不会悄悄降低。** 显式槽数可使用全部有效 CPU，但必须通过容量校验。
+内存使用宿主 RAM 与适用 cgroup `memory.max` 的较小值；每槽按 256 MiB 计算，两种模式均不额外预留内存。允许最大值为有效 CPU 数减 1、内存槽数向下取整与 libuv 上限 511 的最小值。**不再有 7 槽上限；默认值自动限制在允许最大值内。** 显式正整数也必须符合该上限，不能占用保留的 CPU。例如至少 3 个有效 CPU、512 MiB 内存最多允许 2 槽。
 
 | 有效 CPU 数 | 默认执行槽（内存足够时） |
 | --- | --- |
-| 1 / 2 / 3 | 1 |
-| 4 | 2 |
-| 8 | 6 |
-| 16 | 14 |
-| 32 | 30 |
+| 1 | 0 |
+| 2 | 1 |
+| 3 | 2 |
+| 4 | 3 |
+| 8 | 7 |
+| 16 | 15 |
+| 32 | 31 |
 
-**8 个有效逻辑 CPU、8 GiB RAM 的 all 示例**：若允许 ID 为 0–7，则默认使用 2–7 的 6 槽、3 个消费者、4 个下载并发、工作目录 1–6、线程池 14。8 CPU 但只有 4 GiB 可用内存时，all 最多预算 4 槽；默认 6 会报错，应明确选择 4 或更少。不要只凭 CPU 数决定高内存题或 AI 工作负载的并发。
+**8 个有效逻辑 CPU、8 GiB RAM 的 all 示例**：若允许 ID 为 0–7，则默认使用 1–7 的 7 槽、3 个消费者、4 个下载并发、工作目录 1–7、线程池 16。8 CPU、4 GiB 可用内存仍允许 7 槽；内存为 512 MiB 时，默认与最大值均为 2 槽，使用 CPU 6–7、线程池 6。高内存题或 AI 工作负载可明确选择更少槽数。
 
 每槽 512 MiB 是 **tmpfs 最大容量**，不是预分配，也不是进程内存上限。编译器、选手程序、页缓存、AI、数据库同时占 RAM。`TasksMax`、父 cgroup、CPU quota 和物理核心共享仍可能形成瓶颈。`lscpu -e=CPU,CORE,SOCKET,ONLINE` 可分辨逻辑 CPU 与物理核；SMT 不等于独占物理核，`cpuAffinity` 与 systemd `AllowedCPUs` 也不会自动给每槽分配独占核心。
 
@@ -131,9 +133,9 @@ sudo systemctl show libreoj-judge.service -p CPUAccounting -p MemoryAccounting -
 ### 1. 查看计划
 
 ```bash
-sudo bash /opt/LibreOJ/deploy/resize-judge.sh --prefix /opt/LibreOJ --plan
+sudo bash /opt/LLMOJ/deploy/resize-judge.sh --prefix /opt/LLMOJ --plan
 # 指定目标：数字为示例，必须满足本机 CPU／内存预算
-sudo bash /opt/LibreOJ/deploy/resize-judge.sh --prefix /opt/LibreOJ --slots 6 --plan
+sudo bash /opt/LLMOJ/deploy/resize-judge.sh --prefix /opt/LLMOJ --slots 6 --plan
 ```
 
 `--plan` 不写配置、不停服务。检查旧/新槽数、CPU 集合、内存预算和线程池；自定义安装路径替换 `--prefix`。脚本会拒绝需要人工审查的服务 drop-in 或非标准布局，不会删除这些设置来绕过校验。
@@ -145,13 +147,13 @@ sudo bash /opt/LibreOJ/deploy/resize-judge.sh --prefix /opt/LibreOJ --slots 6 --
 默认交互方式会用中文展示容量和排空要求，只询问实例数。**提交该数字（或按回车接受默认值）即表示已经排空，并立即执行维护，没有第二次确认。** 未排空时按 Ctrl+C 退出：
 
 ```bash
-sudo bash /opt/LibreOJ/deploy/resize-judge.sh --prefix /opt/LibreOJ
+sudo bash /opt/LLMOJ/deploy/resize-judge.sh --prefix /opt/LLMOJ
 ```
 
 已排空后的非交互示例：
 
 ```bash
-sudo bash /opt/LibreOJ/deploy/resize-judge.sh --prefix /opt/LibreOJ --slots 6 --apply --drained
+sudo bash /opt/LLMOJ/deploy/resize-judge.sh --prefix /opt/LLMOJ --slots 6 --apply --drained
 ```
 
 脚本先将私有 judge YAML、受管理单元及状态备份到 `<prefix>/backups/judge-resize/<UTC时间>/`，打印该私有目录，再只停止 judge，更新槽数、工作目录、CPU affinity、消费者/下载并发、线程池、挂载和服务单元；不会重新生成节点 key、改变服务器 URL、rootfs 或 AI 配置。它会检查 systemd 单元并执行真实沙盒探针；原来运行的 judge 恢复运行并核对实际 CPU/线程池，原来停止的 judge 保持停止。验证失败会尝试恢复备份；若自动恢复也失败则保持 judge 停止，报告供人工回滚的目录。保管备份目录，不要把含 key 的 YAML 放入公开报告。
@@ -168,7 +170,7 @@ sudo systemctl show libreoj-judge.service -p AllowedCPUs -p EffectiveCPUs -p Tas
 需要回退时，先阻止新任务并再次排空，将下面路径替换为脚本实际输出的私有备份目录：
 
 ```bash
-sudo bash /opt/LibreOJ/deploy/resize-judge.sh --prefix /opt/LibreOJ --rollback /path/to/private-backup --drained
+sudo bash /opt/LLMOJ/deploy/resize-judge.sh --prefix /opt/LLMOJ --rollback /path/to/private-backup --drained
 ```
 
 回滚恢复备份中的配置/单元及记录的运行、挂载状态；不是题库或数据库备份恢复，也不会撤回扩容后已完成的提交。回滚后同样检查节点在线和真实提交结果。

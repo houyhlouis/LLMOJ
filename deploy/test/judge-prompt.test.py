@@ -12,7 +12,7 @@ DEPLOY = Path(__file__).resolve().parents[1]
 
 
 class JudgePrompt(unittest.TestCase):
-    def prompt(self, answers, default=30, maximum=32, language='zh-CN', existing=False):
+    def prompt(self, answers, default=31, maximum=31, language='zh-CN', existing=False):
         source = (DEPLOY/'install.sh').read_text()
         start = source.index('ask_judge_slots() {')
         end = source.index('\nif [[ "$MODE" == install', start)
@@ -43,10 +43,10 @@ printf '\\nSELECTED=%s\\n' "$JUDGE_SLOTS"
 '''
             return subprocess.run(['bash','-c',script],input=answers,env=env,text=True,capture_output=True,timeout=10)
 
-    def test_default_cpu_minus_two_preserves_zero_for_retry_metadata(self):
+    def test_default_cpu_minus_one_preserves_zero_for_retry_metadata(self):
         p=self.prompt('\n')
         self.assertEqual(p.returncode,0,p.stderr)
-        self.assertIn('默认 30',p.stdout)
+        self.assertIn('默认 31',p.stdout)
         self.assertIn('SELECTED=0',p.stdout)
 
     def test_explicit_30_and_zero_are_accepted(self):
@@ -61,12 +61,20 @@ printf '\\nSELECTED=%s\\n' "$JUDGE_SLOTS"
         self.assertIn('SELECTED=24',p.stdout)
         self.assertIn('CPU/RAM capacity exceeded',p.stderr)
 
-    def test_insufficient_memory_does_not_silently_lower_default(self):
-        p=self.prompt('\n8\n',maximum=8)
+    def test_memory_limited_default_accepts_enter_without_reprompt(self):
+        p=self.prompt('\n',default=2,maximum=2)
         self.assertEqual(p.returncode,0,p.stderr)
-        self.assertIn('自动数量超过可用资源',p.stdout)
-        self.assertIn('SELECTED=8',p.stdout)
-        self.assertIn('CPU/RAM capacity exceeded',p.stderr)
+        self.assertIn('默认 2',p.stdout)
+        self.assertIn('SELECTED=0',p.stdout)
+        self.assertNotIn('CPU/RAM capacity exceeded',p.stderr)
+
+    def test_zero_capacity_fails_without_waiting_for_input(self):
+        for language in ('en','zh-CN'):
+            p=self.prompt('',default=0,maximum=0,language=language)
+            self.assertNotEqual(p.returncode,0)
+            self.assertIn('256 MiB',p.stderr)
+            self.assertIn('--role web',p.stderr)
+            self.assertNotIn('Input ended',p.stderr)
 
     def test_retry_keeps_existing_configuration_without_validating_new_default(self):
         p=self.prompt('', maximum=8, existing=True)
@@ -74,12 +82,13 @@ printf '\\nSELECTED=%s\\n' "$JUDGE_SLOTS"
         self.assertIn('SELECTED=0',p.stdout)
         self.assertIn('保留现有 judge.yaml',p.stdout)
         self.assertNotIn('CPU/RAM capacity exceeded',p.stderr)
-        self.assertNotIn('默认 30',p.stdout)
+        self.assertNotIn('默认 31',p.stdout)
 
     def test_eof_fails_and_english_language_is_available(self):
         p=self.prompt('',language='en')
         self.assertNotEqual(p.returncode,0)
-        self.assertIn('automatic CPU-2 default 30',p.stdout)
+        self.assertIn('default 31',p.stdout)
+        self.assertIn('256 MiB',p.stdout)
         self.assertIn('Input ended',p.stderr)
 
 

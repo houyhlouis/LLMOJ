@@ -40,7 +40,7 @@ Review AI-generated content. Executing reference solutions and test-data generat
 | Item | Requirement |
 | --- | --- |
 | Verified system | Ubuntu 24.04 amd64 on a regular VM or physical server |
-| Memory | At least 3 GiB; 8 GiB recommended for compilation |
+| Judge resources | At least 2 effective logical CPUs; 256 MiB effective RAM per slot; 8 GiB recommended for compilation |
 | Free disk | At least 30 GiB for a full installation, 40 GiB recommended; 10 GiB for web-only mode |
 | System and network | systemd 254+, cgroup v2, and access to package repositories, GitHub and build dependency sources |
 
@@ -53,13 +53,13 @@ curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/install.sh -o
 
 The installer prompts for deployment mode, port, hostname, site name, installation directory and Docker sources, then installs dependencies, builds the application and configures services. Full mode also builds the judging rootfs; allow time for downloads and compilation on the first run.
 
-The default directory is `/opt/LibreOJ`, with the site listening on `0.0.0.0:80` at `http://SERVER_IP`. See the [installation guide](wiki/Installation.md) for custom ports, mirrors, unattended installation and version pinning.
+The default directory is `/opt/LLMOJ`, with the site listening on `0.0.0.0:80` at `http://SERVER_IP`. See the [installation guide](wiki/Installation.md) for custom ports, mirrors, unattended installation and version pinning.
 
-When first creating judge configuration without an explicit slot count, all mode asks for judge instances (execution slots), defaulting to effective CPUs minus two, minimum one. Slots are not OS threads. Insufficient RAM requires an explicit smaller choice; existing deployments use the [resize guide](wiki/Judge-Configuration.md). The Ubuntu 26.04 database-init failure has an isolated reproduction and fix workflow; fresh 26.04 installation remains unverified. See [installation and troubleshooting](wiki/Installation.md).
+When first creating judge configuration without an explicit slot count, all mode asks for judge instances (execution slots). Default and maximum both use `min(effective CPUs-1, effective RAM MiB//256, 511)`, with no extra memory reservation. For example, at least 3 effective CPUs and 512 MiB RAM default to 2 slots; 1 CPU or less than 256 MiB RAM cannot run a local judge and can use web-only mode. Slots are not OS threads; existing deployments use the [resize guide](wiki/Judge-Configuration.md). The Ubuntu 26.04 database-init failure has an isolated reproduction and fix workflow; fresh 26.04 installation remains unverified. See [installation and troubleshooting](wiki/Installation.md).
 
 ### After installation
 
-1. **Sign in as administrator:** on success, the terminal prints `admin` and a random password. The server also saves `config/admin-credentials.json` under the installation directory (`/opt/LibreOJ` by default), readable only by root. Change the password after signing in; rerunning installation does not reset it.
+1. **Sign in as administrator:** on success, the terminal prints `admin` and a random password. The server also saves `config/admin-credentials.json` under the installation directory (`/opt/LLMOJ` by default), readable only by root. Change the password after signing in; rerunning installation does not reset it.
 2. **Start using the judge:** create users, assign permissions and add a problem. Submit a simple program to confirm judging, then create study lists or contests as needed.
 3. **Configure AI:** users with AI configuration permission enter their service URL, model and API key, then test the connection. The project does not provide shared keys or prepaid services.
 
@@ -75,7 +75,7 @@ Existing official one-click deployments can use the separate upgrade entry:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/upgrade.sh -o /tmp/llmoj-upgrade.sh && \
-  sudo bash /tmp/llmoj-upgrade.sh --prefix /opt/LibreOJ
+  sudo bash /tmp/llmoj-upgrade.sh --prefix /opt/LLMOJ
 ```
 
 The updater checks compatibility, builds in staging, takes backups and switches versions after maintenance confirmation. Accounts, problems, API keys, configuration and judge slots are preserved. Add `--plan` for a read-only check. It supports known-compatible official `all` / `web` layouts and refuses unsupported dependency, runtime or schema changes; it cannot promise upgrades across arbitrary historical versions. Pause submissions and drain local/remote judging and AI jobs before maintenance. The new files must be published to GitHub before first use. See [Upgrade](wiki/Upgrade.md) for options and rollback.

@@ -9,7 +9,7 @@
 在原项目目录生成源码包；若目标归档已存在，换一个文件名，打包器不会覆盖：
 
 ```bash
-cd /opt/LibreOJ
+cd /opt/LLMOJ
 python3 deploy/prepare-github.py --archive release/llmoj-source.tar.gz
 sha256sum release/llmoj-source.tar.gz
 mkdir -p ~/llmoj-publish

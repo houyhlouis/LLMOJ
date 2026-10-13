@@ -6,8 +6,8 @@ PartOf=libreoj.target
 [Service]
 User=libreoj
 Group=libreoj
-EnvironmentFile=/opt/LibreOJ/config/minio.env
-ExecStart=/opt/LibreOJ/runtime/minio server --address 127.0.0.1:19000 --console-address 127.0.0.1:19001 /opt/LibreOJ/data/minio
+EnvironmentFile=/opt/LLMOJ/config/minio.env
+ExecStart=/opt/LLMOJ/runtime/minio server --address 127.0.0.1:19000 --console-address 127.0.0.1:19001 /opt/LLMOJ/data/minio
 Restart=on-failure
 RestartSec=3
 UMask=0027

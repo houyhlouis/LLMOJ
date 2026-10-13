@@ -433,8 +433,8 @@ class Resize:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='现有评测机扩缩容：默认有效 CPU 数减 2；私有备份，失败自动回滚。')
-    parser.add_argument('--prefix', default='/opt/LibreOJ')
+    parser = argparse.ArgumentParser(description='现有评测机扩缩容：默认取有效 CPU 数减 1、内存 / 256 MiB 和运行时上限的最小值；私有备份，失败自动回滚。')
+    parser.add_argument('--prefix', default='/opt/LLMOJ')
     parser.add_argument('--mode', choices=('auto', 'all', 'remote'), default='auto')
     parser.add_argument('--slots', type=int)
     action = parser.add_mutually_exclusive_group()
@@ -453,16 +453,17 @@ def main():
                 Resize(args.prefix).restore(args.rollback)
             return
         manager = Resize(args.prefix)
-        # Show CPU-derived default even when insufficient RAM requires a smaller explicit count.
+        # Installation and resizing share the CPU/RAM-constrained default.
         mode = manager.mode(args.mode)
         capacity = manager.capacity(mode == 'remote')
         current = read_config(manager.root)['maxConcurrentTasks']
-        print(f"当前 {current} 槽；有效 CPU {capacity['effective_cpu_count']}；默认 {capacity['default_slots']} 槽（CPU-2）；"
-              f"有效内存 {capacity['memory_mib']} MiB；资源允许最多 {capacity['maximum_slots']} 槽。")
-        if not capacity['default_fits']:
-            print('默认容量超过资源预算；请明确选择较少槽数，不会静默降低。')
+        print(f"当前 {current} 槽；有效 CPU {capacity['effective_cpu_count']}；默认 {capacity['default_slots']} 槽；"
+              f"有效内存 {capacity['memory_mib']} MiB；资源允许最多 {capacity['maximum_slots']} 槽"
+              f"（有效 CPU 减 1、内存 / {capacity['slot_memory_mib']} MiB 与运行时上限中的最小值）。")
         for warning in capacity['warnings']:
             print('注意 / Notice:', warning)
+        if capacity['maximum_slots'] == 0:
+            validate_slots(capacity['default_slots'], capacity)
         slots = args.slots
         interactive = not args.plan and not args.apply
         if interactive:

@@ -201,9 +201,9 @@ async function main() {
   if (process.getuid?.() !== 0) throw new VerificationError("Run the sandbox installation check with sudo through the installer.");
   const arguments_ = process.argv.slice(2);
   if (arguments_.length && (arguments_.length !== 2 || arguments_[0] !== "--root")) {
-    throw new VerificationError("Usage: node verify-installed.mjs [--root /opt/LibreOJ]");
+    throw new VerificationError("Usage: node verify-installed.mjs [--root /opt/LLMOJ]");
   }
-  const root = await fs.realpath(arguments_[1] || "/opt/LibreOJ");
+  const root = await fs.realpath(arguments_[1] || "/opt/LLMOJ");
   const require = createRequire(path.join(root, "apps/judge/package.json"));
   const config = require("js-yaml").load(await fs.readFile(path.join(root, "config/judge.yaml"), "utf8"));
   const delegatedRoot = readDelegatedRoot();

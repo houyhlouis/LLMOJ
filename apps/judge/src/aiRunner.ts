@@ -62,7 +62,7 @@ export interface Request {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_FILE = 16 * 1024 * 1024;
 const MAX_SAMPLE_FILE = 256 * 1024 * 1024;
-const SAMPLE_DIRECTORY = process.env.HYHOJ_AI_SAMPLE_INPUTS_DIR || "/opt/LibreOJ/data/ai-sample-inputs";
+const SAMPLE_DIRECTORY = process.env.HYHOJ_AI_SAMPLE_INPUTS_DIR || "/opt/LLMOJ/data/ai-sample-inputs";
 const MAX_TOTAL = 8 * 1024 * 1024 * 1024;
 const DISK_RESERVE = 2 * 1024 * 1024 * 1024;
 const RETENTION_MS = 24 * 60 * 60 * 1000;

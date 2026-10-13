@@ -7,13 +7,13 @@
 `build.sh` 默认仅显示配方 ID 和目标路径，不下载镜像、不挂载文件系统、不启动服务。构建需要支持 BuildKit 的 Docker/buildx、Git、Bash、gzip 和 SHA-256 工具；暂存验证需要 root、Linux `chroot`/挂载权限以及支持 amd64、32 位程序的宿主机内核。默认完整验证还要求 x32 内核支持；不支持 x32 的宿主机必须显式选择下述验证配置。
 
 ```bash
-cd /opt/LibreOJ
+cd /opt/LLMOJ
 bash deploy/sandbox/build.sh plan
 bash deploy/sandbox/build.sh build
 # 使用上一命令输出的 ARCHIVE 绝对路径：
-sudo bash deploy/sandbox/build.sh stage /opt/LibreOJ/runtime/sandbox-archives/rootfs-实际ROOTFS_ID.tar.gz
+sudo bash deploy/sandbox/build.sh stage /opt/LLMOJ/runtime/sandbox-archives/rootfs-实际ROOTFS_ID.tar.gz
 # 仅当宿主机明确不支持执行 x32 程序：
-sudo env LIBREOJ_X32_SUPPORTED=0 bash deploy/sandbox/build.sh stage /opt/LibreOJ/runtime/sandbox-archives/rootfs-实际ROOTFS_ID.tar.gz
+sudo env LIBREOJ_X32_SUPPORTED=0 bash deploy/sandbox/build.sh stage /opt/LLMOJ/runtime/sandbox-archives/rootfs-实际ROOTFS_ID.tar.gz
 ```
 
 构建脚本直接调用上游 `infra/sandbox-rootfs/build.sh`；基底镜像、下载包及 testlib 由上游配方固定 digest/checksum，APT 使用固定日期快照。配方内容生成 `ROOTFS_ID`，归档另带 SHA-256 文件。归档使用 gzip 的快速压缩级别，并向标准错误显示已处理字节数和速率；压缩级别不参与 `ROOTFS_ID`，归档格式和校验规则保持不变。固定来源提高可复现性，但不承诺 Docker 导出归档在不同构建器上逐字节一致。
@@ -26,7 +26,7 @@ Judge 配置使用：
 
 ```yaml
 sandbox:
-  rootfs: /opt/LibreOJ/runtime/sandbox-rootfs
+  rootfs: /opt/LLMOJ/runtime/sandbox-rootfs
   rootfsId: 此处填入build.sh输出的64位十六进制ROOTFS_ID
   user: sandbox
   resourceMode: default

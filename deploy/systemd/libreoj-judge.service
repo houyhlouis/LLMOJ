@@ -3,12 +3,12 @@ Description=LibreOJ judge (7 execution slots, 3 submissions)
 After=libreoj-backend.service
 Requires=libreoj-backend.service
 PartOf=libreoj.target
-RequiresMountsFor=/opt/LibreOJ/data/judge/work/1 /opt/LibreOJ/data/judge/work/2 /opt/LibreOJ/data/judge/work/3 /opt/LibreOJ/data/judge/work/4 /opt/LibreOJ/data/judge/work/5 /opt/LibreOJ/data/judge/work/6 /opt/LibreOJ/data/judge/work/7
+RequiresMountsFor=/opt/LLMOJ/data/judge/work/1 /opt/LLMOJ/data/judge/work/2 /opt/LLMOJ/data/judge/work/3 /opt/LLMOJ/data/judge/work/4 /opt/LLMOJ/data/judge/work/5 /opt/LLMOJ/data/judge/work/6 /opt/LLMOJ/data/judge/work/7
 
 [Service]
-WorkingDirectory=/opt/LibreOJ/apps/judge
+WorkingDirectory=/opt/LLMOJ/apps/judge
 Environment=NODE_ENV=production
-Environment=LIBREOJ_JUDGE_CONFIG_FILE=/opt/LibreOJ/config/judge.yaml
+Environment=LIBREOJ_JUDGE_CONFIG_FILE=/opt/LLMOJ/config/judge.yaml
 Environment=UV_THREADPOOL_SIZE=32
 Environment=NODE_OPTIONS=--max-old-space-size=512
 ExecStart=/usr/bin/node -r @swc-node/register index.mjs

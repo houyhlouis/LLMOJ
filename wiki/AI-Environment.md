@@ -6,15 +6,15 @@ This page was checked against source revision `43a88bdd62fbf200889b36932fa921439
 
 ## Complete production runtime list
 
-Fallbacks below apply when the program receives no value or an empty string. The installer writes the selected installation root into systemd `Environment=` entries. For a custom installation root, use the generated service configuration rather than copying `/opt/LibreOJ` literally.
+Fallbacks below apply when the program receives no value or an empty string. The installer writes the selected installation root into systemd `Environment=` entries. For a custom installation root, use the generated service configuration rather than copying `/opt/LLMOJ` literally.
 
 | Variable | Reader | Source fallback | Purpose and required alignment |
 | --- | --- | --- | --- |
-| `HYHOJ_AI_STATE_DIR` | backend | `/opt/LibreOJ/data/ai` | Encryption state directory containing `master.key`; read during backend initialization. Do not remove or regenerate the key while retaining the database's encrypted account configurations. |
-| `HYHOJ_AI_GENERATED_DIR` | backend | `/opt/LibreOJ/data/ai-generated` | Reads, validates and publishes runner output; must match the local judge YAML `aiGeneratedDirectory`. The judge does not read this environment variable. |
-| `HYHOJ_AI_SAMPLE_INPUTS_DIR` | backend and judge | `/opt/LibreOJ/data/ai-sample-inputs` | Private samples, input snapshots and controlled helper-file staging; the runner reads bounded files there. Both processes must use the same directory. The judge reads it once when loading its module. |
-| `HYHOJ_AI_RUNNER_SOCKET` | backend | `/opt/LibreOJ/data/judge/ai-runner.sock` | Local AI runner UNIX socket; must match judge YAML `aiRunnerSocket`. The judge does not read this environment variable, and this is not a remote TCP runner address. |
-| `HYHOJ_ARCHIVE_WORK_DIRECTORY` | backend | `/opt/LibreOJ/data/backend-archives` | Shared archive workspace. AI ZIP processing creates an `ai-attachment-*` temporary directory here before size, path and content validation. Other archive operations also use it. |
+| `HYHOJ_AI_STATE_DIR` | backend | `/opt/LLMOJ/data/ai` | Encryption state directory containing `master.key`; read during backend initialization. Do not remove or regenerate the key while retaining the database's encrypted account configurations. |
+| `HYHOJ_AI_GENERATED_DIR` | backend | `/opt/LLMOJ/data/ai-generated` | Reads, validates and publishes runner output; must match the local judge YAML `aiGeneratedDirectory`. The judge does not read this environment variable. |
+| `HYHOJ_AI_SAMPLE_INPUTS_DIR` | backend and judge | `/opt/LLMOJ/data/ai-sample-inputs` | Private samples, input snapshots and controlled helper-file staging; the runner reads bounded files there. Both processes must use the same directory. The judge reads it once when loading its module. |
+| `HYHOJ_AI_RUNNER_SOCKET` | backend | `/opt/LLMOJ/data/judge/ai-runner.sock` | Local AI runner UNIX socket; must match judge YAML `aiRunnerSocket`. The judge does not read this environment variable, and this is not a remote TCP runner address. |
+| `HYHOJ_ARCHIVE_WORK_DIRECTORY` | backend | `/opt/LLMOJ/data/backend-archives` | Shared archive workspace. AI ZIP processing creates an `ai-attachment-*` temporary directory here before size, path and content validation. Other archive operations also use it. |
 
 These values are filesystem paths, not URLs. Use absolute paths and preserve traversal permissions on parent directories. Setting a variable neither moves existing data nor updates another process's YAML. `HYHOJ_ROOT` is input to installer/configuration scripts; it does not dynamically replace these backend fallback paths at runtime.
 

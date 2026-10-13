@@ -25,7 +25,7 @@ This reference is checked against the installer, schemas, examples, consumers, a
 - **Installer-generated values** are calculated at first installation from paths, ports, CPUs, and RAM. Existing private configuration is normally retained on retries.
 - **Effective values** come from actual instance files plus systemd units and drop-ins. The database registration policy can override its YAML default; AI settings are additionally stored per user.
 
-Examples use `/opt/LibreOJ`. For a custom `--prefix`, substitute the actual instance path everywhere. Changing one environment variable does not relocate an installation.
+Examples use `/opt/LLMOJ`. For a custom `--prefix`, substitute the actual instance path everywhere. Changing one environment variable does not relocate an installation.
 
 ## Applying changes
 

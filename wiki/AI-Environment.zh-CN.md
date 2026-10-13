@@ -6,15 +6,15 @@
 
 ## 生产运行变量：完整清单
 
-表中的回退值是程序未收到变量或收到空字符串时的默认值。一键安装会把安装根目录代入 systemd 的 `Environment=`：自定义安装根目录时，应以生成的服务配置为准，不要把下表的 `/opt/LibreOJ` 原样套用。
+表中的回退值是程序未收到变量或收到空字符串时的默认值。一键安装会把安装根目录代入 systemd 的 `Environment=`：自定义安装根目录时，应以生成的服务配置为准，不要把下表的 `/opt/LLMOJ` 原样套用。
 
 | 变量 | 读取进程 | 源码回退值 | 用途及必须保持的对应关系 |
 | --- | --- | --- | --- |
-| `HYHOJ_AI_STATE_DIR` | backend | `/opt/LibreOJ/data/ai` | 加密主密钥目录，包含 `master.key`；后端初始化时读取。已有加密账号配置时，不能移走/重新生成主密钥后继续使用原数据库。 |
-| `HYHOJ_AI_GENERATED_DIR` | backend | `/opt/LibreOJ/data/ai-generated` | 读取、验证、发布 runner 的生成结果；必须与本机 judge YAML 的 `aiGeneratedDirectory` 一致。judge 不读取此环境变量。 |
-| `HYHOJ_AI_SAMPLE_INPUTS_DIR` | backend 和 judge | `/opt/LibreOJ/data/ai-sample-inputs` | 后端准备私有样例、输入快照及受控辅助文件的暂存目录，runner 读取其中的受限文件；两进程必须使用同一目录。judge 在模块加载时读取一次。 |
-| `HYHOJ_AI_RUNNER_SOCKET` | backend | `/opt/LibreOJ/data/judge/ai-runner.sock` | 后端连接本机 AI runner 的 UNIX socket；必须与 judge YAML 的 `aiRunnerSocket` 相同。judge 不读取此环境变量，也不接受远程 TCP runner 地址。 |
-| `HYHOJ_ARCHIVE_WORK_DIRECTORY` | backend | `/opt/LibreOJ/data/backend-archives` | 共享的归档工作目录；AI ZIP 附件先在其中创建 `ai-attachment-*` 临时目录，再进行大小、路径和内容校验；其他归档操作也使用它。 |
+| `HYHOJ_AI_STATE_DIR` | backend | `/opt/LLMOJ/data/ai` | 加密主密钥目录，包含 `master.key`；后端初始化时读取。已有加密账号配置时，不能移走/重新生成主密钥后继续使用原数据库。 |
+| `HYHOJ_AI_GENERATED_DIR` | backend | `/opt/LLMOJ/data/ai-generated` | 读取、验证、发布 runner 的生成结果；必须与本机 judge YAML 的 `aiGeneratedDirectory` 一致。judge 不读取此环境变量。 |
+| `HYHOJ_AI_SAMPLE_INPUTS_DIR` | backend 和 judge | `/opt/LLMOJ/data/ai-sample-inputs` | 后端准备私有样例、输入快照及受控辅助文件的暂存目录，runner 读取其中的受限文件；两进程必须使用同一目录。judge 在模块加载时读取一次。 |
+| `HYHOJ_AI_RUNNER_SOCKET` | backend | `/opt/LLMOJ/data/judge/ai-runner.sock` | 后端连接本机 AI runner 的 UNIX socket；必须与 judge YAML 的 `aiRunnerSocket` 相同。judge 不读取此环境变量，也不接受远程 TCP runner 地址。 |
+| `HYHOJ_ARCHIVE_WORK_DIRECTORY` | backend | `/opt/LLMOJ/data/backend-archives` | 共享的归档工作目录；AI ZIP 附件先在其中创建 `ai-attachment-*` 临时目录，再进行大小、路径和内容校验；其他归档操作也使用它。 |
 
 这些值是文件系统路径，不是 URL；使用绝对路径并保留父目录的可穿越权限。环境变量不会替你搬迁已有数据，也不会自动更新另一进程的 YAML。`HYHOJ_ROOT` 是安装/配置脚本的输入，并非后端运行时自动替换上述回退值的开关。
 

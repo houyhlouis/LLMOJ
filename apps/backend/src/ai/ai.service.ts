@@ -123,7 +123,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   async onModuleInit() {
-    const directory = process.env.HYHOJ_AI_STATE_DIR || "/opt/LibreOJ/data/ai";
+    const directory = process.env.HYHOJ_AI_STATE_DIR || "/opt/LLMOJ/data/ai";
     this.key = await loadAiEncryptionKey(directory, (await this.configurations.count()) > 0);
     // Deployment has one backend process; a DB advisory lock also protects future clustered workers.
     this.timer = setInterval(() => {
@@ -190,7 +190,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const attachment = this.validateAttachmentToken(user, job.input.attachmentToken, job.createdAt);
     const problem = await this.editable(user, job.problemId);
     const snapshot = await this.snapshot(problem);
-    const base = process.env.HYHOJ_ARCHIVE_WORK_DIRECTORY || "/opt/LibreOJ/data/backend-archives";
+    const base = process.env.HYHOJ_ARCHIVE_WORK_DIRECTORY || "/opt/LLMOJ/data/backend-archives";
     await fs.mkdir(base, { recursive: true, mode: 0o700 });
     const directory = await fs.mkdtemp(path.join(base, "ai-attachment-"));
     try {
@@ -290,7 +290,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   ) {
     const pairs = snapshot.judgeInfo.hiddenSamples || [];
     if (!pairs.length) return { files: [], directory: null as string };
-    const base = process.env.HYHOJ_AI_SAMPLE_INPUTS_DIR || "/opt/LibreOJ/data/ai-sample-inputs";
+    const base = process.env.HYHOJ_AI_SAMPLE_INPUTS_DIR || "/opt/LLMOJ/data/ai-sample-inputs";
     await fs.mkdir(base, { recursive: true, mode: 0o700 });
     const directory = path.join(base, job.id);
     await fs.rm(directory, { recursive: true, force: true });
@@ -1673,7 +1673,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     const registered = new Map(
       (await this.problems.getProblemFiles(problem, ProblemFileType.TestData)).map(file => [file.filename, file.uuid])
     );
-    const base = process.env.HYHOJ_AI_SAMPLE_INPUTS_DIR || "/opt/LibreOJ/data/ai-sample-inputs";
+    const base = process.env.HYHOJ_AI_SAMPLE_INPUTS_DIR || "/opt/LLMOJ/data/ai-sample-inputs";
     await fs.mkdir(base, { recursive: true, mode: 0o700 });
     const directory = await fs.mkdtemp(path.join(base, ".sources-"));
     const result: {
@@ -2286,7 +2286,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     }
     const totalSamples = inlineSamples.length + sampleFiles.files.length;
     const validatedSamples = protocolProblem ? protocolSamples.length : totalSamples;
-    const directory = path.join(process.env.HYHOJ_AI_GENERATED_DIR || "/opt/LibreOJ/data/ai-generated", job.id);
+    const directory = path.join(process.env.HYHOJ_AI_GENERATED_DIR || "/opt/LLMOJ/data/ai-generated", job.id);
     try {
       user = await this.assertSnapshot(job, snapshot);
       if (
@@ -2583,7 +2583,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       )
     )
       throw new AiError("INVALID_AI_PROTOCOL");
-    const root = process.env.HYHOJ_AI_SAMPLE_INPUTS_DIR || "/opt/LibreOJ/data/ai-sample-inputs";
+    const root = process.env.HYHOJ_AI_SAMPLE_INPUTS_DIR || "/opt/LLMOJ/data/ai-sample-inputs";
     await fs.mkdir(root, { recursive: true, mode: 0o700 });
     const directory = await fs.mkdtemp(path.join(root, ".public-headers-"));
     try {
@@ -2649,7 +2649,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
   private cleanupSandbox(jobId: string): Promise<void> {
     return new Promise(resolve => {
-      const socket = createConnection(process.env.HYHOJ_AI_RUNNER_SOCKET || "/opt/LibreOJ/data/judge/ai-runner.sock");
+      const socket = createConnection(process.env.HYHOJ_AI_RUNNER_SOCKET || "/opt/LLMOJ/data/judge/ai-runner.sock");
       const timer = setTimeout(() => {
         socket.destroy();
         resolve();
@@ -2680,7 +2680,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
         reject(new AiError("SAMPLES_TOO_LARGE"));
         return;
       }
-      const socket = createConnection(process.env.HYHOJ_AI_RUNNER_SOCKET || "/opt/LibreOJ/data/judge/ai-runner.sock");
+      const socket = createConnection(process.env.HYHOJ_AI_RUNNER_SOCKET || "/opt/LLMOJ/data/judge/ai-runner.sock");
       let buffer = "";
       let settled = false;
       let chain = Promise.resolve();

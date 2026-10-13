@@ -26,7 +26,7 @@ def absolute_path(value: str, name: str) -> Path:
     return path
 
 
-root = absolute_path(os.environ.get("HYHOJ_ROOT", "/opt/LibreOJ"), "HYHOJ_ROOT").resolve()
+root = absolute_path(os.environ.get("HYHOJ_ROOT", "/opt/LLMOJ"), "HYHOJ_ROOT").resolve()
 if root == Path("/"):
     raise SystemExit("HYHOJ_ROOT must not be /")
 node = absolute_path(os.environ.get("NODE_BINARY", str(root / "runtime/node/bin/node")), "NODE_BINARY")
