@@ -18,6 +18,7 @@ require.extensions[".ts"] = (module, filename) =>
     filename
   );
 const { AiService } = require("./ai.service.ts");
+const { qualityState } = require("./ai-quality.fixture.cjs");
 const { outputCaseRule } = require("./ai-output-rules.ts");
 const statement = (text, sectionTitle = "Description") => [
   { locale: "en_US", title: "Fixture", contentSections: [{ type: "Text", sectionTitle, text }] }
@@ -47,6 +48,7 @@ function fixture() {
     id: "memory-only",
     input: { count: 5 },
     state: {
+      ...qualityState(),
       completed: [],
       discussionId: 31,
       plan: { subtasks: [{ id: 1, points: 100 }], needsSpj: false },
@@ -278,4 +280,47 @@ test("ambiguous case instructions preserve the model decision and attach a revie
   assert.equal(job.state.plan.caseSensitive, true);
   assert.equal(job.state.plan.needsSpj, false);
   assert(job.state.warnings.includes("OUTPUT_CASE_REVIEW_RECOMMENDED"));
+});
+
+
+test("an old bound checkpoint without quality analysis rebuilds the generator and all independent quality sources", async () => {
+  const { svc, snapshot, job, run } = fixture();
+  const provider = require("./ai-provider.ts"), generateText = provider.generateText;
+  delete job.state.qualityPlan;
+  job.state.makeCode = "int main(){/* LEGACY_UNTARGETED_GENERATOR */}";
+  const rebuiltMake = "int main(){/* NEW_TARGETED_GENERATOR */ return 0;}";
+  let analyses = 0;
+  const generated = [];
+  svc.model = async (_config, prompt) => {
+    analyses++;
+    assert(prompt.startsWith("Independently analyze this programming problem"));
+    return qualityState().qualityPlan;
+  };
+  provider.generateText = async (_config, _system, prompt) => {
+    const stage = prompt.match(/^Generate ONLY ([a-z-]+)\.cpp/)?.[1];
+    generated.push(stage);
+    if (stage === "make") {
+      assert.equal(job.state.makeCode, undefined);
+      assert.equal(job.state.qualityArtifacts, undefined, "old independent artifacts are invalidated with the generator");
+      assert.match(prompt, /Mandatory quality targets/);
+      return rebuiltMake;
+    }
+    assert(["small-make", "oracle", "alternative", "challenge"].includes(stage));
+    return "int main(){return 0;}";
+  };
+  svc.runSandbox = async (_currentJob, request) => {
+    assert.equal(request.makeCode, rebuiltMake);
+    assert.equal(request.quality.fuzzCases.length, 64);
+    assert.equal(request.quality.alternatives.length, 1);
+    assert.equal(request.quality.challenges.length, 1);
+    throw new Error("QUALITY_UPGRADE_REACHED_SANDBOX");
+  };
+  try {
+    await assert.rejects(run(snapshot), /QUALITY_UPGRADE_REACHED_SANDBOX/);
+    assert.equal(analyses, 1);
+    assert.deepEqual(generated, ["make", "small-make", "oracle", "alternative", "challenge"]);
+    assert.equal(job.state.makeCode, rebuiltMake);
+  } finally {
+    provider.generateText = generateText;
+  }
 });

@@ -30,6 +30,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - name: Run test-data generation regressions
+        run: node --test --test-concurrency=1 apps/backend/src/ai/*.test.cjs
+      - name: Run judge data-validation regressions
+        run: node --test apps/judge/src/aiQuality.test.cjs
+      - name: Check Wiki export and navigation
+        run: python3 deploy/test/wiki-export.test.py
 
   native:
     name: Native

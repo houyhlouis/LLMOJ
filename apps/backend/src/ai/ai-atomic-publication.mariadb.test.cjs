@@ -16,6 +16,7 @@ require.extensions[".ts"] = (module, filename) => module._compile(ts.transpileMo
 String.prototype.format ||= function (...args) { return require("node:util").format(this, ...args); };
 const { DataSource, EntitySchema } = require("typeorm");
 const { AiService } = require("./ai.service.ts");
+const { qualityState, qualityReceipt } = require("./ai-quality.fixture.cjs");
 const { AiJobEntity } = require("./ai.entity.ts");
 const { UserEntity } = require("../user/user.entity.ts");
 const { ProblemService } = require("../problem/problem.service.ts");
@@ -106,14 +107,15 @@ test("AI final publication is atomic against cancel, lease loss and human edits 
       f.job.state = { completed: [], plan: { subtasks: [{ id: 1, points: 100 }], needsSpj: false,
         timeLimitMs: 1000, memoryLimitMiB: 128, fileIo: null }, makeCode: "int main(){}", stdCode: "int main(){}",
         validatorCode: "int main(){}", testdataSnapshotHash: f.service.testdataFingerprint(f.snapshot) };
+      Object.assign(f.job.state, qualityState(f.job.state.plan.subtasks.map(item => item.id)));
       await db.getRepository(AiJobEntity).update({ id: f.job.id }, { state: f.job.state });
       f.service.readExistingAiHelpers = async () => ({});
-      f.service.runSandbox = async () => {
+      f.service.runSandbox = async (_job, request) => {
         const files = [];
         for (let i = 1; i <= 5; i++) for (const extension of ["in", "out"]) {
           const name = `${i}.${extension}`; fs.writeFileSync(path.join(directory, name), "1\n"); files.push(name);
         }
-        return { directory, files, validation: { samplesPassed: 0, inputsPassed: 5, sampleInputsPassed: 0 } };
+        return { directory, files, validation: { samplesPassed: 0, inputsPassed: 5, sampleInputsPassed: 0, quality: qualityReceipt(request) } };
       };
       f.service.putFile = async () => {};
       f.service.cleanupSandbox = async () => {};

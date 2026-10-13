@@ -27,7 +27,7 @@
 
 - **Statements and tutorials:** organize imported content, translate statements, and suggest tags, difficulty and tutorial drafts.
 - **Source discovery:** combine search results and semantic checks to help identify a problem's original source.
-- **Test data:** generate reference solutions, generators and validators; compile, run and check them in a sandbox, then save validated test files and judging configuration.
+- **Test data:** for traditional problems, run at least 64 small differential cases against an independent oracle, cross-check every full case with another correct solution, and require executable wrong or slow candidates to fail before installing data. Validation reports retain counterexamples and verdicts. Interactive and communication problems use protocol simulation.
 - **Task management:** view progress, cancel or retry jobs; problem writes recheck current permissions and the problem version.
 - **Per-user configuration:** bring your own model and search services (Tavily/MCP). API keys are encrypted at rest; HTTP/HTTPS, public, private-network and loopback endpoints are supported.
 

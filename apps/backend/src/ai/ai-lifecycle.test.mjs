@@ -4,12 +4,16 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { request, db, close } from "../../test/integration-client.mjs";
 import { state, token, fixtureUserId, prepareMockFixture, clearMockFixtureConfiguration } from "./ai-fixture-utils.mjs";
+import { sumQualityResponse, assertSumQualityReceipt } from "./ai-quality-integration.fixture.mjs";
 await prepareMockFixture();
 const held = [];
 let calls = 0;
 let generationFixture;
 let fixtureHandlerError;
-const generationCalls = { plan: 0, makeCode: 0, stdCode: 0, checkerCode: 0, validatorCode: 0 };
+const generationCalls = {
+  plan: 0, qualityPlan: 0, makeCode: 0, stdCode: 0, checkerCode: 0, validatorCode: 0,
+  smallMakeCode: 0, oracleCode: 0, alternativeCode: 0, challengeCode: 0
+};
 const server = http.createServer(async (req, res) => {
   try {
     const chunks = [];
@@ -38,14 +42,15 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     assert(generationFixture, "Unexpected inference while cached code should be reused");
-    const field = prompt.startsWith("Design a test-data plan")
+    const qualityResponse = sumQualityResponse(prompt);
+    const field = qualityResponse?.field || (prompt.startsWith("Design a test-data plan")
       ? "plan"
       : [
           ["make", "makeCode"],
           ["std", "stdCode"],
           ["checker", "checkerCode"],
           ["validator", "validatorCode"]
-        ].find(([name]) => prompt.startsWith(`Generate ONLY ${name}.cpp`))?.[1];
+        ].find(([name]) => prompt.startsWith(`Generate ONLY ${name}.cpp`))?.[1]);
     assert(field, "Unexpected lifecycle mock prompt");
     generationCalls[field]++;
     const rows = await db.query("SELECT state,step FROM ai_job WHERE id=? AND ownerId=?", [
@@ -53,13 +58,16 @@ const server = http.createServer(async (req, res) => {
       fixtureUserId
     ]);
     const durable = parse(rows[0].state);
-    const stage = field === "plan" ? "plan" : field.replace("Code", "");
+    const stage = qualityResponse?.stage || (field === "plan" ? "plan" : field.replace("Code", ""));
     assert.equal(rows[0].step, `testdata.${stage}`, "model request starts after its progress checkpoint");
     if (field === "plan") {
       assert.notEqual(durable.testdataSnapshotHash, generationFixture.oldSnapshotHash);
       assert.notEqual(durable.testdataSnapshotHash, generationFixture.oldPublishedHash);
       for (const stale of [
         "plan",
+        "qualityPlan",
+        "qualityArtifacts",
+        "qualityValidation",
         "makeCode",
         "stdCode",
         "checkerCode",
@@ -69,7 +77,7 @@ const server = http.createServer(async (req, res) => {
       ])
         assert.equal(durable[stale], undefined, `retry must clear stale ${stale} before fresh planning`);
     }
-    respond(generationFixture[field]);
+    respond(qualityResponse ? qualityResponse.output : generationFixture[field]);
   } catch (error) {
     fixtureHandlerError = error;
     res.statusCode = 500;
@@ -353,18 +361,27 @@ try {
   await waitCompleted("fresh inference after changed snapshot retry");
   assert.deepEqual(generationCalls, {
     plan: 1,
+    qualityPlan: 1,
     makeCode: 1,
     stdCode: 1,
     checkerCode: stableState.plan.needsSpj ? 1 : 0,
-    validatorCode: 1
+    validatorCode: 1,
+    smallMakeCode: 1,
+    oracleCode: 1,
+    alternativeCode: 1,
+    challengeCode: 1
   });
   const rebuilt = await finishedState();
   assert.notEqual(rebuilt.testdataSnapshotHash, stableState.testdataSnapshotHash);
-  assert.deepEqual(rebuilt.generated.sampleValidation, {
+  const { quality, ...sampleValidation } = rebuilt.generated.sampleValidation;
+  assert.deepEqual(sampleValidation, {
     samplesPassed: afterPublicationRecovery.samples.length,
     inputsPassed: 6,
     sampleInputsPassed: afterPublicationRecovery.samples.length
   });
+  assertSumQualityReceipt(quality, 6);
+  assert.deepEqual(rebuilt.generated.qualityValidation, quality);
+  assert.deepEqual((await getJob(previous.id)).result.testdataQuality, quality);
   assert.equal((await getJob(previous.id)).result.discussionId, discussionId);
   assert.equal(
     Number((await db.query("SELECT COUNT(*) n FROM discussion WHERE problemId=?", [previous.problemId]))[0].n),

@@ -43,6 +43,19 @@ python3 deploy/prepare-github.py --archive release/llmoj-source.tar.gz
 
 Use disposable instances for database/browser integration tests, respecting the constraints in apps/backend/src/ai/README.md. Never use production data or sessions as fixtures. Packaging/exporting only creates local files; it never commits, pushes or publishes.
 
+## Test-data validation checks
+
+From the repository root, run the backend workflow and judge quality suites:
+
+```bash
+node --test --test-concurrency=1 apps/backend/src/ai/*.test.cjs
+node --test apps/judge/src/aiQuality.test.cjs
+```
+
+CI runs both suites and the existing Wiki export/navigation checks. Default tests use mock model, database or sandbox interfaces and require neither production credentials nor a rootfs; optional database tests skip when unconfigured. Backend cases cover quality plans, old job recovery, independent generation requests and publication gates. Judge cases cover differential testing, checker failures, multiple valid outputs, slow-algorithm verdicts and counterexample replacement. The integration-fixture offline checks compile fixed synthetic programs in temporary directories using the local C++ compiler, without connecting to a database or model service.
+
+Real compilation, resource enforcement and protocol execution require a separately configured disposable backend and judge. Mock results do not replace those checks. Exercise independently solvable small inputs, incorrect references, surviving candidates, multiple-answer problems and worst-case constructions. Slow candidates must be correct on small inputs and fail full cases through actual time or memory limits. See the [module test requirements](apps/backend/src/ai/README.md) and the [generation and validation guide](wiki/AI.md#test-data-validation-and-coverage).
+
 ## Registration review and upgrade regression checks
 
 Run from the repository root using the required Node version:

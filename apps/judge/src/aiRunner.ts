@@ -22,6 +22,7 @@ import {
 } from "./task/submission/interaction";
 import { Disposer } from "./posixUtils";
 import { CompileResultSuccess } from "./compile";
+import { AiQuality, QualityRequest, QualityVerdict, qualitySources, validateQuality } from "./aiQuality";
 
 import config from "./config";
 import getLanguage from "./languages";
@@ -40,6 +41,7 @@ export interface Request {
   problemType?: "Traditional" | "Interaction" | "Communication";
   interactorCode?: string;
   managerCode?: string;
+  quality?: QualityRequest;
   graderCode?: string;
   extraSourceFiles?: Record<string, string>;
   protocolSamples?: { input: string }[];
@@ -73,8 +75,8 @@ const generationQueue = new Queue(3);
 
 type Emit = (event: Record<string, unknown>) => void;
 
-function referenceError(message: string, candidateFailure: boolean): Error {
-  return Object.assign(new Error(message), { candidateFailure });
+function referenceError(message: string, candidateFailure: boolean, qualityVerdict?: QualityVerdict): Error {
+  return Object.assign(new Error(message), { candidateFailure, qualityVerdict });
 }
 
 export function validate(request: Request) {
@@ -180,6 +182,11 @@ export function validate(request: Request) {
     )
       throw new Error("Invalid subtask or seed");
   }
+  if (!validating && !protocol) {
+    if (!request.validatorCode) throw new Error("Traditional generation requires an input validator");
+    validateQuality(request.quality, request.cases, request.stdCode);
+  } else if (request.quality != null)
+    throw new Error("Quality verification is only supported for Traditional generation");
   if (request.samples != null && (!Array.isArray(request.samples) || request.samples.length > 100))
     throw new Error("Too many samples");
   for (const sample of request.samples || []) {
@@ -329,6 +336,14 @@ async function execute(
           await fs.promises.link(content.path, path.join(references, filename));
         }
       }
+      const solution = name === "std" || /^quality-(?:alt|challenge)-/.test(name);
+      const oracle = name === "quality-oracle";
+      let timeLimit = solution ? request.stdTimeLimitMs : request.timeLimitMs;
+      let memoryLimit = solution ? request.stdMemoryLimitMiB : request.memoryLimitMiB;
+      if (oracle) {
+        timeLimit = 5000;
+        memoryLimit = 512;
+      }
       const fileIo = name === "std" ? request.stdFileIo : null;
       if (fileIo) {
         if (Buffer.isBuffer(input)) await fs.promises.writeFile(path.join(working, fileIo.inputFilename), input);
@@ -342,9 +357,9 @@ async function execute(
           return filename && files[filename] && !Buffer.isBuffer(files[filename]) ? `${SOURCE}/${filename}` : parameter;
         }),
         process: 1,
-        time: name === "std" ? request.stdTimeLimitMs : request.timeLimitMs,
-        memory: (name === "std" ? request.stdMemoryLimitMiB : request.memoryLimitMiB) * 1024 * 1024,
-        stackSize: (name === "std" ? request.stdMemoryLimitMiB : request.memoryLimitMiB) * 1024 * 1024,
+        time: timeLimit,
+        memory: memoryLimit * 1024 * 1024,
+        stackSize: memoryLimit * 1024 * 1024,
         stdin: fileIo ? "/dev/null" : standardInput,
         stdout: `${WORKING}/stdout`,
         stderr: `${WORKING}/stderr`,
@@ -371,15 +386,23 @@ async function execute(
         if (!valid || verdict.score !== 100)
           throw referenceError(
             `checker: ${SandboxStatus[result.status]} (exit ${result.code}) ${stderr.slice(0, 2000)}`,
-            !!valid && verdict.score < 100
+            !!valid && verdict.score < 100,
+            valid && verdict.score < 100 ? "WA" : undefined
           );
         return Buffer.alloc(0);
       }
       if (result.status !== SandboxStatus.OK || result.code !== 0) {
         const message = await readRegular(path.join(working, "stderr")).catch(() => Buffer.from(""));
+        const verdicts = new Map<number, QualityVerdict>([
+          [SandboxStatus.TimeLimitExceeded, "TLE"],
+          [SandboxStatus.MemoryLimitExceeded, "MLE"],
+          [SandboxStatus.RuntimeError, "RE"],
+          [SandboxStatus.OutputLimitExceeded, "RE"]
+        ]);
         throw referenceError(
           `${name}: ${SandboxStatus[result.status]} (exit ${result.code}) ${message.toString("utf8").slice(0, 2000)}`,
-          name === "std" && result.status !== SandboxStatus.Unknown
+          name === "std" && result.status !== SandboxStatus.Unknown,
+          verdicts.get(result.status)
         );
       }
       try {
@@ -550,7 +573,7 @@ async function generateWithSamples(
   // Version the validation contract as well as hashing all supplied source bytes.
   const hash = crypto
     .createHash("sha256")
-    .update(JSON.stringify({ version: 4, request, sampleHashes }))
+    .update(JSON.stringify({ version: 5, request, sampleHashes }))
     .digest("hex");
   const resultPath = path.join(directory, "result.json");
   // Only root can create output directories; no backend-controlled pathname or symlink is followed.
@@ -585,6 +608,28 @@ async function generateWithSamples(
     await fs.promises.chown(target, 0, config.aiRunnerGid);
     files.push(filename);
   }
+  async function replaceCase(index: number, input: Buffer, answer: Buffer) {
+    const inputPath = path.join(directory, `${index + 1}.in`);
+    const outputPath = path.join(directory, `${index + 1}.out`);
+    const old = await Promise.all([inputPath, outputPath].map(filename => fs.promises.stat(filename)));
+    const replacementBytes = input.length + answer.length;
+    const replacedBytes = old[0].size + old[1].size;
+    if (
+      input.length > MAX_FILE ||
+      answer.length > MAX_FILE ||
+      totalBytes - replacedBytes + replacementBytes > MAX_TOTAL
+    )
+      throw new Error("Replacement data exceeds generation size limits");
+    const space = await (
+      fs.promises as unknown as { statfs: (filename: string) => Promise<{ bavail: number; bsize: number }> }
+    ).statfs(config.aiGeneratedDirectory);
+    if (space.bavail * space.bsize < DISK_RESERVE + replacementBytes)
+      throw new Error("Insufficient disk space for adversarial case replacement");
+    // Nothing is exported before result.json is committed; an interrupted replacement aborts the whole job.
+    await fs.promises.writeFile(inputPath, input, { mode: 0o640 });
+    await fs.promises.writeFile(outputPath, answer, { mode: 0o640 });
+    totalBytes += replacementBytes - replacedBytes;
+  }
   try {
     for (const [name, source] of [
       ...(validating ? [] : [["make", request.makeCode]]),
@@ -599,6 +644,13 @@ async function generateWithSamples(
       await compileSource(source, name, binaryDirectory, request);
       checkCanceled();
       await publish(`${name}.cpp`, source);
+    }
+    // Auxiliary and challenge sources are private; only official problem artifacts are published.
+    for (const [name, source] of request.quality ? qualitySources(request.quality) : []) {
+      checkCanceled();
+      emit({ type: "progress", phase: `compile-${name}`, completed: 0, total: request.cases.length });
+      await compileSource(source, name, binaryDirectory, request);
+      checkCanceled();
     }
     if (request.graderCode) await publish("grader.cpp", request.graderCode);
     for (const [filename, source] of Object.entries(request.extraSourceFiles || {})) await publish(filename, source);
@@ -637,17 +689,22 @@ async function generateWithSamples(
       input: Buffer | { path: string },
       actual: Buffer | { path: string },
       expected: Buffer | { path: string },
-      number: number
+      label: number | string
     ) => {
       if (request.checkerCode) {
-        await execute(
-          binaryDirectory,
-          "checker",
-          request,
-          Buffer.alloc(0),
-          [`${WORKING}/input`, `${WORKING}/actual`, `${WORKING}/expected`],
-          { input, actual, expected }
-        );
+        try {
+          await execute(
+            binaryDirectory,
+            "checker",
+            request,
+            Buffer.alloc(0),
+            [`${WORKING}/input`, `${WORKING}/actual`, `${WORKING}/expected`],
+            { input, actual, expected }
+          );
+        } catch (error) {
+          error.message = `${typeof label === "number" ? `sample ${label}` : label}: ${error.message}`;
+          throw error;
+        }
       } else {
         const comparison = await fs.promises.mkdtemp(path.join(directory, "comparison-"));
         try {
@@ -664,13 +721,43 @@ async function generateWithSamples(
             paths[1],
             request.checker || { type: "lines", caseSensitive: true }
           );
-          if (!result || typeof result !== "object" || !("score" in result) || result.score !== 100)
-            throw referenceError(`Reference solution failed sample ${number}`, true);
+          if (!result || typeof result !== "object" || !("score" in result) || result.score == null)
+            throw new Error(`Builtin checker failed while checking ${label}`);
+          if (result.score !== 100) throw referenceError(`Output mismatch: ${label}`, true, "WA");
         } finally {
           await fs.promises.rm(comparison, { recursive: true, force: true });
         }
       }
     };
+    const quality = request.quality
+      ? new AiQuality(request.quality, {
+          execute: async (name, input, parameters) => {
+            checkCanceled();
+            const output = await execute(binaryDirectory, name, request, input, parameters);
+            checkCanceled();
+            return output;
+          },
+          validate: validateInput,
+          compare: compareSample,
+          verifySample: async (name, input, expected, label) => {
+            checkCanceled();
+            const temporary = await fs.promises.mkdtemp(path.join(directory, "quality-sample-"));
+            try {
+              const actual = { path: path.join(temporary, "output") };
+              // Uploaded sample outputs retain the existing streamed 256 MiB limit.
+              await execute(binaryDirectory, name, request, input, [], {}, actual.path);
+              checkCanceled();
+              await compareSample(input, actual, expected, label);
+              checkCanceled();
+            } finally {
+              await fs.promises.rm(temporary, { recursive: true, force: true });
+            }
+          },
+          checkCanceled,
+          progress: (phase, completed, total) => emit({ type: "progress", phase, completed, total }),
+          customChecker: !!request.checkerCode
+        })
+      : null;
     const sampleCount = (request.samples?.length || 0) + (request.sampleFiles?.length || 0);
     for (const [sampleIndex, sample] of (protocol ? [] : request.samples || []).entries()) {
       checkCanceled();
@@ -690,6 +777,7 @@ async function generateWithSamples(
       const actual = await execute(binaryDirectory, "std", request, input);
       checkCanceled();
       await compareSample(input, actual, expected, samplesPassed + 1);
+      if (quality) await quality.checkSample(input, expected, samplesPassed + 1);
       samplesPassed++;
       emit({ type: "progress", phase: "validate-samples", completed: samplesPassed, total: sampleCount });
     }
@@ -708,6 +796,7 @@ async function generateWithSamples(
       await execute(binaryDirectory, "std", request, input, [], {}, actual.path);
       checkCanceled();
       await compareSample(input, actual, expected, sampleNumber);
+      if (quality) await quality.checkSample(input, expected, sampleNumber);
       await fs.promises.unlink(actual.path);
       samplesPassed++;
       emit({ type: "progress", phase: "validate-samples", completed: samplesPassed, total: sampleCount });
@@ -728,6 +817,8 @@ async function generateWithSamples(
         total: request.protocolSamples.length
       });
     }
+    if (quality) await quality.runDifferential();
+    const finalCases = request.cases.map(testcase => ({ ...testcase }));
     for (let index = 0; index < request.cases.length; index++) {
       checkCanceled();
       const { subtask, seed } = request.cases[index];
@@ -748,7 +839,8 @@ async function generateWithSamples(
         protocolCasesPassed++;
       }
       checkCanceled();
-      if (!protocol && request.checkerCode)
+      if (quality) await quality.checkCorrect(input, answer, subtask, `case ${index + 1}`);
+      if (!quality && !protocol && request.checkerCode)
         await execute(
           binaryDirectory,
           "checker",
@@ -757,15 +849,51 @@ async function generateWithSamples(
           [`${WORKING}/input`, `${WORKING}/actual`, `${WORKING}/expected`],
           { input, actual: answer, expected: answer }
         );
+      const kills = quality ? await quality.findKills(input, answer, subtask) : [];
+      checkCanceled();
       await publish(`${index + 1}.in`, input);
       await publish(`${index + 1}.out`, answer);
+      if (quality) quality.recordCase(index, kills);
       emit({ type: "progress", phase: "generate", completed: index + 1, total: request.cases.length });
     }
+    if (quality) {
+      let next = quality.nextSearchCase(finalCases);
+      while (next) {
+        checkCanceled();
+        const { subtask, seed } = next;
+        const input = await execute(binaryDirectory, "make", request, Buffer.from(`${subtask} ${seed}\n`), [
+          String(subtask),
+          String(seed)
+        ]);
+        await validateInput(input, subtask, seed, `adversarial search (subtask ${subtask}, seed ${seed})`);
+        const answer = await execute(binaryDirectory, "std", request, input);
+        await quality.checkCorrect(input, answer, subtask, `adversarial search seed ${seed}`);
+        const kills = await quality.findKills(input, answer, subtask);
+        if (kills.length) {
+          const index = quality.replacementIndex(finalCases, subtask);
+          if (index < 0) throw new Error("No unprotected case available for an adversarial replacement");
+          checkCanceled();
+          await replaceCase(index, input, answer);
+          finalCases[index] = next;
+          quality.recordReplacement(index, kills);
+        }
+        next = quality.nextSearchCase(finalCases);
+      }
+    }
+    const qualityResult = quality?.result();
     const result = {
       type: "complete",
       directory,
       files,
-      validation: { samplesPassed, inputsPassed, sampleInputsPassed, protocolCasesPassed, protocolSamplesPassed },
+      ...(quality ? { finalCases } : {}),
+      validation: {
+        samplesPassed,
+        inputsPassed,
+        sampleInputsPassed,
+        protocolCasesPassed,
+        protocolSamplesPassed,
+        ...(qualityResult ? { quality: qualityResult } : {})
+      },
       requestHash: hash
     };
     checkCanceled();
@@ -864,11 +992,31 @@ export async function startAiRunner() {
           } else {
             if (active.size >= 8) throw new Error("AI generation queue is full");
             active.add(request.jobId);
+            const baseExecutions =
+              request.cases.length +
+              (request.samples?.length || 0) +
+              (request.sampleFiles?.length || 0) +
+              (request.protocolSamples?.length || 0);
+            const qualityExecutions = request.quality
+              ? (request.quality.fuzzCases.length + request.cases.length + request.quality.extraAttempts) *
+                (3 + request.quality.alternatives.length + request.quality.challenges.length)
+              : 0;
+            const executionBudgetMs = Math.min(
+              4 * 60 * 60 * 1000,
+              180000 +
+                (baseExecutions + qualityExecutions) *
+                  Math.max(20000, request.stdTimeLimitMs * (request.problemType === "Communication" ? 2 : 1) + 15000)
+            );
+            const deadline = Date.now() + executionBudgetMs;
             emit({ type: "progress", phase: "queued", completed: 0, total: request.cases.length });
             try {
               await generationQueue.add(() =>
                 generate(request, emit, () => {
                   if (socket.destroyed) throw new Error("Generation canceled");
+                  if (Date.now() > deadline)
+                    throw new Error(
+                      `Generation exceeded its ${Math.ceil(executionBudgetMs / 60000)}-minute execution budget`
+                    );
                 })
               );
             } finally {

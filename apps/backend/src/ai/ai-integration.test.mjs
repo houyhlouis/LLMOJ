@@ -3,6 +3,7 @@ import http from "node:http";
 import assert from "node:assert/strict";
 import { request, db, close } from "../../test/integration-client.mjs";
 import { state, token, fixtureUserId, prepareMockFixture, clearMockFixtureConfiguration } from "./ai-fixture-utils.mjs";
+import { sumMakeCode, sumStdCode, sumQualityResponse, assertSumQualityReceipt } from "./ai-quality-integration.fixture.mjs";
 await prepareMockFixture();
 const useSpj = process.env.HYHOJ_TEST_SPJ === "1";
 const testInvalidInput = process.env.HYHOJ_TEST_INVALID_INPUT === "1";
@@ -31,10 +32,8 @@ const translated = {
   ]
 };
 const samples = [{ inputData: "1 2\n", outputData: "3\n" }];
-const makeCode =
-  '#include <bits/stdc++.h>\nusing namespace std; int main(int argc,char**argv){long long sub=stoll(argv[1]), seed=stoll(argv[2]), bound=sub==1?10:1000000000; cout<<(seed==1?-bound:bound)<<" "<<(seed==1?0:bound)<<"\\n";}';
-const stdCode =
-  '#include <iostream>\nusing namespace std; int main(){long long a,b;if(!(cin>>a>>b))return 1;cout<<a+b<<"\\n";}';
+const makeCode = sumMakeCode;
+const stdCode = sumStdCode;
 const validatorCode = `#include <bits/stdc++.h>
 using namespace std;
 int main(int argc, char** argv) {
@@ -75,8 +74,10 @@ const server = http.createServer(async (req, res) => {
     assert.equal(req.url, "/chat/completions");
     modelCalls++;
     const prompt = body.messages.at(-1).content;
+    const qualityResponse = sumQualityResponse(prompt);
     let output;
-    if (prompt.startsWith("Extract this programming problem")) output = { localizedContents: [statement], samples };
+    if (qualityResponse) output = qualityResponse.output;
+    else if (prompt.startsWith("Extract this programming problem")) output = { localizedContents: [statement], samples };
     else if (prompt.startsWith("Find the exact original"))
       output = { originalProblem: sourceUrl, evidence: "Exact fixture source / 精确匹配测试来源" };
     else if (prompt.startsWith("Translate the statement")) output = translated;
@@ -190,11 +191,15 @@ try {
   assert.equal(rejectedInvalidInput, testInvalidInput);
   const storedState = await db.query("SELECT state FROM ai_job WHERE id=?", [jobId]);
   const checkpoint = typeof storedState[0].state === "string" ? JSON.parse(storedState[0].state) : storedState[0].state;
-  assert.deepEqual(checkpoint.generated.sampleValidation, {
+  const { quality, ...sampleValidation } = checkpoint.generated.sampleValidation;
+  assert.deepEqual(sampleValidation, {
     samplesPassed: samples.length,
     inputsPassed: 6,
     sampleInputsPassed: samples.length
   });
+  assertSumQualityReceipt(quality, 6);
+  assert.deepEqual(checkpoint.generated.qualityValidation, quality);
+  assert.deepEqual(job.result.testdataQuality, quality);
   const problem = await request(token, "problem/getProblem", {
     id: problemId,
     localizedContentsOfAllLocales: true,
@@ -260,6 +265,8 @@ try {
       proportionalSumScoring: true,
       usageMetered: true,
       samplesValidated: true,
+      differentialCases: quality.fuzzPassed,
+      adversarialCandidatesRejected: quality.challengesKilled,
       uniqueSpj: useSpj,
       secretIsolation: true,
       problemId,

@@ -12,7 +12,23 @@ Provider requests support HTTP/HTTPS and permit private, loopback and public des
 
 `HYHOJ_AI_SAMPLE_INPUTS_DIR` and `HYHOJ_AI_GENERATED_DIR` select private temporary work directories. Backend and judge configuration must agree on the sandbox input paths and runner socket. Generated programs execute in the judge sandbox. Its root filesystem and compiler dependencies are supplied separately from the source repository.
 
-AI jobs use bounded concurrency, resumable checkpoints and cancellation checks. Source discovery requires search evidence and semantic verification. Test-data installation validates generated input, applicable samples and permissions before activating the new judge configuration. Usage records contain request metadata and reported usage counts, without credentials or prompt/response bodies.
+AI jobs use bounded concurrency, resumable checkpoints and cancellation checks. Source discovery requires search evidence and semantic verification. Test-data installation validates generated input, applicable samples, the traditional-task quality gate and permissions before activating the new judge configuration. Usage records contain request metadata and reported usage counts, without credentials or prompt/response bodies.
+
+## Test-data quality gate
+
+Traditional problems use three independent checks before new data is activated:
+
+1. A separately generated small-input generator and brute-force oracle check the reference solution on at least 64 legal boundary and random inputs, with at least one input for every subtask. The input validator also checks these inputs. The oracle is requested separately from the reference solution; it uses a simpler exhaustive method rather than copying the optimized implementation.
+2. A separately generated alternative correct algorithm must pass every final input using the configured checker and the problem's time and memory limits. Multiple valid witnesses and floating-point answers are compared using the actual checker, rather than byte equality.
+3. Concrete wrong or excessively slow candidate programs are executed against the final dataset. Every candidate must fail on a legal case from its applicable subtasks. The runner can search a bounded number of additional targeted inputs and replace cases while retaining subtask scores. Each replacement is checked by the input validator, reference solution and alternative correct solution before it enters the dataset.
+
+The plan records permitted correct algorithms and identifies each wrong or slow candidate's assumption, applicable subtasks and a concrete adversarial construction. SPFA is a slow target only when the legal graph family and resource limits make it inappropriate; the plan must retain other efficient correct methods. Every slow candidate must pass all applicable small differential inputs. A slow target requires TLE or MLE on a full-size legal input; WA or RE is a faulty implementation, not evidence of algorithmic degeneration. A candidate compilation failure, checker failure or sandbox infrastructure failure does not count as a successful rejection. All candidates must be rejected, all differential inputs must pass and all alternative-solution checks must pass; incomplete or inconsistent reports stop publication.
+
+The oracle, small-input generator, alternative solution and challenge programs are private validation helpers and are not published as problem files. Existing generated make.cpp, std.cpp and validator.cpp artifacts are retained, and data.yaml includes the quality report.
+
+The final report records differential counts and each rejected candidate's final case index and verdict (WA, RE, TLE or MLE). This provides evidence against the chosen candidate programs, not a proof that every possible incorrect implementation is rejected. Cases use fresh randomness, so reported final inputs are the reproducible counterexamples; a case index is not a random seed. The number of inputs, models and adversarial attempts is bounded to protect the shared judging queue.
+
+Interactive and communication problems keep their existing hidden-state and protocol validation. Their jobs explicitly report that the independent brute-force and wrong-algorithm quality gate currently applies only to traditional problems.
 
 ## Tests
 
@@ -22,6 +38,14 @@ Run the mock unit tests and type check from `apps/backend`:
 node --test --test-concurrency=1 src/ai/*.test.cjs
 ./node_modules/.bin/tsc --noEmit -p tsconfig.json
 ```
+
+The judge quality suite runs without a rootfs or native sandbox:
+
+```sh
+node --test apps/judge/src/aiQuality.test.cjs
+```
+
+Run that command from the repository root. CI runs both the backend mock suite and this judge suite, as documented in the bilingual development guides. Real sandbox acceptance requires a dedicated execution environment and verifies compilation, actual resource verdicts and checker behavior separately.
 
 The mock tests use synthetic keys. MariaDB tests are opt-in through their documented test configuration environment variables and create temporary tables; select a disposable test database.
 

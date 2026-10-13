@@ -2,7 +2,7 @@
 
 [English](AI-Environment.md) | 简体中文 | [AI 账号配置](AI.zh-CN.md) | [全部环境变量](Environment.zh-CN.md) | [Judge 配置](Judge-Configuration.zh-CN.md)
 
-本文按源码 `43a88bdd62fbf200889b36932fa921439a293190` 核对。以下运行变量控制后端与本机 AI runner 的目录和通信，不配置服务商账号。模型/搜索 Key、Base URL、模型、输出预算和每用户并发均在 `/ai/configuration` 保存到该用户的加密配置；没有用于代替该页面的 `OPENAI_API_KEY` 等 AI 提供商环境变量。
+本文按仓库内的配置和执行代码核对。以下运行变量控制后端与本机 AI runner 的目录和通信，不配置服务商账号。模型/搜索 Key、Base URL、模型、输出预算和每用户并发均在 `/ai/configuration` 保存到该用户的加密配置；没有用于代替该页面的 `OPENAI_API_KEY` 等 AI 提供商环境变量。
 
 ## 生产运行变量：完整清单
 
@@ -85,7 +85,9 @@ sudo systemctl is-active libreoj-backend.service
 | 调度 | 全局最多 8 个运行任务，每用户排队加运行最多 100；每用户默认运行 3、可配置 1–8。同一题串行。本机 runner 最多接纳 8 个任务，生成队列并行 3，共用实际 judge 槽位。 |
 | runner socket | 请求体上限 16 MiB，后端未处理响应缓冲上限 1048576 个字符；最多 32 个连接，收到首个请求前有 30 秒连接超时。 |
 | runner 输出与磁盘 | 普通输出单文件 16 MiB，输入样例单文件 256 MiB，总输出 8 GiB；生成时要求保留 2 GiB 磁盘余量。 |
-| runner 执行等待 | 后端按案例数和标程限时计算等待预算，上限 4 小时；不是模型请求超时，也不是允许单个程序跑 4 小时。 |
+| 传统题质量验证 | 默认至少 64 组小数据并覆盖所有子任务；runner 接受 64–1000 组小数据、1–3 份独立正解和 1–4 个候选程序，其中至少一个错误实现。当前后端生成一份独立正解，额外反例搜索最多 16 次；runner 协议上限为 32 次。没有对应的环境变量覆盖入口。 |
+| 辅助程序资源 | 小数据生成器与精确参考程序每次执行最多 5 秒、512 MiB；独立正解和候选程序按题目的实际时间/内存限制运行。验证与普通提交共用 judge 槽位。 |
+| runner 执行等待 | 后端预算计入正式数据、样例、对拍、独立正解和候选程序运行，以及额外反例搜索，上限仍为 4 小时；不是模型请求超时，也不是允许单个程序跑 4 小时。 |
 | 临时生成结果 | 保留期 24 小时，runner 每小时清理符合其所有者/非活动等校验的过期目录；已发布题目数据有自己的持久存储。 |
 | AI 生成器修复 | 只有 AI 生成的 `make.cpp` 明确编译失败可自动修复一次，预算持久化；不会无限重试用户提供的评测程序。 |
 
@@ -113,8 +115,9 @@ sudo systemctl is-active libreoj-backend.service
 
 ## 源码依据
 
-- [后端 AI 目录/socket 与调度](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai.service.ts)、[加密文件约束](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-crypto.ts)
-- [AI runner](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/aiRunner.ts)、[生成后端单元](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py)、[生成 judge 配置/单元](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-judge.py)、[目录权限](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/install-support.py)
+- [后端 AI 目录/socket 与调度](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.service.ts)、[加密文件约束](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-crypto.ts)
+- [AI runner](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiRunner.ts)、[生成后端单元](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py)、[生成 judge 配置/单元](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-judge.py)、[目录权限](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/install-support.py)
 - [文件读取](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/utils/readBrowserFile.ts)、[AI 上传调用点](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/pages/ai/api.ts)、[导入取消/提交](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/pages/ai/AiImportPage.tsx)、[通用上传](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/utils/callApiWithFileUpload.ts)
 - [提供商超时与协议](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-provider.ts)、[Responses 恢复](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-responses.ts)
 - [MJS 测试隔离约束](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/test/integration-client.mjs)、[专用账号约束](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-fixture-utils.mjs)、[网络测试变量](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-network-policy.test.cjs)
+- [测试数据验证参数与验收](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-testdata-quality.ts)、[runner 质量验证限制](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiQuality.ts)

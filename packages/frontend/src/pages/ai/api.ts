@@ -103,8 +103,8 @@ const errors: Record<string, [string, string]> = {
   INVALID_GENERATED_JUDGE_INFO: ["生成的评测配置未通过校验。", "The generated judge configuration failed validation."],
   INVALID_SANDBOX_FILE: ["沙箱产物不符合文件或大小要求。", "A sandbox output failed file or size validation."],
   INVALID_SANDBOX_RESPONSE: [
-    "沙箱响应或样例验证结果不完整。",
-    "The sandbox response or sample validation is incomplete."
+    "沙箱响应或数据验证结果不完整。",
+    "The sandbox response or test-data validation is incomplete."
   ],
   INVALID_SUBTASK_SCORES: ["子任务分值之和必须为 100。", "Subtask scores must sum to 100."],
   TEST_COUNT_RATIO_UNREPRESENTABLE: [
@@ -117,6 +117,18 @@ const errors: Record<string, [string, string]> = {
   ],
   INVALID_TEST_COUNT: ["测试数据组数必须为 5 到 1000。", "The number of test cases must be between 5 and 1000."],
   INVALID_TEST_PLAN: ["AI 返回的子任务和数据范围规划无效。", "The AI returned an invalid subtask/constraint plan."],
+  INVALID_AI_QUALITY_PLAN: [
+    "AI 返回的对拍或对抗测试方案不完整，请重试生成。",
+    "The AI returned an incomplete differential or adversarial testing plan. Retry generation."
+  ],
+  TESTDATA_QUALITY_GATE_FAILED: [
+    "数据未通过对拍、多种正解验证或错误算法拦截，未启用新数据。请查看任务中的验证失败原因并重试。",
+    "Differential testing, alternative correct solutions or adversarial checks failed. The new data was not activated. Review the validation failure in this job and retry."
+  ],
+  TESTDATA_QUALITY_PROTOCOL_UNSUPPORTED: [
+    "交互题和通信题使用协议验证；当前独立对拍和错误算法拦截仅适用于传统题。",
+    "Interactive and communication problems use protocol validation. Independent differential and adversarial checks currently apply to traditional problems."
+  ],
   PARTIAL_SCORE_CHECKER_NOT_ALLOWED: [
     "SPJ 必须采用通过或失败的二元评分。",
     "The SPJ must use binary pass/fail scoring."
@@ -167,8 +179,8 @@ const errors: Record<string, [string, string]> = {
   PROBLEM_AI_BUSY: ["此题已有 AI 任务正在执行。", "An AI job is already running for this problem."],
   SANDBOX_UNAVAILABLE: ["评测沙箱暂不可用，请稍后重试。", "The judging sandbox is unavailable. Please retry."],
   SANDBOX_GENERATION_FAILED: [
-    "生成程序编译、运行、输入约束或样例验证失败。",
-    "Generated code failed compilation, execution, input validation or sample validation."
+    "生成程序编译、运行、输入约束、样例、对拍或对抗测试失败。",
+    "Generated code failed compilation, execution, input validation, sample checks, differential testing or adversarial checks."
   ],
   INVALID_MODEL_JSON: [
     "模型返回格式错误，请重试或更换模型。",
@@ -238,6 +250,14 @@ const errors: Record<string, [string, string]> = {
   ]
 };
 export function aiError(value: string) {
+  const surviving = String(value || "").match(
+    /^SANDBOX_GENERATION_FAILED:\s*Data quality insufficient:\s*challenges survived \(([a-z0-9_-]{1,48}(?:, [a-z0-9_-]{1,48}){0,3})\)$/
+  );
+  if (surviving)
+    return aiText(
+      `以下错误或低效算法仍能通过：${surviving[1]}。新数据未启用，请重试生成。`,
+      `These wrong or slow algorithms still pass: ${surviving[1]}. The new data was not activated. Retry generation.`
+    );
   const [code, detail = ""] = String(value || "INTERNAL_ERROR").split(/:\s*/, 2);
   if (code === "INVALID_AI_TUTORIAL") {
     if (detail === "UNSUPPORTED_NO_PARTIAL_SCORE_CLAIM")
@@ -453,6 +473,21 @@ export interface AiJob {
     referenceSource?: { kind: "tutorial" | "model"; discussionId?: number; samplesPassed: number; validated: boolean };
     requestedCount?: number;
     generatedCount?: number;
+    testdataQuality?: {
+      version: 1;
+      fuzzPassed: number;
+      alternativeCount: number;
+      alternativesPassed: number;
+      challengeCount: number;
+      challengesKilled: number;
+      extraAttemptsUsed: number;
+      challengeResults: Array<{
+        id: string;
+        kind: "wrong" | "slow";
+        killedBy: number;
+        verdict: "WA" | "RE" | "TLE" | "MLE";
+      }>;
+    };
   };
 }
 export const actionName = (name: string) =>
@@ -475,6 +510,19 @@ export const actionName = (name: string) =>
     completed: aiText("完成", "Completed"),
     cancelled: aiText("已取消", "Cancelled"),
     plan: aiText("分析子任务", "Plan subtasks"),
+    "quality-plan": aiText("设计对拍与对抗测试", "Plan differential and adversarial checks"),
+    "small-make": aiText("生成小规模对拍数据", "Generate small differential inputs"),
+    oracle: aiText("生成独立暴力解", "Generate independent brute-force oracle"),
+    alternative: aiText("生成另一种正解", "Generate an alternative correct solution"),
+    challenge: aiText("生成待拦截的错误算法", "Generate adversarial candidate solutions"),
+    differential: aiText("随机与边界对拍", "Check random and boundary inputs"),
+    adversarial: aiText("验证错误与低效算法拦截", "Check rejection of wrong and slow algorithms"),
+    "validate-alternatives": aiText("验证多种正确算法", "Validate alternative correct algorithms"),
+    "adversarial-search": aiText("搜索针对性反例", "Search for adversarial counterexamples"),
+    "quality-differential": aiText("随机与边界对拍", "Check random and boundary inputs"),
+    "quality-adversarial": aiText("验证错误与低效算法拦截", "Check rejection of wrong and slow algorithms"),
+    "quality-search": aiText("搜索针对性反例", "Search for adversarial counterexamples"),
+    "quality-alternatives": aiText("验证多种正确算法", "Validate alternative correct algorithms"),
     make: aiText("生成 make.cpp", "Generate make.cpp"),
     std: aiText("生成 std.cpp", "Generate std.cpp"),
     checker: aiText("生成 SPJ", "Generate SPJ"),
@@ -498,4 +546,7 @@ export const actionName = (name: string) =>
     generate: aiText("运行生成器", "Run generator"),
     upload: aiText("保存数据", "Save test data"),
     samples: aiText("验证样例", "Validate samples")
-  }[name] || name);
+  }[name] ||
+  (/^compile-quality-/.test(name)
+    ? aiText("编译对拍与对抗测试程序", "Compile differential and adversarial programs")
+    : name));

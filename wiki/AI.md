@@ -2,7 +2,7 @@
 
 English | [简体中文](AI.zh-CN.md) | [All configuration](Configuration.md) | [AI environment](AI-Environment.md)
 
-This page describes source revision `43a88bdd62fbf200889b36932fa921439a293190`. AI configuration belongs to the signed-in account, not a shared site account. No model, public key or service credits are supplied. Configure providers at `/ai/configuration`, import at `/ai/import`, or use the AI panel on an existing problem's edit page.
+This page follows the configuration and execution code in the repository. AI configuration belongs to the signed-in account, not a shared site account. No model, public key or service credits are supplied. Configure providers at `/ai/configuration`, import at `/ai/import`, or use the AI panel on an existing problem's edit page.
 
 ## Configure through the UI
 
@@ -101,6 +101,26 @@ Global allow/deny rules and problem ACLs participate in authorization. Writes re
 - Requested test count defaults to 20 and accepts 5–1000. It can be increased, up to 1000, to represent equal case points for subtask scores exactly, with a notice. Imports support traditional, interactive and communication problems; output-only problems must be created manually. Communication mode can be detected or specified as `run-twice` or C++ `grader`.
 - The UI accepts statement files up to 10 MiB: Markdown/text and PNG/JPEG/WebP/GIF. Backend Markdown is capped at 500000 characters and image data URLs at 15000000 characters. ZIP maximum is 64 MiB; preparation also requires at least 22 bytes and validates owner-bound upload credentials, valid for admission for 24 hours. Accepted size does not establish valid content.
 
+## Test-data validation and coverage
+
+Traditional problem generation runs the following checks before publishing data; sample validation is only one step:
+
+1. Analyze legal boundaries, degenerate structures and complexity counterexamples to build a coverage plan. The plan describes correct algorithms, an exact small-input oracle and 1–4 executable incorrect or inefficient implementations, including at least one incorrect implementation.
+2. Generate a small-input generator, an exact oracle and one independent efficient solution separately. These requests receive the statement, constraints and coverage plan, without the existing generator, reference solution or other implementation sources. Prefer direct methods such as exhaustive enumeration for the oracle; when no tiny inputs are legal, use an exact method feasible at the minimum legal size.
+3. Generate at least 64 legal small inputs by default, covering every subtask. More than 64 subtasks increases this count. An independent validator checks each input before the reference and alternative solutions are compared against the oracle.
+4. Cross-check every final test case with the independent solution. Multiple-answer and floating-point problems use the actual checker/SPJ, accepting different valid outputs without requiring literal equality to the reference.
+5. Compile and run the planned challenge programs to establish that every target fails on an exported final test case. Data is activated only after differential testing, correct-solution cross-checks and all target checks pass.
+
+Challenge programs must also pass all official samples. An incorrect implementation must pass at least one small input in each applicable subtask; an inefficient implementation must pass every applicable small input. WA, RE, TLE or MLE on a final test case can establish an incorrect implementation's counterexample. An inefficient implementation counts only when actual time or memory limits produce TLE/MLE; WA/RE invalidates that probe. Compilation errors, checker `_fail` results and execution infrastructure failures do not establish a rejected target.
+
+The generator prioritizes concrete legal constructions for these targets, rather than relying on large random inputs alone. For example, a shortest-path SPFA implementation is an inefficiency target only when the constraints allow a graph that actually times out; algorithm names alone never reject a program. Valid alternative algorithms are accepted through the actual judging rules.
+
+If the initial final test cases miss a target, the backend makes at most 16 additional counterexample attempts. A useful counterexample replaces an ordinary case in the same subtask, preserving scenario indices 1/2 for minimum/maximum boundaries and all existing rejection witnesses. Case counts and subtask scores stay unchanged. If any target still passes after the search, generation fails without activating the unverified data.
+
+The task UI shows differential counts, independent-solution checks, target verdicts and exported case numbers. The API also includes `extraAttemptsUsed` in `result.testdataQuality` to record additional search attempts. `data.yaml` also stores `qualityPlan`, `qualityValidation`, `finalCaseIndices` and `verificationSources`, recording the coverage plan, results, final subtask/scenario indices and auxiliary source SHA-256 hashes. The `seed` field is a generator scenario index, not a reproducible random seed; the exported input itself is the counterexample evidence. Small-input generator, oracle, alternative-solution and challenge sources remain in private job state and are not publicly exported with problem data.
+
+Interactive and communication problems retain their protocol simulation and validation, with a `TESTDATA_QUALITY_PROTOCOL_UNSUPPORTED` warning indicating that this independent differential/adversarial gate is unavailable. Finite inputs and challenge programs cannot prove that every incorrect or inefficient implementation fails, or that the reference is absolutely correct. Generating independent programs and challenges adds model calls, cost and execution time; see [AI environment and fixed limits](AI-Environment.md).
+
 ## File reading, cancellation and generation failure
 
 File inputs stay mounted until reading finishes, then reset; ZIPs become browser-memory-backed file copies. Read failures are visible and do not proceed to upload. A previously reproduced Snap Firefox failure was caused by AppArmor denying root-owned fixture files. Use a copy owned by the desktop user in a directory that user can access. Do not disable the browser sandbox or broadly relax AppArmor to upload a file.
@@ -127,5 +147,6 @@ Later changes have also used isolated unit, simulated-provider, real-database or
 
 - [DTOs and request ranges](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai.dto.ts), [defaults and presets](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai.types.ts)
 - [Provider implementation](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-provider.ts), [budget validation](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-validation.ts), [Responses recovery](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-responses.ts)
-- [Permissions, scheduling and writes](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai.service.ts), [key lifecycle](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-crypto.ts)
+- [Permissions, scheduling and writes](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.service.ts), [key lifecycle](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-crypto.ts)
 - [Configuration UI](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/pages/ai/AiConfigurationPage.tsx), [import UI](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/pages/ai/AiImportPage.tsx)
+- [Coverage plans and acceptance checks](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-testdata-quality.ts), [differential and adversarial checks](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiQuality.ts), [runner execution and verdicts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiRunner.ts)

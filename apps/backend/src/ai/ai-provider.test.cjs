@@ -28,6 +28,7 @@ const {
   parseModelJson
 } = require("./ai-provider.ts");
 const { AiService } = require("./ai.service.ts");
+const { qualityState, qualityReceipt } = require("./ai-quality.fixture.cjs");
 const { AiError } = require("./ai.types.ts");
 const { validateLlmConfiguration, DEEPSEEK_MAX_OUTPUT_TOKENS } = require("./ai-validation.ts");
 const { LlmConfigurationDto } = require("./ai.dto.ts");
@@ -403,7 +404,7 @@ test("testdata publishes a uniquely named SPJ before switching and preserves old
         return {
           directory,
           files: names,
-          validation: { samplesPassed: 0, inputsPassed: 5, sampleInputsPassed: 0 }
+          validation: { samplesPassed: 0, inputsPassed: 5, sampleInputsPassed: 0, quality: qualityReceipt(payload) }
         };
       };
       svc.cleanupSandbox = async () => {
@@ -433,6 +434,7 @@ test("testdata publishes a uniquely named SPJ before switching and preserves old
           extraSourceFiles: { cpp: { "helper.h": "helper.h" } }
         }
       };
+      Object.assign(job.state, qualityState(job.state.plan.subtasks.map(item => item.id)));
       job.state.testdataSnapshotHash = svc.testdataFingerprint(snapshot);
       const execution = svc.testdata(job, user, { id: 1, type: "Traditional" }, {}, snapshot, 0, 100);
       if (failConfiguration) await assert.rejects(execution, /INVALID_GENERATED_JUDGE_INFO/);
@@ -514,7 +516,7 @@ test("testdata requires proof for every generated input and sample before publis
         assert.equal(payload.validatorCode, "int main(){return 0;}");
         assert.equal(payload.cases.length, 5);
         assert.deepEqual(payload.samples, [{ input: "1\n", output: "1\n" }]);
-        return { directory, files: filenames, validation };
+        return { directory, files: filenames, validation: validation && { ...validation, quality: qualityReceipt(payload) } };
       };
       svc.cleanupSandbox = async jobId => {
         assert.equal(jobId, id);
@@ -536,6 +538,7 @@ test("testdata requires proof for every generated input and sample before publis
         samples: [{ inputData: "1\n", outputData: "1\n" }],
         judgeInfo: { timeLimit: 1000, memoryLimit: 128 }
       };
+      Object.assign(job.state, qualityState(job.state.plan.subtasks.map(item => item.id)));
       job.state.testdataSnapshotHash = svc.testdataFingerprint(snapshot);
       const execution = svc.testdata(job, user, { id: 1, type: "Traditional" }, {}, snapshot, 0, 100);
       if (validation === expected) {
@@ -543,7 +546,7 @@ test("testdata requires proof for every generated input and sample before publis
         assert.equal(switches, 1);
         assert.equal(published.length, 14);
         assert(published.includes("validator.cpp"));
-        assert.deepEqual(job.state.generated.sampleValidation, expected);
+        assert.deepEqual(job.state.generated.sampleValidation, { ...expected, quality: job.state.qualityValidation });
       } else {
         await assert.rejects(execution, /INVALID_SANDBOX_RESPONSE/);
         assert.equal(switches, 0, "unverified input cannot change judging configuration");
@@ -644,6 +647,7 @@ test("input validator is generated independently from make/std and a runner reje
     samples: [{ inputData: "1 2\n", outputData: "3\n" }],
     judgeInfo: {}
   };
+  Object.assign(job.state, qualityState(job.state.plan.subtasks.map(item => item.id)));
   job.state.testdataSnapshotHash = svc.testdataFingerprint(snapshot);
   const beforeRequests = requests.length;
   try {

@@ -18,6 +18,7 @@ require.extensions[".ts"] = (module, filename) =>
     filename
   );
 const { AiService } = require("./ai.service.ts");
+const { qualityState } = require("./ai-quality.fixture.cjs");
 const { resolveAiFileIo } = require("./ai-file-io.ts");
 const { ProblemLocalizedContentDto } = require("../problem/dto/problem-statement.dto.ts");
 const {
@@ -262,6 +263,7 @@ test("case-insensitive statements or explicit plan flag force SPJ before the run
       }
     };
     const snapshot = { statements: [localized("en_US", [text("Output", statement)])], judgeInfo: {}, samples: [] };
+    Object.assign(job.state, qualityState(job.state.plan.subtasks.map(item => item.id)));
     job.state.testdataSnapshotHash = svc.testdataFingerprint(snapshot);
     await assert.rejects(svc.testdata(job, { id: 1 }, { type: "Traditional" }, {}, snapshot, 0, 100), /MOCK_STOP/);
     assert.equal(job.state.plan.needsSpj, true);
@@ -327,6 +329,7 @@ test("named I/O from an old durable plan is normalized before sample execution w
     }
   };
   const snapshot = { statements: named(), samples: [sample], judgeInfo: {} };
+  Object.assign(job.state, qualityState(job.state.plan.subtasks.map(item => item.id)));
   job.state.testdataSnapshotHash = svc.testdataFingerprint(snapshot);
   let payload;
   svc.runSandbox = async (_job, value) => {
@@ -392,9 +395,19 @@ test("tutorial instructions use effective judging I/O and reject implicit machin
 
 test("testdata checkpoints each current model stage before dispatch and persists its output afterward", async () => {
   const http = require("node:http");
-  const job = { id: "stage-fixture", input: { count: 5 }, state: {}, step: "testdata", progress: 10 };
-  const fields = { plan: "plan", make: "makeCode", checker: "checkerCode", validator: "validatorCode", std: "stdCode" };
-  const fractions = { plan: 0.1, make: 0.2, std: 0.44, checker: 0.4, validator: 0.43 };
+  const privateReference = "PRIVATE_OPTIMIZED_REFERENCE_SOURCE";
+  const job = { id: "stage-fixture", input: { count: 5 },
+    state: { attachmentContext: { referenceCode: privateReference } }, step: "testdata", progress: 10 };
+  const fields = { plan: "plan", "quality-plan": "qualityPlan", make: "makeCode", checker: "checkerCode",
+    validator: "validatorCode", std: "stdCode", "small-make": "smallMakeCode", oracle: "oracleCode",
+    alternative: "alternatives", challenge: "challenges" };
+  const fractions = { plan: 0.1, "quality-plan": 0.15, make: 0.2, std: 0.44, checker: 0.4, validator: 0.43,
+    "small-make": 0.442, oracle: 0.443, alternative: 0.444, challenge: 0.445 };
+  const artifactExists = (state, stage) => {
+    if (["small-make", "oracle"].includes(stage)) return !!state.qualityArtifacts?.[fields[stage]];
+    if (["alternative", "challenge"].includes(stage)) return !!state.qualityArtifacts?.[fields[stage]]?.length;
+    return !!state[fields[stage]];
+  };
   const requests = [],
     checkpoints = [];
   const server = http.createServer(async (req, res) => {
@@ -403,8 +416,10 @@ test("testdata checkpoints each current model stage before dispatch and persists
     const prompt = JSON.parse(Buffer.concat(chunks).toString()).messages.at(-1).content;
     const stage = prompt.startsWith("Design a test-data plan")
       ? "plan"
-      : prompt.match(/^Generate ONLY (make|std|checker|validator)\.cpp/)?.[1];
-    requests.push({ stage, step: job.step, progress: job.progress, artifactExists: !!job.state[fields[stage]] });
+      : prompt.startsWith("Independently analyze this programming problem")
+        ? "quality-plan"
+        : prompt.match(/^Generate ONLY (make|std|checker|validator|small-make|oracle|alternative|challenge)\.cpp/)?.[1];
+    requests.push({ stage, prompt, step: job.step, progress: job.progress, artifactExists: artifactExists(job.state, stage) });
     const output =
       stage === "plan"
         ? JSON.stringify({
@@ -415,7 +430,9 @@ test("testdata checkpoints each current model stage before dispatch and persists
             timeLimitMs: 1000,
             memoryLimitMiB: 128
           })
-        : "int main(){return 0;}";
+        : stage === "quality-plan"
+          ? JSON.stringify(qualityState().qualityPlan)
+          : "int main(){return 0;}";
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: output } }] }));
   });
@@ -436,7 +453,7 @@ test("testdata checkpoints each current model stage before dispatch and persists
       current.step = step;
       current.progress = progress;
       const stage = step.split(".")[1];
-      checkpoints.push({ stage, artifactExists: !!current.state[fields[stage]] });
+      checkpoints.push({ stage, artifactExists: artifactExists(current.state, stage) });
     };
     svc.runSandbox = async () => {
       throw new Error("STOP_BEFORE_SANDBOX");
@@ -467,6 +484,10 @@ test("testdata checkpoints each current model stage before dispatch and persists
       Object.keys(fields)
     );
     for (const request of requests) {
+      if (["quality-plan", "small-make", "oracle", "alternative", "challenge"].includes(request.stage))
+        assert(!request.prompt.includes(privateReference), `${request.stage} must independently derive its method without attached solution code`);
+      if (request.stage === "make")
+        assert(request.prompt.includes(privateReference), "the primary generator still receives its normal attachment context");
       assert.equal(
         request.step,
         `testdata.${request.stage}`,
@@ -495,6 +516,7 @@ test("cached archive-derived I/O cannot override the current standard-input judg
     plan: { subtasks: [{ id: 1, points: 100 }], needsSpj: false, fileIo: { inputFilename: "sample.in", outputFilename: "sample.out" } },
     makeCode: "int main(){}", stdCode: "int main(){}", validatorCode: "int main(){}"
   } };
+  Object.assign(job.state, qualityState(job.state.plan.subtasks.map(item => item.id)));
   job.state.testdataSnapshotHash = svc.testdataFingerprint(snapshot);
   svc.runSandbox = async () => { throw Error("STOP_BEFORE_SANDBOX"); };
   await assert.rejects(svc.testdata(job, { id: 1 }, { type: "Traditional" }, {}, snapshot, 0, 100), /STOP_BEFORE_SANDBOX/);
@@ -508,6 +530,7 @@ test("a fresh model plan cannot replace manually configured named I/O with attac
   const snapshot = { statements: [localized()], samples: [], judgeInfo: { fileIo: actual } };
   const job = { id: "fresh-archive-io", input: { count: 5 }, state: {} };
   svc.model = async (_config, prompt) => {
+    if (prompt.startsWith("Independently analyze this programming problem")) return qualityState().qualityPlan;
     assert(prompt.startsWith("Design a test-data plan"));
     assert(prompt.includes(JSON.stringify(actual)));
     return { subtasks: [{ id: 1, points: 100, constraints: "1<=n<=10", coverage: ["maximum"] }], needsSpj: false,

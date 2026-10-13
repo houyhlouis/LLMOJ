@@ -21,6 +21,7 @@ require.extensions[".ts"] = (module, filename) =>
     filename
   );
 const { AiService } = require("./ai.service.ts");
+const { qualityState, qualityReceipt } = require("./ai-quality.fixture.cjs");
 const { AiError } = require("./ai.types.ts");
 const { autoMatchInputToOutput, autoMatchOutputToInput } = require("../problem-type/common/auto-match-input-output.ts");
 const { ProblemTypeTraditionalService } = require("../problem-type/types/traditional/problem-type.service.ts");
@@ -113,7 +114,7 @@ async function fixture(work, initial = originalJudgeInfo()) {
     return user;
   };
   service.checkpoint = async () => {};
-  service.runSandbox = async () => {
+  service.runSandbox = async (_job, request) => {
     state.attempts++;
     fs.mkdirSync(directory, { recursive: true });
     const files = [];
@@ -124,7 +125,7 @@ async function fixture(work, initial = originalJudgeInfo()) {
         fs.writeFileSync(path.join(directory, name), `${state.attempts}\n`);
         files.push(name);
       }
-    return { directory, files, validation: { samplesPassed: 0, inputsPassed: 5, sampleInputsPassed: 0 } };
+    return { directory, files, validation: { samplesPassed: 0, inputsPassed: 5, sampleInputsPassed: 0, quality: qualityReceipt(request) } };
   };
   service.cleanupSandbox = async () => {
     state.events.push("cleanup");
@@ -145,6 +146,7 @@ async function fixture(work, initial = originalJudgeInfo()) {
     input: { count: 5 },
     progress: 0,
     state: {
+      ...qualityState(),
       completed: [],
       plan: {
         subtasks: [{ id: 1, points: 100 }],
@@ -184,7 +186,7 @@ async function fixture(work, initial = originalJudgeInfo()) {
     return run();
   };
   try {
-    await work({ state, job, run, retry, activePairs, assertActiveConsistent });
+    await work({ state, job, service, run, retry, activePairs, assertActiveConsistent });
   } finally {
     if (oldDirectory === undefined) delete process.env.HYHOJ_AI_GENERATED_DIR;
     else process.env.HYHOJ_AI_GENERATED_DIR = oldDirectory;
@@ -351,4 +353,78 @@ test("the explicit published configuration validates and selects managed .in/.ou
     },
     { ...originalJudgeInfo(), subtasks: null }
   );
+});
+
+function addQualityTarget(job, id, kind) {
+  const base = job.state.qualityPlan.targets[0];
+  const target = { ...base, id, kind, algorithm: kind === "slow" ? "Naturally quadratic fixture algorithm" : "Second boundary-assumption fixture algorithm" };
+  job.state.qualityPlan.targets.push(target);
+  job.state.qualityArtifacts.challenges.push({ id, kind, code: "int main(){return 0;}",
+    subtasks: [...target.subtasks], reason: target.reason });
+}
+
+for (const scenario of [
+  { name: "missing quality receipt", mutate: result => { delete result.validation.quality; } },
+  { name: "unsupported quality receipt version", mutate: result => { result.validation.quality.version = 2; } },
+  { name: "a surviving candidate after another candidate is killed", prepare: job => addQualityTarget(job, "second_boundary", "wrong"),
+    mutate: result => { result.validation.quality.challengesKilled = 1; result.validation.quality.challengeResults[1].verdict = "AC"; } },
+  { name: "a slow candidate rejected only for a wrong answer", prepare: job => addQualityTarget(job, "quadratic", "slow"),
+    mutate: result => { result.validation.quality.challengeResults.find(item => item.kind === "slow").verdict = "WA"; } }
+]) {
+  test(`valid generated files cannot publish with ${scenario.name}`, async () => {
+    await fixture(async ({ state, job, service, run }) => {
+      const original = structuredClone(state.active);
+      scenario.prepare?.(job);
+      const sandbox = service.runSandbox;
+      let generatedDirectory;
+      service.runSandbox = async (...args) => {
+        const result = await sandbox(...args);
+        generatedDirectory = result.directory;
+        assert.equal(result.files.length, 10, "the quality gate must reject otherwise valid generated files");
+        scenario.mutate(result);
+        return result;
+      };
+      await assert.rejects(run(), /TESTDATA_QUALITY_GATE_FAILED/);
+      assert.equal(state.attempts, 1);
+      assert.equal(state.writes.length, 0, "failed quality proof must prevent every putFile call");
+      assert.equal(state.activations, 0);
+      assert.deepEqual(state.active, original);
+      assert.deepEqual(state.events, ["cleanup"]);
+      assert.equal(fs.existsSync(generatedDirectory), false);
+      assert.equal(job.state.generated, undefined);
+      assert.equal(job.state.qualityValidation, undefined);
+    });
+  });
+}
+
+test("successful publication stores the quality receipt and YAML verification sources with final searched case indices", async () => {
+  await fixture(async ({ state, job, service, run }) => {
+    const sandbox = service.runSandbox;
+    let request, receipt, finalCases;
+    service.runSandbox = async (currentJob, currentRequest) => {
+      request = currentRequest;
+      const result = await sandbox(currentJob, currentRequest);
+      receipt = result.validation.quality;
+      receipt.extraAttemptsUsed = 1;
+      finalCases = request.cases.map((item, index) => ({ ...item, seed: index === 4 ? item.seed + 16 : item.seed }));
+      result.finalCases = finalCases;
+      return result;
+    };
+    await run();
+    assert.equal(state.activations, 1);
+    assert.deepEqual(job.state.qualityValidation, receipt);
+    assert.deepEqual(job.state.generated.qualityValidation, receipt);
+    const generation = require("js-yaml").load(state.files.get("data.yaml")).generation;
+    assert.deepEqual(generation.qualityValidation, receipt);
+    assert.deepEqual(generation.qualityPlan, job.state.qualityPlan);
+    assert.deepEqual(generation.finalCaseIndices, finalCases, "record search replacements rather than original indices");
+    const digest = source => crypto.createHash("sha256").update(source).digest("hex");
+    assert.deepEqual(generation.verificationSources, {
+      standard: digest(job.state.stdCode), oracle: digest(request.quality.oracleCode),
+      smallGenerator: digest(request.quality.smallMakeCode),
+      alternatives: request.quality.alternatives.map(item => ({ id: item.id, sha256: digest(item.code) })),
+      challenges: request.quality.challenges.map(item => ({ id: item.id, sha256: digest(item.code) }))
+    });
+    assert.equal(state.events.at(-1), "cleanup");
+  });
 });

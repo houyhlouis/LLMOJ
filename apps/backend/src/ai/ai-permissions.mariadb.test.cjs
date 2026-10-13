@@ -36,6 +36,7 @@ const { GroupMembershipEntity } = backendRequire("../group/group-membership.enti
 const { PermissionService, PermissionObjectType } = backendRequire("../permission/permission.service.ts");
 const evidence = [];
 const { AiService } = backendRequire("./ai.service.ts");
+const { qualityState, qualityReceipt } = require("./ai-quality.fixture.cjs");
 const { AiJobEntity } = backendRequire("./ai.entity.ts");
 const { UserEntity } = backendRequire("../user/user.entity.ts");
 const { ProblemService } = backendRequire("../problem/problem.service.ts");
@@ -341,9 +342,10 @@ test(
             validatorCode: "int main(){}",
             testdataSnapshotHash: f.service.testdataFingerprint(f.snapshot)
           };
+          Object.assign(f.job.state, qualityState(f.job.state.plan.subtasks.map(item => item.id)));
           await db.getRepository(AiJobEntity).update({ id: f.job.id }, { state: f.job.state });
           f.service.readExistingAiHelpers = async () => ({});
-          f.service.runSandbox = async () => {
+          f.service.runSandbox = async (_job, request) => {
             const files = [];
             for (let i = 1; i <= 5; i++)
               for (const extension of ["in", "out"]) {
@@ -351,7 +353,7 @@ test(
                 fs.writeFileSync(path.join(directory, name), "1\n");
                 files.push(name);
               }
-            return { directory, files, validation: { samplesPassed: 0, inputsPassed: 5, sampleInputsPassed: 0 } };
+            return { directory, files, validation: { samplesPassed: 0, inputsPassed: 5, sampleInputsPassed: 0, quality: qualityReceipt(request) } };
           };
           f.service.putFile = async () => {};
           f.service.cleanupSandbox = async () => {};
@@ -448,9 +450,10 @@ test(
             validatorCode: "int main(){}",
             testdataSnapshotHash: f.service.testdataFingerprint(f.snapshot)
           };
+          Object.assign(f.job.state, qualityState(f.job.state.plan.subtasks.map(item => item.id)));
           await db.getRepository(AiJobEntity).update({ id: f.job.id }, { state: f.job.state });
           f.service.readExistingAiHelpers = async () => ({});
-          f.service.runSandbox = async () => {
+          f.service.runSandbox = async (_job, request) => {
             const files = [];
             for (let i = 1; i <= 5; i++)
               for (const extension of ["in", "out"]) {
@@ -458,7 +461,7 @@ test(
                 fs.writeFileSync(path.join(directory, name), "1\n");
                 files.push(name);
               }
-            return { directory, files, validation: { samplesPassed: 0, inputsPassed: 5, sampleInputsPassed: 0 } };
+            return { directory, files, validation: { samplesPassed: 0, inputsPassed: 5, sampleInputsPassed: 0, quality: qualityReceipt(request) } };
           };
           f.service.putFile = async () => {};
           f.service.cleanupSandbox = async () => {};

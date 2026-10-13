@@ -46,6 +46,19 @@ python3 deploy/prepare-github.py --archive release/llmoj-source.tar.gz
 
 数据库及浏览器集成测试应使用一次性实例，具体约束见 [AI 说明](apps/backend/src/ai/README.md)。不要把生产数据库或会话作为测试 fixture。打包器仅检查并创建本地归档，不提交、推送或发布到 GitHub。
 
+## 测试数据校验回归
+
+在仓库根目录运行后端工作流及评测侧质量校验测试：
+
+```bash
+node --test --test-concurrency=1 apps/backend/src/ai/*.test.cjs
+node --test apps/judge/src/aiQuality.test.cjs
+```
+
+CI 会运行这两套测试，以及现有 Wiki 导出与导航检查。默认测试使用模拟模型服务、数据库或沙盒接口，不需要生产凭据和 rootfs；可选数据库测试未配置时会跳过。后端测试覆盖质量计划、旧任务恢复、独立生成请求和发布门槛；评测侧测试覆盖对拍、判题器、多种合法输出、慢算法判定和反例替换。 新增的集成夹具离线测试会用本机 C++ 编译器在临时目录中验证固定的合成程序；它不连接数据库或模型服务。
+
+真实编译、资源限制和协议执行需要另行配置隔离后端与评测环境，不能用上述 mock 结果替代。使用小规模可独立求解的样例、错误标程、存活候选、多解题和最坏情况构造检查端到端行为；慢算法应在小数据上正确、只在正式数据上因实际时间或内存限制被拦截。执行条件见 [AI 模块测试说明](apps/backend/src/ai/README.md)，生成流程及验证报告见 [使用说明](wiki/AI.zh-CN.md#测试数据验证与覆盖)。
+
 ## 注册审核与升级回归
 
 在仓库根目录使用项目要求的 Node 版本：

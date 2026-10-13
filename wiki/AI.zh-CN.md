@@ -2,7 +2,7 @@
 
 [English](AI.md) | 简体中文 | [全部配置](Configuration.zh-CN.md) | [AI 环境变量](AI-Environment.zh-CN.md)
 
-本文对应源码 `43a88bdd62fbf200889b36932fa921439a293190`。AI 配置属于当前登录账号，不是全站共享服务。项目不附带模型、公共 Key 或服务额度。页面入口是 `/ai/configuration`；导入入口是 `/ai/import`，已有题的编辑页提供 AI 操作。
+本文按仓库内的配置和执行代码核对。AI 配置属于当前登录账号，不是全站共享服务。项目不附带模型、公共 Key 或服务额度。页面入口是 `/ai/configuration`；导入入口是 `/ai/import`，已有题的编辑页提供 AI 操作。
 
 ## 从页面完成配置
 
@@ -101,6 +101,26 @@ Tavily 每次搜索最多取 5 项、使用 `advanced` 深度，不请求聚合�
 - 数据数量默认 20，允许 5–1000。为了精确表达子任务等分分值，实际数量可能增加至不超过 1000，并有提示。AI 导入支持传统、交互、通信题；提交答案题需要手工创建。通信题可自动判断，也可指定 `run-twice` 或 C++ `grader` 接口。
 - 导入前端接受不超过 10 MiB 的 Markdown/文本/PNG/JPEG/WebP/GIF 题面文件；服务端 Markdown 上限为 500000 字符，图像 data URL 上限为 15000000 字符。ZIP 上限 64 MiB，后端准备阶段还要求至少 22 字节且验证 ZIP 凭据与拥有者；凭据入队有效期为 24 小时。文件大小合格不代表内容合格。
 
+## 测试数据验证与覆盖
+
+传统题的数据生成在发布前执行以下检查，样例校验只是其中一步：
+
+1. 先分析合法的边界、退化结构和复杂度反例，形成覆盖计划。计划说明正确算法、适用于小数据的精确参考算法，以及 1–4 个可实际运行的错误或低效实现，其中至少有一个错误实现。
+2. 分别生成小数据生成器、精确参考程序和一份独立高效正解。生成这些程序时提供题面、约束和覆盖计划，不提供已有生成器、标程或其他实现的代码。小数据优先使用暴力枚举等直接方法；题目不存在合法的小规模输入时，使用能处理最小合法规模的精确方法。
+3. 默认至少生成 64 组合法小数据，并覆盖每个子任务；子任务超过 64 个时相应增加组数。输入经过独立 validator 检查，再将标程和独立正解的输出与精确参考程序对拍。
+4. 所有正式数据都由独立正解交叉校验。多解或浮点题使用该题实际 checker/SPJ 判定，允许不同的合法输出，不要求与标程逐字相同。
+5. 编译并运行覆盖计划中的候选程序，验证正式数据确实能使每个目标失败。只有对拍、正解交叉校验和所有目标的反例验证均通过，才启用本次生成的数据。
+
+候选程序也须先通过正式样例。错误实现还须在每个适用子任务中通过至少一组小数据；低效实现须通过所有适用的小数据。正式数据上的 WA、RE、TLE、MLE 可作为错误实现的反例；低效实现只接受由实际时间或内存限制产生的 TLE/MLE，出现 WA/RE 会使该探针验证失败。编译失败、checker 的 `_fail` 或执行环境故障不能算作卡掉目标。
+
+生成器优先构造目标所需的合法数据，而不是只生成大规模随机输入。例如，最短路题只有在约束允许且真实图结构能触发超时时，才把某个 SPFA 实现视为低效目标；不能仅按算法名称拒绝程序。正确的替代算法按实际判题规则验收。
+
+若初始正式数据未覆盖所有目标，后端最多再尝试 16 次反例搜索。找到反例后只替换同一子任务内的普通测试点，保留索引 1/2 的最小/最大边界测试点和已经卡掉目标的测试点，不改变测试点数量及子任务分值。搜索耗尽仍有目标通过时，本次数据生成失败，不启用未通过验证的数据。
+
+任务页面显示对拍数量、独立正解校验数量，以及各目标的失败判定与正式测试点编号。接口 `result.testdataQuality` 还包含 `extraAttemptsUsed`，记录额外搜索次数。`data.yaml` 还保存 `qualityPlan`、`qualityValidation`、`finalCaseIndices` 和 `verificationSources`，记录覆盖计划、验证结果、最终子任务/索引及辅助源码的 SHA-256。这里的 `seed` 字段是生成器场景索引，不是可复现随机数种子；实际导出的输入文件才是反例凭据。小数据生成器、精确参考程序、独立正解和候选程序源码保留在私有任务状态，不随题目数据公开导出。
+
+交互题、通信题保留原有协议模拟与校验，任务会提示 `TESTDATA_QUALITY_PROTOCOL_UNSUPPORTED`，表示上述独立对拍与反例验证暂不可用。有限数据和有限候选程序无法证明所有错误或低效实现都会失败，也不能证明标程绝对正确。新增的独立程序和候选程序生成会增加模型调用、费用及执行时间；并发和资源限制见 [AI 环境与固定限制](AI-Environment.zh-CN.md)。
+
 ## 文件读取、取消与生成失败
 
 选择文件时先完成读取，再清空输入控件；ZIP 先形成浏览器内存中的文件副本。读取失败会显示错误，不继续上传。曾经真实复现的 Linux Snap Firefox 故障由 AppArmor 拒绝读取 root 所有的测试文件触发：把自己要上传的文件放在当前桌面用户有权访问的目录，并用该用户拥有的副本。不要为此关闭浏览器沙箱或全局放宽 AppArmor。
@@ -127,5 +147,6 @@ Tavily 每次搜索最多取 5 项、使用 `advanced` 深度，不请求聚合�
 
 - [配置 DTO、范围与请求参数](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai.dto.ts)、[默认值和服务商预设](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai.types.ts)
 - [服务商协议实现](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-provider.ts)、[预算校验](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-validation.ts)、[Responses 恢复](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-responses.ts)
-- [权限、任务调度与写入](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai.service.ts)、[密钥生命周期](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-crypto.ts)
+- [权限、任务调度与写入](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.service.ts)、[密钥生命周期](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-crypto.ts)
 - [配置界面](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/pages/ai/AiConfigurationPage.tsx)、[导入界面](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/pages/ai/AiImportPage.tsx)
+- [测试数据覆盖计划与验收](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-testdata-quality.ts)、[对拍与反例验证](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiQuality.ts)、[runner 执行与判定](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiRunner.ts)
