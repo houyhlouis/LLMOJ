@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateQueries, validatePrivilegeSchema, LEGACY_PRIVILEGES, REVIEW_PRIVILEGE, PRIVILEGE_EXPANSION_SQL } from '../upgrade-schema.mjs';
+import { validateQueries, validatePrivilegeSchema, LEGACY_PRIVILEGES, REVIEW_PRIVILEGE, CURRENT_PRIVILEGES, PRIVILEGE_EXPANSION_SQL } from '../upgrade-schema.mjs';
 const create = "CREATE TABLE `registration_review` (`userId` int NOT NULL, `status` enum ('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending', `createdAt` datetime NOT NULL, `reviewedAt` datetime NULL, `reviewedBy` int NULL, `reason` varchar(500) NULL, INDEX `IDX_a74ed8c7d42252b6ece8a0833c` (`status`, `createdAt`), UNIQUE INDEX `REL_9ae4f649115581773289397754` (`userId`), PRIMARY KEY (`userId`)) ENGINE=InnoDB";
 const foreign = 'ALTER TABLE `registration_review` ADD CONSTRAINT `FK_9ae4f6491155817732893977546` FOREIGN KEY (`userId`) REFERENCES `user`(`id`) ON DELETE CASCADE ON UPDATE NO ACTION';
 test('exact new table and FK accepted; no-op accepted',()=>{assert.deepEqual(validateQueries([{query:create},{query:foreign}]),[create,foreign]);assert.deepEqual(validateQueries([]),[])});
@@ -22,12 +22,13 @@ test('only exact append-only review privilege DDL is accepted',()=>assert.deepEq
 for (const [name,sql] of Object.entries({removedValue:PRIVILEGE_EXPANSION_SQL.replace("'ManageUser', ",''),renamedValue:PRIVILEGE_EXPANSION_SQL.replace("'ManageUser'","'ManagePeople'"),reordered:PRIVILEGE_EXPANSION_SQL.replace("'EditHomepage', 'ManageUser'","'ManageUser', 'EditHomepage'"),extraValue:PRIVILEGE_EXPANSION_SQL.replace("'ManageRegistrationReviews'","'ManageRegistrationReviews', 'Unexpected'"),nullable:PRIVILEGE_EXPANSION_SQL.replace('NOT NULL','NULL'),otherColumn:PRIVILEGE_EXPANSION_SQL.replaceAll('`privilegeType`','`other`')})) test('reject privilege '+name,()=>assert.throws(()=>validateQueries([sql])));
 test('existing old privilege enum requires exactly one expansion; new enum requires none',async()=>{
  await validatePrivilegeSchema(fakeColumn(enumColumn(LEGACY_PRIVILEGES)),[PRIVILEGE_EXPANSION_SQL]);
- await validatePrivilegeSchema(fakeColumn(enumColumn([...LEGACY_PRIVILEGES,REVIEW_PRIVILEGE])),[]);
+ await validatePrivilegeSchema(fakeColumn(enumColumn([...LEGACY_PRIVILEGES,REVIEW_PRIVILEGE])),[PRIVILEGE_EXPANSION_SQL]);
+ await validatePrivilegeSchema(fakeColumn(enumColumn(CURRENT_PRIVILEGES)),[]);
  await assert.rejects(()=>validatePrivilegeSchema(fakeColumn(enumColumn(LEGACY_PRIVILEGES)),[]));
- await assert.rejects(()=>validatePrivilegeSchema(fakeColumn(enumColumn([...LEGACY_PRIVILEGES,REVIEW_PRIVILEGE])),[PRIVILEGE_EXPANSION_SQL]));
+ await assert.rejects(()=>validatePrivilegeSchema(fakeColumn(enumColumn(CURRENT_PRIVILEGES)),[PRIVILEGE_EXPANSION_SQL]));
  await assert.rejects(()=>validatePrivilegeSchema(fakeColumn(enumColumn(LEGACY_PRIVILEGES)),[PRIVILEGE_EXPANSION_SQL,PRIVILEGE_EXPANSION_SQL]));
 });
 test('unknown existing privilege values/order or custom column properties cannot be overwritten',async()=>{
  const old=enumColumn(LEGACY_PRIVILEGES);
- for (const column of [null,enumColumn([...LEGACY_PRIVILEGES,'CustomPrivilege']),enumColumn([...LEGACY_PRIVILEGES].reverse()),{...old,isNullable:'YES'},{...old,defaultValue:'ManageUser'},{...old,collation:'utf8mb4_bin'},{...old,columnKey:''},{...old,comment:'custom'}]) await assert.rejects(()=>validatePrivilegeSchema(fakeColumn(column),[PRIVILEGE_EXPANSION_SQL]));
+ for (const column of [null,enumColumn([...LEGACY_PRIVILEGES,'CustomPrivilege']),enumColumn([...LEGACY_PRIVILEGES].reverse()),enumColumn(CURRENT_PRIVILEGES.slice(0,-1)),{...old,isNullable:'YES'},{...old,defaultValue:'ManageUser'},{...old,collation:'utf8mb4_bin'},{...old,columnKey:''},{...old,comment:'custom'}]) await assert.rejects(()=>validatePrivilegeSchema(fakeColumn(column),[PRIVILEGE_EXPANSION_SQL]));
 });

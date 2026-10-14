@@ -27,3 +27,6 @@ export * from "./set-submission-public-response.dto";
 
 export * from "./delete-submission-request.dto";
 export * from "./delete-submission-response.dto";
+
+export * from "./fake-submission-request.dto";
+export * from "./fake-submission-response.dto";

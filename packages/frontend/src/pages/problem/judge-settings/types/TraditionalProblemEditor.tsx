@@ -24,7 +24,19 @@ const subtasksEditorOptions: Options<typeof SubtasksEditor> = {
 export type JudgeInfoTraditional = JudgeInfoWithMeta &
   JudgeInfoWithSubtasks &
   JudgeInfoWithChecker &
-  JudgeInfoWithExtraSourceFiles & { hiddenSamples?: Array<{ inputFile: string; outputFile: string }> };
+  JudgeInfoWithExtraSourceFiles & {
+    hiddenSamples?: Array<{ inputFile: string; outputFile: string }>;
+    selfEval?: {
+      generatorFile: string;
+      generatorSha256: string;
+      standardFile: string;
+      standardSha256: string;
+      validatorFile?: string;
+      validatorSha256?: string;
+      subtaskIds: number[];
+      standardFileIo?: { inputFilename: string; outputFilename: string };
+    };
+  };
 type TraditionalProblemEditorProps = EditorComponentProps<JudgeInfoTraditional>;
 
 let TraditionalProblemEditor: React.FC<TraditionalProblemEditorProps> = props => {
@@ -44,6 +56,16 @@ const judgeInfoProcessor: JudgeInfoProcessor<JudgeInfoTraditional> = {
   parseJudgeInfo(raw, testData) {
     return Object.assign(
       {
+        ...(raw.selfEval && typeof raw.selfEval === "object"
+          ? {
+              selfEval: {
+                ...raw.selfEval,
+                subtaskIds: Array.isArray(raw.selfEval.subtaskIds)
+                  ? [...raw.selfEval.subtaskIds]
+                  : raw.selfEval.subtaskIds
+              }
+            }
+          : {}),
         ...(Array.isArray(raw.hiddenSamples)
           ? {
               hiddenSamples: raw.hiddenSamples.map(sample => ({

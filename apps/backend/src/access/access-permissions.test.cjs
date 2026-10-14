@@ -29,6 +29,12 @@ function load(relative, overrides = {}) {
         }
       : name === "@nestjs/typeorm"
       ? { InjectDataSource: decorator, InjectRepository: decorator }
+      : name === "@libreoj/judge-protocol"
+      ? require(name)
+      : name === "../team/team-access"
+      ? // This suite exercises site permissions on resources outside a team.
+        // Team membership and privacy have independent database regressions.
+        { teamResourceAccess: async () => null }
       : name.endsWith("user-privilege.service") || name.endsWith("user-privilege.entity")
       ? { UserPrivilegeType: P, UserPrivilegeEntity: class {} }
       : generic);
@@ -39,8 +45,10 @@ const catalog = load("access/permission-catalog.ts");
 const { UserPrivilegeService } = load("user/user-privilege.service.ts", { "../access/permission-catalog": catalog });
 const { AccessGuard } = load("access/access.guard.ts");
 const { withoutTestData } = load("submission/submission-redaction.ts");
-const { SubmissionService, SubmissionPermissionType } = load("submission/submission.service.ts");
 const { ProblemService, ProblemPermissionType } = load("problem/problem.service.ts");
+const { SubmissionService, SubmissionPermissionType } = load("submission/submission.service.ts", {
+  "../problem/problem.service": { ProblemPermissionType }
+});
 const { DiscussionService, DiscussionPermissionType } = load("discussion/discussion.service.ts", {
   "../problem/problem.service": { ProblemPermissionType }
 });
@@ -58,6 +66,28 @@ const { DiscussionService, DiscussionPermissionType } = load("discussion/discuss
     {}
   );
   const user = { id: 2, isAdmin: false };
+  const communityPermissions = [
+    ["ViewTeam", "team", true, true],
+    ["CreateTeam", "team", true, false],
+    ["ManageTeams", "team", false, false],
+    ["FakeSubmission", "submission", false, false],
+    ["ViewHack", "hack", true, true],
+    ["CreateHack", "hack", true, false],
+    ["ManageHack", "hack", false, false],
+    ["CreateSelfEval", "submission", true, false]
+  ];
+  for (const [key, category, defaultAllowed, guestAllowed] of communityPermissions) {
+    const entries = catalog.permissionCatalog.filter(item => item.key === key);
+    assert.equal(entries.length, 1, key + " must appear exactly once in permission administration");
+    assert.equal(entries[0].category, category);
+    assert.equal(entries[0].defaultValue, defaultAllowed);
+    assert.equal(await service.userHasPrivilege(user, key), defaultAllowed, key + " has the intended account default");
+    assert.equal(await service.userHasPrivilege(null, key), guestAllowed, key + " has the intended guest policy");
+    rules.set(key, false);
+    assert.equal(await service.userHasPrivilege(user, key), false, key + " respects an explicit account denial");
+    assert.equal(await service.userHasPrivilege({ id: 1, isAdmin: true }, key), true, "administrators retain " + key);
+    rules.delete(key);
+  }
   assert.equal(await service.userHasPrivilege(user, P.ViewProblem), true);
   assert.equal(await service.userHasPrivilege(user, P.ManageProblem), false);
   const reviewPermission = catalog.permissionCatalog.find(item => item.key === P.ManageRegistrationReviews);
@@ -94,6 +124,13 @@ const { DiscussionService, DiscussionPermissionType } = load("discussion/discuss
     "non-admins cannot gain permission administration by an override"
   );
   assert.equal(await service.userHasPrivilege({ id: 1, isAdmin: true }, P.ManagePermissions), true);
+  grants.add(P.ManagePermissions);
+  assert.equal(
+    await service.permissionDecision(user, P.ManagePermissions, true),
+    false,
+    "neither a legacy grant nor an object fallback can grant non-admin permission administration"
+  );
+  grants.delete(P.ManagePermissions);
   assert.equal(await service.userHasPrivilege(null, P.ViewProblem), true);
   assert.equal(await service.userHasPrivilege(null, P.CreateProblem), false);
   assert.equal(
@@ -180,7 +217,7 @@ const { DiscussionService, DiscussionPermissionType } = load("discussion/discuss
   submissions.userPrivilegeService = service;
   submissions.problemService = { userHasPermission: async () => false, findProblemById: async () => ({}) };
   submissions.getUserProblemAcceptedSubmissionCount = async () => 1;
-  const publicSubmission = { isPublic: true, submitterId: 99, problemId: 1 };
+  const publicSubmission = { id: 1, status: "Accepted", isPublic: true, submitterId: 99, problemId: 1 };
   assert.equal(
     await submissions.userHasPermission(user, publicSubmission, SubmissionPermissionType.View),
     true,
@@ -207,6 +244,53 @@ const { DiscussionService, DiscussionPermissionType } = load("discussion/discuss
     false,
     "explicit rejudge denial beats problem editor privileges"
   );
+  rules.set(P.DeleteSubmission, true);
+  assert.equal(
+    await submissions.userHasPermission(user, publicSubmission, SubmissionPermissionType.Fake),
+    true,
+    "unconfigured Fake preserves existing authorization to delete this record"
+  );
+  rules.set(P.FakeSubmission, false);
+  grants.add(P.FakeSubmission);
+  assert.equal(
+    await submissions.userHasPermission(user, publicSubmission, SubmissionPermissionType.Fake),
+    false,
+    "explicit Fake denial defeats both legacy deletion fallback and an older Fake grant"
+  );
+  rules.set(P.RejudgeSubmission, true);
+  assert.equal(
+    await submissions.userHasPermission(
+      user,
+      { ...publicSubmission, status: "Fake" },
+      SubmissionPermissionType.Rejudge
+    ),
+    false,
+    "rejudge authorization alone cannot restore a record when Fake is explicitly denied"
+  );
+  grants.delete(P.FakeSubmission);
+  rules.set(P.DeleteSubmission, false);
+  rules.set(P.FakeSubmission, true);
+  assert.equal(await submissions.userHasPermission(user, publicSubmission, SubmissionPermissionType.Delete), false);
+  assert.equal(
+    await submissions.userHasPermission(user, publicSubmission, SubmissionPermissionType.Fake),
+    true,
+    "an explicit Fake grant permits moderation without granting deletion"
+  );
+  assert.equal(
+    await submissions.userHasPermission(
+      user,
+      { ...publicSubmission, status: "Fake" },
+      SubmissionPermissionType.Rejudge
+    ),
+    true,
+    "separate Fake and rejudge grants permit a fresh evaluation of a disqualified record"
+  );
+  assert.equal(
+    await submissions.userHasPermission(null, publicSubmission, SubmissionPermissionType.Fake),
+    false,
+    "public visibility never grants anonymous moderation"
+  );
+  for (const permission of [P.DeleteSubmission, P.FakeSubmission, P.RejudgeSubmission]) rules.delete(permission);
   const rawProgress = {
     progressType: "Finished",
     status: "Accepted",

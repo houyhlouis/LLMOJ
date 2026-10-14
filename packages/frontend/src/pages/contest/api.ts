@@ -68,6 +68,8 @@ const chineseStatuses: Record<string, string> = {
   ConfigurationError: "配置错误",
   SystemError: "系统错误",
   Canceled: "已取消",
+  Fake: "作弊作废",
+  Hacked: "被 Hack",
   Skipped: "已跳过"
 };
 

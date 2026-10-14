@@ -156,6 +156,9 @@ export class SubmissionStatisticsService {
       .where("submission.problemId = :problemId", { problemId: problem.id })
       .andWhere("submission.contestId IS NULL")
       .andWhere("submission.score IS NOT NULL")
+      .andWhere("submission.status NOT IN (:...invalidStatuses)", {
+        invalidStatuses: [SubmissionStatus.Fake, SubmissionStatus.Hacked]
+      })
       .groupBy("submission.score")
       .getRawMany();
     const result = new Array(101).fill(0);
@@ -173,7 +176,12 @@ export class SubmissionStatisticsService {
    */
   async onSubmissionUpdated(oldSubmission: SubmissionEntity, submission?: SubmissionEntity): Promise<void> {
     // Submission score statistics
-    if (!submission || oldSubmission.score !== submission.score) {
+    if (
+      !submission ||
+      oldSubmission.score !== submission.score ||
+      [SubmissionStatus.Fake, SubmissionStatus.Hacked].includes(oldSubmission.status) !==
+        [SubmissionStatus.Fake, SubmissionStatus.Hacked].includes(submission.status)
+    ) {
       await this.redisService.cacheDelete(REDIS_KEY_SUBMISSION_SCORE_STATISTICS.format(oldSubmission.problemId));
     }
 

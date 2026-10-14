@@ -57,6 +57,7 @@ function fixture() {
   };
   service.db = {
     getRepository: entity => ({
+      findOne: async () => null,
       findOneBy: async q =>
         entity.name === "ContestEntity"
           ? q.id === 10

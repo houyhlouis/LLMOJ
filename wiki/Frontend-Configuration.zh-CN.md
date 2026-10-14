@@ -82,3 +82,9 @@ sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_module
 Cloudflare 变体要求 `CLOUDFLARE_WORKER_NAME`、`CLOUDFLARE_ACCOUNT_ID`，生成 `wrangler.toml`；OSS 变体要求 `ALIYUN_ACCESS_KEY_ID`、`ALIYUN_ACCESS_KEY_SECRET`、`ALIYUN_OSS_BUCKET`、`ALIYUN_OSS_ENDPOINT`，会发布 CN 区域页面。它们与一键安装无关；密钥不要写入 settings.json 或 Wiki。详见 [环境变量](Environment.zh-CN.md)。
 
 来源：[deploy/build-frontend-offline.mjs](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/build-frontend-offline.mjs), [packages/bootstrap-config/settings.json](https://github.com/houyhlouis/LLMOJ/blob/main/packages/bootstrap-config/settings.json), [packages/bootstrap-config/src/build.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/bootstrap-config/src/build.ts), [apps/bootstrap-cloudflare/config.mjs](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/bootstrap-cloudflare/config.mjs), [apps/bootstrap-static/deploy-oss.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/bootstrap-static/deploy-oss.ts).
+
+## 固定尺寸的详情窗口
+
+提交和 Hack 列表使用 1100 × 720 像素的固定窗口，小屏幕按可用空间缩小。窗口通过 iframe 加载原同源详情链接，并附加 `embed=1`；该参数只在内嵌页面中隐藏顶部导航及其占位。普通详情链接、窗口中的 **#编号** 仍打开完整页面。登录、代码可见性、比赛反馈和所有操作沿用原页面的权限检查。详见 [提交预览](Submissions.zh-CN.md) 和 [Hack](Hacks.zh-CN.md)。
+
+内嵌模式在窗口启动时确定，框内普通链接进行客户端导航后仍保留该布局；在框内进入列表时使用普通链接，不递归打开更多预览窗口。不需要新增后端权限或配置开关。

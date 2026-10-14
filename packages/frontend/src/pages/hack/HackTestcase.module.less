@@ -1,0 +1,61 @@
+.testcase {
+  margin: 1.5em 0 !important;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) repeat(3, minmax(0, 1fr));
+  align-items: center;
+  gap: 1em;
+
+  > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  :global(.label) {
+    justify-self: start;
+    margin: 0;
+  }
+}
+
+.unknownVerdict {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5em;
+
+  > span {
+    color: var(--theme-foreground-transparent);
+    font-size: 0.9em;
+  }
+}
+
+.inputTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75em;
+
+  :global(.button) {
+    margin: 0;
+  }
+}
+
+.details {
+  min-width: 0;
+
+  pre {
+    height: auto !important;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    overflow: visible !important;
+  }
+}
+
+@media only screen and (max-width: 767px) {
+  .summary {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}

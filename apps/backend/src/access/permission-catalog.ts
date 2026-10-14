@@ -348,6 +348,62 @@ export const permissionCatalog = [
     zh: "详细权限管理（仅管理员）",
     en: "Detailed permission management (administrators only)",
     defaultValue: false
+  },
+  {
+    key: "ViewTeam",
+    category: "team",
+    zh: "查看团队",
+    en: "View teams",
+    defaultValue: true
+  },
+  {
+    key: "CreateTeam",
+    category: "team",
+    zh: "创建团队",
+    en: "Create teams",
+    defaultValue: true
+  },
+  {
+    key: "ManageTeams",
+    category: "team",
+    zh: "管理所有团队",
+    en: "Manage all teams",
+    defaultValue: false
+  },
+  {
+    key: "FakeSubmission",
+    category: "submission",
+    zh: "将作弊提交作废为零分",
+    en: "Disqualify cheating submissions",
+    defaultValue: false
+  },
+  {
+    key: "ViewHack",
+    category: "hack",
+    zh: "查看Hack记录",
+    en: "View hack records",
+    defaultValue: true
+  },
+  {
+    key: "CreateHack",
+    category: "hack",
+    zh: "提交Hack数据",
+    en: "Submit hacks",
+    defaultValue: true
+  },
+  {
+    key: "ManageHack",
+    category: "hack",
+    zh: "配置与重测Hack",
+    en: "Configure and rejudge hacks",
+    defaultValue: false
+  },
+  {
+    key: "CreateSelfEval",
+    category: "submission",
+    zh: "在启用的 NOI / OI 比赛中运行预测试自评测",
+    en: "Run pretest self evaluation in enabled NOI / OI contests",
+    defaultValue: true
   }
 ] as const;
 
@@ -360,5 +416,7 @@ export const guestPermissions = new Set<string>([
   "ViewDiscussion",
   "ViewContest",
   "ViewContestScoreboard",
+  "ViewTeam",
+  "ViewHack",
   "DownloadProblemAttachments"
 ]);

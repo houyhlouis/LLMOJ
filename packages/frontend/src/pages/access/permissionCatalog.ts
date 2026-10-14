@@ -294,6 +294,62 @@ export const permissionCatalog = [
     defaultValue: false
   },
   {
+    key: "ViewTeam",
+    category: "team",
+    zh: "查看团队",
+    en: "View teams",
+    defaultValue: true
+  },
+  {
+    key: "CreateTeam",
+    category: "team",
+    zh: "创建团队",
+    en: "Create teams",
+    defaultValue: true
+  },
+  {
+    key: "ManageTeams",
+    category: "team",
+    zh: "管理全部团队及私人资源",
+    en: "Manage all teams and private resources",
+    defaultValue: false
+  },
+  {
+    key: "FakeSubmission",
+    category: "submission",
+    zh: "作废作弊提交（Fake）",
+    en: "Invalidate cheating submissions (Fake)",
+    defaultValue: false
+  },
+  {
+    key: "ViewHack",
+    category: "hack",
+    zh: "查看 Hack 记录",
+    en: "View hack records",
+    defaultValue: true
+  },
+  {
+    key: "CreateHack",
+    category: "hack",
+    zh: "发起 Hack",
+    en: "Create hacks",
+    defaultValue: true
+  },
+  {
+    key: "ManageHack",
+    category: "hack",
+    zh: "管理全部 Hack 与参考程序、校验器",
+    en: "Manage all hacks, references, and validators",
+    defaultValue: false
+  },
+  {
+    key: "CreateSelfEval",
+    category: "submission",
+    zh: "在已启用的 NOI / OI 比赛中使用预测试自评测",
+    en: "Run pretest self evaluation in enabled NOI / OI contests",
+    defaultValue: true
+  },
+  {
     key: "ManageSummaries",
     category: "personal",
     zh: "管理自己的比赛总结",

@@ -4,6 +4,8 @@ English | [简体中文](AI.zh-CN.md) | [All configuration](Configuration.md) | 
 
 This page follows the configuration and execution code in the repository. AI configuration belongs to the signed-in account, not a shared site account. No model, public key or service credits are supplied. Configure providers at `/ai/configuration`, import at `/ai/import`, or use the AI panel on an existing problem's edit page.
 
+Repository-maintained AI instructions and prompts use English throughout import/OCR, translation, source search and verification, tutorials, tags, difficulty, generation and repair. Generated content still follows the requested language: extraction preserves the original statement language, `zh_CN` remains Chinese and `en_US` remains English, including bilingual solutions. Original user/problem/search content is kept in its original language. JSON schemas, judging constraints and Chinese editor labels remain unchanged.
+
 ## Configure through the UI
 
 1. Have an administrator grant the permissions below, then open AI API Configuration using your own account.
@@ -150,3 +152,13 @@ Later changes have also used isolated unit, simulated-provider, real-database or
 - [Permissions, scheduling and writes](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.service.ts), [key lifecycle](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-crypto.ts)
 - [Configuration UI](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/pages/ai/AiConfigurationPage.tsx), [import UI](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/pages/ai/AiImportPage.tsx)
 - [Coverage plans and acceptance checks](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-testdata-quality.ts), [differential and adversarial checks](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiQuality.ts), [runner execution and verdicts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiRunner.ts)
+
+## Where solutions are saved
+
+New AI solutions appear in the corresponding problem page's embedded Solutions tab and remain discussions in their author's My discussions. Migration verifies recorded job discussion IDs, problem and author; ordinary titles never trigger automatic classification. See [Solutions](Solutions.md).
+
+## Prepare Self Eval for an NOI contest
+
+Publishing traditional official data also binds immutable versions of the make.cpp, std.cpp and input validator actually used by that generation, for later enabled NOI / OI contests. Other problem types and ordinary problem-bank pages do not offer Self Eval runs.
+
+Before the contest, managers can select Self Eval on its problem page, open Configure Self Eval and use **AI: generate official data and Self Eval programs**. This runs the existing AI `testdata` workflow and regenerates this problem’s official judging data. It requires the manager’s configured AI provider and applicable AI, generation and data-editing permissions. After completion, the interface loads matching make/std versions; select **Prepare pretest data** and reuse the formal checker/SPJ. Failed generation or preparation never opens an incomplete pretest set. See [Self Eval](Self-Evaluation.md) for manual make/std maintenance and whole-contest quotas.

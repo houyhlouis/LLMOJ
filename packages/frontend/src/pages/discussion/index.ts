@@ -1,8 +1,10 @@
 import { mount, lazy } from "navi";
 
 import getRoute from "@/utils/getRoute";
+import { solutionsRoute } from "./discussions/DiscussionsPage";
 
 export default {
+  solutions: solutionsRoute,
   d: mount({
     "/:id": mount({
       "/": lazy(() => import("./view/DiscussionViewPage")),

@@ -74,4 +74,4 @@ export function normalizeAiSections<T extends { locale: string; contentSections:
 }
 
 export const AI_MARKDOWN_RULES =
-  "Use Markdown math with $...$ inline and $$...$$ display delimiters. Never use \\( ... \\) or \\[ ... \\] delimiters, and never put LaTeX formulas in bare parentheses. Preserve code fences and escape backslashes exactly once in JSON. Put all subtask constraints, percentages/scores and data ranges in the Limits and Hints section (数据范围与提示 in Chinese), not in Description or a separate Subtasks section.";
+  "Use Markdown math with $...$ inline and $$...$$ display delimiters. Never use \\( ... \\) or \\[ ... \\] delimiters, and never put LaTeX formulas in bare parentheses. Preserve code fences and escape backslashes exactly once in JSON. Put all subtask constraints, percentages/scores and data ranges in the localized Limits and Hints section (the limitsAndHints editor field, including its Chinese equivalent for zh_CN), not in Description or a separate Subtasks section.";

@@ -1,4 +1,7 @@
 return {
+  close_preview: "关闭评测记录预览",
+  close_hack_preview: "关闭 Hack 预览",
+  retry_preview: "重试",
   title: "提交记录",
   cancel: "取消",
   confirm_cancel: "确认取消",
@@ -15,6 +18,12 @@ return {
   delete: "删除",
   confirm_delete: "确认删除",
   success_delete: "删除成功。",
+  fake: "Fake（作弊作废）",
+  confirm_fake: "确认作废并将得分设为 0",
+  success_fake: "已保留评测记录并将得分设为 0。",
+  fake_notice:
+    "此记录已因作弊作废，实际得分为 0。下方保留的测试点信息是原始评测结果，不计入成绩。有权限的管理员可通过重测解除作废并重新评测。",
+  confirm_restore_rejudge: "确认解除作废并重新评测",
   error: {
     NO_SUCH_PROBLEM: "无此题目。",
     NO_SUCH_FILE: "无此文件。",

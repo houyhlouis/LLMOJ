@@ -13,6 +13,8 @@ export enum SubmissionStatus {
   ConfigurationError = "ConfigurationError",
   SystemError = "SystemError",
   Canceled = "Canceled",
+  Fake = "Fake",
+  Hacked = "Hacked",
   Pending = "Pending"
 }
 
@@ -22,6 +24,8 @@ export enum SubmissionStatusAll {
   ConfigurationError = "ConfigurationError",
   SystemError = "SystemError",
   Canceled = "Canceled",
+  Fake = "Fake",
+  Hacked = "Hacked",
 
   CompilationError = "CompilationError",
 

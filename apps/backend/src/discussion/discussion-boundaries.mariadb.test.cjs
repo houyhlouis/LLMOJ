@@ -15,6 +15,9 @@ const { DiscussionService } = require("./discussion.service.ts");
 const { DiscussionEntity } = require("./discussion.entity.ts");
 const { DiscussionReplyEntity } = require("./discussion-reply.entity.ts");
 const { DiscussionContentEntity } = require("./discussion-content.entity.ts");
+// This fixture deliberately models ordinary discussions only. Team write
+// authorization is covered by the separate real team integration suite.
+require("../team/team-access.ts").teamResourceAccess = async () => null;
 function deferred() { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; }
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 

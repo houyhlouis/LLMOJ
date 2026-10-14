@@ -27,6 +27,7 @@ const currentUser = { id: 4 };
 function fixture({ parentProblem = 30, collisionProblem = null, canViewParent = false, manage = true } = {}) {
   const controller = Object.create(DiscussionController.prototype);
   const service = Object.create(DiscussionService.prototype);
+  service.connection = { getRepository: () => ({ findOne: async () => null }) };
   const reply = { id: 12, discussionId: 38, publisherId: 1, isPublic: true };
   const parent = { id: 38, problemId: parentProblem, publisherId: 1, isPublic: false };
   const collision = { id: 12, problemId: collisionProblem, publisherId: 1, isPublic: true };

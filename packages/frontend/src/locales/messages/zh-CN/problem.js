@@ -22,6 +22,7 @@ return {
     accepted: "通过"
   },
   action: {
+    solutions: "题解",
     submit: "提交",
     login_to_submit: "请登录后提交",
     submission: "提交记录",

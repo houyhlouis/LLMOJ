@@ -103,7 +103,7 @@ export class UserPrivilegeService {
       await transactionalEntityManager.delete(UserPermissionRuleEntity, { userId, allowed: true });
 
       // The original Privileges checkboxes can also disable default-enabled new capabilities.
-      for (const permission of defaultUserPermissions) {
+      for (const permission of new Set([...defaultUserPermissions, UserPrivilegeType.FakeSubmission])) {
         // eslint-disable-next-line no-await-in-loop -- Privilege propagation depends on the preceding decision.
         await transactionalEntityManager.save(UserPermissionRuleEntity, {
           userId,

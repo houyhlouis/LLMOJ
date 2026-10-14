@@ -8,6 +8,7 @@ import { Pagination } from "@/components/Pagination";
 import MarkdownContent from "@/markdown/MarkdownContent";
 import { callContest, tr, formatDate } from "./api";
 import style from "./ContestPages.module.less";
+import { ruleLabel } from "./contest-rules";
 
 const ContestsPage = observer(({ data, page }: { data: any; page: number }) => {
   useEffect(() => {
@@ -86,7 +87,7 @@ const ContestsPage = observer(({ data, page }: { data: any; page: number }) => {
                       </div>
                     )}
                   </Table.Cell>
-                  <Table.Cell>{c.rule.toUpperCase()}</Table.Cell>
+                  <Table.Cell>{ruleLabel(c.rule)}</Table.Cell>
                   <Table.Cell className={style.nowrap}>{formatDate(c.startTime)}</Table.Cell>
                   <Table.Cell className={style.nowrap}>
                     {Date.now() < +new Date(c.startTime)

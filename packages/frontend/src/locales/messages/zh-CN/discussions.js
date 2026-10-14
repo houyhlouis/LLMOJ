@@ -1,4 +1,10 @@
 return {
+  solutions: "题解",
+  solution: "题解",
+  all_solutions: "所有题解",
+  add_solution: "发布题解",
+  no_solutions: "暂无题解",
+  no_solutions_search: "找不到符合条件的题解",
   title: "讨论",
   error: {
     PERMISSION_DENIED: "权限不足。",

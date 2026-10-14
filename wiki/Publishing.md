@@ -80,3 +80,13 @@ References: [local Wiki editing](https://docs.github.com/en/communities/document
 Main source is MIT; the original rootfs recipe is Unlicense. MinIO, databases, compilers, fonts and other components retain their own licenses. A source release does not relicense them; preserve licenses/notices.
 
 Rootfs is built on the installation server. Source archives exclude complete rootfs, NOI Linux images and runtime data. Distributing compiled binaries or rootfs as Release assets requires separate review of notices, applicable source obligations and redistribution terms.
+
+## Teams, solutions, moderation, Hack and self-evaluation delivery
+
+Overlay the changed-files archive onto a complete local main-repository root, preserving apps, packages, deploy, wiki and .github paths. It is not a standalone installation archive; sync the documented base revision first. Review GitHub Desktop’s Changes, enter the supplied English summary and commit manually.
+
+The Wiki is the separate LLMOJ.wiki.git repository. Overlay its exported pages and _Sidebar.md directly onto that repository root without nesting another wiki directory or replacing .git. deploy/export-wiki.py converts links to Wiki URLs; the main repository retains its source Markdown under wiki/. Commit and push the two repositories separately. A source commit does not publish the GitHub Wiki.
+
+The combined package includes the four contest formats, permissions, judge protocol/task handlers, schema contract, tests, and bilingual guides as well as the earlier team, solution, and Fake changes. Server deployment and GitHub publication are separate operations. Existing servers also need the build and migration in [Community upgrade](Community-Upgrade.md); a Windows commit does not update the running OJ.
+
+The corrected release also includes navigation and private access boundaries: teams from personal profiles with ID-based admission, embedded problem solutions, Hacks from submission details with a results-only list, and Self Eval only in enabled NOI / OI contests. Update the STD content field, backend restrictions, matching judge handlers and documentation together with the frontend.

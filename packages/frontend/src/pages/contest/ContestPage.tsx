@@ -14,6 +14,9 @@ import {
   contestLanguageName
 } from "./api";
 import style from "./ContestPages.module.less";
+import { appState } from "@/appState";
+import { ruleDescription } from "./contest-rules";
+import { SubmissionPreviewLink, SubmissionPreviewProvider } from "@/pages/submission/SubmissionPreview";
 
 function ContestPage({ initial, tab }: { initial: any; tab: string }) {
   const localizeLanguage = useLocalizer("code_language");
@@ -70,22 +73,7 @@ function ContestPage({ initial, tab }: { initial: any; tab: string }) {
       {tab === "overview" && (
         <>
           <MarkdownContent content={detail.contest.description} />
-          <p className={style.description}>
-            {detail.contest.rule === "noi"
-              ? tr(
-                  "NOI：最后一次提交计分，比赛期间仅显示编译结果。",
-                  "NOI: the last submission counts; only compilation feedback is available during the contest."
-                )
-              : detail.contest.rule === "ioi"
-              ? tr(
-                  "IOI：每题最高分计分，比赛期间仅查看自己的结果。",
-                  "IOI: the best score counts; participants see their own results during the contest."
-                )
-              : tr(
-                  "ICPC：按通过题数及罚时排名，编译失败不计罚时，每次错误罚时20分钟。",
-                  "ICPC: rank by solved problems and penalty; compilation errors incur no penalty, other wrong attempts add 20 minutes."
-                )}
-          </p>
+          <p className={style.description}>{ruleDescription(detail.contest.rule)}</p>
           {!detail.started && !detail.manager ? (
             <Message>
               {tr("比赛尚未开始，题目将在开始后公开。", "Problems will become available when the contest starts.")}
@@ -257,7 +245,13 @@ function ContestPage({ initial, tab }: { initial: any; tab: string }) {
                   {data.submissions.map((s: any) => (
                     <Table.Row key={s.id} className={style.row}>
                       <Table.Cell>
-                        <Link href={`/contest/${id}/submission/${s.id}`}>#{s.id}</Link>
+                        <SubmissionPreviewLink
+                          submissionId={s.id}
+                          contestId={id}
+                          href={`/contest/${id}/submission/${s.id}`}
+                        >
+                          #{s.id}
+                        </SubmissionPreviewLink>
                       </Table.Cell>
                       <Table.Cell>{s.username}</Table.Cell>
                       <Table.Cell>
@@ -311,11 +305,13 @@ export const ranklist = defineRoute(async req => (
   />
 ));
 export const submissions = defineRoute(async req => (
-  <ContestPage
-    key={`${req.params.contestId}-submissions`}
-    initial={await callContest("detail", { id: Number(req.params.contestId) })}
-    tab="submissions"
-  />
+  <SubmissionPreviewProvider>
+    <ContestPage
+      key={`${req.params.contestId}-submissions`}
+      initial={await callContest("detail", { id: Number(req.params.contestId) })}
+      tab="submissions"
+    />
+  </SubmissionPreviewProvider>
 ));
 
 export default { overview, ranklist, submissions };

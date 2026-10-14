@@ -3,8 +3,14 @@ import { ApiProperty } from "@nestjs/swagger";
 import { IsBoolean, IsEnum, IsInt, IsOptional, Length, Min } from "class-validator";
 
 import { Locale } from "../../common/locale.type";
+import { DiscussionType } from "../discussion-type.enum";
 
 export class QueryDiscussionsRequestDto {
+  @ApiProperty({ enum: DiscussionType, required: false })
+  @IsEnum(DiscussionType)
+  @IsOptional()
+  type?: DiscussionType;
+
   @ApiProperty({ enum: Locale })
   @IsEnum(Locale)
   locale: Locale;
@@ -14,7 +20,7 @@ export class QueryDiscussionsRequestDto {
   @IsOptional()
   keyword?: string;
 
-  @ApiProperty({ description: "`null` for global. `-1` for ALL problems." })
+  @ApiProperty({ description: "`null` for global. `-1` for all problems. `-2` for global and problem discussions." })
   @IsInt()
   @IsOptional()
   problemId?: number;

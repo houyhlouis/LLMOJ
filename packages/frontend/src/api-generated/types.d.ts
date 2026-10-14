@@ -75,13 +75,14 @@ declare namespace ApiTypes {
     reply?: ApiTypes.DiscussionReplyDto;
   }
   export interface CreateDiscussionRequestDto {
+    type?: "Discussion" | "Solution";
     problemId?: number;
     title: string;
     content: string;
     isPublic?: boolean;
   }
   export interface CreateDiscussionResponseDto {
-    error?: "PERMISSION_DENIED" | "NO_SUCH_PROBLEM";
+    error?: "PERMISSION_DENIED" | "NO_SUCH_PROBLEM" | "SOLUTION_REQUIRES_PROBLEM";
     discussionId?: number;
   }
   export interface CreateGroupRequestDto {
@@ -143,6 +144,12 @@ declare namespace ApiTypes {
   export interface DeleteProblemTagResponseDto {
     error?: "NO_SUCH_PROBLEM_TAG" | "PERMISSION_DENIED";
   }
+  export interface FakeSubmissionRequestDto {
+    submissionId: number;
+  }
+  export interface FakeSubmissionResponseDto {
+    error?: "NO_SUCH_SUBMISSION" | "PERMISSION_DENIED";
+  }
   export interface DeleteSubmissionRequestDto {
     submissionId: number;
   }
@@ -162,6 +169,7 @@ declare namespace ApiTypes {
     permissionLevel: 1 | 2;
   }
   export interface DiscussionMetaDto {
+    type: "Discussion" | "Solution";
     id: number;
     title: string;
     publishTime: string; // date-time
@@ -444,6 +452,14 @@ declare namespace ApiTypes {
       | "ManagePermissions"
       | "SkipRecaptcha"
       | "ManageRegistrationReviews"
+      | "ViewTeam"
+      | "CreateTeam"
+      | "ManageTeams"
+      | "FakeSubmission"
+      | "ViewHack"
+      | "CreateHack"
+      | "ManageHack"
+      | "CreateSelfEval"
     )[];
     userPreference?: ApiTypes.UserPreferenceDto;
     serverPreference: ApiTypes.PreferenceConfig;
@@ -463,6 +479,7 @@ declare namespace ApiTypes {
     permissionCancel?: boolean;
     permissionSetPublic?: boolean;
     permissionDelete?: boolean;
+    permissionFake?: boolean;
   }
   export interface GetTencentCaptchaAppIdResponseDto {
     appId: string;
@@ -559,6 +576,14 @@ declare namespace ApiTypes {
       | "ManagePermissions"
       | "SkipRecaptcha"
       | "ManageRegistrationReviews"
+      | "ViewTeam"
+      | "CreateTeam"
+      | "ManageTeams"
+      | "FakeSubmission"
+      | "ViewHack"
+      | "CreateHack"
+      | "ManageHack"
+      | "CreateSelfEval"
     )[];
   }
   export interface GetUserPreferenceRequestDto {
@@ -884,6 +909,7 @@ declare namespace ApiTypes {
     details?: {};
   }
   export interface QueryDiscussionsRequestDto {
+    type?: "Discussion" | "Solution";
     locale: "en_US" | "zh_CN";
     keyword?: string;
     /**
@@ -975,6 +1001,8 @@ declare namespace ApiTypes {
       | "ConfigurationError"
       | "SystemError"
       | "Canceled"
+      | "Fake"
+      | "Hacked"
       | "CompilationError"
       | "FileError"
       | "RuntimeError"
@@ -1324,6 +1352,14 @@ declare namespace ApiTypes {
       | "ManagePermissions"
       | "SkipRecaptcha"
       | "ManageRegistrationReviews"
+      | "ViewTeam"
+      | "CreateTeam"
+      | "ManageTeams"
+      | "FakeSubmission"
+      | "ViewHack"
+      | "CreateHack"
+      | "ManageHack"
+      | "CreateSelfEval"
     )[];
   }
   export interface SetUserPrivilegesResponseDto {
@@ -1359,6 +1395,8 @@ declare namespace ApiTypes {
       | "ConfigurationError"
       | "SystemError"
       | "Canceled"
+      | "Fake"
+      | "Hacked"
       | "CompilationError"
       | "FileError"
       | "RuntimeError"
@@ -1384,6 +1422,8 @@ declare namespace ApiTypes {
       | "ConfigurationError"
       | "SystemError"
       | "Canceled"
+      | "Fake"
+      | "Hacked"
       | "CompilationError"
       | "FileError"
       | "RuntimeError"
@@ -1430,12 +1470,14 @@ declare namespace ApiTypes {
     editTime?: string; // date-time
   }
   export interface UpdateDiscussionRequestDto {
+    type?: "Discussion" | "Solution";
+    problemId?: number;
     discussionId: number;
     title: string;
     content: string;
   }
   export interface UpdateDiscussionResponseDto {
-    error?: "PERMISSION_DENIED" | "NO_SUCH_DISCUSSION";
+    error?: "PERMISSION_DENIED" | "NO_SUCH_DISCUSSION" | "NO_SUCH_PROBLEM" | "SOLUTION_REQUIRES_PROBLEM";
   }
   export interface UpdateHomepageSettingsRequestDto {
     settings: ApiTypes.HomepageSettings;

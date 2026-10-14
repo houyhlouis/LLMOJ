@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import {createRequire} from 'node:module';
 import {execFileSync} from 'node:child_process';
 import assert from 'node:assert/strict';
-import {validateQueries,validatePrivilegeSchema,LEGACY_PRIVILEGES,REVIEW_PRIVILEGE,PRIVILEGE_EXPANSION_SQL} from '../upgrade-schema.mjs';
+import {validateQueries,normalizeCommunitySchemaQueries,validateCommunitySchema,validatePrivilegeSchema,LEGACY_PRIVILEGES,REVIEW_PRIVILEGE,PRIVILEGE_EXPANSION_SQL} from '../upgrade-schema.mjs';
 import {inspectLegacyRegistration,migrateLegacyRegistration} from '../upgrade-registration.mjs';
 // Opt-in integration test. Only isolated, disposable MariaDB servers are allowed.
 // Example (the socket/server and pristine baseline dump must already exist):
@@ -40,6 +40,11 @@ if (/\b(?:CREATE|DROP)\s+(?:DATABASE|SCHEMA)\b|\bUSE\s+[`A-Za-z_]/i.test(sqlText
  throw new Error('Baseline must be a trusted synthetic single-database dump without database selection, cross-database qualifiers, or client commands');
 }
 let ddl;
+async function schemaQueries(ds) {
+ const queries=validateQueries(await normalizeCommunitySchemaQueries(ds,(await ds.driver.createSchemaBuilder().log()).upQueries));
+ await validateCommunitySchema(ds,queries);
+ return queries;
+}
 const hash=bcrypt.hashSync('SyntheticMigrationPass42!',4);
 const stamp=new Date('2026-10-10T12:00:00Z'),decision=new Date('2026-10-10T12:00:10Z');
 function dsFor(database){return new DataSource({type:'mariadb',username:'root',database,extra:{socketPath:SOCKET},entities:[ROOT+'/apps/backend/dist/**/*.entity.js'],synchronize:false,logging:false});}
@@ -72,26 +77,26 @@ async function state(ds){
 }
 async function caseRun(name,fn){try{const detail=await fn();results.push({case:name,status:'passed',...detail});console.log(name+': passed');}catch(error){results.push({case:name,status:'failed',code:error.code||error.name,message:error.code?undefined:error.message?.slice(0,180)});console.log(name+': FAILED '+(error.code||error.name));throw error;}finally{fs.writeFileSync(report,JSON.stringify({productionModified:false,results},null,2)+'\n');fs.chmodSync(report,0o644);}}
 await caseRun('pristine-baseline-schema-and-noop',()=>clone(async ds=>{
- const queries=validateQueries((await ds.driver.createSchemaBuilder().log()).upQueries);assert.equal(queries.length,5);await validatePrivilegeSchema(ds,queries);ddl=queries;
+ const queries=await schemaQueries(ds);assert.equal(queries.filter(sql=>sql.includes('`registration_')||sql===PRIVILEGE_EXPANSION_SQL).length,5);await validatePrivilegeSchema(ds,queries);ddl=queries;
  const before=await inspectLegacyRegistration(ds);assert.equal(before.pending,0);
  for(const sql of queries)await ds.query(sql);await migrateLegacyRegistration(ds);
- assert.equal((await ds.driver.createSchemaBuilder().log()).upQueries.length,0);return {ddlStatements:5};
+ assert.equal((await ds.driver.createSchemaBuilder().log()).upQueries.length,0);return {ddlStatements:queries.length};
 }));
 await caseRun('v3-application-schema-requires-only-review-privilege-expansion',()=>clone(async ds=>{
  for(const sql of ddl) if(sql!==PRIVILEGE_EXPANSION_SQL) await ds.query(sql);
  const before=await state(ds);
- const queries=validateQueries((await ds.driver.createSchemaBuilder().log()).upQueries);
+ const queries=await schemaQueries(ds);
  assert.deepEqual(queries,[PRIVILEGE_EXPANSION_SQL]);await validatePrivilegeSchema(ds,queries);
  const plan=await inspectLegacyRegistration(ds);assert.deepEqual([plan.pending,plan.rejected,plan.approvedHistory],[0,0,0]);
  for(const sql of queries) await ds.query(sql);
  await migrateLegacyRegistration(ds);assert.deepEqual(await state(ds),before);
- const next=validateQueries((await ds.driver.createSchemaBuilder().log()).upQueries);assert.deepEqual(next,[]);await validatePrivilegeSchema(ds,next);
+ const next=await schemaQueries(ds);assert.deepEqual(next,[]);await validatePrivilegeSchema(ds,next);
  return {ddlStatements:1,noAccountApplicationOrAuditChanges:true,idempotent:true};
 }));
 await caseRun('pending-rejected-approved-audits-passwords-and-idempotency',()=>clone(async ds=>{
  await tables(ds,false);const p=await legacy(ds,'pending'),r=await legacy(ds,'rejected'),a=await legacy(ds,'approved');
  const oldCounter=Number((await ds.query("SELECT AUTO_INCREMENT AS value FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='user'"))[0].value);
- const queries=validateQueries((await ds.driver.createSchemaBuilder().log()).upQueries);assert.equal(queries.length,2);await validatePrivilegeSchema(ds,queries);
+ const queries=await schemaQueries(ds);assert.equal(queries.length,2);await validatePrivilegeSchema(ds,queries);
  const plan=await inspectLegacyRegistration(ds);assert.deepEqual([plan.pending,plan.rejected,plan.approvedHistory,plan.archivedAccountAuditRecords,plan.reassignedAuditRecords],[1,1,1,4,1]);
  for(const sql of queries)await ds.query(sql);const moved=await migrateLegacyRegistration(ds);assert.equal(moved.fingerprint,plan.fingerprint);
  const applications=await ds.query('SELECT * FROM registration_application ORDER BY id');assert.equal(applications.length,3);
@@ -153,13 +158,13 @@ await caseRun('privilege-append-preserves-all-existing-values-and-grants',()=>cl
  const admin=Number((await ds.query('SELECT id FROM user WHERE isAdmin=1 ORDER BY id LIMIT 1'))[0].id);
  for (const privilege of LEGACY_PRIVILEGES) await ds.query('INSERT IGNORE INTO user_privilege(userId,privilegeType) VALUES (?,?)',[admin,privilege]);
  const before=await ds.query('SELECT userId,privilegeType,privilegeType+0 AS enumIndex FROM user_privilege ORDER BY userId,privilegeType+0');
- const queries=validateQueries((await ds.driver.createSchemaBuilder().log()).upQueries);
+ const queries=await schemaQueries(ds);
  assert.ok(queries.includes(PRIVILEGE_EXPANSION_SQL));await validatePrivilegeSchema(ds,queries);
  for(const query of queries) await ds.query(query);
  assert.deepEqual(await ds.query('SELECT userId,privilegeType,privilegeType+0 AS enumIndex FROM user_privilege ORDER BY userId,privilegeType+0'),before);
  await ds.query('INSERT INTO user_privilege(userId,privilegeType) VALUES (?,?)',[admin,REVIEW_PRIVILEGE]);
  assert.equal(Number((await ds.query('SELECT privilegeType+0 AS n FROM user_privilege WHERE userId=? AND privilegeType=?',[admin,REVIEW_PRIVILEGE]))[0].n),LEGACY_PRIVILEGES.length+1);
- const next=validateQueries((await ds.driver.createSchemaBuilder().log()).upQueries);assert.deepEqual(next,[]);await validatePrivilegeSchema(ds,next);
+ const next=await schemaQueries(ds);assert.deepEqual(next,[]);await validatePrivilegeSchema(ds,next);
  return {existingEnumValues:LEGACY_PRIVILEGES.length,oldNumericIndexesAndRowsPreserved:true,newValueAppendOnly:true,idempotent:true};
 }));
 await caseRun('privilege-unknown-value-and-order-refused-before-ddl',()=>clone(async ds=>{
@@ -169,7 +174,7 @@ await caseRun('privilege-unknown-value-and-order-refused-before-ddl',()=>clone(a
  await ds.query(columnSql(custom));await ds.query('INSERT INTO user_privilege(userId,privilegeType) VALUES (?,?)',[admin,'CustomPrivilege']);
  const query="SELECT COLUMN_TYPE AS value FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='user_privilege' AND COLUMN_NAME='privilegeType'";
  const before=await ds.query(query),rows=await ds.query('SELECT * FROM user_privilege ORDER BY userId,privilegeType');
- const changes=validateQueries((await ds.driver.createSchemaBuilder().log()).upQueries);assert.ok(changes.includes(PRIVILEGE_EXPANSION_SQL));
+ const changes=await schemaQueries(ds);assert.ok(changes.includes(PRIVILEGE_EXPANSION_SQL));
  await assert.rejects(()=>validatePrivilegeSchema(ds,changes));
  const database=(await ds.query('SELECT DATABASE() AS name'))[0].name;
  let refused=false;

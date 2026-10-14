@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import { Form } from "semantic-ui-react";
 import { observer } from "mobx-react";
 
@@ -13,6 +13,7 @@ import {
 interface CodeLanguageAndOptionsProps {
   pending?: boolean;
   allowedLanguages?: CodeLanguage[];
+  allowedVariants?: string[];
   elementAfterLanguageSelect?: React.ReactNode;
   headerForLanguage?: string;
   classNameForLanguage?: string;
@@ -27,6 +28,28 @@ let CodeLanguageAndOptions: React.FC<CodeLanguageAndOptionsProps> = props => {
   const _ = useLocalizer("code_language");
 
   const compileAndRunOptionsBackup = useRef(new Map<CodeLanguage, Record<string, unknown>>()).current;
+  function permittedValues(language: CodeLanguage, name: string, values: string[]) {
+    if (
+      !props.allowedVariants ||
+      props.allowedVariants.includes(language) ||
+      !((language === CodeLanguage.Cpp && name === "std") || (language === CodeLanguage.Python && name === "version"))
+    )
+      return values;
+    return values.filter(value => props.allowedVariants.includes(language + ":" + value));
+  }
+  useEffect(() => {
+    if (!props.allowedVariants?.length || props.pending) return;
+    const allowed = [...new Set(props.allowedVariants.map(value => value.split(":")[0]))],
+      language = (allowed.includes(props.language) ? props.language : allowed[0]) as CodeLanguage,
+      next =
+        language === props.language ? { ...props.compileAndRunOptions } : getPreferredCompileAndRunOptions(language);
+    for (const option of compileAndRunOptions[language]) {
+      const values = permittedValues(language, option.name, option.values);
+      if (values.length && !values.includes(next[option.name] as string)) next[option.name] = values[0];
+    }
+    if (language !== props.language) props.onUpdateLanguage(language);
+    if (JSON.stringify(next) !== JSON.stringify(props.compileAndRunOptions)) props.onUpdateCompileAndRunOptions(next);
+  }, [props.allowedVariants?.join(","), props.language, props.pending]);
   function onSwitchLanguage(newLanguage: CodeLanguage) {
     const oldLanguage = props.language;
     compileAndRunOptionsBackup.set(oldLanguage, props.compileAndRunOptions);
@@ -61,7 +84,7 @@ let CodeLanguageAndOptions: React.FC<CodeLanguageAndOptionsProps> = props => {
                 key={option.name}
                 label={_(`.${props.language}.options.${option.name}.name`)}
                 value={props.compileAndRunOptions[option.name] as string}
-                options={option.values.map(value => ({
+                options={permittedValues(props.language, option.name, option.values).map(value => ({
                   key: value,
                   value: value,
                   text: _(`.${props.language}.options.${option.name}.values.${value}`)

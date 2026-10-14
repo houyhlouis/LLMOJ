@@ -31,6 +31,7 @@ return {
   search_problem: "搜索题目",
   top_users: {
     header: "排名",
+    view_all: "查看全部",
     username: "用户名",
     bio: "个性签名",
     rating: "积分",

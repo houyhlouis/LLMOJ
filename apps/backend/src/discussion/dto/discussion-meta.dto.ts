@@ -1,6 +1,11 @@
 import { ApiProperty } from "@nestjs/swagger";
 
+import { DiscussionType } from "../discussion-type.enum";
+
 export class DiscussionMetaDto {
+  @ApiProperty({ enum: DiscussionType })
+  type: DiscussionType;
+
   @ApiProperty()
   id: number;
 

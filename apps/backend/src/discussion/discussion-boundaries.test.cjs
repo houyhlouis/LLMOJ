@@ -19,6 +19,7 @@ const { Locale } = require("../common/locale.type.ts");
 
 function fixture({ isPublic = false, manage = false, canViewParent = true, overrides = {} } = {}) {
   const service = Object.create(DiscussionService.prototype), controller = Object.create(DiscussionController.prototype);
+  service.connection = { getRepository: () => ({ findOne: async () => null }) };
   const parent = { id: 11, publisherId: 10, isPublic: true, problemId: 22 };
   const reply = { id: 31, discussionId: 11, publisherId: 2, isPublic };
   const writes = [];

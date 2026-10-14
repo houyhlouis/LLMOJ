@@ -1,0 +1,43 @@
+.editor {
+  height: 400px;
+  margin-bottom: 1.5em;
+  border: 1px solid var(--theme-border);
+}
+.quota {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6em;
+  margin: 1.5em 0;
+}
+.management {
+  margin: 1.5em 0;
+  padding: 1.5em;
+  border: 1px solid var(--theme-border);
+  border-radius: 0.3em;
+}
+.managerEditor {
+  height: 320px;
+  border: 1px solid var(--theme-border);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75em;
+  margin: 1.25em 0;
+}
+.participant,
+.ai {
+  margin-top: 2em;
+}
+@media only screen and (max-width: 767px) {
+  .editor {
+    height: 320px;
+  }
+  .management {
+    padding: 1em;
+  }
+  .managerEditor {
+    height: 260px;
+  }
+}

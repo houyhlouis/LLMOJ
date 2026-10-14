@@ -80,3 +80,13 @@ git push
 主体源码为 MIT，原版 rootfs 配方为 Unlicense。MinIO、数据库、编译器、字体和其他组件各自适用原许可。发布此源码仓库不会让这些第三方软件统一变成 MIT；不要删掉 LICENSE 或第三方版权说明。
 
 安装器在服务器下载并构建 rootfs，源码包不含完整 rootfs、NOI Linux ISO 或运行数据。如果以后上传二进制或 rootfs 到 Release，需要另行检查其版权材料、适用源码提供义务和各组件再分发条款。
+
+## 团队、题解、作废、Hack 与自测更新包
+
+主仓库的修改文件包应覆盖到完整本地仓库根目录，保留 apps、packages、deploy、wiki 和 .github 的路径。它不是独立安装源码包；先确认完整仓库已同步所标注的基础提交。GitHub Desktop 的 Changes 中检查修改后填写提供的英文 summary 并自行提交。
+
+Wiki 使用独立的 LLMOJ.wiki.git 仓库。Wiki 更新包中的页面及 _Sidebar.md 直接覆盖其本地仓库根目录，不要额外套一层 wiki 目录，也不要覆盖或删除 .git。该包由 deploy/export-wiki.py 导出，已把链接转换到 Wiki 地址；主仓库仍保存原始 wiki/Markdown。两个仓库分别 commit/push，源码 commit 不会自动更新 GitHub Wiki。
+
+合并包同时包含四种赛制、新权限、评测协议与处理器、结构合同、测试和中英文指南，以及之前的团队、题解和 Fake 改动。服务器部署与 GitHub 发布是两项独立操作。已有服务器还需按 [社区功能升级](Community-Upgrade.zh-CN.md) 构建和迁移，Windows 提交本身不会升级运行中的 OJ。
+
+修正版同时包含界面位置和私人访问边界：团队从个人主页进入并按编号加入，题解嵌入题目页，Hack 从提交详情发起并在结果列表查看，Self Eval 仅在已开启的 NOI / OI 比赛中提供。不要只复制前端；STD 内容字段、后端限制、同版评测处理器与说明必须一起更新。

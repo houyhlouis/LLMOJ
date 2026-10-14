@@ -1,9 +1,11 @@
-import { Injectable, Inject, forwardRef } from "@nestjs/common";
+import { Injectable, Inject, forwardRef, ForbiddenException } from "@nestjs/common";
 import { InjectRepository, InjectDataSource } from "@nestjs/typeorm";
 
 import { Repository, DataSource, EntityManager, Brackets } from "typeorm";
 
 import { DiscussionEntity } from "./discussion.entity";
+import { DiscussionType } from "./discussion-type.enum";
+import { discussionVisibilitySql } from "./discussion-visibility";
 
 import { DiscussionContentEntity } from "./discussion-content.entity";
 
@@ -27,6 +29,7 @@ import { ProblemEntity } from "../problem/problem.entity";
 import { LockService } from "../redis/lock.service";
 import { escapeLike } from "../database/database.utils";
 import { ProblemPermissionType, ProblemService } from "../problem/problem.service";
+import { teamResourceAccess, teamResourceVisibilitySql } from "../team/team-access";
 
 export enum DiscussionReactionType {
   Discussion = "Discussion",
@@ -119,6 +122,7 @@ export class DiscussionService {
     return {
       id: discussion.id,
       title: discussion.title,
+      type: discussion.type ?? DiscussionType.Discussion,
       publishTime: discussion.publishTime,
       editTime: discussion.editTime,
       sortTime: discussion.sortTime,
@@ -140,6 +144,26 @@ export class DiscussionService {
     if (discussion.problemId) {
       const problem = discussionProblem ?? (await this.problemService.findProblemById(discussion.problemId));
       if (!(await this.problemService.userHasPermission(user, problem, ProblemPermissionType.View))) return false;
+    }
+    const teamRead = await teamResourceAccess(this.connection, user, "discussion", discussion.id);
+    if (teamRead !== null) {
+      if (!teamRead) return false;
+      if (type === DiscussionPermissionType.View) return true;
+      if (type === DiscussionPermissionType.Modify) {
+        const canManage = await teamResourceAccess(this.connection, user, "discussion", discussion.id, "discussions");
+        const active = await teamResourceAccess(this.connection, user, "discussion", discussion.id, "post");
+        const own = user?.id === discussion.publisherId;
+        return (
+          active &&
+          (canManage || own) &&
+          (await this.userPrivilegeService.permissionDecision(
+            user,
+            own ? UserPrivilegeType.EditOwnDiscussion : UserPrivilegeType.EditAnyDiscussion,
+            true
+          ))
+        );
+      }
+      return false;
     }
     if (type === DiscussionPermissionType.View)
       return await this.userHasPermissionOriginal(user, discussion, type, discussionProblem);
@@ -255,9 +279,13 @@ export class DiscussionService {
       return false;
     const discussion = await this.findDiscussionById(discussionReply.discussionId);
     if (!(await this.userHasPermission(user, discussion, DiscussionPermissionType.View))) return false;
+    const teamPost = await teamResourceAccess(this.connection, user, "discussion", discussion.id, "post");
+    if (teamPost === false) return false;
+    const teamModerator = await teamResourceAccess(this.connection, user, "discussion", discussion.id, "discussions");
     const own = discussionReply.publisherId === user.id;
     const legacy =
       own ||
+      teamModerator === true ||
       (hasPrivilege ?? (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageDiscussion)));
     return await this.userPrivilegeService.permissionDecision(
       user,
@@ -320,8 +348,10 @@ export class DiscussionService {
     content: string,
     problem: ProblemEntity,
     onCreated?: (discussion: DiscussionEntity, manager: EntityManager) => Promise<void>,
-    authorizeCommit?: (manager: EntityManager) => Promise<void>
+    authorizeCommit?: (manager: EntityManager) => Promise<void>,
+    type: DiscussionType = DiscussionType.Discussion
   ): Promise<DiscussionEntity> {
+    if (type === DiscussionType.Solution && !problem) throw new Error("SOLUTION_REQUIRES_PROBLEM");
     const isolation = authorizeCommit ? "SERIALIZABLE" : "READ COMMITTED";
     return await this.connection.transaction(isolation, async transactionalEntityManager => {
       await authorizeCommit?.(transactionalEntityManager);
@@ -329,6 +359,7 @@ export class DiscussionService {
 
       const discussion = new DiscussionEntity();
       discussion.title = title;
+      discussion.type = type;
       discussion.publishTime = now;
       discussion.sortTime = now;
       discussion.replyCount = 0;
@@ -355,14 +386,30 @@ export class DiscussionService {
   async updateDiscussionTitleAndContent(
     discussion: DiscussionEntity,
     newTitle: string,
-    newContent: string
+    newContent: string,
+    classification?: { type: DiscussionType; problemId: number },
+    actingUser?: UserEntity
   ): Promise<void> {
     return await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
+      await this.authorizeTeamDiscussionWrite(
+        transactionalEntityManager,
+        actingUser,
+        discussion.id,
+        "discussion",
+        discussion.publisherId
+      );
       discussion.title = newTitle;
       discussion.editTime = new Date();
+      if (classification) {
+        if (classification.type === DiscussionType.Solution && !classification.problemId)
+          throw new Error("SOLUTION_REQUIRES_PROBLEM");
+        discussion.type = classification.type;
+        discussion.problemId = classification.problemId;
+      }
       await transactionalEntityManager.update(DiscussionEntity, discussion.id, {
         title: discussion.title,
-        editTime: discussion.editTime
+        editTime: discussion.editTime,
+        ...(classification ? { type: classification.type, problemId: classification.problemId } : {})
       });
 
       const discussionContent = await transactionalEntityManager.findOneBy(DiscussionContentEntity, {
@@ -383,40 +430,63 @@ export class DiscussionService {
   /**
    * Query discussions with pagination.
    *
-   * If the user has manage discussion privilege, show all discussions.
-   * If the user has no manage discussion privilege, show only public and the user owned discussions.
+   * Apply discussion, problem and team View permissions before count/LIMIT.
    *
    * @param problemId `null` for global only and `-1` for ALL problems.
    */
   async queryDiscussionsAndCount(
     currentUser: UserEntity,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Do not trust the legacy permission hint over current capability decisions.
     hasPrivilege: boolean,
     keyword: string,
     problemId: number,
     publisherId: number,
     nonpublic: boolean,
     skipCount: number,
-    takeCount: number
+    takeCount: number,
+    type?: DiscussionType
   ): Promise<[discussions: DiscussionEntity[], count: number]> {
     const queryBuilder = this.discussionRepository.createQueryBuilder("discussion").select("discussion.id", "id");
+    const [
+      viewDiscussions,
+      viewProblems,
+      manageDiscussions,
+      manageProblems,
+      hiddenProblemWithGrant,
+      hiddenProblemWithoutGrant
+    ] = await Promise.all([
+      this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ViewDiscussion),
+      this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ViewProblem),
+      this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageDiscussion),
+      this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageProblem),
+      this.userPrivilegeService.permissionDecision(currentUser, UserPrivilegeType.ViewHiddenProblem, true),
+      this.userPrivilegeService.permissionDecision(currentUser, UserPrivilegeType.ViewHiddenProblem, false)
+    ]);
+    queryBuilder.andWhere(
+      discussionVisibilitySql(currentUser, {
+        viewDiscussions,
+        viewProblems,
+        manageDiscussions,
+        manageProblems,
+        hiddenProblemWithGrant,
+        hiddenProblemWithoutGrant
+      })
+    );
+
+    if (type) queryBuilder.andWhere("discussion.type = :discussionType", { discussionType: type });
 
     if (keyword) queryBuilder.andWhere("discussion.title LIKE :like", { like: `%${escapeLike(keyword)}%` });
 
-    if (problemId == null) queryBuilder.andWhere("discussion.problemId IS NULL");
+    if (problemId === -2) {
+      // Include both general and problem discussions for "My discussions".
+    } else if (problemId == null && type === DiscussionType.Solution)
+      queryBuilder.andWhere("discussion.problemId IS NOT NULL");
+    else if (problemId == null) queryBuilder.andWhere("discussion.problemId IS NULL");
     else if (problemId === -1) queryBuilder.andWhere("discussion.problemId IS NOT NULL");
     else queryBuilder.andWhere("discussion.problemId = :problemId", { problemId });
 
-    if (!hasPrivilege && !(currentUser && publisherId === currentUser.id)) {
-      if (currentUser)
-        queryBuilder.andWhere(
-          new Brackets(brackets =>
-            brackets
-              .where("discussion.isPublic = 1")
-              .orWhere("discussion.publisherId = :publisherId", { publisherId: currentUser.id })
-          )
-        );
-      else queryBuilder.andWhere("discussion.isPublic = 1");
-    } else if (nonpublic) queryBuilder.andWhere("discussion.isPublic = 0");
+    if (nonpublic && (manageDiscussions || (currentUser && publisherId === currentUser.id)))
+      queryBuilder.andWhere("discussion.isPublic = 0");
 
     if (publisherId) queryBuilder.andWhere("discussion.publisherId = :publisherId", { publisherId });
 
@@ -584,6 +654,39 @@ export class DiscussionService {
     });
   }
 
+  private async authorizeTeamDiscussionWrite(
+    manager: EntityManager,
+    user: UserEntity,
+    discussionId: number,
+    operation: "discussion" | "reply" | "newReply",
+    publisherId?: number
+  ): Promise<void> {
+    const active = await teamResourceAccess(manager, user, "discussion", discussionId, "post");
+    if (active === null) return;
+    if (
+      !active ||
+      !user ||
+      !(await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ViewSite, manager)) ||
+      !(await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ViewDiscussion, manager))
+    )
+      throw new ForbiddenException();
+    const own = user.id === publisherId;
+    const delegated = await teamResourceAccess(manager, user, "discussion", discussionId, "discussions");
+    if (operation !== "newReply" && !own && !delegated) throw new ForbiddenException();
+    const permission =
+      operation === "newReply"
+        ? UserPrivilegeType.ReplyDiscussion
+        : operation === "discussion"
+        ? own
+          ? UserPrivilegeType.EditOwnDiscussion
+          : UserPrivilegeType.EditAnyDiscussion
+        : own
+        ? UserPrivilegeType.EditOwnReply
+        : UserPrivilegeType.ManageDiscussionReplies;
+    if (!(await this.userPrivilegeService.permissionDecision(user, permission, true, manager)))
+      throw new ForbiddenException();
+  }
+
   private async updateSortTime(discussionId: number, transactionalEntityManager: EntityManager, editTime?: Date) {
     const [queryResultMaxReplyTime, queryResultPublishOrEditTime] = await Promise.all([
       transactionalEntityManager
@@ -633,6 +736,7 @@ export class DiscussionService {
     content: string
   ): Promise<DiscussionReplyEntity> {
     return await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
+      await this.authorizeTeamDiscussionWrite(transactionalEntityManager, currentUser, discussion.id, "newReply");
       // Lock the parent before inserting a child: its FK otherwise takes a
       // shared parent lock that concurrent inserts would need to upgrade.
       await this.lockDiscussionForReplyChange(discussion.id, transactionalEntityManager);
@@ -651,12 +755,25 @@ export class DiscussionService {
     });
   }
 
-  async updateReplyContent(discussionReply: DiscussionReplyEntity, newContent: string): Promise<void> {
-    discussionReply.content = newContent;
-    discussionReply.editTime = new Date();
-    await this.discussionReplyRepository.update(discussionReply.id, {
-      content: discussionReply.content,
-      editTime: discussionReply.editTime
+  async updateReplyContent(
+    discussionReply: DiscussionReplyEntity,
+    newContent: string,
+    actingUser?: UserEntity
+  ): Promise<void> {
+    await this.connection.transaction("READ COMMITTED", async manager => {
+      await this.authorizeTeamDiscussionWrite(
+        manager,
+        actingUser,
+        discussionReply.discussionId,
+        "reply",
+        discussionReply.publisherId
+      );
+      discussionReply.content = newContent;
+      discussionReply.editTime = new Date();
+      await manager.update(DiscussionReplyEntity, discussionReply.id, {
+        content: discussionReply.content,
+        editTime: discussionReply.editTime
+      });
     });
   }
 
@@ -665,8 +782,15 @@ export class DiscussionService {
     await this.discussionReplyRepository.update(discussionReply.id, { isPublic });
   }
 
-  async deleteReply(discussionReply: DiscussionReplyEntity): Promise<void> {
+  async deleteReply(discussionReply: DiscussionReplyEntity, actingUser?: UserEntity): Promise<void> {
     await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
+      await this.authorizeTeamDiscussionWrite(
+        transactionalEntityManager,
+        actingUser,
+        discussionReply.discussionId,
+        "reply",
+        discussionReply.publisherId
+      );
       await this.lockDiscussionForReplyChange(discussionReply.discussionId, transactionalEntityManager);
       const deleted = await transactionalEntityManager.delete(DiscussionReplyEntity, {
         id: discussionReply.id,
@@ -792,6 +916,10 @@ export class DiscussionService {
   }
 
   async getDiscussionCountOfProblem(problem: ProblemEntity): Promise<number> {
-    return await this.discussionRepository.countBy({ problemId: problem.id });
+    return await this.discussionRepository
+      .createQueryBuilder("discussion")
+      .where("discussion.problemId = :problemId", { problemId: problem.id })
+      .andWhere(teamResourceVisibilitySql("discussion", "discussion.id", null))
+      .getCount();
   }
 }

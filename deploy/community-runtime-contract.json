@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "description": "Reviewed runtime transitions from supported community releases to safe Hack target testcase feedback, independent STD I/O, and NOI-only Self Eval; dependencies and native code remain unchanged.",
+  "files": [
+    {
+      "path": "packages/judge-protocol/src/index.ts",
+      "oldSha256": [
+        "d0e14095be68c34bde2fa2ae43778208deecb81e87a5e2e10266cd0e14435d49",
+        "af352859ac3abfb5c3be8481f050b61b3c37358277be99b5d80373c762689eca",
+        "938c8a557b1107f2793d56ab23923bf80f5e2b7c7d1f87372a1153f3b0dde3d0"
+      ],
+      "newSha256": "487bc1315b52d0a2c0df8b202de57549beb4c1fe43ffefef5c8c1adf2e80ee55"
+    },
+    {
+      "path": "apps/judge/src/task/index.ts",
+      "oldSha256": [
+        "4b327370ec26d49d613a4ab00148d078e863037a6123754f11a5f9c7989d0a04"
+      ],
+      "newSha256": "1fc0cf604001d31affcb91c7bacef730c81f5384d26581c04648ace748bd5903"
+    },
+    {
+      "path": "apps/judge/src/task/hack/index.ts",
+      "oldSha256": [
+        null,
+        "b08ec427c74ece12c17643328106b6158dcbd1b273ac90c5301a447ce52bc6d3",
+        "c28abef871995a53fb0762268740bc31ca8db2e01e6cf99864702d70752ae05b"
+      ],
+      "newSha256": "014db7dada24728f5f960772068ceeb663a08d5c7fa64c20d425c14d2d42ef3b"
+    },
+    {
+      "path": "apps/judge/src/task/hack/hack.test.cjs",
+      "oldSha256": [
+        null,
+        "447b3a1b4cc9f6757cd80c32ba501b26c463caf8411a7dd7764528eb98e4d6f7",
+        "8aba00c482ebefb89558cf2f1781446461b8410cf46c26cf98af0ed3ceaf6f4b"
+      ],
+      "newSha256": "1b782999fc46f6e097e0a3703049ccf7552c6ccc854b2db3fd95ea381493dcf0"
+    },
+    {
+      "path": "apps/judge/src/task/self-eval/index.ts",
+      "oldSha256": [
+        null,
+        "d94529e9e238713ed03cbb9ab8b347d466d7684eea057c14c24d3f2c30f798eb"
+      ],
+      "newSha256": "41174da02cad191397b3ace6fa47bb3b443c3f3562495144a1897f8fa9d7a132"
+    },
+    {
+      "path": "apps/judge/src/task/self-eval/self-eval.test.cjs",
+      "oldSha256": [
+        null
+      ],
+      "newSha256": "a5d90b820e2c2e62ebb52f0bafdb60e00412203c7f855a423d35214b00b214d0"
+    }
+  ]
+}

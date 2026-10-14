@@ -5,6 +5,7 @@ import { appState } from "@/appState";
 import { Link } from "@/utils/hooks";
 import { tr, formatDate } from "./api";
 import style from "./ContestPages.module.less";
+import { ruleLabel } from "./contest-rules";
 
 export default observer(function ContestFrame({
   detail,
@@ -25,7 +26,7 @@ export default observer(function ContestFrame({
       <Header as="h1">
         {contest.title}
         <Header.Subheader>
-          <Label>{contest.rule.toUpperCase()}</Label> {formatDate(contest.startTime)} — {formatDate(contest.endTime)}
+          <Label>{ruleLabel(contest.rule)}</Label> {formatDate(contest.startTime)} — {formatDate(contest.endTime)}
         </Header.Subheader>
       </Header>
       <Menu pointing secondary stackable>
@@ -39,6 +40,9 @@ export default observer(function ContestFrame({
         )}
         <Menu.Item as={Link} href={`${base}/submissions`} active={tab === "submissions"}>
           {tr("提交记录", "Submissions")}
+        </Menu.Item>
+        <Menu.Item as={Link} href={`${base}/hacks`} active={tab === "hacks"}>
+          Hack
         </Menu.Item>
         {appState.currentUser && (
           <Menu.Item as={Link} href={`${base}/summary`} active={tab === "summary"}>

@@ -44,6 +44,8 @@ const AccessPage = observer(() => {
     users: t("用户与用户组", "Users and groups"),
     problem: t("题目", "Problems"),
     submission: t("提交与评测", "Submissions"),
+    hack: t("Hack", "Hacks"),
+    team: t("团队", "Teams"),
     discussion: t("讨论与题解", "Discussions"),
     contest: t("比赛", "Contests"),
     personal: t("题单与总结", "Study lists and summaries"),
@@ -73,6 +75,12 @@ const AccessPage = observer(() => {
             )}
           </p>
           <UserSearch onResultSelect={x => select(x.id)} />
+          <p className={style.notes}>
+            {t(
+              "题解沿用讨论权限。团队的站点权限与团队内成员、资源权限同时生效；“管理全部团队”可访问团队私人资源。Hack 权限仍受题目、提交和比赛资格及时段限制；“管理全部 Hack”允许配置参考程序和校验器，并重测非成功记录。Fake 独立控制作弊提交作废，旧的删除提交授权作为未配置时的兼容默认。",
+              "Solutions use discussion permissions. Site team permissions apply alongside team membership and resource permissions; Manage all teams grants access to private team resources. Hack permissions still require access to the problem, submission, and contest, and a valid hack window. Manage all hacks grants reference and validator configuration and rejudging of unsuccessful records. Fake separately controls invalidating cheating submissions, with legacy delete authorization as the fallback when no explicit setting exists."
+            )}
+          </p>
           {error && <Message negative content={error} />}
           {saved && <Message positive content={t("权限已保存。", "Permissions saved.")} />}
           {user && (

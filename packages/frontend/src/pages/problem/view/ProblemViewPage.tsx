@@ -58,6 +58,7 @@ import { onEnterPress } from "@/utils/onEnterPress";
 import { downloadProblemFile, downloadProblemFilesAsArchive } from "../files/ProblemFilesPage";
 import { makeToBeLocalizedText } from "@/locales";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
+import ProblemSolutions from "./ProblemSolutions";
 
 export function useProblemViewMarkdownContentPatcher(problemId: number): MarkdownContentPatcher {
   const _ = useLocalizer();
@@ -153,6 +154,8 @@ interface ProblemViewPageProps {
   requestedLocale: Locale;
   problem: ApiTypes.GetProblemResponseDto;
   ProblemTypeView: ProblemTypeView<any>;
+  showSolutions?: boolean;
+  solutionPage?: number;
 }
 
 let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
@@ -573,130 +576,136 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
       />
       <div className={style.statementView} style={{ display: inSubmitView ? "none" : null }}>
         <div className={style.leftContainer}>
-          {localizedContentUnavailableMessageVisable &&
-            ![appState.contentLocale, props.requestedLocale].includes(
-              props.problem.localizedContentsOfLocale.locale as Locale
-            ) && (
-              <Message
-                onDismiss={() => setLocalizedContentUnavailableMessageVisable(false)}
-                content={
-                  <span
-                    dangerouslySetInnerHTML={{
-                      __html: _("common.localized_content_unavailable", {
-                        display_locale: `<b>${_(`language.${props.problem.localizedContentsOfLocale.locale}`)}</b>`
-                      })
-                    }}
-                  />
-                }
-              />
-            )}
-          {props.problem.localizedContentsOfLocale.contentSections
-            .filter(section => isVisibleProblemSection(section, props.problem.samples))
-            .map((section, i) => (
-              <React.Fragment key={i}>
-                <EmojiRenderer>
-                  <Header size="large">{section.sectionTitle}</Header>
-                </EmojiRenderer>
-                {section.type === "Text" ? (
-                  <>
-                    <MarkdownContent content={section.text} patcher={problemViewMarkdownContentPatcher} />
-                  </>
-                ) : (
-                  <>
-                    <Grid columns="equal">
-                      <Grid.Row>
-                        <Grid.Column className={style.sample + " " + style.sampleInput}>
-                          <Header size="small" className={style.sampleHeader}>
-                            {_(".sample.input")}
-                            <Label
-                              size="small"
-                              as="a"
-                              pointing="below"
-                              className={style.copySample}
-                              onClick={e =>
-                                onCopySampleClick(
-                                  section.sampleId,
-                                  "input",
-                                  props.problem.samples[section.sampleId].inputData
-                                )
-                              }
-                            >
-                              {lastCopiedSample.id === section.sampleId && lastCopiedSample.type === "input"
-                                ? _(".sample.copied")
-                                : _(".sample.copy")}
-                            </Label>
-                          </Header>
-                          <Segment className={style.sampleDataSegment}>
-                            <EmojiRenderer>
-                              <pre className={style.sampleDataPre}>
-                                <code>{props.problem.samples[section.sampleId].inputData}</code>
-                              </pre>
-                            </EmojiRenderer>
-                          </Segment>
-                        </Grid.Column>
-                        <Grid.Column
-                          className={
-                            style.sample +
-                            " " +
-                            style.sampleOutput +
-                            (props.problem.samples[section.sampleId].outputData === "" ? " " + style.empty : "")
-                          }
-                        >
-                          <Header size="small" className={style.sampleHeader}>
-                            {_(".sample.output")}
-                            <Label
-                              size="small"
-                              as="a"
-                              pointing="below"
-                              className={style.copySample}
-                              onClick={e =>
-                                onCopySampleClick(
-                                  section.sampleId,
-                                  "output",
-                                  props.problem.samples[section.sampleId].outputData
-                                )
-                              }
-                            >
-                              {lastCopiedSample.id === section.sampleId && lastCopiedSample.type === "output"
-                                ? _(".sample.copied")
-                                : _(".sample.copy")}
-                            </Label>
-                          </Header>
-                          <Segment className={style.sampleDataSegment}>
-                            <EmojiRenderer>
-                              <pre className={style.sampleDataPre}>
-                                <code>{props.problem.samples[section.sampleId].outputData}</code>
-                              </pre>
-                            </EmojiRenderer>
-                          </Segment>
-                        </Grid.Column>
-                      </Grid.Row>
-                      <Grid.Row className={style.sampleExplanation}>
-                        <Grid.Column>
-                          <MarkdownContent content={section.text} patcher={problemViewMarkdownContentPatcher} />
-                        </Grid.Column>
-                      </Grid.Row>
-                    </Grid>
-                  </>
-                )}
-              </React.Fragment>
-            ))}
-          {!!props.problem.additionalFiles?.length && (
+          {props.showSolutions ? (
+            <ProblemSolutions problemId={props.problem.meta.id} page={props.solutionPage} />
+          ) : (
             <>
-              <Header size="large">{_("problem_files.header_additional_files")}</Header>
-              <List>
-                {props.problem.additionalFiles.map(file => (
-                  <List.Item key={file.uuid}>
-                    <Button
-                      basic
-                      size="small"
-                      onClick={() => downloadProblemFile(props.problem.meta.id, "AdditionalFile", file.filename, _)}
-                    >
-                      {file.filename}
-                    </Button>
-                  </List.Item>
+              {localizedContentUnavailableMessageVisable &&
+                ![appState.contentLocale, props.requestedLocale].includes(
+                  props.problem.localizedContentsOfLocale.locale as Locale
+                ) && (
+                  <Message
+                    onDismiss={() => setLocalizedContentUnavailableMessageVisable(false)}
+                    content={
+                      <span
+                        dangerouslySetInnerHTML={{
+                          __html: _("common.localized_content_unavailable", {
+                            display_locale: `<b>${_(`language.${props.problem.localizedContentsOfLocale.locale}`)}</b>`
+                          })
+                        }}
+                      />
+                    }
+                  />
+                )}
+              {props.problem.localizedContentsOfLocale.contentSections
+                .filter(section => isVisibleProblemSection(section, props.problem.samples))
+                .map((section, i) => (
+                  <React.Fragment key={i}>
+                    <EmojiRenderer>
+                      <Header size="large">{section.sectionTitle}</Header>
+                    </EmojiRenderer>
+                    {section.type === "Text" ? (
+                      <>
+                        <MarkdownContent content={section.text} patcher={problemViewMarkdownContentPatcher} />
+                      </>
+                    ) : (
+                      <>
+                        <Grid columns="equal">
+                          <Grid.Row>
+                            <Grid.Column className={style.sample + " " + style.sampleInput}>
+                              <Header size="small" className={style.sampleHeader}>
+                                {_(".sample.input")}
+                                <Label
+                                  size="small"
+                                  as="a"
+                                  pointing="below"
+                                  className={style.copySample}
+                                  onClick={e =>
+                                    onCopySampleClick(
+                                      section.sampleId,
+                                      "input",
+                                      props.problem.samples[section.sampleId].inputData
+                                    )
+                                  }
+                                >
+                                  {lastCopiedSample.id === section.sampleId && lastCopiedSample.type === "input"
+                                    ? _(".sample.copied")
+                                    : _(".sample.copy")}
+                                </Label>
+                              </Header>
+                              <Segment className={style.sampleDataSegment}>
+                                <EmojiRenderer>
+                                  <pre className={style.sampleDataPre}>
+                                    <code>{props.problem.samples[section.sampleId].inputData}</code>
+                                  </pre>
+                                </EmojiRenderer>
+                              </Segment>
+                            </Grid.Column>
+                            <Grid.Column
+                              className={
+                                style.sample +
+                                " " +
+                                style.sampleOutput +
+                                (props.problem.samples[section.sampleId].outputData === "" ? " " + style.empty : "")
+                              }
+                            >
+                              <Header size="small" className={style.sampleHeader}>
+                                {_(".sample.output")}
+                                <Label
+                                  size="small"
+                                  as="a"
+                                  pointing="below"
+                                  className={style.copySample}
+                                  onClick={e =>
+                                    onCopySampleClick(
+                                      section.sampleId,
+                                      "output",
+                                      props.problem.samples[section.sampleId].outputData
+                                    )
+                                  }
+                                >
+                                  {lastCopiedSample.id === section.sampleId && lastCopiedSample.type === "output"
+                                    ? _(".sample.copied")
+                                    : _(".sample.copy")}
+                                </Label>
+                              </Header>
+                              <Segment className={style.sampleDataSegment}>
+                                <EmojiRenderer>
+                                  <pre className={style.sampleDataPre}>
+                                    <code>{props.problem.samples[section.sampleId].outputData}</code>
+                                  </pre>
+                                </EmojiRenderer>
+                              </Segment>
+                            </Grid.Column>
+                          </Grid.Row>
+                          <Grid.Row className={style.sampleExplanation}>
+                            <Grid.Column>
+                              <MarkdownContent content={section.text} patcher={problemViewMarkdownContentPatcher} />
+                            </Grid.Column>
+                          </Grid.Row>
+                        </Grid>
+                      </>
+                    )}
+                  </React.Fragment>
                 ))}
-              </List>
+              {!!props.problem.additionalFiles?.length && (
+                <>
+                  <Header size="large">{_("problem_files.header_additional_files")}</Header>
+                  <List>
+                    {props.problem.additionalFiles.map(file => (
+                      <List.Item key={file.uuid}>
+                        <Button
+                          basic
+                          size="small"
+                          onClick={() => downloadProblemFile(props.problem.meta.id, "AdditionalFile", file.filename, _)}
+                        >
+                          {file.filename}
+                        </Button>
+                      </List.Item>
+                    ))}
+                  </List>
+                </>
+              )}
             </>
           )}
         </div>
@@ -770,6 +779,21 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
                 ) : null}
               </Menu.Item>
               <Menu.Item
+                as={Link}
+                href={{ pathname: getProblemUrl(props.problem.meta), query: { tab: "solutions" } }}
+                active={props.showSolutions}
+                icon="book"
+                name={_(".action.solutions")}
+              />
+              {props.showSolutions && (
+                <Menu.Item
+                  as={Link}
+                  href={getProblemUrl(props.problem.meta)}
+                  icon="file alternate outline"
+                  name={appState.locale === "zh_CN" ? "题目" : "Problem"}
+                />
+              )}
+              <Menu.Item
                 name={_(".action.files")}
                 icon="folder open"
                 as={Link}
@@ -777,6 +801,16 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
               />
             </Menu>
             <Menu pointing secondary vertical className={`${style.actionMenu} ${style.secondActionMenu}`}>
+              {props.problem.meta.type === ProblemType.Traditional &&
+                (props.problem.permissionOfCurrentUser.includes("Modify") ||
+                  appState.currentUserHasPrivilege("ManageHack")) && (
+                  <Menu.Item
+                    as={Link}
+                    href={`/p/id/${props.problem.meta.id}/hack-reference`}
+                    icon="code"
+                    name={appState.locale === "zh_CN" ? "标准代码 / STD" : "Reference code / STD"}
+                  />
+                )}
               {props.problem.permissionOfCurrentUser.includes("Modify") && (
                 <Menu.Item
                   name={_(".action.edit")}
@@ -899,6 +933,8 @@ export default {
         key={uuid()}
         idType="id"
         requestedLocale={requestedLocale}
+        showSolutions={request.query.tab === "solutions"}
+        solutionPage={Math.max(1, Math.min(10000, parseInt(request.query.solutionPage) || 1))}
         problem={problem}
         ProblemTypeView={await getProblemTypeView(problem.meta.type as ProblemType)}
       />
@@ -914,6 +950,8 @@ export default {
         key={uuid()}
         idType="displayId"
         requestedLocale={requestedLocale}
+        showSolutions={request.query.tab === "solutions"}
+        solutionPage={Math.max(1, Math.min(10000, parseInt(request.query.solutionPage) || 1))}
         problem={problem}
         ProblemTypeView={await getProblemTypeView(problem.meta.type as ProblemType)}
       />

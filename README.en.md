@@ -11,9 +11,14 @@
 ### Problems, contests and permissions
 
 - Chinese and English interfaces, a browser code editor, problem management, study lists, discussions and submission history.
-- NOI, IOI and ICPC contest rules, with contest permissions, scoreboards and rejudging.
+- [NOI / OI, IOI, ICPC and Strict IOI](wiki/Contest-Rules.md), with contest permissions, scoreboards and rejudging; Strict IOI combines the best result for each subtask.
 - Multiple users and groups, problem/discussion sharing, and permission controls for contests and administration.
-
+- [Private teams](wiki/Teams.md): open My teams from your own profile and join by numeric team ID. Approval-free, approval-required and invitation admission never publish a team directory. Teams include groups, delegated permissions, problems, contests, assignments, discussions and files.
+- [Solutions](wiki/Solutions.md): read and write within each problem page, preserving discussion replies and My discussions, explicit reclassification and AI solutions. The top navigation and discussion index have no separate solutions section.
+- [Fake moderation](wiki/Submission-Moderation.md): preserve cheating evidence while setting effective scores to zero and updating accepted counts, contests and assignments.
+- [Hacks](wiki/Hacks.md): start from a specific submission detail. Managers maintain the problem STD in a code editor or adopt an accepted submission as STD. The Hack page uses submission-list styling and only displays records, filters and My hacks. Successful hacks retain evidence and invalidate the target score.
+- [Self Eval](wiki/Self-Evaluation.md): optional for NOI / OI contests only, from the contest problem page. Before the contest, managers enter `make.cpp` and `std.cpp` in code editors; evaluation reuses the formal SPJ. AI can generate and bind the same program versions. Fixed hidden pretests do not affect official scores, with a default whole-contest quota of 30 attempts per participant.
+- Permission management adds team access, creation and administration, Fake, Hack viewing/creation/management, and self-evaluation. Site-wide denies and private team access remain effective.
 - Administrators can switch open, approval-based or closed registration in Site management. Saved changes take effect immediately without a restart. Reviews can be delegated, and rejected applications can later be approved with their audit history retained.
 - The footer displays the configured site name followed by “Powered by LLMOJ”, with custom copyright text preserved.
 
@@ -82,6 +87,8 @@ The updater checks compatibility, builds in staging, takes backups and switches 
 
 ## Deployment modes
 
+The teams, solutions, Fake, Hack, Strict IOI and self-evaluation release includes fixed additive database migrations and reviewed judge-task extensions. Existing installations should read [Community upgrade](wiki/Community-Upgrade.md). The upgrader rehearses fixed-schema changes on a restored database copy and refuses unknown changes or downgrades that could bypass team privacy, moderation, self-evaluation quotas or new permission rules. Automatic upgrades for the new Hack/SelfEval judge tasks support `all` installations; `web` installations require separately coordinated remote-judge versions. An unpublished complete local source tree can use the local upgrade workflow in the guide.
+
 | Mode | Components and purpose |
 | --- | --- |
 | `--role all` (default) | Web application, storage, local judging and AI execution; additional remote judges can handle ordinary submissions |
@@ -89,12 +96,15 @@ The updater checks compatibility, builds in staging, takes backups and switches 
 
 Use `all` on the web node for AI reference-solution validation and test-data generation. Remote ordinary judges do not automatically replace the local AI worker. See [distributed judging](wiki/Distributed-Judging.md) for architecture diagrams, node registration and setup.
 
+Team files have 10 GiB total space with no separate per-file cap; large files upload in chunks. Submission lists offer previews that preserve filters and link to the full page; see [Submission previews](wiki/Submissions.md). Open Members through **View all** in the home page Top Users panel.
+
 ## Documentation and development
 
 | Documentation | Topics |
 | --- | --- |
 | [Installation](wiki/Installation.md) · [Docker sources](wiki/Docker-Sources.md) | Installer options, mirrors, service management and retries |
 | [Distributed judging](wiki/Distributed-Judging.md) · [Remote judges](wiki/Remote-Judge.md) | Architecture, web/judge separation and node setup |
+| [Contest rules](wiki/Contest-Rules.md) · [Hacks](wiki/Hacks.md) · [Self-evaluation](wiki/Self-Evaluation.md) | Subtask scoring, submission-detail Hacks, NOI hidden pretests and whole-contest quotas |
 | [AI features](wiki/AI.md) · [HTTPS](wiki/HTTPS.md) | Model configuration, execution environment and encrypted site access |
 | [Development](README-DEVELOPMENT.md) · [Source package](deploy/SOURCE-PACKAGE.md) | Builds, tests and source distribution scope |
 

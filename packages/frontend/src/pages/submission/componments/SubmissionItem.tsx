@@ -12,6 +12,7 @@ import ScoreText from "@/components/ScoreText";
 import { CodeLanguage } from "@/interfaces/CodeLanguage";
 import { getProblemDisplayName, getProblemIdString, getProblemUrl } from "@/pages/problem/utils";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
+import { SubmissionPreviewLink } from "../SubmissionPreview";
 
 function parseSubmissionMeta(submission: ApiTypes.SubmissionMetaDto) {
   return {
@@ -87,15 +88,18 @@ export const SubmissionItem: React.FC<SubmissionItemProps> = props => {
     <Table.Row className={style[props.page + "Page"]}>
       {(props.statusPopup || (x => x))(
         <Table.Cell className={style.columnStatus} textAlign="left">
-          <Link href={props.page !== "submission" ? submissionLink : null}>
+          <SubmissionPreviewLink
+            submissionId={submission.id}
+            href={props.page !== "submission" ? submissionLink : null}
+          >
             <StatusText status={submission.status} statusText={props.statusText} />
-          </Link>
+          </SubmissionPreviewLink>
         </Table.Cell>
       )}
       <Table.Cell className={style.columnScore}>
-        <Link href={props.page !== "submission" ? submissionLink : null}>
+        <SubmissionPreviewLink submissionId={submission.id} href={props.page !== "submission" ? submissionLink : null}>
           <ScoreText score={submission.score || 0} />
-        </Link>
+        </SubmissionPreviewLink>
       </Table.Cell>
       <Table.Cell className={style.columnProblemAndSubmitter} textAlign="left">
         <div className={style.problem}>
@@ -132,7 +136,9 @@ export const SubmissionItem: React.FC<SubmissionItemProps> = props => {
               {Object.values(CodeLanguage).includes(submission.codeLanguage as any) && (
                 <>
                   {props.page !== "submission" ? (
-                    <Link href={submissionLink}>{_(`code_language.${submission.codeLanguage}.name`)}</Link>
+                    <SubmissionPreviewLink submissionId={submission.id} href={submissionLink}>
+                      {_(`code_language.${submission.codeLanguage}.name`)}
+                    </SubmissionPreviewLink>
                   ) : (
                     _(`code_language.${submission.codeLanguage}.name`)
                   )}
@@ -219,15 +225,17 @@ export const SubmissionItemMobile: React.FC<SubmissionItemMobileProps> = props =
         <div className={style.flexContainer}>
           <div>
             <div>
-              <Link href={submissionLink}>
+              <SubmissionPreviewLink submissionId={submission.id} href={submissionLink}>
                 <StatusText status={submission.status} statusText={props.statusText} />
                 <ScoreText score={submission.score || 0} />
-              </Link>
+              </SubmissionPreviewLink>
             </div>
             <div>
               {Object.values(CodeLanguage).includes(submission.codeLanguage as any) && (
                 <>
-                  <Link href={submissionLink}>{_(`code_language.${submission.codeLanguage}.name`)}</Link>
+                  <SubmissionPreviewLink submissionId={submission.id} href={submissionLink}>
+                    {_(`code_language.${submission.codeLanguage}.name`)}
+                  </SubmissionPreviewLink>
                   &nbsp;/&nbsp;
                 </>
               )}

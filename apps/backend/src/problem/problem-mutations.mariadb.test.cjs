@@ -14,7 +14,7 @@ require.extensions['.ts'] = (module, filename) => {
   } }).outputText, filename);
 };
 String.prototype.format ||= function (...args) { return require('node:util').format(this, ...args); };
-const { DataSource, EntitySchema } = require('typeorm');
+const { DataSource, EntitySchema, Repository } = require('typeorm');
 const { ProblemService } = require('./problem.service.ts');
 const { ProblemEntity } = require('./problem.entity.ts');
 const { ProblemSampleEntity } = require('./problem-sample.entity.ts');
@@ -150,20 +150,26 @@ test('problem mutations preserve concurrent fields and file ownership (real Mari
       const p = await fixture(), type = ProblemFileType.TestData;
       await files.save({ problemId: p.id, type, filename: 'first.in', uuid: crypto.randomUUID() });
       const first = await files.findOneBy({ problemId: p.id, type, filename: 'first.in' });
-      svc.problemFileRepository = { findOneBy: where => files.findOneBy(where), update: async (where, changes) => {
+      const update = Repository.prototype.update;
+      Repository.prototype.update = async function (where, changes) {
+        if (this.metadata.target !== ProblemFileEntity) return update.call(this, where, changes);
         await files.save({ problemId: p.id, type, filename: changes.filename, uuid: crypto.randomUUID() });
-        return files.update(where, changes);
-      } };
+        return update.call(this, where, changes);
+      };
       try { assert.equal(await svc.renameProblemFile(p, type, 'first.in', 'race.in'), 'FILE_ALREADY_EXISTS'); }
-      finally { svc.problemFileRepository = files; }
+      finally { Repository.prototype.update = update; }
       assert.equal((await files.findOneBy({ problemId: p.id, type, filename: 'first.in' })).uuid, first.uuid);
     });
     await run('rename unexpected database error remains an error', async () => {
       const p = await fixture(), type = ProblemFileType.TestData;
       await files.save({ problemId: p.id, type, filename: 'first.in', uuid: crypto.randomUUID() });
-      svc.problemFileRepository = { findOneBy: where => files.findOneBy(where), update: async () => { throw new Error('unexpected DB failure'); } };
+      const update = Repository.prototype.update;
+      Repository.prototype.update = async function (where, changes) {
+        if (this.metadata.target === ProblemFileEntity) throw new Error('unexpected DB failure');
+        return update.call(this, where, changes);
+      };
       try { await assert.rejects(svc.renameProblemFile(p, type, 'first.in', 'new.in'), /unexpected DB failure/); }
-      finally { svc.problemFileRepository = files; }
+      finally { Repository.prototype.update = update; }
     });
   } finally {
     if (db.isInitialized) {

@@ -4,8 +4,18 @@
 
 LLMOJ is an AI-assisted online judge based on LibreOJ. Start with [Configuration overview](Configuration.md) to find a setting, or the installation guide for a new deployment. After changing CPU or RAM capacity, follow [Judge configuration and resizing](Judge-Configuration.md) to update execution slots, CPU affinity, and systemd units together.
 
+Open the member list (`/u`) using **View all** at the top-right of the site's **Top Users** panel. Members no longer appears in the top navigation. The button is shown only to users with the `ViewUsers` privilege.
+
 | Topic | Page |
 | --- | --- |
+| Private teams from your profile, ID-based admission, review and resources | [Teams](Teams.md) |
+| Solutions inside problem pages, My discussions and verified AI classification | [Solutions](Solutions.md) |
+| Submission previews, live feedback, permissions and full-page links | [Submissions](Submissions.md) |
+| Zero-score cheating moderation, retained evidence and rejudge recovery | [Fake moderation](Submission-Moderation.md) |
+| Scoring and feedback for NOI / OI, IOI, ICPC and Strict IOI | [Contest rules](Contest-Rules.md) |
+| Submission-detail Hacks, STD code editor, results and filters | [Hacks](Hacks.md) |
+| Optional NOI Self Eval, make/std editors, formal SPJ and whole-contest quotas | [Self-evaluation](Self-Evaluation.md) |
+| Database and judge-task migration for community and contest features | [Community upgrade](Community-Upgrade.md) |
 | Website registration settings and delegated review | [Registration approval](Registration-Approval.md) |
 | Preserve configuration/data while upgrading; compatibility and rollback | [Upgrade](Upgrade.md) |
 | Installation entry points, every flag, and retries | [Installation](Installation.md) |

@@ -18,10 +18,15 @@ function load(file, overrides) {
   return module.exports;
 }
 const {withoutTestData} = load('submission-redaction.ts', {});
+const {submissionDisplayProgress} = load('submission-display-progress.ts', {
+  '@libreoj/judge-protocol':{SubmissionStatus:{Fake:'Fake'}},
+  './submission-progress.interface':{SubmissionProgressType:{Finished:'Finished'}}
+});
 const {SubmissionProgressGateway:Gateway, SubmissionProgressSubscriptionType:T} = load('submission-progress.gateway.ts', {
   '@nestjs/common':{Inject:decorator,forwardRef:x=>x},
   '@nestjs/websockets':{WebSocketGateway:decorator,WebSocketServer:decorator},
   'jsonwebtoken':jwt, 'jsondiffpatch':{diff}, './submission-redaction':{withoutTestData},
+  './submission-display-progress':{submissionDisplayProgress},
   './submission.service':{SubmissionPermissionType:{View:'View'}},
   './submission-progress.interface':{SubmissionProgressType:{Finished:'Finished'}},
   './submission-progress.service':{SubmissionEventType:{Progress:0,Deleted:2}},
@@ -31,11 +36,12 @@ const {SubmissionProgressGateway:Gateway, SubmissionProgressSubscriptionType:T} 
   '../logger':{logger:{log:noop,error:noop}}
 });
 function fixture() {
-  const state = {view:true,site:true,data:true,session:true,problem:true,code:true,fail:false};
+  const state = {view:true,site:true,data:true,session:true,problem:true,code:true,team:true,fail:false};
   const records = new Map([[74,{id:74,problemId:1,submitterId:5,isPublic:true,status:'Pending'}]]);
   const metrics = {inc:noop,dec:noop};
   const g = new Gateway({config:{security:{sessionSecret:'test-fixture-only'}}}, {
     findSubmissionById:async id=>records.get(id),
+    userHasTeamResourceAccess:async()=>state.team,
     userHasPermission:async (user, submission, type)=> {assert.equal(type,'View');if(state.fail)throw Error('storage unavailable');return state.view && state.code && (submission.isPublic || user?.id===submission.submitterId || state.problem);},
     getSubmissionBasicMeta:async sub=>({status:sub.status}),
     getSubmissionDetail:async()=>({result:{progressType:'Finished',testcaseResult:{a:{status:'Accepted',input:'private input',output:'private answer'}}}})
@@ -135,4 +141,20 @@ test('contest object permission cannot bypass revoked global ViewSubmission',asy
   const {g,key,socket,state,records,messages}=fixture();records.get(74).contestId=14;g.submissionService.userHasPermission=async()=>true;
   const s=socket(key());await g.handleConnection(s);state.view=false;await g.onSubmissionEvent(74,0,progress);
   assert.equal(s.connected,false);assert.equal(messages.length,0);
+});
+
+
+test('team membership revocation stops public metadata and own detailed streams',async()=>{
+  for(const type of [T.Meta,T.Detail,T.DetailWithoutTestData]){
+    const {g,key,socket,state,messages}=fixture();const s=socket(key(type));await g.handleConnection(s);state.team=false;
+    await g.onSubmissionEvent(74,0,progress);assert.equal(s.connected,false);assert.equal(messages.length,0);
+  }
+});
+test('reconnecting to a fake shows an effective finished zero without changing the original result',async()=>{
+  const {g,key,socket,records,messages}=fixture();records.get(74).status='Fake';
+  const original={progressType:'Finished',status:'Accepted',score:100,subtasks:[{score:100}]};
+  g.submissionService.getSubmissionDetail=async()=>({result:original});
+  const s=socket(key());await g.handleConnection(s);assert.equal(messages.length,1);
+  assert.equal(messages[0].delta[0].progressDetail.status,'Fake');assert.equal(messages[0].delta[0].progressDetail.score,0);
+  assert.equal(original.status,'Accepted');assert.equal(original.score,100);
 });

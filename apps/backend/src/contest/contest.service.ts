@@ -9,13 +9,20 @@ import { createHash } from "crypto";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 
-import { DataSource, In } from "typeorm";
+import { DataSource, In, Brackets } from "typeorm";
 
 import { ContestEntity } from "./contest.entity";
 import { ContestProblemEntity } from "./contest-problem.entity";
 import { ContestSummaryEntity } from "./contest-summary.entity";
 import { scoreContest } from "./contest-scoring";
 import { contestSubmissionFeedback } from "./contest-feedback";
+import {
+  isContestRule,
+  contestHasBlindFeedback,
+  contestHasLiveScoreboard,
+  contestHasDetailedSelfFeedback,
+  normalizeContestRuleOptions
+} from "./contest-rules";
 
 import { normalizeContestLanguages, isContestLanguageAllowed } from "./contest-languages";
 
@@ -28,8 +35,10 @@ import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.
 import { ProblemService, ProblemPermissionType } from "../problem/problem.service";
 import { ProblemEntity, ProblemType } from "../problem/problem.entity";
 import { ProblemFileType } from "../problem/problem-file.entity";
-import { SubmissionService } from "../submission/submission.service";
+import { SubmissionService, SubmissionPermissionType } from "../submission/submission.service";
+import { teamResourceAccess, teamResourceVisibilitySql } from "../team/team-access";
 import { SubmissionEntity } from "../submission/submission.entity";
+import { SubmissionDetailEntity } from "../submission/submission-detail.entity";
 import { FileService, MinioSignFor } from "../file/file.service";
 import { FileEntity } from "../file/file.entity";
 import { Locale } from "../common/locale.type";
@@ -60,6 +69,9 @@ export class ContestService {
   ) {}
 
   async manager(user: UserEntity, contest: ContestEntity) {
+    const team = await teamResourceAccess(this.db, user, "contest", contest.id, "contests");
+    if (team !== null)
+      return team && (await this.privileges.permissionDecision(user, UserPrivilegeType.EditContest, true));
     return (
       !!user &&
       (user.isAdmin ||
@@ -75,7 +87,10 @@ export class ContestService {
     if (!contest) throw new NotFoundException();
     if (!(await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewContest))) throw new ForbiddenException();
     const manager = await this.manager(user, contest);
+    const team = await teamResourceAccess(this.db, user, "contest", contest.id);
+    if (team === false) throw new ForbiddenException();
     if (
+      team === null &&
       !manager &&
       (!(await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewContest)) ||
         (!contest.isPublic && !(await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewHiddenContest))))
@@ -99,16 +114,23 @@ export class ContestService {
     if (!manage) {
       if (!(await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewContest)))
         throw new ForbiddenException();
-      query.where("c.isPublic = true");
-      if (user && (await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewHiddenContest)))
-        query.orWhere("1 = 1");
+      let extra: "all" | "owner" | null = null;
+      if (user && (await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewHiddenContest))) extra = "all";
       // Ownership or appointment grants private access only while editing is permitted.
-      else if (user && (await this.privileges.userHasPrivilege(user, UserPrivilegeType.EditContest)))
-        query.orWhere("c.ownerId = :userId OR JSON_CONTAINS(c.adminIds, :jsonId)", {
-          userId: user.id,
-          jsonId: String(user.id)
-        });
+      else if (user && (await this.privileges.userHasPrivilege(user, UserPrivilegeType.EditContest))) extra = "owner";
+      query.where(
+        new Brackets(legacy => {
+          legacy.where("c.isPublic = true");
+          if (extra === "all") legacy.orWhere("1 = 1");
+          else if (extra === "owner")
+            legacy.orWhere("c.ownerId = :userId OR JSON_CONTAINS(c.adminIds, :jsonId)", {
+              userId: user.id,
+              jsonId: String(user.id)
+            });
+        })
+      );
     }
+    query.andWhere(teamResourceVisibilitySql("contest", "c.id", user));
     const [contests, total] = await query
       .orderBy("c.startTime", "DESC")
       .skip((page - 1) * 30)
@@ -127,7 +149,8 @@ export class ContestService {
     const ended = Date.now() >= +contest.endTime;
     const problems = started || manager ? await this.problemList(contest.id) : [];
     // Running NOI contests conceal verdicts even when aggregate statistics are enabled.
-    const showStatistics = problems.length && (manager || ended || (contest.rule !== "noi" && !contest.hideStatistics));
+    const showStatistics =
+      problems.length && (manager || ended || (contestHasLiveScoreboard(contest.rule) && !contest.hideStatistics));
     const submissions = problems.length
       ? await this.db
           .getRepository(SubmissionEntity)
@@ -139,7 +162,7 @@ export class ContestService {
           })
           .getMany()
       : [];
-    const scores = scoreContest(contest.rule, contest.startTime, problems, submissions);
+    const scores = await this.score(contest, problems, submissions);
     const own =
       user && (await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewSubmission))
         ? scores.find(row => row.userId === user.id)
@@ -163,7 +186,7 @@ export class ContestService {
       problems.map(p => {
         const entry = own?.problems[p.id];
         if (!entry) return [p.id, null];
-        if (contest.rule === "noi" && !manager && !ended)
+        if (contestHasBlindFeedback(contest.rule) && !manager && !ended)
           return [
             p.id,
             {
@@ -187,7 +210,7 @@ export class ContestService {
         (await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewContestScoreboard)) &&
         (manager ||
           ended ||
-          contest.rule === "acm" ||
+          contestHasLiveScoreboard(contest.rule) ||
           (await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewHiddenContestScoreboard))),
       canSubmit:
         !!user &&
@@ -206,13 +229,19 @@ export class ContestService {
       await this.login(user, UserPrivilegeType.CreateContest);
       contest = this.db.getRepository(ContestEntity).create({ ownerId: user.id, createdAt: new Date() });
     }
-    if (!["noi", "ioi", "acm"].includes(data.rule)) throw new BadRequestException("Invalid rule");
+    if (!isContestRule(data.rule)) throw new BadRequestException("Invalid rule");
     if (id && data.rule !== contest.rule && (await this.db.getRepository(SubmissionEntity).countBy({ contestId: id })))
       throw new BadRequestException("Cannot change rule after submissions");
     const start = new Date(data.startTime);
     const end = new Date(data.endTime);
     if (!Number.isFinite(+start) || !Number.isFinite(+end) || +start >= +end)
       throw new BadRequestException("Invalid time range");
+    let ruleOptions: ContestEntity["ruleOptions"];
+    try {
+      ruleOptions = normalizeContestRuleOptions(data.ruleOptions ?? contest.ruleOptions, start, end, data.rule);
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
     const languages = normalizeContestLanguages(data.languages);
     if (
       !Array.isArray(data.adminIds) ||
@@ -230,9 +259,13 @@ export class ContestService {
       subtitle: text(data.subtitle ?? "", 20000),
       description: text(data.description ?? "", 200000),
       rule: data.rule,
+      ruleOptions,
       startTime: start,
       endTime: end,
-      isPublic: data.isPublic === true,
+      isPublic:
+        id && (await teamResourceAccess(this.db, user, "contest", contest.id)) !== null
+          ? contest.isPublic
+          : data.isPublic === true,
       hideStatistics: data.hideStatistics === true,
       adminIds: [...new Set(data.adminIds)],
       languages
@@ -608,7 +641,7 @@ export class ContestService {
     const detail = await this.submissions.getSubmissionDetail(s);
     // Full judge results contain filenames and checker output, which are never public contest metadata.
     const canCode = manager || user?.id === s.submitterId;
-    const canResults = manager || ended || (contest.rule === "ioi" && canCode);
+    const canResults = manager || ended || (contestHasDetailedSelfFeedback(contest.rule) && canCode);
     const { result } = detail;
     const subtasks = canResults
       ? result?.subtasks?.map(st => ({
@@ -624,8 +657,47 @@ export class ContestService {
       submission: this.safeSubmission(s, contest, manager),
       content: canCode ? detail.content : null,
       compile: canCode && (manager || s.status === "CompilationError") ? result?.compile : undefined,
-      subtasks
+      subtasks,
+      permissionFake: manager && (await this.submissions.userHasPermission(user, s, SubmissionPermissionType.Fake)),
+      permissionRejudge:
+        manager && (await this.submissions.userHasPermission(user, s, SubmissionPermissionType.Rejudge))
     };
+  }
+
+  private async score(
+    contest: ContestEntity,
+    problems: { id: number; weight: number }[],
+    submissions: SubmissionEntity[]
+  ) {
+    const detailRows =
+      contest.rule === "strictioi" && submissions.length
+        ? await this.db.getRepository(SubmissionDetailEntity).findBy({ submissionId: In(submissions.map(s => s.id)) })
+        : [];
+    const details = new Map(detailRows.map(detail => [detail.submissionId, detail.result]));
+    return scoreContest(
+      contest.rule,
+      contest.startTime,
+      problems,
+      submissions.map(s => ({ ...s, subtasks: details.get(s.id)?.subtasks }))
+    );
+  }
+
+  async hackAccess(user: UserEntity, contest: ContestEntity): Promise<{ allowed: boolean; reason?: string }> {
+    const access = await this.get(user, contest.id, true);
+    contest = access.contest;
+    if (!user || !(await this.privileges.userHasPrivilege(user, UserPrivilegeType.ParticipateContest)))
+      return { allowed: false, reason: "Contest participation is not permitted" };
+    const options = contest.ruleOptions ?? {};
+    if (options.hackEnabled !== true) return { allowed: false, reason: "Hacks are disabled for this contest" };
+    if (access.manager) return { allowed: true };
+    const now = Date.now();
+    // Hidden-score formats cannot leak competitors' results through live hack attempts.
+    if (now < +contest.endTime && !contestHasLiveScoreboard(contest.rule))
+      return { allowed: false, reason: "Hacks open after the contest ends" };
+    const begin = options.hackStartTime ? +new Date(options.hackStartTime) : +contest.endTime;
+    const end = options.hackEndTime ? +new Date(options.hackEndTime) : Infinity;
+    if (now < begin || now >= end) return { allowed: false, reason: "The hack window is closed" };
+    return { allowed: true };
   }
 
   async ranklist(user: UserEntity, id: number) {
@@ -635,7 +707,7 @@ export class ContestService {
     if (
       !manager &&
       Date.now() < +contest.endTime &&
-      contest.rule !== "acm" &&
+      !contestHasLiveScoreboard(contest.rule) &&
       !(await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewHiddenContestScoreboard))
     )
       throw new ForbiddenException("Ranklist is hidden during this contest");
@@ -646,7 +718,7 @@ export class ContestService {
       .where("s.contestId = :id", { id })
       .andWhere("s.submitTime >= :start AND s.submitTime < :end", { start: contest.startTime, end: contest.endTime })
       .getMany();
-    const rows = scoreContest(contest.rule, contest.startTime, problems, submissions);
+    const rows = await this.score(contest, problems, submissions);
     const users = rows.length
       ? await this.db.getRepository(UserEntity).findBy({ id: In(rows.map(r => r.userId)) })
       : [];
@@ -691,9 +763,30 @@ export class ContestService {
     const rows = await this.db
       .getRepository(SubmissionEntity)
       .findBy(submissionId ? { contestId: id, id: submissionId } : { contestId: id });
-    // eslint-disable-next-line no-await-in-loop -- Keep transaction operations and permission checks in their existing order.
-    for (const s of rows) await this.submissions.rejudgeSubmission(s);
-    return { count: rows.length };
+    let count = 0;
+    for (const s of rows) {
+      if (["Fake", "Hacked"].includes(s.status)) {
+        if (!submissionId) continue;
+        // eslint-disable-next-line no-await-in-loop
+        if (!(await this.submissions.userHasPermission(user, s, SubmissionPermissionType.Rejudge)))
+          throw new ForbiddenException();
+      }
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await this.submissions.rejudgeSubmission(s, user);
+      } catch (error) {
+        // Concurrent invalidation must remain in effect during a mass rejudge.
+        let isInvalidated = false;
+        if (!submissionId && error instanceof ForbiddenException) {
+          // eslint-disable-next-line no-await-in-loop -- Recheck the raced record before deciding to skip it.
+          isInvalidated = ["Fake", "Hacked"].includes((await this.submissions.findSubmissionById(s.id))?.status);
+        }
+        if (isInvalidated) continue;
+        throw error;
+      }
+      count++;
+    }
+    return { count };
   }
 
   async summary(user: UserEntity, id: number, data?: ContestRequestData) {
@@ -733,6 +826,8 @@ export class ContestService {
   }
 
   async delete(user: UserEntity, id: number) {
+    if ((await teamResourceAccess(this.db, user, "contest", id)) !== null)
+      throw new BadRequestException("Archive team contests from the team page");
     if (!(await this.get(user, id)).manager) throw new ForbiddenException();
     for (const s of await this.db.getRepository(SubmissionEntity).findBy({ contestId: id })) {
       // eslint-disable-next-line no-await-in-loop -- Finish each deletion before processing the next submission.

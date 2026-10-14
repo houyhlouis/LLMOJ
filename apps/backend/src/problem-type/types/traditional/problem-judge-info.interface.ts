@@ -7,6 +7,18 @@ export interface ProblemJudgeInfoTraditional extends ProblemJudgeInfo {
    * The default time / memory limit
    * One is ignored in a subtask if the it defined its own default
    */
+  /** Immutable copies of the same programs that produced active formal data. */
+  selfEval?: {
+    generatorFile: string;
+    standardFile: string;
+    validatorFile?: string;
+    generatorSha256: string;
+    standardSha256: string;
+    validatorSha256?: string;
+    subtaskIds: number[];
+    standardFileIo?: { inputFilename: string; outputFilename: string };
+  };
+
   timeLimit: number;
   memoryLimit: number;
 

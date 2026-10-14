@@ -1,9 +1,8 @@
 @import "common/common.module.less";
 
 .leftContainer {
-  height: calc(100vh - 105px);
-  position: sticky !important;
-  top: calc(49px + 28px + 0px);
+  height: auto;
+  position: static !important;
 }
 
 .header {
@@ -21,15 +20,15 @@
 }
 
 .yamlCodeBox {
-  height: 100%;
+  height: auto;
 
   .yamlSegment {
     margin-top: 14px !important;
-    height: calc(100% - 50px);
+    height: auto;
 
     pre {
-      overflow-y: auto !important;
-      overflow-y: overlay !important;
+      height: auto !important;
+      overflow-y: hidden !important;
     }
   }
 }

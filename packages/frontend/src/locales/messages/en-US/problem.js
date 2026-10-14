@@ -22,6 +22,7 @@ return {
     accepted: "AC."
   },
   action: {
+    solutions: "Solutions",
     submit: "Submit",
     login_to_submit: "Login to submit",
     submission: "Submissions",

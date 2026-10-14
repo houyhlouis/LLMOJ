@@ -11,8 +11,14 @@
 ### 题库、竞赛与权限管理
 
 - 中英文界面与浏览器代码编辑器，支持题目管理、题单、讨论及提交记录查询。
-- 支持 NOI、IOI、ICPC 赛制，提供比赛权限、排行榜和重评功能。
+- 支持 [NOI / OI、IOI、ICPC 与严格 IOI 赛制](wiki/Contest-Rules.zh-CN.md)，提供比赛权限、排行榜和重评功能；严格 IOI 按子任务合并历次最高分。
 - 支持多用户、用户组、题目与讨论授权，以及比赛和管理功能的权限控制。
+- [私人团队](wiki/Teams.zh-CN.md)：从自己的个人主页进入“我的团队”，通过团队编号加入；免审核、申请审核或邀请均不公开团队目录，支持分组与分权、题库、比赛、题单作业、讨论和文件共享。
+- [题解](wiki/Solutions.zh-CN.md)：在题目页内查看和撰写，保留讨论回复与“我的讨论”，支持旧讨论明确分类和 AI 题解；顶部导航和讨论区不增加独立题解专区。
+- [Fake 评测](wiki/Submission-Moderation.zh-CN.md)：保留作弊证据并将有效成绩归零，同步更新通过题统计、比赛和作业计分。
+- [Hack](wiki/Hacks.zh-CN.md)：从具体提交详情提供反例；管理员在代码编辑器中维护题目 STD，或将已通过提交设为 STD。Hack 页沿用提交列表样式，仅展示记录、筛选和“我的 Hack”；成功后保留证据并作废目标成绩。
+- [Self Eval](wiki/Self-Evaluation.zh-CN.md)：仅 NOI / OI 比赛可选择开启，入口在比赛题目页；赛前在代码编辑器填写 `make.cpp`、`std.cpp`，沿用正式 SPJ，AI 也可生成并绑定同版程序。固定隐藏预测试集不计正式成绩，默认每位选手全场最多 30 次。
+- 权限管理新增团队访问与创建、团队管理、Fake、Hack 查看／创建／管理和自测权限，网站级禁止规则与团队私有内容限制依然生效。
 - 管理员可在“网站管理”网页切换开放注册、注册审核或关闭注册，保存立即生效，无需重启；也可委派审核，已拒绝申请可改为通过。
 - 页脚随站点名称显示“站点名称 Powered by LLMOJ”，保留自定义版权说明。
 
@@ -81,12 +87,16 @@ curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/upgrade.zh-CN
 
 ## 部署模式
 
+团队、题解、Fake、Hack、严格 IOI 与自测版本包含固定增量数据库迁移和经过审核的评测任务扩展；已有实例请阅读 [社区功能升级](wiki/Community-Upgrade.zh-CN.md)。升级器会检查固定结构、在数据库副本上验证后执行，禁止未知改表和可能绕过团队访问、作弊处罚、自测额度或新权限规则的旧版回滚。新增 Hack／自测评测任务的自动升级仅支持 `all`；`web` 部署须另行协调远程评测机版本。未上传 GitHub 的源码可使用教程中的本地完整源码升级流程。
+
 | 模式 | 包含内容与用途 |
 | --- | --- |
 | `--role all`（默认） | 网页、存储、本机评测和 AI 执行环境；可再添加远程评测机分担普通提交 |
 | `--role web` | 网页和存储，不构建本机 rootfs；普通提交需接入远程评测机 |
 
 需要 AI 标程验证和数据生成时，网页节点使用 `all`。远程普通评测机不会自动替代本机 AI worker。详细架构图、节点注册和部署步骤见 [分布式评测](wiki/Distributed-Judging.zh-CN.md)。
+
+团队文件总空间为 10 GiB，不设独立单文件限制，较大文件自动分块上传。提交列表支持保留筛选位置的悬浮详情及原页面入口，参见 [提交预览](wiki/Submissions.zh-CN.md)。Members 从首页排名面板右上角的“查看全部”进入。
 
 ## 文档与开发
 
@@ -95,6 +105,7 @@ curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/upgrade.zh-CN
 | [安装与配置](wiki/Installation.zh-CN.md) · [Docker 源](wiki/Docker-Sources.zh-CN.md) | 安装参数、镜像源、服务管理与重试 |
 | [分布式评测](wiki/Distributed-Judging.zh-CN.md) · [独立评测机](wiki/Remote-Judge.zh-CN.md) | 系统架构、网页与评测分离、节点接入 |
 | [注册审核](wiki/Registration-Approval.zh-CN.md) · [安全升级](wiki/Upgrade.zh-CN.md) | 网页注册设置、委派审核、保留配置升级与回滚 |
+| [比赛赛制](wiki/Contest-Rules.zh-CN.md) · [Hack](wiki/Hacks.zh-CN.md) · [自测](wiki/Self-Evaluation.zh-CN.md) | 子任务计分、提交详情 Hack、NOI 隐藏预测试与全场额度 |
 | [AI 功能](wiki/AI.zh-CN.md) · [HTTPS](wiki/HTTPS.zh-CN.md) | 模型配置、执行环境与站点加密访问 |
 | [开发说明](README-DEVELOPMENT.zh-CN.md) · [源码包](deploy/SOURCE-PACKAGE.zh-CN.md) | 构建、测试与发布文件范围 |
 

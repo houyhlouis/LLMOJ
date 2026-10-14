@@ -4,8 +4,18 @@
 
 LLMOJ 是基于 LibreOJ 的 AI 辅助在线评测平台。从 [配置总览](Configuration.zh-CN.md) 查找配置项，首次部署从安装教程开始。CPU 核心数或内存调整后，请按 [评测配置与扩缩容](Judge-Configuration.zh-CN.md) 同步更新执行槽、CPU 绑定和 systemd 单元。
 
+用户列表从网站首页“排名”面板右上角的“查看全部”按钮进入（`/u`），顶部导航栏不再提供用户入口。该按钮仅对具有 `ViewUsers` 权限的用户显示。
+
 | 场景 | 页面 |
 | --- | --- |
+| 个人主页的私人团队、编号加入、审核、分组与资源 | [团队](Teams.zh-CN.md) |
+| 题目页内题解、我的讨论及旧 AI 题解分类 | [题解](Solutions.zh-CN.md) |
+| 提交列表悬浮详情、实时结果、权限与原页面入口 | [提交预览](Submissions.zh-CN.md) |
+| 作弊记录归零、证据保留和管理员重评恢复 | [Fake 评测](Submission-Moderation.zh-CN.md) |
+| NOI / OI、IOI、ICPC 与严格 IOI 的计分和反馈 | [比赛赛制](Contest-Rules.zh-CN.md) |
+| 提交详情 Hack、题目 STD 编辑、结果列表与筛选 | [Hack](Hacks.zh-CN.md) |
+| NOI 比赛可选 Self Eval、make/std 编辑、正式 SPJ 与全场额度 | [自测](Self-Evaluation.zh-CN.md) |
+| 社区功能、比赛和评测任务扩展的迁移与升级兼容 | [社区功能升级](Community-Upgrade.zh-CN.md) |
 | 网页注册设置、委派审核、待审核申请限制 | [注册审核](Registration-Approval.zh-CN.md) |
 | 保留配置与数据升级、兼容检查和回滚 | [一键升级](Upgrade.zh-CN.md) |
 | 安装入口、全部参数和安装重试 | [Installation](Installation.zh-CN.md) |

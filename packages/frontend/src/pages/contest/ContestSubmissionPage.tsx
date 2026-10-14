@@ -1,31 +1,98 @@
 import React, { useEffect, useState } from "react";
-import { Button, Header, Message, Table, Segment } from "semantic-ui-react";
+import { Button, Header, Message, Table, Segment, Popup } from "semantic-ui-react";
+import api from "@/api";
+import { appState } from "@/appState";
 import { defineRoute } from "@/AppRouter";
 import ContestFrame from "./ContestFrame";
 import { callContest, tr, formatDate, contestStatusText, contestLanguageName } from "./api";
 import { useLocalizer } from "@/utils/hooks";
+import HackAction from "@/pages/hack/HackAction";
+import SubmissionReferenceButton from "@/pages/hack/SubmissionReferenceButton";
+import hackStyle from "@/pages/hack/HackPages.module.less";
 
-function ContestSubmissionPage({ detail, initial }: { detail: any; initial: any }) {
+function ContestSubmissionPage({ detail, initial, embedded }: { detail: any; initial: any; embedded?: boolean }) {
   const localizeLanguage = useLocalizer("code_language"),
     localizeSubmission = useLocalizer("submission");
   const [data, setData] = useState(initial),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [operationPending, setOperationPending] = useState(false),
+    [fakePopupOpen, setFakePopupOpen] = useState(false),
+    [restorePopupOpen, setRestorePopupOpen] = useState(false);
   const id = detail.contest.id,
     submissionId = initial.submission.id;
   useEffect(() => {
+    let live = true,
+      refreshing = false;
     const interval = setInterval(async () => {
+      if (!live || refreshing) return;
+      refreshing = true;
       try {
-        setData(await callContest("submission", { id, submissionId }));
+        const result = await callContest("submission", { id, submissionId });
+        if (live) setData(result);
       } catch (e) {
-        setError(e.message);
+        if (live) setError(e.message);
+      } finally {
+        refreshing = false;
       }
     }, 3000);
-    return () => clearInterval(interval);
+    return () => {
+      live = false;
+      clearInterval(interval);
+    };
   }, [id, submissionId]);
-  return (
-    <ContestFrame detail={detail} tab="submissions">
-      <Header as="h2">#{submissionId}</Header>
+  async function rejudge() {
+    if (operationPending) return;
+    setOperationPending(true);
+    try {
+      await callContest("rejudge", { id, submissionId });
+      setData(await callContest("submission", { id, submissionId }));
+      setError("");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setRestorePopupOpen(false);
+      setOperationPending(false);
+    }
+  }
+  async function fake() {
+    if (operationPending) return;
+    setOperationPending(true);
+    try {
+      const { requestError, response } = await api.submission.fakeSubmission({ submissionId });
+      if (requestError) setError(requestError(localizeSubmission));
+      else if (response.error) setError(localizeSubmission(`.error.${response.error}`));
+      else {
+        setData(await callContest("submission", { id, submissionId }));
+        setError("");
+      }
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setFakePopupOpen(false);
+      setOperationPending(false);
+    }
+  }
+  const content = (
+    <>
+      {!embedded && <Header as="h2">#{submissionId}</Header>}
+      <div className={hackStyle.submissionActions}>
+        <HackAction submissionId={submissionId} />
+        <SubmissionReferenceButton submissionId={submissionId} status={data.submission.status} />
+      </div>
       {error && <Message negative>{error}</Message>}
+      {data.submission.status === "Fake" && (
+        <Message negative icon="ban" content={localizeSubmission(".fake_notice")} />
+      )}
+      {data.submission.status === "Hacked" && (
+        <Message
+          negative
+          icon="bug"
+          content={tr(
+            "有效 Hack 已使此提交失效，实际得分为 0。",
+            "A valid hack has invalidated this submission; its effective score is 0."
+          )}
+        />
+      )}
       <p>
         {formatDate(data.submission.submitTime)} · {contestLanguageName(data.submission.codeLanguage, localizeLanguage)}{" "}
         · {contestStatusText(data.submission.status)}
@@ -75,28 +142,59 @@ function ContestSubmissionPage({ detail, initial }: { detail: any; initial: any 
           </Table>
         </React.Fragment>
       ))}
-      {detail.manager && (
-        <Button
-          onClick={async () => {
-            try {
-              await callContest("rejudge", { id, submissionId });
-            } catch (e) {
-              setError(e.message);
+      {data.permissionRejudge &&
+        (["Fake", "Hacked"].includes(data.submission.status) ? (
+          <Popup
+            on="click"
+            open={restorePopupOpen}
+            onOpen={() => setRestorePopupOpen(true)}
+            onClose={() => setRestorePopupOpen(false)}
+            trigger={<Button loading={operationPending}>{localizeSubmission(".rejudge")}</Button>}
+            content={
+              <Button
+                negative
+                loading={operationPending}
+                onClick={rejudge}
+                content={localizeSubmission(".confirm_restore_rejudge")}
+              />
             }
-          }}
-        >
-          {tr("重新评测", "Rejudge")}
-        </Button>
+          />
+        ) : (
+          <Button loading={operationPending} onClick={rejudge}>
+            {tr("重新评测", "Rejudge")}
+          </Button>
+        ))}
+      {data.permissionFake && data.submission.status !== "Fake" && (
+        <Popup
+          on="click"
+          open={fakePopupOpen}
+          onOpen={() => setFakePopupOpen(true)}
+          onClose={() => setFakePopupOpen(false)}
+          trigger={<Button negative icon="ban" loading={operationPending} content={localizeSubmission(".fake")} />}
+          content={
+            <Button negative loading={operationPending} onClick={fake} content={localizeSubmission(".confirm_fake")} />
+          }
+        />
       )}
+    </>
+  );
+  return embedded ? (
+    content
+  ) : (
+    <ContestFrame detail={detail} tab="submissions">
+      {content}
     </ContestFrame>
   );
 }
-export default defineRoute(async req => {
-  const id = Number(req.params.contestId),
-    submissionId = Number(req.params.submissionId);
+
+export async function loadContestSubmissionPage(id: number, submissionId: number, embedded = false) {
   const [detail, initial] = await Promise.all([
     callContest("detail", { id }),
     callContest("submission", { id, submissionId })
   ]);
-  return <ContestSubmissionPage key={submissionId} detail={detail} initial={initial} />;
-});
+  return <ContestSubmissionPage key={submissionId} detail={detail} initial={initial} embedded={embedded} />;
+}
+
+export default defineRoute(async req =>
+  loadContestSubmissionPage(Number(req.params.contestId), Number(req.params.submissionId))
+);

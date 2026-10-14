@@ -31,6 +31,9 @@ import { StudyListModule } from "./study-list/study-list.module";
 import { ContestModule } from "./contest/contest.module";
 import { AiModule } from "./ai/ai.module";
 import { SiteManagementModule } from "./site-management/site-management.module";
+import { TeamModule } from "./team/team.module";
+import { HackModule } from "./hack/hack.module";
+import { SelfEvalModule } from "./self-eval/self-eval.module";
 
 @Module({
   imports: [
@@ -57,7 +60,10 @@ import { SiteManagementModule } from "./site-management/site-management.module";
     StudyListModule,
     ContestModule,
     AiModule,
-    SiteManagementModule
+    SiteManagementModule,
+    TeamModule,
+    HackModule,
+    SelfEvalModule
   ],
   controllers: [AppController],
   providers: [AppService, ErrorFilter]

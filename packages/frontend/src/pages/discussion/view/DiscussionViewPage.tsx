@@ -1007,9 +1007,9 @@ let DiscussionViewPage: React.FC<DiscussionViewPageProps> = props => {
       primary
       className="labeled icon"
       icon="plus"
-      content={_(".add_discussion")}
+      content={_(discussion.meta.type === "Solution" ? "discussions.add_solution" : ".add_discussion")}
       as={Link}
-      href={getNewDiscussionUrl(discussion.problem?.meta?.id)}
+      href={getNewDiscussionUrl(discussion.problem?.meta?.id, discussion.meta.type)}
     />
   );
 
@@ -1018,11 +1018,18 @@ let DiscussionViewPage: React.FC<DiscussionViewPageProps> = props => {
   return (
     <>
       {permissionManager}
-      {getBreadcrumb(discussion.problem, _)}
+      {getBreadcrumb(discussion.problem, _, null, null, discussion.meta.type)}
       <div className={style.titleAndActions}>
         <div className={style.title}>
           <EmojiRenderer>
-            <Header size="large" content={getDiscussionDisplayTitle(discussion.meta.title, _)} />
+            <>
+              <Header size="large" content={getDiscussionDisplayTitle(discussion.meta.title, _)} />
+              {discussion.meta.type === "Solution" && (
+                <Label color="blue" basic>
+                  {_("discussions.solution")}
+                </Label>
+              )}
+            </>
           </EmojiRenderer>
           <span className={style.replyCount}>
             {_(

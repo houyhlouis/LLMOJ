@@ -1,7 +1,9 @@
-import { Injectable, Inject, forwardRef } from "@nestjs/common";
+import { createHash } from "crypto";
+
+import { Injectable, Inject, forwardRef, ForbiddenException } from "@nestjs/common";
 import { InjectRepository, InjectDataSource } from "@nestjs/typeorm";
 
-import { Repository, DataSource, QueryBuilder, IsNull } from "typeorm";
+import { Repository, DataSource, QueryBuilder, IsNull, EntityManager } from "typeorm";
 import { ValidationError } from "class-validator";
 import { v4 as uuid } from "uuid";
 import moment from "moment-timezone";
@@ -15,6 +17,7 @@ import {
 } from "./submission-progress.interface";
 
 import { SubmissionContent } from "./submission-content.interface";
+import { submissionDisplayProgress } from "./submission-display-progress";
 
 import { SubmissionProgressService, SubmissionEventType } from "./submission-progress.service";
 
@@ -48,6 +51,7 @@ import { FileEntity } from "../file/file.entity";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
 
 import { ContestEntity } from "../contest/contest.entity";
+import { teamResourceAccess, teamResourceVisibilitySql } from "../team/team-access";
 
 import { MetricsService } from "../metrics/metrics.service";
 
@@ -58,7 +62,8 @@ export enum SubmissionPermissionType {
   Cancel = "Cancel",
   Rejudge = "Rejudge",
   ManagePublicness = "ManagePublicness",
-  Delete = "Delete"
+  Delete = "Delete",
+  Fake = "Fake"
 }
 
 interface SubmissionTaskExtraInfo extends JudgeTaskExtraInfo {
@@ -183,19 +188,42 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
     problem?: ProblemEntity,
     hasPrivilege?: boolean
   ): Promise<boolean> {
+    if (!(await this.userHasTeamResourceAccess(user, submission))) return false;
+    // Recheck disqualification authority before allowing a fake to be restored.
+    if (
+      type === SubmissionPermissionType.Rejudge &&
+      submission.status === SubmissionStatus.Fake &&
+      !(await this.userHasPermission(user, submission, SubmissionPermissionType.Fake, problem, hasPrivilege))
+    )
+      return false;
+
     if (submission.contestId) {
       const contest = await this.connection.getRepository(ContestEntity).findOneBy({ id: submission.contestId });
       if (!contest || !user || !(await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ViewContest)))
         return false;
+      const teamManager = await teamResourceAccess(this.connection, user, "contest", submission.contestId, "contests");
       const manager =
-        user.isAdmin ||
-        (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageContest)) ||
-        ((await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.EditContest)) &&
-          (contest.ownerId === user.id || contest.adminIds.includes(user.id)));
+        teamManager !== null
+          ? teamManager &&
+            (await this.userPrivilegeService.permissionDecision(user, UserPrivilegeType.EditContest, true))
+          : user.isAdmin ||
+            (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageContest)) ||
+            ((await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.EditContest)) &&
+              (contest.ownerId === user.id || contest.adminIds.includes(user.id)));
       // Contest endpoints expose only the feedback permitted by the contest rule.
       if (manager) {
         if (type === SubmissionPermissionType.Rejudge)
-          return await this.userPrivilegeService.permissionDecision(user, UserPrivilegeType.RejudgeSubmission, true);
+          return (
+            (submission.status !== SubmissionStatus.Hacked ||
+              (await this.userPrivilegeService.permissionDecision(user, UserPrivilegeType.ManageHack, true))) &&
+            (await this.userPrivilegeService.permissionDecision(user, UserPrivilegeType.RejudgeSubmission, true))
+          );
+        if (type === SubmissionPermissionType.Fake)
+          return await this.userPrivilegeService.permissionDecision(
+            user,
+            UserPrivilegeType.FakeSubmission,
+            await this.userPrivilegeService.permissionDecision(user, UserPrivilegeType.DeleteSubmission, true)
+          );
         if (type === SubmissionPermissionType.Delete)
           return await this.userPrivilegeService.permissionDecision(user, UserPrivilegeType.DeleteSubmission, true);
         return true;
@@ -203,6 +231,7 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
       if (
         type === SubmissionPermissionType.ManagePublicness ||
         type === SubmissionPermissionType.Delete ||
+        type === SubmissionPermissionType.Fake ||
         type === SubmissionPermissionType.Rejudge
       )
         return false;
@@ -251,6 +280,20 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
 
       // Those who has the Modify permission of the submission's problem can Rejudge a submission
       case SubmissionPermissionType.Rejudge:
+        if (
+          submission.status === SubmissionStatus.Hacked &&
+          !(await this.userPrivilegeService.permissionDecision(
+            user,
+            UserPrivilegeType.ManageHack,
+            await this.problemService.userHasPermission(
+              user,
+              problem ?? (await this.problemService.findProblemById(submission.problemId)),
+              ProblemPermissionType.Modify,
+              hasPrivilege
+            )
+          ))
+        )
+          return false;
         return await this.userPrivilegeService.permissionDecision(
           user,
           UserPrivilegeType.RejudgeSubmission,
@@ -272,6 +315,12 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
               (hasPrivilege ??
                 (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageProblem))))
         );
+      case SubmissionPermissionType.Fake:
+        return await this.userPrivilegeService.permissionDecision(
+          user,
+          UserPrivilegeType.FakeSubmission,
+          await this.userHasPermission(user, submission, SubmissionPermissionType.Delete, problem, hasPrivilege)
+        );
       case SubmissionPermissionType.ManagePublicness:
         return (
           !!user &&
@@ -284,6 +333,12 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
     }
   }
 
+  async userHasTeamResourceAccess(user: UserEntity, submission: SubmissionEntity): Promise<boolean> {
+    const resourceKind = submission.contestId ? "contest" : "problem";
+    const resourceId = submission.contestId || submission.problemId;
+    return (await teamResourceAccess(this.connection, user, resourceKind, resourceId)) !== false;
+  }
+
   async querySubmissions(
     problemId: number,
     submitterId: number,
@@ -292,9 +347,13 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
     minId: number,
     maxId: number,
     publicOnly: boolean,
-    takeCount: number
+    takeCount: number,
+    currentUser?: UserEntity
   ): Promise<{ result: SubmissionEntity[]; hasSmallerId: boolean; hasLargerId: boolean }> {
-    const queryBuilder = this.submissionRepository.createQueryBuilder().andWhere("contestId IS NULL");
+    const queryBuilder = this.submissionRepository
+      .createQueryBuilder("submission")
+      .andWhere("contestId IS NULL")
+      .andWhere(teamResourceVisibilitySql("problem", "submission.problemId", currentUser));
 
     if (publicOnly) {
       queryBuilder.andWhere("isPublic = :isPublic", {
@@ -640,10 +699,17 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
     await this.onSubmissionUpdated(oldSubmission, submission);
   }
 
-  async rejudgeSubmission(submission: SubmissionEntity): Promise<void> {
+  async rejudgeSubmission(submission: SubmissionEntity, actingUser?: UserEntity): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-shadow
     await this.lockSubmission(submission, true, async submission => {
       if (!submission) return;
+
+      // A fake may have been applied after the caller's initial permission check.
+      if (
+        [SubmissionStatus.Fake, SubmissionStatus.Hacked].includes(submission.status) &&
+        (!actingUser || !(await this.userHasPermission(actingUser, submission, SubmissionPermissionType.Rejudge)))
+      )
+        throw new ForbiddenException("Restoring a fake submission requires disqualification permission");
 
       await this.judgeSubmission(submission, true);
 
@@ -691,8 +757,73 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
     await this.submissionRepository.save(submission);
   }
 
+  async fakeSubmission(submission: SubmissionEntity, actingUserId: number): Promise<boolean> {
+    // Share the same locks as judge completion/rejudge, and re-read the effective verdict.
+    return await this.lockSubmission(submission, true, async lockedSubmission => {
+      if (!lockedSubmission) return false;
+      if (lockedSubmission.status === SubmissionStatus.Fake) return true;
+      const oldSubmission = { ...lockedSubmission };
+      if (lockedSubmission.taskId) this.judgeGateway.cancelTask(lockedSubmission.taskId);
+      lockedSubmission.taskId = null;
+      lockedSubmission.status = SubmissionStatus.Fake;
+      lockedSubmission.score = 0;
+      // Code, uploaded files, execution resources and original judge result remain intact.
+      await this.submissionRepository.save(lockedSubmission);
+      await this.onSubmissionUpdated(oldSubmission, lockedSubmission);
+      await this.auditService.log(actingUserId, "submission.fake", AuditLogObjectType.Submission, lockedSubmission.id, {
+        previousStatus: oldSubmission.status,
+        previousScore: oldSubmission.score,
+        previousTaskId: oldSubmission.taskId
+      });
+      const detail = await this.getSubmissionDetail(lockedSubmission);
+      await this.submissionProgressService.emitSubmissionEvent(
+        lockedSubmission.id,
+        SubmissionEventType.Progress,
+        submissionDisplayProgress(lockedSubmission, detail.result)
+      );
+      return true;
+    });
+  }
+
   async setSubmissionsPublic(problemId: number, isPublic: boolean): Promise<void> {
     await this.submissionRepository.update({ problemId, contestId: IsNull() }, { isPublic });
+  }
+
+  async markSubmissionHacked(
+    submission: SubmissionEntity,
+    hackerId: number,
+    hackId: number,
+    fingerprint: string,
+    persistHack?: (manager: EntityManager) => Promise<void>
+  ): Promise<boolean> {
+    return await this.lockSubmission(submission, true, async locked => {
+      if (!locked || locked.taskId || [SubmissionStatus.Fake, SubmissionStatus.Hacked].includes(locked.status))
+        return false;
+      const detail = await this.getSubmissionDetail(locked);
+      const current = createHash("sha256")
+        .update(JSON.stringify([locked.id, locked.submitTime, locked.status, locked.score, detail.content]))
+        .digest("hex");
+      if (current !== fingerprint) return false;
+      const old = { ...locked };
+      locked.status = SubmissionStatus.Hacked;
+      locked.score = 0;
+      await this.connection.transaction("READ COMMITTED", async manager => {
+        await manager.save(locked);
+        if (persistHack) await persistHack(manager);
+      });
+      await this.onSubmissionUpdated(old, locked);
+      await this.auditService.log(hackerId, "submission.hacked", AuditLogObjectType.Submission, locked.id, {
+        hackId,
+        previousStatus: old.status,
+        previousScore: old.score
+      });
+      await this.submissionProgressService.emitSubmissionEvent(
+        locked.id,
+        SubmissionEventType.Progress,
+        submissionDisplayProgress(locked, detail.result)
+      );
+      return true;
+    });
   }
 
   async deleteSubmission(submission: SubmissionEntity): Promise<void> {
@@ -795,9 +926,10 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
 
     // Don't lock the problem if not finished since we don't modify the database.
     // eslint-disable-next-line @typescript-eslint/no-shadow
-    await this.lockSubmission(submission, finished, async (submission, problem?) => {
+    const accepted = await this.lockSubmission(submission, finished, async (submission, problem?) => {
       if (!submission || submission.taskId !== taskId) {
         logger.warn(`Invalid task Id ${taskId} of task progress, maybe there's a too-early rejudge?`);
+        return false;
       }
 
       // First update database, then report progress
@@ -806,11 +938,12 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
       }
 
       await this.submissionProgressService.emitSubmissionEvent(submission.id, SubmissionEventType.Progress, progress);
+      return true;
     });
 
-    if (finished) this.metricSubmissionJudgeTime.observe(progress.totalOccupiedTime / 1000);
+    if (accepted && finished) this.metricSubmissionJudgeTime.observe(progress.totalOccupiedTime / 1000);
 
-    return true;
+    return accepted;
   }
 
   async getTaskToBeSentToJudgeByTaskId(taskId: string, priotity: number): Promise<JudgeTask<SubmissionTaskExtraInfo>> {

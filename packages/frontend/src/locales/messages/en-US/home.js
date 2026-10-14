@@ -31,6 +31,7 @@ return {
   search_problem: "Search Problem",
   top_users: {
     header: "Top Users",
+    view_all: "View all",
     username: "Username",
     bio: "Bio",
     rating: "Rating",

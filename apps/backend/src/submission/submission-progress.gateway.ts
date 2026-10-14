@@ -10,6 +10,7 @@ import { SubmissionStatus } from "@libreoj/judge-protocol";
 
 import { SubmissionProgress, SubmissionProgressType } from "./submission-progress.interface";
 import { withoutTestData } from "./submission-redaction";
+import { submissionDisplayProgress } from "./submission-display-progress";
 import { SubmissionPermissionType, SubmissionService } from "./submission.service";
 import { SubmissionEventType } from "./submission-progress.service";
 
@@ -167,6 +168,8 @@ export class SubmissionProgressGateway implements OnGatewayConnection, OnGateway
       !(await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ViewSubmission))
     )
       return false;
+
+    if (!(await this.submissionService.userHasTeamResourceAccess(user, submission))) return false;
 
     if (subscription.type === SubmissionProgressSubscriptionType.Meta && !submission.contestId) {
       // List progress exposes metadata; keep its visibility rules independent of code access.
@@ -351,6 +354,7 @@ export class SubmissionProgressGateway implements OnGatewayConnection, OnGateway
           case SubmissionProgressSubscriptionType.Detail:
           case SubmissionProgressSubscriptionType.DetailWithoutTestData: {
             const submissionDetail = await this.submissionService.getSubmissionDetail(submission);
+            const displayedProgress = submissionDisplayProgress(submission, submissionDetail.result);
             await this.sendMessage(client, submissionId, {
               progressMeta: {
                 progressType: SubmissionProgressType.Finished,
@@ -358,8 +362,8 @@ export class SubmissionProgressGateway implements OnGatewayConnection, OnGateway
               },
               progressDetail:
                 subscription.type === SubmissionProgressSubscriptionType.DetailWithoutTestData
-                  ? withoutTestData(submissionDetail.result)
-                  : submissionDetail.result
+                  ? withoutTestData(displayedProgress)
+                  : displayedProgress
             });
             break;
           }

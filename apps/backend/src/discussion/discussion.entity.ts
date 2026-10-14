@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Index, Column, ManyToOne, JoinColumn, OneToOne } from "typeorm";
 
 import { DiscussionContentEntity } from "./discussion-content.entity";
+import { DiscussionType } from "./discussion-type.enum";
 
 import { ProblemEntity } from "../problem/problem.entity";
 import { UserEntity } from "../user/user.entity";
@@ -14,6 +15,10 @@ export class DiscussionEntity {
 
   @Column({ type: "varchar", length: 80 })
   title: string;
+
+  @Column({ type: "varchar", length: 20, default: DiscussionType.Discussion })
+  @Index("IDX_discussion_type")
+  type: DiscussionType;
 
   @OneToOne(() => DiscussionContentEntity, discussionContent => discussionContent.discussion)
   content: Promise<DiscussionContentEntity>;

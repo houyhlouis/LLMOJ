@@ -25,6 +25,7 @@ import toast from "@/utils/toast";
 import api from "@/api";
 import formatDateTime from "@/utils/formatDateTime";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
+import { detailPreviewCloseMessage, detailPreviewFocusMessage, embeddedDetailMode } from "@/utils/embeddedDetail";
 
 export type NavButtonName =
   | "home"
@@ -32,8 +33,11 @@ export type NavButtonName =
   | "study_lists"
   | "contests"
   | "submissions"
+  | "hacks"
   | "members"
-  | "discussion";
+  | "discussion"
+  | "teams"
+  | "solutions";
 
 let AppLayout: React.FC<React.PropsWithChildren> = props => {
   const navigation = useNavigationChecked();
@@ -41,6 +45,47 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
   const _ = useLocalizer("common");
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    if (!embeddedDetailMode) return;
+    document.documentElement.classList.add(style.embeddedDetail);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" && event.key !== "Tab") return;
+      const overlayOpen = Array.from(
+        document.querySelectorAll<HTMLElement>(".ui.modal,.ui.dropdown.active,.ui.popup.visible")
+      ).some(element => element.getClientRects().length > 0);
+      // Let the original page close its own Hack dialogs, confirmations and dropdowns first.
+      if (overlayOpen) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        window.parent.postMessage({ type: detailPreviewCloseMessage }, window.location.origin);
+      } else {
+        const focusable = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            'a[href],button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex="0"]'
+          )
+        ).filter(element => element.getClientRects().length > 0);
+        const first = focusable[0],
+          last = focusable[focusable.length - 1];
+        if (
+          (!event.shiftKey && document.activeElement === last) ||
+          (event.shiftKey && document.activeElement === first)
+        ) {
+          event.preventDefault();
+          window.parent.postMessage(
+            { type: detailPreviewFocusMessage, direction: event.shiftKey ? "previous" : "next" },
+            window.location.origin
+          );
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      document.documentElement.classList.remove(style.embeddedDetail);
+    };
+  }, []);
 
   useEffect(() => {
     if (sidebarOpen !== document.documentElement.classList.contains(style.sidebarOpen))
@@ -70,7 +115,10 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
 
   const onLoginOrRegisterClick = useLoginOrRegisterNavigation();
 
-  const navButtons: Record<NavButtonName, { icon: SemanticICONS; text: string; url?: string }> = {
+  const navButtons: Record<
+    Exclude<NavButtonName, "teams" | "solutions" | "members">,
+    { icon: SemanticICONS; text: string; url?: string }
+  > = {
     home: {
       icon: "home",
       text: ".navbar.home",
@@ -88,11 +136,7 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
       text: ".navbar.submissions",
       url: "/s"
     },
-    members: {
-      icon: "users",
-      text: ".navbar.members",
-      url: "/u"
-    },
+    hacks: { icon: "bug", text: ".navbar.hacks", url: "/hacks" },
     discussion: {
       icon: "comments",
       text: ".navbar.discussion",
@@ -131,6 +175,12 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
           <Icon name="hourglass half" />
           {_(".header.user.submissions")}
         </Dropdown.Item>
+        {appState.currentUserHasPrivilege("ViewHack") && (
+          <Dropdown.Item as={Link} href="/hacks?mine=1">
+            <Icon name="bug" />
+            {_(".header.user.hacks")}
+          </Dropdown.Item>
+        )}
         <Dropdown.Item as={Link} href={{ pathname: "/p", query: { ownerId: appState.currentUser.id } }}>
           <Icon name="book" />
           {_(".header.user.problems")}
@@ -138,6 +188,10 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
         <Dropdown.Item as={Link} href={{ pathname: "/d", query: { publisherId: appState.currentUser.id } }}>
           <Icon name="comments" />
           {_(".header.user.discussions")}
+        </Dropdown.Item>
+        <Dropdown.Item as={Link} href="/teams?mine=1">
+          <Icon name="users" />
+          {_(".header.user.teams")}
         </Dropdown.Item>
         {appState.currentUserHasPrivilege("ManageSummaries") && (
           <Dropdown.Item as={Link} href="/summaries">
@@ -293,23 +347,25 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
     </Menu.Menu>
   );
 
-  const wide = useScreenWidthWithin(1024, Infinity);
+  const wide = useScreenWidthWithin(1280, Infinity);
 
   const sidebarOpenStatusClassName = sidebarOpen ? " " + style.sidebarOpen : "";
 
   return (
     <>
       <GlobalProgressBar isAnimating={!!loadingRoute} />
-      <Menu borderless fixed="top" className={style.menu}>
-        <Container id={style.mainMenuContainer}>
-          {logo}
-          {wide ? topBarItemsForWideScreen : topBarItemsForNarrowScreen}
-        </Container>
-      </Menu>
+      {!embeddedDetailMode && (
+        <Menu borderless fixed="top" className={style.menu}>
+          <Container id={style.mainMenuContainer}>
+            {logo}
+            {wide ? topBarItemsForWideScreen : topBarItemsForNarrowScreen}
+          </Container>
+        </Menu>
+      )}
       {getFooter(style.footer + " " + style.real)}
       <Container id={style.mainUiContainer}>{props.children}</Container>
       {getFooter(style.footer + " " + style.placeholder)}
-      {!wide && (
+      {!wide && !embeddedDetailMode && (
         <>
           <div className={style.sidebarDimmer + sidebarOpenStatusClassName} onClick={() => setSidebarOpen(false)}></div>
           <Sidebar

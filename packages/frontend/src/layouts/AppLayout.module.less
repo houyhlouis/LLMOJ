@@ -1,5 +1,5 @@
 .menu {
-  width: 100vw !important;
+  width: 100% !important;
   height: 48px;
 }
 
@@ -116,6 +116,21 @@ body {
   }
 }
 
+:global(html).embeddedDetail {
+  body {
+    margin-top: 0;
+    min-height: 100vh;
+  }
+
+  :global(#root) {
+    padding-top: 16px;
+  }
+
+  :global(#noty_layout__topRight) {
+    top: 20px !important;
+  }
+}
+
 @media only screen and (max-width: 1127px) {
   :global(.ui.container) {
     width: 100% !important;
@@ -131,8 +146,13 @@ body {
 }
 
 @media only screen and (min-width: 1128px) {
-  #mainUiContainer, #mainMenuContainer {
+  #mainUiContainer {
     width: 1127px !important;
+  }
+
+  #mainMenuContainer {
+    width: 1127px !important;
+    max-width: calc(100% - 30px);
   }
 
   #mainUiContainer {
@@ -157,7 +177,6 @@ body {
   }
 }
 
-
 // Set "position: relative; " on <body> instead of <html> to make Popper.js work
 body {
   // Extensions e.g. "Youdao directory" will add a inline style "position: static; " to <body>
@@ -177,7 +196,7 @@ body {
     margin: calc(@margin-top + @margin-bottom) 0 0 0 !important;
     visibility: hidden;
   }
-  
+
   &.real {
     margin: @margin-top 0 @margin-bottom 0 !important;
     position: absolute;

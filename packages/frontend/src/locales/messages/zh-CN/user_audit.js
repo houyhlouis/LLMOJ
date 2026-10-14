@@ -52,6 +52,7 @@ return {
   "problem_tag.delete": "删除题目标签 [firstObject]",
 
   "submission.rejudge": "重测提交记录 [firstObject]",
+  "submission.fake": "将提交记录 [firstObject] 因作弊作废并置为 0 分",
   "submission.cancel": "取消提交记录 [firstObject] 的评测",
   "submission.set_public": "将提交记录 [firstObject] 设为公开",
   "submission.set_non_public": "将提交记录 [firstObject] 设为非公开",

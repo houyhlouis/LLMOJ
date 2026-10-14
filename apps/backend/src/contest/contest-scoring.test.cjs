@@ -151,3 +151,10 @@ assert.equal(contestSubmissionFeedback(full, "noi", false, true).score, 100);
 assert.equal(contestSubmissionFeedback(full, "acm", false, false).score, null);
 assert.equal(contestSubmissionFeedback(full, "ioi", false, false).score, 100);
 console.log("Contest privacy: 11 assertions passed.");
+
+for (const rule of ["noi", "ioi", "acm"]) {
+  const original = [submission(1, 1, 1, 60, "Accepted", 100)];
+  assert.equal(scoreContest(rule, start, problems, original)[0].score, rule === "acm" ? 1 : 100);
+  assert.equal(scoreContest(rule, start, problems, [{ ...original[0], status: "Fake", score: 0 }])[0].score, 0);
+}
+assert.equal(scoreContest("ioi", start, problems, [submission(1, 1, 1, 30, "PartiallyCorrect", 60), submission(2, 1, 1, 60, "Fake", 0)])[0].score, 60);

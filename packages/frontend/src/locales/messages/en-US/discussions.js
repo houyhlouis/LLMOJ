@@ -1,4 +1,10 @@
 return {
+  solutions: "Solutions",
+  solution: "Solution",
+  all_solutions: "All solutions",
+  add_solution: "Add solution",
+  no_solutions: "No solutions yet",
+  no_solutions_search: "No matching solutions",
   title: "Discussions",
   error: {
     PERMISSION_DENIED: "Permission denied.",

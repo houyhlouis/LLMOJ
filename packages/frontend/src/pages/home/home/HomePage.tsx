@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Grid, Header, Icon, List, Placeholder, Segment, Table } from "semantic-ui-react";
+import { Button, Grid, Header, Icon, List, Placeholder, Segment, Table } from "semantic-ui-react";
 import { observer } from "mobx-react";
 import Countdown from "react-countdown";
 
@@ -365,7 +365,17 @@ let HomePage: React.FC<HomePageProps> = props => {
 
   const getTopUsers = (inMainView: boolean) => (
     <>
-      <Header className={style.header} as="h4" block icon="user" content={_(".top_users.header")} attached="top" />
+      <Header className={style.header + " " + style.topUsersHeader} as="h4" block attached="top">
+        <span className={style.topUsersTitle}>
+          <Icon name="user" />
+          {_(".top_users.header")}
+        </span>
+        {appState.currentUserHasPrivilege("ViewUsers") && (
+          <Button as={Link} href="/u" size="mini" compact basic className={style.viewAllUsers}>
+            {_(".top_users.view_all")}
+          </Button>
+        )}
+      </Header>
       <Segment className={style.segment} textAlign="center" attached="bottom" placeholder={props.topUsers.length === 0}>
         {props.topUsers.length > 0 ? (
           <Table unstackable className={style.table} basic="very" textAlign="center" compact={!inMainView}>

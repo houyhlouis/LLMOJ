@@ -65,7 +65,15 @@ export enum UserPrivilegeType {
   SkipRecaptcha = "SkipRecaptcha",
 
   // Append new privileges to preserve stored MariaDB enum ordering.
-  ManageRegistrationReviews = "ManageRegistrationReviews"
+  ManageRegistrationReviews = "ManageRegistrationReviews",
+  ViewTeam = "ViewTeam",
+  CreateTeam = "CreateTeam",
+  ManageTeams = "ManageTeams",
+  FakeSubmission = "FakeSubmission",
+  ViewHack = "ViewHack",
+  CreateHack = "CreateHack",
+  ManageHack = "ManageHack",
+  CreateSelfEval = "CreateSelfEval"
 }
 
 @Entity("user_privilege")

@@ -52,6 +52,7 @@ return {
   "problem_tag.delete": "Delete problem tag [firstObject]",
 
   "submission.rejudge": "Rejudge submission [firstObject]",
+  "submission.fake": "Disqualify submission [firstObject] and set score to 0",
   "submission.cancel": "Cancel submission [firstObject]",
   "submission.set_public": "Set submission [firstObject] public",
   "submission.set_non_public": "Set submission [firstObject] nonpublic",

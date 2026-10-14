@@ -9,6 +9,7 @@ export default {
       "/edit": getRoute(() => import("./ContestEditPage"), "edit"),
       "/ranklist": getRoute(() => import("./ContestPage"), "ranklist"),
       "/submissions": getRoute(() => import("./ContestPage"), "submissions"),
+      "/hacks": lazy(() => import("../hack/HacksPage")),
       "/summary": lazy(() => import("./ContestSummaryPage")),
       "/problem/:problemId": lazy(() => import("./ContestProblemPage")),
       "/submission/:submissionId": lazy(() => import("./ContestSubmissionPage"))

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { Table, Icon, Accordion, Grid, SemanticWIDTHS, Button, Popup, Ref, Menu } from "semantic-ui-react";
+import { Table, Icon, Accordion, Grid, SemanticWIDTHS, Button, Popup, Ref, Menu, Message } from "semantic-ui-react";
 import { observer } from "mobx-react";
 import { v4 as uuid } from "uuid";
 import { patch } from "jsondiffpatch";
@@ -22,6 +22,8 @@ import { TestcaseResultCommon, ProblemTypeSubmissionView, GetAdditionalSectionsC
 import { SubmissionProgressMessageMetaOnly, SubmissionProgressType } from "../common";
 import { makeToBeLocalizedText } from "@/locales";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
+import HackAction from "@/pages/hack/HackAction";
+import SubmissionReferenceButton from "@/pages/hack/SubmissionReferenceButton";
 
 async function fetchData(submissionId: number) {
   const { requestError, response } = await api.submission.getSubmissionDetail({
@@ -187,7 +189,11 @@ interface SubmissionPageProps {
   permissionCancel: boolean;
   permissionSetPublic: boolean;
   permissionDelete: boolean;
+  permissionFake: boolean;
   ProblemTypeSubmissionView: ProblemTypeSubmissionView;
+  embedded?: boolean;
+  onRefresh?: () => void;
+  onDeleted?: () => void;
 }
 
 let SubmissionPage: React.FC<SubmissionPageProps> = props => {
@@ -195,8 +201,13 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
   const navigation = useNavigationChecked();
 
   useEffect(() => {
-    appState.enterNewPage(`${_(".title")} #${props.meta.id}`, "submissions");
-  }, [appState.locale, props.meta]);
+    if (!props.embedded) appState.enterNewPage(`${_(".title")} #${props.meta.id}`, "submissions");
+  }, [appState.locale, props.meta, props.embedded]);
+
+  function refreshDetail() {
+    if (props.onRefresh) props.onRefresh();
+    else navigation.refresh();
+  }
 
   // The meta only provides fields not changing with progress
   // score, status, time, memory are in the full info
@@ -250,6 +261,7 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
   // Ctrl-A to select all code
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.target as HTMLElement)?.closest?.('input,textarea,[contenteditable="true"],.monaco-editor')) return;
       if (refDefaultCopyCodeBox.current && (event.ctrlKey || event.metaKey) && event.key === "a") {
         var sel = window.getSelection();
         var rg = document.createRange();
@@ -739,7 +751,7 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
     else if (response.error) toast.error(_(`.error.${response.error}`));
     else {
       toast.success(_(".success_rejudge"));
-      navigation.refresh();
+      refreshDetail();
     }
 
     setRejudgePopupOpen(false);
@@ -758,7 +770,7 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
     else if (response.error) toast.error(_(`.error.${response.error}`));
     else {
       toast.success(_(meta.isPublic ? ".success_set_non_public" : ".success_set_public"));
-      navigation.refresh();
+      refreshDetail();
     }
 
     setTogglePublicPopupOpen(false);
@@ -776,7 +788,8 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
     else if (response.error) toast.error(_(`.error.${response.error}`));
     else {
       toast.success(_(".success_delete"));
-      navigation.navigate("/s");
+      if (props.onDeleted) props.onDeleted();
+      else navigation.navigate("/s");
     }
 
     setDeletePopupOpen(false);
@@ -784,20 +797,35 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
   }
 
   const [statusNodeRef, setStatusNodeRef] = useState<HTMLElement>();
+  async function onFake() {
+    if (operationPending) return;
+    setOperationPending(true);
+    const { requestError, response } = await api.submission.fakeSubmission({ submissionId: meta.id });
+    if (requestError) toast.error(requestError(_));
+    else if (response.error) toast.error(_(`.error.${response.error}`));
+    else {
+      toast.success(_(".success_fake"));
+      refreshDetail();
+    }
+    setFakePopupOpen(false);
+    setOperationPending(false);
+  }
 
   const [operationsPopupOpen, setOperationsPopupOpen] = useState(false);
   const [cancelPopupOpen, setCancelPopupOpen] = useState(false);
   const [rejudgePopupOpen, setRejudgePopupOpen] = useState(false);
   const [togglePublicPopupOpen, setTogglePublicPopupOpen] = useState(false);
   const [deletePopupOpen, setDeletePopupOpen] = useState(false);
+  const [fakePopupOpen, setFakePopupOpen] = useState(false);
 
   const showRejudge = props.permissionRejudge;
   const showCancel = props.permissionCancel && progressMeta.pending;
   const showTogglePublic = props.permissionSetPublic;
   const showDelete = props.permissionDelete;
+  const showFake = props.permissionFake && progressMeta.status !== "Fake";
 
   const statusPopup = (statusNode: JSX.Element) =>
-    !showRejudge && !showCancel ? (
+    !showRejudge && !showCancel && !showTogglePublic && !showDelete && !showFake ? (
       statusNode
     ) : (
       <>
@@ -806,7 +834,7 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
             className={style.operationsPopup}
             trigger={statusNode}
             open={operationsPopupOpen}
-            onOpen={() => !cancelPopupOpen && !rejudgePopupOpen && setOperationsPopupOpen(true)}
+            onOpen={() => !cancelPopupOpen && !rejudgePopupOpen && !fakePopupOpen && setOperationsPopupOpen(true)}
             onClose={() => setOperationsPopupOpen(false)}
             disabled={operationPending}
             hoverable
@@ -856,6 +884,17 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
                     onClick={() => (setOperationsPopupOpen(false), setDeletePopupOpen(true))}
                   />
                 )}
+                {showFake && (
+                  <Menu.Item
+                    content={
+                      <>
+                        <Icon name="ban" />
+                        {_(".fake")}
+                      </>
+                    }
+                    onClick={() => (setOperationsPopupOpen(false), setFakePopupOpen(true))}
+                  />
+                )}
               </Menu>
             }
             position="bottom left"
@@ -876,7 +915,16 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
             open={rejudgePopupOpen}
             onClose={() => setRejudgePopupOpen(false)}
             context={statusNodeRef}
-            content={<Button negative content={_(".confirm_rejudge")} loading={operationPending} onClick={onRejudge} />}
+            content={
+              <Button
+                negative
+                content={_(
+                  ["Fake", "Hacked"].includes(progressMeta.status) ? ".confirm_restore_rejudge" : ".confirm_rejudge"
+                )}
+                loading={operationPending}
+                onClick={onRejudge}
+              />
+            }
             position="bottom left"
           />
         )}
@@ -905,11 +953,32 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
             position="bottom left"
           />
         )}
+        {showFake && (
+          <Popup
+            open={fakePopupOpen}
+            onClose={() => setFakePopupOpen(false)}
+            context={statusNodeRef}
+            content={<Button negative content={_(".confirm_fake")} loading={operationPending} onClick={onFake} />}
+            position="bottom left"
+          />
+        )}
       </>
     );
 
   return (
     <>
+      {progressMeta.status === "Fake" && <Message negative icon="ban" content={_(".fake_notice")} />}
+      {progressMeta.status === "Hacked" && (
+        <Message
+          negative
+          icon="bug"
+          content={
+            appState.locale === "zh_CN"
+              ? "有效 Hack 已使此提交失效，实际得分为 0。原始评测信息保留在下方。"
+              : "A valid hack has invalidated this submission; its effective score is 0. The original judging details are preserved below."
+          }
+        />
+      )}
       {!isMobile && (
         <Table textAlign="center" basic="very" unstackable fixed={isWideScreen} compact={isWideScreen ? false : "very"}>
           <Table.Header>
@@ -947,6 +1016,10 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
           }}
         />
       )}
+      <div className={style.submissionActions}>
+        <HackAction submissionId={meta.id} />
+        <SubmissionReferenceButton submissionId={meta.id} status={progressMeta.status} />
+      </div>
       <props.ProblemTypeSubmissionView
         progress={progress}
         progressMeta={progressMeta}
@@ -970,8 +1043,11 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
 
 SubmissionPage = observer(SubmissionPage);
 
-export default defineRoute(async request => {
-  const queryResult = await fetchData(parseInt(request.params.id) || 0);
+export async function loadSubmissionPage(
+  submissionId: number,
+  presentation: Pick<SubmissionPageProps, "embedded" | "onRefresh" | "onDeleted"> = {}
+) {
+  const queryResult = await fetchData(submissionId);
 
   const ProblemTypeSubmissionView: ProblemTypeSubmissionView = (
     await (() => {
@@ -999,6 +1075,13 @@ export default defineRoute(async request => {
   }
 
   return (
-    <SubmissionPage key={uuid()} {...(queryResult as any)} ProblemTypeSubmissionView={ProblemTypeSubmissionView} />
+    <SubmissionPage
+      key={uuid()}
+      {...(queryResult as any)}
+      ProblemTypeSubmissionView={ProblemTypeSubmissionView}
+      {...presentation}
+    />
   );
-});
+}
+
+export default defineRoute(async request => loadSubmissionPage(parseInt(request.params.id) || 0));

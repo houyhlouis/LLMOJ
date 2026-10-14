@@ -4,6 +4,7 @@ import { ApiOperation, ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { SubmissionStatus } from "@libreoj/judge-protocol";
 
 import { withoutTestData } from "./submission-redaction";
+import { submissionDisplayProgress } from "./submission-display-progress";
 import { SubmissionStatisticsService } from "./submission-statistics.service";
 
 import { SubmissionProgressService } from "./submission-progress.service";
@@ -41,6 +42,9 @@ import {
   DeleteSubmissionRequestDto,
   DeleteSubmissionResponseDto,
   DeleteSubmissionResponseError,
+  FakeSubmissionRequestDto,
+  FakeSubmissionResponseDto,
+  FakeSubmissionResponseError,
   PrepareSubmissionFileUploadRequestDto
 } from "./dto";
 
@@ -199,7 +203,8 @@ export class SubmissionController {
       !(hasManageProblemPrivilege || hasViewProblemPermission || isSubmissionsOwned),
       request.takeCount > this.configService.config.queryLimit.submissions
         ? this.configService.config.queryLimit.submissions
-        : request.takeCount
+        : request.takeCount,
+      currentUser
     );
 
     const submissionMetas: SubmissionMetaDto[] = new Array(queryResult.result.length);
@@ -302,7 +307,8 @@ export class SubmissionController {
       permissionRejudge,
       permissionCancel,
       permissionSetPublic,
-      permissionDelete
+      permissionDelete,
+      permissionFake
     ] = await Promise.all([
       this.userService.findUserById(submission.submitterId),
       this.submissionService.getSubmissionDetail(submission),
@@ -334,6 +340,13 @@ export class SubmissionController {
         SubmissionPermissionType.Delete,
         problem,
         hasPrivilege
+      ),
+      this.submissionService.userHasPermission(
+        currentUser,
+        submission,
+        SubmissionPermissionType.Fake,
+        problem,
+        hasPrivilege
       )
     ]);
 
@@ -342,6 +355,7 @@ export class SubmissionController {
       UserPrivilegeType.ReadProblemData,
       true
     );
+    const displayedProgress = submissionDisplayProgress(submission, progress || submissionDetail.result);
     return {
       meta: {
         id: submission.id,
@@ -358,9 +372,7 @@ export class SubmissionController {
         memoryUsed: submission.memoryUsed
       },
       content: submissionDetail.content,
-      progress: canReadTestData
-        ? progress || submissionDetail.result
-        : withoutTestData(progress || submissionDetail.result),
+      progress: canReadTestData ? displayedProgress : withoutTestData(displayedProgress),
       progressSubscriptionKey: !pending
         ? null
         : this.submissionProgressGateway.encodeSubscription({
@@ -374,7 +386,8 @@ export class SubmissionController {
       permissionRejudge,
       permissionCancel,
       permissionSetPublic,
-      permissionDelete
+      permissionDelete,
+      permissionFake
     };
   }
 
@@ -516,7 +529,7 @@ export class SubmissionController {
     const previousStatus = submission.status;
     const previousScore = submission.score;
 
-    await this.submissionService.rejudgeSubmission(submission);
+    await this.submissionService.rejudgeSubmission(submission, currentUser);
 
     await this.auditService.log("submission.rejudge", AuditLogObjectType.Submission, submission.id, {
       isPreviouslyPending,
@@ -524,6 +537,25 @@ export class SubmissionController {
       previousScore
     });
 
+    return {};
+  }
+
+  @ApiOperation({
+    summary: "Disqualify a submission, retaining its code and judge result with an effective score of zero."
+  })
+  @ApiBearerAuth()
+  @Post("fakeSubmission")
+  async fakeSubmission(
+    @CurrentUser() currentUser: UserEntity,
+    @Body() request: FakeSubmissionRequestDto
+  ): Promise<FakeSubmissionResponseDto> {
+    if (!currentUser) return { error: FakeSubmissionResponseError.PERMISSION_DENIED };
+    const submission = await this.submissionService.findSubmissionById(request.submissionId);
+    if (!submission) return { error: FakeSubmissionResponseError.NO_SUCH_SUBMISSION };
+    if (!(await this.submissionService.userHasPermission(currentUser, submission, SubmissionPermissionType.Fake)))
+      return { error: FakeSubmissionResponseError.PERMISSION_DENIED };
+    if (!(await this.submissionService.fakeSubmission(submission, currentUser.id)))
+      return { error: FakeSubmissionResponseError.NO_SUCH_SUBMISSION };
     return {};
   }
 

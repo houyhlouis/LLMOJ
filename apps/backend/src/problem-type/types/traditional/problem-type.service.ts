@@ -109,6 +109,58 @@ export class ProblemTypeTraditionalService
 
     validateExtraSourceFiles(judgeInfo, testData);
 
+    if (judgeInfo.selfEval != null) {
+      const recipe = judgeInfo.selfEval;
+      const names = new Set(testData.map(file => file.filename));
+      if (
+        !recipe ||
+        typeof recipe !== "object" ||
+        ![recipe.generatorFile, recipe.standardFile].every(name => typeof name === "string" && names.has(name)) ||
+        ![recipe.generatorSha256, recipe.standardSha256].every(
+          hash => typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash)
+        ) ||
+        ((recipe.validatorFile != null || recipe.validatorSha256 != null) &&
+          (typeof recipe.validatorFile !== "string" ||
+            !names.has(recipe.validatorFile) ||
+            typeof recipe.validatorSha256 !== "string" ||
+            !/^[0-9a-f]{64}$/.test(recipe.validatorSha256))) ||
+        !Array.isArray(recipe.subtaskIds) ||
+        !recipe.subtaskIds.length ||
+        recipe.subtaskIds.length > 1000 ||
+        recipe.subtaskIds.some(
+          id =>
+            !Number.isSafeInteger(id) ||
+            id < 1 ||
+            id > 2147483647 ||
+            (Array.isArray(judgeInfo.subtasks) && id > judgeInfo.subtasks.length)
+        ) ||
+        new Set(recipe.subtaskIds).size !== recipe.subtaskIds.length ||
+        (Array.isArray(judgeInfo.subtasks) && recipe.subtaskIds.length !== judgeInfo.subtasks.length)
+      )
+        throw ["INVALID_SELF_EVAL_RECIPE"]; // eslint-disable-line no-throw-literal
+      if (
+        recipe.standardFileIo &&
+        (!recipe.standardFileIo.inputFilename ||
+          !recipe.standardFileIo.outputFilename ||
+          ![recipe.standardFileIo.inputFilename, recipe.standardFileIo.outputFilename].every(name =>
+            /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(name)
+          ) ||
+          recipe.standardFileIo.inputFilename === recipe.standardFileIo.outputFilename)
+      )
+        throw ["INVALID_SELF_EVAL_RECIPE"]; // eslint-disable-line no-throw-literal
+      restrictProperties(recipe, [
+        "generatorFile",
+        "standardFile",
+        "validatorFile",
+        "generatorSha256",
+        "standardSha256",
+        "validatorSha256",
+        "subtaskIds",
+        "standardFileIo"
+      ]);
+      restrictProperties(recipe.standardFileIo, ["inputFilename", "outputFilename"]);
+    }
+
     restrictProperties(judgeInfo, [
       "timeLimit",
       "memoryLimit",
@@ -117,7 +169,8 @@ export class ProblemTypeTraditionalService
       "hiddenSamples",
       "subtasks",
       "checker",
-      "extraSourceFiles"
+      "extraSourceFiles",
+      "selfEval"
     ]);
     restrictProperties(judgeInfo.fileIo, ["inputFilename", "outputFilename"]);
   }

@@ -107,6 +107,12 @@ class FixtureUpgrade(u.Upgrade):
 @unittest.skipUnless(os.geteuid()==0, 'Run with sudo; ownership checks use root-owned temporary fixtures')
 class UpgradeTests(unittest.TestCase):
     def setUp(self):
+        # This is a tiny synthetic fixture, not a deployment disk-budget check.
+        # Keep the suite independent of the host's available storage; the low-disk
+        # case below explicitly overrides this and exercises the real guard.
+        disk = patch.object(u.shutil, 'disk_usage', return_value=shutil._ntuple_diskusage(32*u.GIB, 8*u.GIB, 24*u.GIB))
+        disk.start()
+        self.addCleanup(disk.stop)
         self.tmp=tempfile.TemporaryDirectory(prefix='upgrade-test-')
         self.base=Path(self.tmp.name); self.root=self.base/'instance'; self.source=self.base/'source'; self.units=self.base/'units'
         for path in (self.root,self.source,self.units): path.mkdir()

@@ -1,6 +1,8 @@
 import { Column, Entity, Index, PrimaryGeneratedColumn } from "typeorm";
 
-export type ContestRule = "noi" | "ioi" | "acm";
+import type { ContestRule, ContestRuleOptions } from "./contest-rules";
+
+export type { ContestRule } from "./contest-rules";
 
 @Entity("contest")
 export class ContestEntity {
@@ -12,7 +14,9 @@ export class ContestEntity {
 
   @Column({ type: "mediumtext" }) description: string;
 
-  @Column({ type: "varchar", length: 8 }) rule: ContestRule;
+  @Column({ type: "varchar", length: 16 }) rule: ContestRule;
+
+  @Column({ type: "json", nullable: true }) ruleOptions: ContestRuleOptions;
 
   @Column({ type: "datetime" }) @Index() startTime: Date;
 

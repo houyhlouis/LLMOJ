@@ -2,6 +2,8 @@ import { ApiPropertyOptional } from "@nestjs/swagger";
 
 import { IsInt, IsObject, IsOptional, Min, Max } from "class-validator";
 
+import type { ContestRuleOptions } from "./contest-rules";
+
 import type { SubmissionContent } from "../submission/submission-content.interface";
 import type { FileUploadInfoDto } from "../file/dto";
 import type { Locale } from "../common/locale.type";
@@ -11,6 +13,7 @@ export interface ContestRequestData {
   subtitle?: string;
   description?: string;
   rule?: string;
+  ruleOptions?: ContestRuleOptions;
   startTime?: string;
   endTime?: string;
   isPublic?: boolean;

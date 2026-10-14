@@ -2,13 +2,15 @@
 
 [简体中文](Upgrade.zh-CN.md) | English | [Wiki home](Home.en.md)
 
+This release includes private teams from personal profiles, embedded problem solutions, Fake moderation, submission-detail Hacks, optional NOI contest Self Eval and Strict IOI, with frozen schema and judge-runtime contracts. It validates changes on a restored database copy before maintenance cutover. See [Community upgrade](Community-Upgrade.md) for schema details, the standalone helper, verified AI classification and downgrade safeguards. Use the target complete source's entry point; older registration-only or first community-feature upgraders cannot install the combined release.
+
 New installations default to `/opt/LLMOJ`. Existing installations remain in their current directory; use `--prefix /opt/LibreOJ` for an existing instance there. Changing the default does not migrate files or services.
 
 The updater supports **completed official one-click `all` and `web` deployments**. It updates application code and public assets while preserving accounts, problems, submissions, objects, AI settings/encryption keys, judge slots, CPU affinity and existing service customizations. It does not rerun the installer or administrator bootstrap.
 
 ## Compatibility
 
-This release supports the official version-3 installation metadata, local MariaDB/Redis/MinIO, a single backend, Node 24.21.0 and pnpm 11.13.1. Runtime, lockfile, shared packages, judge/native code and rootfs recipes must match the supported target contract. Only known registration-review/application schema changes, explicit migration of legacy inactive empty accounts, and appending `ManageRegistrationReviews` to the known `user_privilege.privilegeType` enum are permitted. The enum expansion checks every existing value and its order; removal, renaming, reordering or unknown values are not supported.
+This release supports official version-3 metadata, local MariaDB/Redis/MinIO, a single backend, Node 24.21.0 and pnpm 11.13.1. Runtime, lockfile, native code and rootfs recipes must remain compatible. The known Hack/self-evaluation protocol and task handlers have a pinned file-specific runtime contract with exact old and new hashes; arbitrary judge changes are refused. The combined runtime transition is automated only for the official `all` role. A `web` deployment requires separately coordinated remote judges and is refused for this transition. Database changes are restricted to registration-review/application safeguards, twelve community tables, the nullable STD content addition to the first Hack table, the discussion category column/index, append-only Fake/Hacked, eight appended permissions, and two contest fields: non-destructive rule widening to `varchar(16)` and nullable `ruleOptions longtext` using `simple-json`. Only NOI / OI, IOI, ICPC and Strict IOI are supported. Self Eval is offered only in enabled NOI / OI contests, with manager-supplied make/std and the formal SPJ. Existing privilege and status enum values and order are checked; removal, renaming, reordering and unknown values are unsupported.
 
 The known repository-link, package-description and bootstrap-title branding changes are treated as metadata-only for compatibility. Only the specified LibreOJ-to-LLMOJ values in identified files are allowed; package names, dependencies, scripts, API/CDN endpoints and all other settings remain subject to the existing checks. Source integrity still uses the original file bytes.
 
@@ -37,13 +39,13 @@ A plan checks deployment/runtime and lists deferred checks. It does not build, c
 
 ## Maintenance and preservation
 
-Pause new submissions/imports/AI tasks and drain queued/running jobs, including remote judges. Interactive execution requires typing `UPGRADE`. The tool also checks active database jobs, but cannot coordinate remote nodes on your behalf.
+Pause new submissions/imports/AI tasks and drain queued/running jobs, including Hack, self-evaluation, fixed prediction preparation and remote judges. Interactive execution requires typing `UPGRADE`. The tool also checks active database jobs, but cannot coordinate remote nodes on your behalf.
 
 It acquires the maintenance lock, validates effective service paths and available space, builds using independent dependency copies, and verifies asset hashes. It privately backs up configuration, AI master key and SQL, then restores SQL to a temporary database to audit and test schema and registration-application migrations. Before cutover it stops Nginx/judge/backend, takes a fresh dump and repeats schema checks. After switching files, it checks backend/local-judge health and restores the original service states, opening Nginx last.
 
 Backups and private build logs remain in `<prefix>/backups/upgrade/<UTC-random>/`; the terminal prints the path. Backups may contain secrets and must not be uploaded to GitHub. They are retained for your own retention policy; business data and backups are not deleted. Legacy inactive empty accounts are converted to independent applications under the strict rules below.
 
-A dedicated `/etc/systemd/system/libreoj-backend.service.d/90-libreoj-schema-sync.conf` sets `LIBREOJ_SCHEMA_SYNC=0` to disable automatic schema writes at backend startup. The updater applies checked migrations explicitly. Unknown content using that filename is never overwritten. Other units/drop-ins, Nginx configuration, credentials and judge capacity remain unchanged.
+A dedicated `/etc/systemd/system/libreoj-backend.service.d/90-libreoj-schema-sync.conf` sets `LIBREOJ_SCHEMA_SYNC=0` to disable automatic schema writes at backend startup. It is installed before the first community DDL statement and retained after a partial migration failure. The updater applies checked migrations explicitly. Unknown content using that filename is never overwritten. Other units/drop-ins, Nginx configuration, credentials and judge capacity remain unchanged.
 
 Site management stores registration policy under an independent key in the existing `settings` table; it adds no table or column. Upgrading preserves both the website override and homepage content. Without an override, the YAML default continues to apply.
 
@@ -78,6 +80,8 @@ sudo bash /path/to/LLMOJ/deploy/upgrade.sh \
 Verify the reported `sourceSha256`, then supply both `--source` and `--source-sha256 FULL_64_HEX_DIGEST` for execution. `python3 /path/to/LLMOJ/deploy/upgrade.py --source /path/to/LLMOJ --source-digest` also computes the tree digest without writes. A hash detects changes but does not establish trust by itself. A ZIP containing only modified files is not a complete source tree.
 
 ## Failure, retry and rollback
+
+When teams, solution categories, Fake/Hacked records, Hack STD configuration/history, self-evaluation data, Strict IOI contests, saved feature options or new explicit permission grants/denials exist, a rollback target must support their access and behavior rules; otherwise rollback is refused. Repair the new release instead. After community schema additions, the guard disabling automatic schema writes is retained during rollback.
 
 Build/clone-validation failures keep the original running instance. Failures during cutover attempt code/service recovery. If automatic recovery fails, application services remain stopped and the private recovery location is reported. Do not assume success after a failure message.
 

@@ -1,5 +1,8 @@
 return {
   title: "Submission",
+  close_preview: "Close submission preview",
+  close_hack_preview: "Close hack preview",
+  retry_preview: "Retry",
   cancel: "Cancel",
   confirm_cancel: "Confirm cancel",
   success_cancel: "Successfully canceled.",
@@ -15,6 +18,12 @@ return {
   delete: "Delete",
   confirm_delete: "Confirm delete",
   success_delete: "Successfully deleted.",
+  fake: "Fake (disqualify)",
+  confirm_fake: "Confirm disqualification and set score to 0",
+  success_fake: "Submission retained and score set to 0.",
+  fake_notice:
+    "This submission is disqualified for cheating and scores 0. The original judge results shown below are retained as evidence and do not count toward the score. An authorized manager can rejudge to restore it.",
+  confirm_restore_rejudge: "Confirm restore and rejudge",
   error: {
     NO_SUCH_PROBLEM: "No such problem.",
     NO_SUCH_FILE: "No such file.",

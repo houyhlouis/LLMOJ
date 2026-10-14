@@ -491,17 +491,20 @@ test("testdata requires proof for every generated input and sample before publis
           filenames.push(filename);
         }
       const published = [],
+        publishedBytes = new Map(),
         user = { id: 1 };
       let switches = 0,
-        cleaned = 0;
+        cleaned = 0,
+        activatedJudgeInfo;
       const svc = new AiService(
         {},
         {},
         {},
         { userHasPrivilege: async () => true, permissionDecision: async () => true },
         {
-          updateProblemJudgeInfo: async () => {
+          updateProblemJudgeInfo: async (_problem, judgeInfo) => {
             switches++;
+            activatedJudgeInfo = structuredClone(judgeInfo);
             return null;
           }
         },
@@ -511,7 +514,10 @@ test("testdata requires proof for every generated input and sample before publis
       svc.assertJob = async () => user;
       svc.assertSnapshot = async () => user;
       svc.checkpoint = async () => {};
-      svc.putFile = async (_problem, filename) => published.push(filename);
+      svc.putFile = async (_problem, filename, source) => {
+        published.push(filename);
+        publishedBytes.set(filename, typeof source === "string" ? fs.readFileSync(source) : Buffer.from(source));
+      };
       svc.runSandbox = async (_job, payload) => {
         assert.equal(payload.validatorCode, "int main(){return 0;}");
         assert.equal(payload.cases.length, 5);
@@ -544,8 +550,24 @@ test("testdata requires proof for every generated input and sample before publis
       if (validation === expected) {
         await execution;
         assert.equal(switches, 1);
-        assert.equal(published.length, 14);
-        assert(published.includes("validator.cpp"));
+        const prefix = activatedJudgeInfo.subtasks[0].testcases[0].inputFile.replace(/1\.in$/, "");
+        assert.match(prefix, /^ai-managed-[0-9a-f-]{36}-$/);
+        const originalArtifacts = [...filenames.map(filename => prefix + filename), "make.cpp", "std.cpp", "validator.cpp", "data.yaml"];
+        const immutableSelfEvalSources = ["make.cpp", "std.cpp", "validator.cpp"].map(filename => prefix + filename);
+        // The original ten case files and four review artifacts remain unchanged;
+        // the extra three files are immutable copies from that same generation.
+        assert.equal(originalArtifacts.length, 14);
+        assert.deepEqual(published.filter(filename => !immutableSelfEvalSources.includes(filename)).sort(), originalArtifacts.sort());
+        assert.deepEqual(published.filter(filename => immutableSelfEvalSources.includes(filename)).sort(), immutableSelfEvalSources.sort());
+        for (const filename of filenames) assert.equal(publishedBytes.get(prefix + filename).toString(), "1\n");
+        const recipe = activatedJudgeInfo.selfEval;
+        assert.deepEqual(recipe.subtaskIds, [1]);
+        for (const [role, stateKey, filename] of [["generator", "makeCode", "make.cpp"], ["standard", "stdCode", "std.cpp"], ["validator", "validatorCode", "validator.cpp"]]) {
+          assert.equal(recipe[role + "File"], prefix + filename, "Self Eval must bind to the active formal generation");
+          assert.equal(recipe[role + "Sha256"], crypto.createHash("sha256").update(job.state[stateKey]).digest("hex"));
+          assert.equal(publishedBytes.get(recipe[role + "File"]).toString(), job.state[stateKey]);
+          assert.equal(publishedBytes.get(filename).toString(), job.state[stateKey], "downloadable review source still matches its immutable copy");
+        }
         assert.deepEqual(job.state.generated.sampleValidation, { ...expected, quality: job.state.qualityValidation });
       } else {
         await assert.rejects(execution, /INVALID_SANDBOX_RESPONSE/);

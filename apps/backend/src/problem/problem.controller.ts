@@ -1,4 +1,4 @@
-import { Controller, Post, Body, BadRequestException } from "@nestjs/common";
+import { Controller, Post, Body, BadRequestException, ForbiddenException } from "@nestjs/common";
 import { ApiOperation, ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 
 import { SubmissionStatus } from "@libreoj/judge-protocol";
@@ -299,7 +299,23 @@ export class ProblemController {
       samples: await this.problemService.getProblemSamples(problem)
     };
 
-    const success = await this.problemService.updateProblemStatement(problem, request, problemTags);
+    const success = await this.problemService.updateProblemStatement(
+      problem,
+      request,
+      problemTags,
+      async (manager, currentProblem) => {
+        if (
+          !(await this.problemService.userHasPermission(
+            currentUser,
+            currentProblem,
+            ProblemPermissionType.Modify,
+            undefined,
+            manager
+          ))
+        )
+          throw new ForbiddenException();
+      }
+    );
 
     if (!success)
       return {
@@ -742,7 +758,8 @@ export class ProblemController {
       request.type,
       request.uploadInfo,
       request.filename,
-      hasPrivilege
+      hasPrivilege,
+      currentUser
     );
     if (typeof result === "string")
       return {
@@ -782,7 +799,7 @@ export class ProblemController {
         error: RemoveProblemFilesResponseError.PERMISSION_DENIED
       };
 
-    await this.problemService.removeProblemFiles(problem, request.type, request.filenames);
+    await this.problemService.removeProblemFiles(problem, request.type, request.filenames, currentUser);
 
     await this.auditService.log("problem.remove_files", AuditLogObjectType.Problem, problem.id, {
       type: request.type,
@@ -855,7 +872,8 @@ export class ProblemController {
       problem,
       request.type,
       request.filename,
-      request.newFilename
+      request.newFilename,
+      currentUser
     );
     if (renamed === "FILE_ALREADY_EXISTS") return { error: RenameProblemFileResponseError.FILE_ALREADY_EXISTS };
     if (!renamed) return { error: RenameProblemFileResponseError.NO_SUCH_FILE };
@@ -900,7 +918,19 @@ export class ProblemController {
       problem,
       request.judgeInfo,
       request.submittable,
-      hasPrivilege
+      hasPrivilege,
+      async (manager, currentProblem) => {
+        if (
+          !(await this.problemService.userHasPermission(
+            currentUser,
+            currentProblem,
+            ProblemPermissionType.Modify,
+            undefined,
+            manager
+          ))
+        )
+          throw new ForbiddenException();
+      }
     );
     if (judgeInfoError)
       return {
@@ -1193,7 +1223,7 @@ export class ProblemController {
         const oldType = problem.type;
         const [oldJudgeInfo] = await this.problemService.getProblemJudgeInfo(problem);
 
-        if (!(await this.problemService.changeProblemType(problem, request.type)))
+        if (!(await this.problemService.changeProblemType(problem, request.type, currentUser)))
           return {
             error: ChangeProblemTypeResponseError.PROBLEM_HAS_SUBMISSION
           };

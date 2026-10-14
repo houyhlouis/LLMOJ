@@ -15,6 +15,7 @@ import {
 import { callContest, contestRequest, submitContest, prepareContestUpload, tr } from "./api";
 import ContestFrame from "./ContestFrame";
 import style from "./ContestPages.module.less";
+import SelfEvalButton from "@/pages/self-eval/SelfEvalButton";
 
 function initialOptions(value: string) {
   const [language, variant] = value.split(":");
@@ -223,6 +224,15 @@ function ContestProblemPage({ detail, initial }: { detail: any; initial: any }) 
       {error && <Message negative>{error}</Message>}
       <Divider />
       <Header as="h2">{tr("提交", "Submit")}</Header>
+      {data.type === "Traditional" &&
+        data.contest.rule === "noi" &&
+        data.contest.ruleOptions?.selfEvalEnabled === true && (
+          <SelfEvalButton
+            problemId={data.problem.problemId}
+            contestId={id}
+            initialContent={{ language, code, compileAndRunOptions: options }}
+          />
+        )}
       {data.type === "Communication" && data.hasGrader && (
         <Message info>
           {tr(

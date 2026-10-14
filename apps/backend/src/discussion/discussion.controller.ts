@@ -9,6 +9,7 @@ import {
 } from "./discussion.service";
 
 import { DiscussionReplyEntity } from "./discussion-reply.entity";
+import { DiscussionType } from "./discussion-type.enum";
 
 import {
   CreateDiscussionRequestDto,
@@ -110,6 +111,8 @@ export class DiscussionController {
       };
 
     const problem = request.problemId && (await this.problemService.findProblemById(request.problemId));
+    if (request.type === DiscussionType.Solution && !request.problemId)
+      return { error: CreateDiscussionResponseError.SOLUTION_REQUIRES_PROBLEM };
     if (request.problemId) {
       if (!problem)
         return {
@@ -127,7 +130,10 @@ export class DiscussionController {
       currentUser,
       request.title,
       request.content,
-      problem
+      problem,
+      undefined,
+      undefined,
+      request.type ?? DiscussionType.Discussion
     );
 
     return {
@@ -274,11 +280,12 @@ export class DiscussionController {
       currentUser,
       hasPrivilege,
       request.keyword,
-      filterProblem || request.problemId === -1 ? request.problemId : null,
+      filterProblem || request.problemId === -1 || request.problemId === -2 ? request.problemId : null,
       filterPublisher ? request.publisherId : null,
       request.nonpublic,
       request.skipCount,
-      request.takeCount
+      request.takeCount,
+      request.type
     );
 
     const canSee = await Promise.all(
@@ -604,18 +611,47 @@ export class DiscussionController {
         error: UpdateDiscussionResponseError.PERMISSION_DENIED
       };
 
+    const type = request.type ?? discussion.type ?? DiscussionType.Discussion;
+    const problemId = request.problemId === undefined ? discussion.problemId : request.problemId;
+    const reclassified = type !== (discussion.type ?? DiscussionType.Discussion) || problemId !== discussion.problemId;
+    if (reclassified) {
+      if (
+        currentUser?.id !== discussion.publisherId &&
+        !(await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageDiscussion))
+      )
+        return { error: UpdateDiscussionResponseError.PERMISSION_DENIED };
+      if (problemId) {
+        const problem = await this.problemService.findProblemById(problemId);
+        if (!problem) return { error: UpdateDiscussionResponseError.NO_SUCH_PROBLEM };
+        if (!(await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.View)))
+          return { error: UpdateDiscussionResponseError.PERMISSION_DENIED };
+      }
+    }
+    if (type === DiscussionType.Solution && !problemId)
+      return { error: UpdateDiscussionResponseError.SOLUTION_REQUIRES_PROBLEM };
+
     const old = {
       title: discussion.title,
-      content: await this.discussionService.getDiscussionContent(discussion)
+      content: await this.discussionService.getDiscussionContent(discussion),
+      type: discussion.type ?? DiscussionType.Discussion,
+      problemId: discussion.problemId
     };
 
-    await this.discussionService.updateDiscussionTitleAndContent(discussion, request.title, request.content);
+    await this.discussionService.updateDiscussionTitleAndContent(
+      discussion,
+      request.title,
+      request.content,
+      reclassified ? { type, problemId: problemId ?? null } : undefined,
+      currentUser
+    );
 
     await this.auditService.log("discussion.update", AuditLogObjectType.Discussion, discussion.id, {
       old,
       new: {
         title: request.title,
-        content: request.content
+        content: request.content,
+        type,
+        problemId
       }
     });
 
@@ -644,7 +680,7 @@ export class DiscussionController {
 
     const oldContent = discussionReply.content;
 
-    await this.discussionService.updateReplyContent(discussionReply, request.content);
+    await this.discussionService.updateReplyContent(discussionReply, request.content, currentUser);
 
     await this.auditService.log(
       "discussion.update_reply",
@@ -735,7 +771,7 @@ export class DiscussionController {
 
     const oldContent = discussionReply.content;
 
-    await this.discussionService.deleteReply(discussionReply);
+    await this.discussionService.deleteReply(discussionReply, currentUser);
 
     await this.auditService.log(
       "discussion.delete_reply",

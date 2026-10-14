@@ -7,6 +7,7 @@ import { CodeLanguage, normalizeContestLanguages } from "@/interfaces/CodeLangua
 import ContestFrame from "./ContestFrame";
 import { callContest, tr, problemLetter, languageChoices } from "./api";
 import style from "./ContestPages.module.less";
+import { ruleChoices, ruleDescription } from "./contest-rules";
 
 const dateInput = (value: string) => {
   const d = new Date(value);
@@ -22,6 +23,7 @@ function ContestEditPage({ detail }: { detail?: any }) {
     detail
       ? {
           ...detail.contest,
+          ruleOptions: detail.contest.ruleOptions ?? {},
           languages: normalizeContestLanguages(detail.contest.languages),
           startTime: dateInput(detail.contest.startTime),
           endTime: dateInput(detail.contest.endTime)
@@ -31,6 +33,7 @@ function ContestEditPage({ detail }: { detail?: any }) {
           subtitle: "",
           description: "",
           rule: "noi",
+          ruleOptions: {},
           startTime: dateInput(new Date(Date.now() + 3600000).toISOString()),
           endTime: dateInput(new Date(Date.now() + 14400000).toISOString()),
           adminIds: [],
@@ -55,7 +58,16 @@ function ContestEditPage({ detail }: { detail?: any }) {
   };
   const [problem, setProblem] = useState<any>(blankProblem);
   function change(name: string, value: any) {
-    setData({ ...data, [name]: value });
+    const next = { ...data, [name]: value };
+    if (name === "rule" && value !== "noi") {
+      next.ruleOptions = { ...data.ruleOptions };
+      delete next.ruleOptions.selfEvalEnabled;
+      delete next.ruleOptions.selfEvalMaxAttempts;
+    }
+    setData(next);
+  }
+  function changeOption(name: string, value: any) {
+    setData({ ...data, ruleOptions: { ...data.ruleOptions, [name]: value } });
   }
   async function save() {
     setPending(true);
@@ -147,11 +159,7 @@ function ContestEditPage({ detail }: { detail?: any }) {
           <Form.Select
             label={tr("赛制", "Rule")}
             value={data.rule}
-            options={[
-              { value: "noi", text: "NOI" },
-              { value: "ioi", text: "IOI" },
-              { value: "acm", text: "ICPC" }
-            ]}
+            options={ruleChoices()}
             onChange={(_, v) => change("rule", v.value)}
           />
           <Form.Input
@@ -167,6 +175,65 @@ function ContestEditPage({ detail }: { detail?: any }) {
             onChange={(_, v) => change("endTime", v.value)}
           />
         </Form.Group>
+        <p className={style.description}>{ruleDescription(data.rule)}</p>
+        {data.rule === "noi" && (
+          <>
+            <Form.Checkbox
+              label={tr(
+                "开启 Self Eval（预测试结果不计入正式成绩）",
+                "Enable Self Eval (pretests do not affect official scores)"
+              )}
+              checked={data.ruleOptions.selfEvalEnabled === true}
+              onChange={(_, v) => changeOption("selfEvalEnabled", !!v.checked)}
+            />
+            {data.ruleOptions.selfEvalEnabled && (
+              <Form.Input
+                required
+                type="number"
+                min={1}
+                max={1000}
+                step={1}
+                label={tr("每位选手全场最多自测次数", "Maximum self-evaluations per participant for the whole contest")}
+                value={data.ruleOptions.selfEvalMaxAttempts ?? 30}
+                onChange={(_, v) => changeOption("selfEvalMaxAttempts", Number(v.value))}
+              />
+            )}
+            <p className={style.description}>
+              {tr(
+                "仅 NOI / OI 赛制支持。管理员在比赛题目页填写 make.cpp 和 std.cpp，沿用正式 SPJ，并在赛前准备隐藏预测试集。默认每位选手全场 30 次。",
+                "Available only for NOI / OI. Managers enter make.cpp and std.cpp on the contest problem page, reuse the official checker, and prepare the hidden set before the contest. The default quota is 30 attempts per participant across the round."
+              )}
+            </p>
+          </>
+        )}
+        <Form.Checkbox
+          label={tr(
+            "允许 Hack（仍需相应权限及题目 Hack 配置）",
+            "Allow hacks (permissions and problem hack configuration are required)"
+          )}
+          checked={data.ruleOptions.hackEnabled === true}
+          onChange={(_, v) => changeOption("hackEnabled", !!v.checked)}
+        />
+        <Form.Group widths="equal">
+          <Form.Input
+            type="datetime-local"
+            label={tr("Hack 开始时间（可选）", "Hack start time (optional)")}
+            value={data.ruleOptions.hackStartTime ? dateInput(data.ruleOptions.hackStartTime) : ""}
+            onChange={(_, v) => changeOption("hackStartTime", v.value ? new Date(v.value).toISOString() : undefined)}
+          />
+          <Form.Input
+            type="datetime-local"
+            label={tr("Hack 结束时间（可选）", "Hack end time (optional)")}
+            value={data.ruleOptions.hackEndTime ? dateInput(data.ruleOptions.hackEndTime) : ""}
+            onChange={(_, v) => changeOption("hackEndTime", v.value ? new Date(v.value).toISOString() : undefined)}
+          />
+        </Form.Group>
+        <p className={style.description}>
+          {tr(
+            "开启后默认在赛后开放 Hack，可设置开放时间。NOI / OI 和严格 IOI 在赛时保护其他选手的记录及成绩。",
+            "When enabled, hacks open after the contest by default; an explicit window can be configured. NOI / OI and Strict IOI protect competitors' records and scores during the round."
+          )}
+        </p>
         <Form.Input
           label={tr("协管员用户 ID（逗号分隔）", "Administrator user IDs (comma separated)")}
           value={adminIds}

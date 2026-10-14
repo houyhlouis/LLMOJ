@@ -1,0 +1,103 @@
+.page {
+  padding-bottom: 14px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0 0 20px;
+  > :global(.ui.header) {
+    margin: 0;
+    flex: 1;
+    min-width: 200px;
+    overflow-wrap: anywhere;
+  }
+  > :global(.ui.button), > :global(.ui.label) {
+    margin: 0;
+  }
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0;
+  > :global(.ui.button) {
+    margin: 0;
+  }
+}
+.tabs,
+.table {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.tabs {
+  margin-bottom: 20px;
+  > :global(.ui.menu) {
+    white-space: nowrap;
+    width: max-content;
+    min-width: 100%;
+    margin-top: 0;
+  }
+}
+.table {
+  > :global(.ui.table) {
+    margin-top: 14px;
+  }
+  > :global(.ui.unstackable.table) {
+    min-width: 320px;
+  }
+}
+.joinForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  > :global(.field) {
+    margin: 0 !important;
+    flex: 1;
+    min-width: 200px;
+    max-width: 400px;
+  }
+  > :global(.ui.button) {
+    margin: 0;
+  }
+}
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 20px;
+}
+.application {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.empty {
+  color: var(--theme-description-message-foreground);
+  padding: 24px 0;
+}
+.description {
+  overflow-wrap: anywhere;
+  margin: 18px 0;
+}
+.token {
+  overflow-wrap: anywhere;
+  font-family: monospace;
+}
+.editor {
+  overflow: visible;
+}
+.note {
+  color: var(--theme-description-message-foreground);
+}
+.rowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}

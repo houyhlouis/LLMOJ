@@ -1,5 +1,8 @@
 export enum JudgeTaskType {
-  Submission = "Submission"
+  Submission = "Submission",
+  Hack = "Hack",
+  SelfEvalPrepare = "SelfEvalPrepare",
+  SelfEval = "SelfEval"
 }
 
 export interface JudgeTaskMeta {
@@ -34,7 +37,49 @@ export enum SubmissionStatus {
   PartiallyCorrect = "PartiallyCorrect",
   WrongAnswer = "WrongAnswer",
   Accepted = "Accepted",
-  JudgementFailed = "JudgementFailed"
+  JudgementFailed = "JudgementFailed",
+  Fake = "Fake",
+  Hacked = "Hacked"
+}
+
+export enum HackStatus {
+  Pending = "Pending",
+  Running = "Running",
+  Success = "Success",
+  Failed = "Failed",
+  InvalidInput = "InvalidInput",
+  ConfigurationError = "ConfigurationError",
+  SystemError = "SystemError",
+  Canceled = "Canceled"
+}
+
+export interface HackProgress {
+  status: HackStatus;
+  finished: boolean;
+  message?: string;
+  timeUsed?: number;
+  memoryUsed?: number;
+  // Safe target-testcase feedback. Compiler/checker diagnostics and program output stay private.
+  targetExecuted?: boolean;
+  targetStatus?: SubmissionStatus;
+  targetScore?: number;
+}
+
+export interface SelfEvalCase {
+  subtask: number;
+  input: string;
+  output: string;
+}
+
+export interface SelfEvalProgress {
+  status: string;
+  finished: boolean;
+  score?: number;
+  timeUsed?: number;
+  memoryUsed?: number;
+  subtasks?: { score: number; fullScore: number }[];
+  cases?: SelfEvalCase[];
+  message?: string;
 }
 
 export enum SubmissionProgressType {

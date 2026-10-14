@@ -1,0 +1,168 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  flex-wrap: wrap;
+  margin-bottom: 1.5em;
+}
+.toolbar > :global(.header) {
+  margin: 0 !important;
+}
+.myHacks {
+  margin-left: auto !important;
+}
+.queryForm {
+  margin-bottom: 1.5em;
+}
+.tableScroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+}
+.table {
+  min-width: 950px;
+}
+.table :global(td) {
+  vertical-align: middle !important;
+}
+.secondary {
+  opacity: 0.65;
+  font-size: 0.9em;
+  margin-top: 0.25em;
+}
+.pagination {
+  text-align: center;
+  margin-top: 1.5em;
+}
+.inputData {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+.inputEditor textarea {
+  font-family: monospace;
+}
+.action {
+  margin-top: 0.35em !important;
+}
+.detailGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1em;
+}
+@media only screen and (max-width: 767px) {
+  .detailGrid {
+    grid-template-columns: 1fr;
+  }
+  .queryForm :global(.fields) {
+    flex-wrap: wrap;
+  }
+  .queryForm :global(.field) {
+    width: 100% !important;
+  }
+  .toolbar :global(.button) {
+    margin-right: 0;
+  }
+}
+
+.tableScroll > .hackTable {
+  min-width: 900px;
+  margin: 0 !important;
+  :global(th),
+  :global(td) {
+    vertical-align: middle !important;
+  }
+  :global(td) {
+    height: 44px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+.statusColumn {
+  width: 150px;
+}
+.problemColumn {
+  width: 180px;
+}
+.targetFilter input {
+  width: 130px !important;
+}
+.hackQuery :global(.inline.fields) {
+  flex-wrap: wrap;
+  row-gap: 0.75em;
+}
+.statusSuccess {
+  color: #21ba45 !important;
+}
+.statusFailed,
+.statusInvalidInput {
+  color: #db2828 !important;
+}
+.statusPending,
+.statusCanceled {
+  color: #767676 !important;
+}
+.statusRunning {
+  color: #f2711c !important;
+}
+.statusSystemError,
+.statusConfigurationError {
+  color: #a333c8 !important;
+}
+.submissionActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6em;
+  margin: 1.5em 0;
+}
+.submissionActions:empty {
+  display: none;
+}
+.submissionActions :global(.button) {
+  margin: 0 !important;
+}
+.referenceEditor {
+  height: 440px !important;
+  margin-bottom: 1.5em;
+}
+.referencePage {
+  margin-top: 1em;
+}
+.referenceHeader {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1em;
+  margin-bottom: 1.5em;
+}
+.referenceHeader > :global(.header) {
+  margin: 0 !important;
+}
+.referenceHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  margin-left: auto;
+}
+.referenceHeaderActions :global(.button) {
+  margin: 0 !important;
+}
+.referencePage :global(.form) {
+  margin-bottom: 1.5em;
+}
+@media only screen and (max-width: 767px) {
+  .hackQuery :global(.field) {
+    width: auto !important;
+  }
+  .hackQuery .statusFilter {
+    display: block;
+  }
+  .hackQuery .statusFilter div[role="listbox"] {
+    width: 160px !important;
+  }
+  .referenceEditor {
+    height: 350px !important;
+  }
+}

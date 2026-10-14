@@ -397,3 +397,61 @@ test("tutorial fact errors are localized without rendering arbitrary backend det
   assert.match(api.aiError("INVALID_AI_TUTORIAL: UNVERIFIED_SOURCE_PROVENANCE_CLAIM"), /原题来源/);
   assert.match(api.actionName("repair-make"), /修复/);
 });
+
+function teamUploadFixture({ size = 10 * 1024 ** 3, failPart, abortAfterPart } = {}) {
+  const calls = [], chunks = [], controller = new AbortController();
+  const partSize = 32 * 1024 ** 2;
+  const session = { uuid: 'team-session', size, partSize, partCount: size > partSize ? Math.ceil(size / partSize) : 0 };
+  const file = { name: 'large.bin', size, slice: (start, end) => ({ size: end - start }) };
+  const request = async (action, body) => {
+    calls.push({ action, body });
+    if (action === 'prepareFileUpload') return { uploadSession: session, signedUploadRequest: session.partCount ? undefined : { uuid: session.uuid } };
+    if (action === 'prepareFileUploadPart') {
+      if (body.part === failPart) throw new Error('Part signing denied');
+      return { signedUploadRequest: { uuid: 'chunk-' + body.part } };
+    }
+    if (action === 'uploadFile') return { fileId: 42 };
+    if (action === 'cancelFileUpload') return {};
+    throw new Error('Unexpected action');
+  };
+  const upload = async options => {
+    await options.prepareUploadApi({}, options.file);
+    chunks.push(options.file.size);
+    options.onProgress({ status: 'Uploading', progress: 1 });
+    if (chunks.length === abortAfterPart) { controller.abort(); return { uploadCancelled: true }; }
+    return options.api({});
+  };
+  const { uploadTeamFile } = load('utils/uploadTeamFile.ts', { './callApiWithFileUpload': { callApiWithFileUpload: upload } });
+  return { calls, chunks, controller, run: () => uploadTeamFile({ teamId: 7, file, request, signal: controller.signal }) };
+}
+
+test('a complete 10 GiB team file is sliced into bounded chunks without reading the whole file', async () => {
+  const fixture = teamUploadFixture();
+  assert.equal((await fixture.run()).fileId, 42);
+  assert.equal(fixture.chunks.length, 320);
+  assert.equal(Math.max(...fixture.chunks), 32 * 1024 ** 2);
+  assert.equal(fixture.chunks.reduce((sum, size) => sum + size, 0), 10 * 1024 ** 3);
+  assert.equal(fixture.calls.filter(call => call.action === 'uploadFile').length, 1);
+  assert.equal(fixture.calls.filter(call => call.action === 'cancelFileUpload').length, 0);
+  const final = fixture.calls.find(call => call.action === 'uploadFile');
+  assert.equal(final.body.uploadInfo.uuid, 'team-session');
+  assert.equal(final.body.uploadInfo.size, 10 * 1024 ** 3);
+});
+
+test('cancelled and failed team chunks release their reservation and never finalize a partial file', async () => {
+  for (const options of [{ abortAfterPart: 1 }, { failPart: 2 }]) {
+    const fixture = teamUploadFixture(options);
+    await assert.rejects(fixture.run());
+    assert.equal(fixture.calls.filter(call => call.action === 'uploadFile').length, 0);
+    assert.equal(fixture.calls.filter(call => call.action === 'cancelFileUpload').length, 1);
+  }
+});
+
+test('small and empty team files keep a single bounded POST request and reserve their final UUID', async () => {
+  for (const size of [0, 17]) {
+    const fixture = teamUploadFixture({ size });
+    assert.equal((await fixture.run()).fileId, 42);
+    assert.deepEqual(fixture.chunks, [size]);
+    assert.equal(fixture.calls.filter(call => call.action === 'prepareFileUploadPart').length, 0);
+  }
+});

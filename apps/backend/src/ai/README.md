@@ -2,6 +2,12 @@
 
 `AiModule` provides authenticated, owner-scoped LLM and search/MCP configuration and durable jobs under `/api/ai/`. Supported actions include statement import and translation, source discovery, tags, difficulty, tutorials and sandboxed test-data generation. Generated problems remain private, and every write rechecks the current user's permissions and problem snapshot.
 
+## Prompt and content languages
+
+Repository-maintained system instructions, task prompts and injected formatting/protocol/scoring rules use English. This includes image extraction and OCR verification, statement translation, source discovery and verification, tutorials, tags, difficulty calibration, test-data plans, generators, validators, checkers, protocol judges, reference/independent solutions, quality probes and generator repair. The prompt regression suite follows model call sites and imported instruction fragments to check this convention.
+
+Instruction language does not change content language. Extraction preserves the original statement language; translation follows its requested locale; `zh_CN` output remains Chinese and `en_US` output remains English. Bilingual tutorial/tag/explanation requirements and JSON keys remain intact. Original statements, quotations, search results, code and user input stay untrusted data in their original language. Chinese parsing expressions and localized editor/UI labels remain in place.
+
 ## Credentials and configuration
 
 Provider credentials are encrypted with AES-256-GCM. Configuration responses expose `hasKey` without returning saved API keys. Saving a new provider URL clears the old key unless a replacement is supplied. The frontend clears submitted keys; request bodies, provider error bodies and keys are excluded from AI diagnostics and usage records.
@@ -66,3 +72,7 @@ Browser integration requires Playwright available as a local backend development
 - [Tavily search API](https://docs.tavily.com/documentation/api-reference/endpoint/search)
 - [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports)
 - [Codeforces API](https://codeforces.com/apiHelp): embedded difficulty calibration uses official metadata; provenance is recorded in `deploy/content/codeforces-calibration.json`.
+
+## NOI contest Self Eval integration
+
+Successful traditional-data publication binds immutable, hash-checked copies of the exact generator, standard solution and validator used by that job. The enabled NOI / OI contest problem’s Self Eval dialog can explicitly start the existing `testdata` workflow through its AI button, regenerate formal data, reload matching make/std sources and then prepare the fixed hidden prediction set before the contest begins. The prediction judge reuses the problem’s formal checker/SPJ; handwritten configuration needs only make/std, with the bound formal validator reused when available. This binding does not expose ordinary problem-bank Self Eval or alter official scores. Runtime/API scope and quotas are enforced independently by SelfEvalService. See the bilingual [Self Eval guide](../../../../wiki/Self-Evaluation.md).

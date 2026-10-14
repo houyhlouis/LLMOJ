@@ -80,6 +80,14 @@ async function fixture(work, initial = originalJudgeInfo()) {
     }
     if (state.active.checker?.type === "custom")
       assert(state.files.has(state.active.checker.filename), "an active checker must already exist");
+    if (state.active.selfEval) {
+      const recipe = state.active.selfEval;
+      for (const role of ["generator", "standard", "validator"]) {
+        const source = state.files.get(recipe[role + "File"]);
+        assert.notEqual(source, undefined, "a committed self-evaluation recipe must reference an existing immutable program");
+        assert.equal(crypto.createHash("sha256").update(source).digest("hex"), recipe[role + "Sha256"]);
+      }
+    }
   }
   const service = new AiService(
     {},
@@ -195,6 +203,60 @@ async function fixture(work, initial = originalJudgeInfo()) {
 }
 
 const uploadFailure = () => new AiError("UPLOAD_GENERATED_FILE_FAILED", "synthetic interrupted upload");
+
+test("formal generation freezes all three exact programs before activating the self-evaluation recipe", async () => {
+  await fixture(async ({ state, job, run, assertActiveConsistent }) => {
+    await run();
+    const recipe = state.active.selfEval;
+    assert(recipe);
+    const activation = state.events.indexOf("activate");
+    for (const [role, sourceKey, artifact] of [["generator", "makeCode", "make.cpp"], ["standard", "stdCode", "std.cpp"], ["validator", "validatorCode", "validator.cpp"]]) {
+      assert.match(recipe[role + "File"], new RegExp("^ai-managed-[0-9a-f-]{36}-" + artifact.replace(".", "\\.") + "$"));
+      assert.equal(state.files.get(recipe[role + "File"]), job.state[sourceKey]);
+      assert.equal(recipe[role + "Sha256"], crypto.createHash("sha256").update(job.state[sourceKey]).digest("hex"));
+      assert(state.events.indexOf(recipe[role + "File"]) < activation);
+      state.files.set(artifact, "changed mutable download artifact");
+    }
+    assertActiveConsistent();
+    assert.deepEqual(recipe.subtaskIds, job.state.plan.subtasks.map(subtask => subtask.id));
+  });
+});
+
+test("an immutable recipe source upload failure or cancellation never activates partial formal data", async () => {
+  for (const scenario of ["failure", "cancel"]) await fixture(async ({ state, run }) => {
+    const original = structuredClone(state.active);
+    if (scenario === "failure") state.beforeWrite = async name => {
+      if (/^ai-managed-.*-validator\.cpp$/.test(name)) throw uploadFailure();
+    };
+    else state.afterWrite = async name => {
+      if (/^ai-managed-.*-make\.cpp$/.test(name)) state.cancelled = true;
+    };
+    await assert.rejects(run(), scenario === "failure" ? /UPLOAD_GENERATED_FILE_FAILED/ : /JOB_CANCELLED/);
+    assert.equal(state.activations, 0);
+    assert.deepEqual(state.active, original);
+  });
+});
+
+test("formal self-evaluation recipes reject missing sources, malformed hashes and unsafe standard filenames", async () => {
+  await fixture(async ({ state, run }) => {
+    await run();
+    const problemType = new ProblemTypeTraditionalService({ config: { resourceLimit: {} } }, { validateCompileAndRunOptions: () => [] });
+    const files = [...state.files.keys()].map(filename => ({ filename }));
+    for (const mutation of [recipe => { recipe.generatorFile = "missing.cpp"; }, recipe => { recipe.standardSha256 = "bad"; },
+      recipe => { recipe.subtaskIds = [1, 1]; }, recipe => { recipe.standardFileIo = { inputFilename: "../secret", outputFilename: "out" }; },
+      recipe => { recipe.standardFileIo = { inputFilename: "same", outputFilename: "same" }; },
+      recipe => { delete recipe.validatorFile; }, recipe => { recipe.validatorSha256 = "bad"; },
+      recipe => { recipe.subtaskIds = [99]; }]) {
+      const info = structuredClone(state.active);
+      mutation(info.selfEval);
+      assert.throws(() => problemType.validateAndFilterJudgeInfo(info, files, true), error => Array.isArray(error) && error.includes("INVALID_SELF_EVAL_RECIPE"));
+    }
+    const manual = structuredClone(state.active);
+    delete manual.selfEval.validatorFile;
+    delete manual.selfEval.validatorSha256;
+    assert.doesNotThrow(() => problemType.validateAndFilterJudgeInfo(manual, files, true));
+  });
+});
 
 test("a fixed-artifact upload failure and an interrupted retry leave the old active data untouched", async () => {
   await fixture(async ({ state, run, retry, activePairs }) => {

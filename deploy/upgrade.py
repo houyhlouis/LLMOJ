@@ -2,8 +2,8 @@
 """Conservative, dependency-preserving upgrades of official all/web installations.
 
 No installer, configuration generator, rootfs builder, or automatic schema sync is
-run. Database migration is deliberately restricted to the registration-review
-additive contract. A rollback never restores a stale SQL dump over user data.
+run. Database migration is restricted to frozen additive registration/community
+contracts. A rollback never restores a stale SQL dump over user data.
 """
 import argparse
 import contextlib
@@ -47,11 +47,26 @@ LEGACY_PACKAGE_DESCRIPTIONS = {
 }
 BOOTSTRAP_SETTINGS = 'packages/bootstrap-config/settings.json'
 SKIP = {'.git', 'node_modules', '__pycache__', 'dist', 'build', 'lib', '.cache', '.vite'}
-PERSISTENT = {'config', 'runtime', 'data', 'logs', 'backups', 'release', 'public', 'node_modules', '.git'}
+PERSISTENT = {'config', 'runtime', 'data', 'logs', 'backups', 'release', 'public', 'node_modules', '.git', 'changes'}
 GUARD = '[Service]\nEnvironment=LIBREOJ_SCHEMA_SYNC=0\n'
 GUARD_NAME = '90-libreoj-schema-sync.conf'
 SERVICES = ('mariadb', 'redis', 'minio', 'backend', 'nginx')
 GIB = 1024 ** 3
+# This digest is reviewed together with the code changes, never learned from the
+# target archive. Updating the contract requires updating this frozen pin too.
+COMMUNITY_RUNTIME_CONTRACT_SHA256 = '65b3db3d76ca4062b88a99296553e136aac8cc9eff21e326d834a1a5ecc9379a'
+COMMUNITY_RUNTIME_PATHS = frozenset({
+    'packages/judge-protocol/src/index.ts',
+    'apps/judge/src/task/index.ts',
+    'apps/judge/src/task/hack/index.ts',
+    'apps/judge/src/task/hack/hack.test.cjs',
+    'apps/judge/src/task/self-eval/index.ts',
+    'apps/judge/src/task/self-eval/self-eval.test.cjs'
+})
+COMMUNITY_PERMISSIONS = (
+    'ViewTeam', 'CreateTeam', 'ManageTeams', 'FakeSubmission',
+    'ViewHack', 'CreateHack', 'ManageHack', 'CreateSelfEval'
+)
 
 
 class UpgradeError(RuntimeError):
@@ -68,6 +83,16 @@ def digest(path):
 
 
 def compatibility_digest(relative, path):
+    if relative == 'packages/judge-protocol/src/index.ts':
+        # The sole wire-compatible protocol change accepted by this release:
+        # append the moderation-only status after every existing enum value.
+        # No task/progress payload, existing status or other source may change.
+        content = Path(path).read_text()
+        content = content.replace(
+            '  JudgementFailed = "JudgementFailed",\n  Fake = "Fake"\n}',
+            '  JudgementFailed = "JudgementFailed"\n}'
+        )
+        return hashlib.sha256(content.encode()).hexdigest()
     if relative not in REPOSITORY_LINK_MANIFESTS and relative != BOOTSTRAP_SETTINGS:
         return digest(path)
     try:
@@ -89,6 +114,47 @@ def compatibility_digest(relative, path):
     return hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
+def community_runtime_transition(source, before, after):
+    """Accept one pinned runtime transition; no wildcard or unreviewed hash."""
+    contract_path = Path(source)/'deploy/community-runtime-contract.json'
+    if not contract_path.is_file() or contract_path.is_symlink() or contract_path.stat().st_size > 32768:
+        fail('Dependencies changed without the frozen community runtime contract')
+    if digest(contract_path) != COMMUNITY_RUNTIME_CONTRACT_SHA256:
+        fail('Community runtime contract differs from the reviewed frozen digest')
+    try:
+        contract = json.loads(contract_path.read_text())
+        if not isinstance(contract, dict):
+            fail('Invalid community runtime contract')
+        entries = contract['files']
+    except (OSError, UnicodeError, ValueError, KeyError):
+        fail('Invalid community runtime contract')
+    if not isinstance(contract, dict) or contract.get('version') != 1 or not isinstance(entries, list):
+        fail('Invalid community runtime contract')
+    paths = set()
+    approved = set()
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {'path', 'oldSha256', 'newSha256'}:
+            fail('Invalid runtime contract entry')
+        relative = entry['path']
+        old_hashes, target_hash = entry['oldSha256'], entry['newSha256']
+        if not isinstance(relative, str) or relative not in COMMUNITY_RUNTIME_PATHS or relative in paths:
+            fail('Unreviewed runtime contract path')
+        paths.add(relative)
+        if not isinstance(old_hashes, list) or not old_hashes or len(old_hashes) > 3 or any(
+            value is not None and (not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{64}', value))
+            for value in old_hashes
+        ) or not isinstance(target_hash, str) or not re.fullmatch(r'[0-9a-f]{64}', target_hash):
+            fail('Invalid runtime contract digest')
+        if after.get(relative) != target_hash:
+            fail('Target runtime code differs from the reviewed frozen contract')
+        if before.get(relative) != target_hash and before.get(relative) not in old_hashes:
+            fail('Deployed runtime code differs from the supported community baselines')
+        approved.add(relative)
+    if paths != COMMUNITY_RUNTIME_PATHS:
+        fail('Incomplete community runtime contract')
+    return approved
+
+
 def source_files(root):
     root = Path(root)
     for directory, dirs, names in os.walk(root, followlinks=False):
@@ -101,7 +167,7 @@ def source_files(root):
         for name in sorted(names):
             path = current/name
             rel = path.relative_to(root)
-            if rel == Path('packages/bootstrap-config/config.json') or name.endswith(('.pyc', '.tsbuildinfo')) or name == '.DS_Store' or (not relative.parts and name in PERSISTENT):
+            if rel == Path('packages/bootstrap-config/config.json') or name.endswith(('.pyc', '.tsbuildinfo')) or name in ('.DS_Store', 'stats.html', '.eslintcache') or (not relative.parts and name in PERSISTENT):
                 continue
             if not stat.S_ISREG(path.lstat().st_mode):
                 fail('Source contains a non-regular file')
@@ -389,7 +455,7 @@ class Upgrade:
             fail('Custom database views, triggers, routines or events require manual upgrade')
         self.database_bytes = int(self.sql("SELECT COALESCE(SUM(DATA_LENGTH+INDEX_LENGTH),0) FROM information_schema.TABLES WHERE TABLE_SCHEMA='libreoj'"))
         return {'role': self.role, 'prefix': str(self.root), 'node': self.node_version, 'pnpm': self.pnpm_version,
-                'services': self.states, 'databaseBytes': self.database_bytes, 'scope': 'dependency-preserving code + registration application schema + strictly validated legacy empty-account migration'}
+                'services': self.states, 'databaseBytes': self.database_bytes, 'scope': 'dependency/native-preserving code + frozen community/contest/permission schema + reviewed Hack/SelfEval runtime + verified data migration'}
 
     def compatibility(self, source):
         required = ('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'deploy/upgrade-schema.mjs', 'deploy/build-frontend-offline.mjs', 'apps/backend/src/auth/registration-review.entity.ts', 'apps/backend/src/auth/registration-application.entity.ts', 'deploy/upgrade-registration.mjs')
@@ -401,8 +467,21 @@ class Upgrade:
         shared = lambda name: (name.startswith(('packages/', 'apps/judge/', 'infra/')) and not name.startswith('packages/frontend/')) or name.endswith('/package.json') or name in ('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc')
         source_dependencies = {name: compatibility_digest(name, source/name) for name in source_map if shared(name)}
         old_dependencies = {name: compatibility_digest(name, self.root/name) for name in old_map if shared(name)}
+        approved_runtime = set()
         if source_dependencies != old_dependencies:
-            fail('Dependencies, shared packages, judge or infrastructure changed; this release requires a separate migration procedure')
+            approved_runtime = community_runtime_transition(source, old_map, source_map)
+            remaining_source = {name: value for name, value in source_dependencies.items() if name not in approved_runtime}
+            remaining_old = {name: value for name, value in old_dependencies.items() if name not in approved_runtime}
+            if remaining_source != remaining_old:
+                fail('Dependencies, shared packages, native judge or infrastructure changed outside the frozen runtime contract')
+            if self.role != 'all':
+                fail('The new Hack/SelfEval runtime requires an all installation; remote judges need a separately coordinated upgrade')
+        protocol = 'packages/judge-protocol/src/index.ts'
+        if protocol in source_map and protocol in old_map:
+            before = (self.root/protocol).read_text()
+            after = (source/protocol).read_text()
+            if protocol not in approved_runtime and before != after and '  JudgementFailed = "JudgementFailed",\n  Fake = "Fake"\n}' in before:
+                fail('Removing or changing the deployed Fake protocol status is unsupported; use a reviewed rollback')
         runtime_pin = re.search(r'^NODE_VERSION=([0-9.]+)$', (source/'deploy/install.sh').read_text(), re.M)
         if not runtime_pin or self.node_version != 'v'+runtime_pin[1]:
             fail('Target Node runtime differs; runtime upgrades require a separate procedure')
@@ -449,7 +528,7 @@ class Upgrade:
             shutil.copytree(self.root/'deploy/systemd', self.stage/'deploy/systemd', dirs_exist_ok=True)
         # Delete removed backend/frontend source modules; stale compiled entities are
         # erased by the backend's own prebuild before target compilation.
-        for name in ('apps/backend/src', 'packages/frontend/src'):
+        for name in ('apps/backend/src', 'apps/judge/src', 'packages/frontend/src'):
             shutil.rmtree(self.stage/name)
             shutil.copytree(source/name, self.stage/name)
         if tree_digest(source) != provenance['treeSha256']:
@@ -478,9 +557,19 @@ class Upgrade:
                    pnpm_config_verify_deps_before_run='false', PNPM_BINARY=str(self.pnpm), HYHOJ_PUBLIC_DIR=str(self.stage/'public'), OJ_SITE_NAME=self.site_name)
         fd = os.open(self.backup/'build.log', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, 'wb') as log:
-            for command in ([self.node, self.pnpm, '--filter', '@libreoj/backend', 'run', 'build'],
-                            [self.node, self.pnpm, '--filter', '@libreoj/frontend', 'run', 'build'],
-                            [self.node, self.stage/'deploy/build-frontend-offline.mjs']):
+            commands = [
+                [self.node, self.pnpm, '--filter', '@libreoj/judge-protocol', 'run', 'build'],
+                [self.node, self.pnpm, '--filter', '@libreoj/judge', 'run', 'check-types']
+            ]
+            regression = self.stage/'apps/judge/src/task/hack/hack.test.cjs'
+            if regression.is_file():
+                commands.append([self.node, regression])
+            commands.extend([
+                [self.node, self.pnpm, '--filter', '@libreoj/backend', 'run', 'build'],
+                [self.node, self.pnpm, '--filter', '@libreoj/frontend', 'run', 'build'],
+                [self.node, self.stage/'deploy/build-frontend-offline.mjs']
+            ])
+            for command in commands:
                 self.host.run(command, cwd=self.stage, env=env, output=log, error_output=log, timeout=1800, umask=0o022)
         if not (self.stage/'apps/backend/dist/main.js').is_file() or not (self.stage/'public/index.html').is_file() or not (self.stage/'public/offline-manifest.json').is_file():
             fail('Build did not produce required artifacts')
@@ -547,10 +636,12 @@ class Upgrade:
             audit = self.schema(database)
             self.schema(database, 'apply')
             verified = self.schema(database)
-            if verified['queries'] or any(verified.get('migration', {}).get(key, 0) for key in ('pending', 'rejected', 'approvedHistory')):
+            if verified['queries'] or any(verified.get('migration', {}).get(key, 0) for key in ('pending', 'rejected', 'approvedHistory')) or verified.get('solutions', {}).get('pending', 0) or verified.get('solutions', {}).get('schemaPending', False) or verified.get('teamStorage', {}).get('pending', 0) or verified.get('teamStorage', {}).get('schemaPending', False):
                 fail('Restored database migration is not stable')
             self.manifest['schemaQueries'] = audit['queries']
             self.manifest['registrationMigration'] = audit.get('migration', {})
+            self.manifest['solutionMigration'] = audit.get('solutions', {})
+            self.manifest['teamStorageMigration'] = audit.get('teamStorage', {})
             self.save()
         finally:
             self.sql(f'DROP DATABASE `{database}`')
@@ -574,6 +665,10 @@ class Upgrade:
             count = self.sql(f'SELECT COUNT(*) FROM `{table}` WHERE {condition}', 'libreoj')
             if int(count):
                 fail('Active or queued judge/AI work remains; drain it before maintenance')
+        for table in ('hack', 'self_eval', 'self_eval_set'):
+            exists = self.sql(f"SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='libreoj' AND TABLE_NAME='{table}'")
+            if exists == '1' and int(self.sql(f"SELECT COUNT(*) FROM `{table}` WHERE status IN ('Pending','Running') OR taskId IS NOT NULL", 'libreoj')):
+                fail('Active or queued Hack/SelfEval work remains; drain it before maintenance')
         # A cancelled/completed AI row may still be unwinding its worker. Its
         # existing database-scoped advisory lease spans those final side effects.
         lock = 'hyhoj_ai_worker:'+hashlib.sha256(b'libreoj').hexdigest()[:48]
@@ -685,12 +780,22 @@ class Upgrade:
         self.schema_on_clone(self.backup/'database.sql')
         # Audit and apply before swapping stage paths; only additive compatible DDL.
         live_audit = self.schema('libreoj')
-        if live_audit['queries'] != self.manifest['schemaQueries'] or live_audit.get('migration', {}) != self.manifest['registrationMigration']:
+        if live_audit['queries'] != self.manifest['schemaQueries'] or live_audit.get('migration', {}) != self.manifest['registrationMigration'] or live_audit.get('solutions', {}) != self.manifest.get('solutionMigration', {}) or live_audit.get('teamStorage', {}) != self.manifest.get('teamStorageMigration', {}):
             fail('Database schema changed since the restored-copy audit')
-        self.schema('libreoj', 'apply')
-        self.manifest['registrationMigrationApplied'] = True
+        # MariaDB DDL can commit before a later statement fails. Install and
+        # record the guard before the first mutation so rollback cannot let an
+        # older backend synchronize away a partially applied schema.
+        self.manifest['communitySchemaApplied'] = any(
+            re.search(r'`(?:team(?:_[a-z]+)*|file|discussion|submission|hack(?:_[a-z]+)*|self_eval(?:_[a-z]+)*|contest|user_privilege|user_permission_rule)`', query)
+            for query in self.manifest['schemaQueries']
+        )
         self.save()
         self.guard_install()
+        self.manifest['registrationMigrationApplied'] = True
+        self.save()
+        applied = self.schema('libreoj', 'apply')
+        self.manifest['teamStorageMigrationResult'] = applied.get('teamStorage', {})
+        self.save()
         self.switch()
         self.assert_preserved()
         self.restore_states(verify=True)
@@ -702,6 +807,80 @@ class Upgrade:
         # Old backends only read YAML and would silently ignore a saved website
         # registration policy. Check before stopping and again after draining.
         previous_backend = self.backup/'previous/apps/backend'
+        # Old code has no team access floor and cannot honor moderation or the
+        # separate solution category. Never expose private resources by restoring
+        # it once these features have data, even if all registrations are approved.
+        candidate = previous_backend if previous_backend.exists() else self.root/'apps/backend'
+        for table, column, condition, capability in (
+            ('team', None, '1=1', 'dist/team/team.service.js'),
+            ('submission', 'status', "status='Fake'", 'dist/submission/dto/fake-submission-request.dto.js'),
+            ('discussion', 'type', "type='Solution'", 'dist/discussion/discussion-type.enum.js')
+        ):
+            if (candidate/capability).is_file():
+                continue
+            table_exists = self.sql(f"SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='libreoj' AND TABLE_NAME='{table}'")
+            if table_exists != '1':
+                continue
+            if column and self.sql(f"SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='libreoj' AND TABLE_NAME='{table}' AND COLUMN_NAME='{column}'") != '1':
+                continue
+            if int(self.sql(f'SELECT COUNT(*) FROM `{table}` WHERE {condition}', 'libreoj')):
+                fail('Rollback refused: team, solution or Fake data requires the current access and moderation rules; repair this release without importing a stale SQL backup')
+        def supports(capability, token=None):
+            path = candidate/capability
+            return path.is_file() and (token is None or token in path.read_text())
+
+        def requires(table, condition='1=1', column=None):
+            exists = self.sql(f"SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='libreoj' AND TABLE_NAME='{table}'")
+            if exists != '1':
+                return False
+            if column and self.sql(f"SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='libreoj' AND TABLE_NAME='{table}' AND COLUMN_NAME='{column}'") != '1':
+                return False
+            return int(self.sql(f'SELECT COUNT(*) FROM `{table}` WHERE {condition}', 'libreoj')) > 0
+
+        # Reverting backend code while retaining a newer judge protocol can still
+        # ignore zero scores, quotas or explicit permission denies. Capabilities
+        # are checked independently; no migration SQL is replayed backwards.
+        judge = candidate.parent/'judge/src/task'
+        hack_supported = supports('dist/hack/hack.service.js') and (self.role != 'all' or (judge/'hack/index.ts').is_file())
+        self_eval_supported = supports('dist/self-eval/self-eval.service.js') and (self.role != 'all' or (judge/'self-eval/index.ts').is_file())
+        extensions = (
+            ('hack', hack_supported), ('hack_problem', hack_supported),
+            ('self_eval', self_eval_supported), ('self_eval_set', self_eval_supported), ('self_eval_quota', self_eval_supported)
+        )
+        if any(not supported and requires(table) for table, supported in extensions):
+            fail('Rollback refused: Hack or SelfEval data requires the current backend and judge; repair this release without replaying stale SQL')
+        if requires('team') and not supports('dist/team/team.service.js', 'joinPreview'):
+            fail('Rollback refused: private teams require ID-based admission and personal-only listings')
+        if (requires('team', 'quotaLimit=10737418240', 'quotaLimit') or requires('team_file_upload')) and not supports('dist/team/team.service.js', 'cancelFileUpload'):
+            fail('Rollback refused: 10 GiB team storage and upload reservations require the current upload backend')
+        if requires('file', 'size>2147483647', 'size') and not supports('dist/file/file.entity.js', 'bigint'):
+            fail('Rollback refused: large stored files require the current bigint file metadata')
+        if requires('hack_problem', 'standardContent IS NOT NULL', 'standardContent') and not supports('dist/hack/hack.service.js', 'standardContent'):
+            fail('Rollback refused: saved STD source requires code-based Hack references')
+        hack_io_supported = supports('dist/hack/hack.service.js', 'referenceFileIo') and (
+            self.role != 'all' or ((judge/'hack/index.ts').is_file() and 'referenceFileIo' in (judge/'hack/index.ts').read_text()))
+        if not hack_io_supported and (
+            requires('hack_problem', "JSON_CONTAINS_PATH(standardContent, 'one', '$.fileIo') = 1", 'standardContent') or
+            requires('hack', "JSON_CONTAINS_PATH(snapshot, 'one', '$.referenceFileIo') = 1", 'snapshot')):
+            fail('Rollback refused: saved STD input/output settings require the corrected Hack backend')
+        if any(requires(table) for table in ('self_eval', 'self_eval_set', 'self_eval_quota')) and not supports(
+                'dist/self-eval/self-eval.service.js', 'Self evaluation is available only in enabled NOI contests'):
+            fail('Rollback refused: Self Eval records require the enabled-NOI-only access boundary')
+        if not supports('dist/submission/submission.service.js', 'Hacked') and requires('submission', "status='Hacked'", 'status'):
+            fail('Rollback refused: Hacked submissions require the current effective-zero scoring rules')
+        if not supports('dist/contest/contest-rules.js', 'strictioi') and requires('contest', "rule='strictioi'", 'rule'):
+            fail('Rollback refused: Strict IOI contests require the current per-subtask scoring rules')
+        feature_options = "ruleOptions IS NOT NULL AND JSON_CONTAINS_PATH(ruleOptions, 'one', '$.hackEnabled', '$.hackStartTime', '$.hackEndTime', '$.selfEvalEnabled', '$.selfEvalMaxAttempts')"
+        if not (supports('dist/contest/contest-rules.js', 'selfEvalEnabled') and supports('dist/contest/contest-rules.js', 'hackEnabled')) and requires('contest', feature_options, 'ruleOptions'):
+            fail('Rollback refused: saved contest Hack/SelfEval settings require this release')
+        permission_catalog = candidate/'dist/access/permission-catalog.js'
+        understands_permissions = permission_catalog.is_file() and all(value in permission_catalog.read_text() for value in COMMUNITY_PERMISSIONS)
+        permissions = ','.join("'"+value+"'" for value in COMMUNITY_PERMISSIONS)
+        if not understands_permissions and (
+            requires('user_privilege', 'privilegeType IN ('+permissions+')', 'privilegeType') or
+            requires('user_permission_rule', 'permission IN ('+permissions+')', 'permission')
+        ):
+            fail('Rollback refused: new community permission grants or explicit denies require the current permission catalog')
         if previous_backend.exists() and not (previous_backend/'dist/settings/registration-settings.service.js').is_file():
             overrides = self.sql("SELECT COUNT(*) FROM `settings` WHERE `key`='registration-policy' AND (COALESCE(JSON_TYPE(`value`), '') <> 'OBJECT' OR COALESCE(JSON_TYPE(JSON_EXTRACT(`value`, '$.registrationMode')), 'MISSING') <> 'NULL')", 'libreoj')
             if int(overrides):
@@ -741,7 +920,7 @@ class Upgrade:
                 os.replace(previous/name, self.root/name)
             elif not record['hadOld'] and (self.root/name).exists() and (record['newMoved'] or not (self.stage/name).exists()):
                 os.replace(self.root/name, retired/(name+'-'+secrets.token_hex(4)))
-        if not self.manifest['guardBefore'] and self.guard.exists():
+        if not self.manifest['guardBefore'] and not self.manifest.get('communitySchemaApplied') and self.guard.exists():
             if self.guard.is_symlink() or self.guard.read_text() != GUARD:
                 fail('Cannot safely remove a changed schema guard')
             self.guard.unlink()

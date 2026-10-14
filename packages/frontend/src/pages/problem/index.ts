@@ -10,6 +10,7 @@ export default {
       "/edit": getRoute(() => import("./edit/ProblemEditPage"), "byId"),
       "/files": getRoute(() => import("./files/ProblemFilesPage"), "byId"),
       "/judge-settings": getRoute(() => import("./judge-settings/ProblemJudgeSettingsPage"), "byId"),
+      "/hack-reference": lazy(() => import("@/pages/hack/HackReferencePage")),
       "/statistics/:type": getRoute(() => import("@/pages/submission/statistics/SubmissionStatisticsPage"), "byId")
     }),
     "/:displayId": mount({

@@ -4,6 +4,8 @@
 
 本文按仓库内的配置和执行代码核对。AI 配置属于当前登录账号，不是全站共享服务。项目不附带模型、公共 Key 或服务额度。页面入口是 `/ai/configuration`；导入入口是 `/ai/import`，已有题的编辑页提供 AI 操作。
 
+仓库维护的 AI 系统指令和 Prompt 统一使用英文，覆盖导入/OCR、翻译、原题搜索与核验、题解、标签、难度、数据生成及修复。生成内容仍遵循原有语言要求：提取时保留原题语言，`zh_CN` 内容仍为中文，`en_US` 内容仍为英文，双语题解要求保持不变。用户输入、题目和搜索资料保留原语言；JSON 字段、评测约束和中文编辑器标签不变。
+
 ## 从页面完成配置
 
 1. 管理员按下面的权限表授权。用户用自己的账号打开“AI API 配置”。
@@ -150,3 +152,13 @@ Tavily 每次搜索最多取 5 项、使用 `advanced` 深度，不请求聚合�
 - [权限、任务调度与写入](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.service.ts)、[密钥生命周期](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-crypto.ts)
 - [配置界面](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/pages/ai/AiConfigurationPage.tsx)、[导入界面](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/pages/ai/AiImportPage.tsx)
 - [测试数据覆盖计划与验收](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-testdata-quality.ts)、[对拍与反例验证](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiQuality.ts)、[runner 执行与判定](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiRunner.ts)
+
+## 题解保存位置
+
+AI 新生成的题解显示在对应题目页内的“题解”栏目，仍属于讨论并出现在作者的“我的讨论”中。已有 AI 题解只通过明确的任务讨论 ID、题目和作者校验进行迁移；普通讨论不会按标题自动分类。参阅 [题解](Solutions.zh-CN.md)。
+
+## 为 NOI 比赛准备 Self Eval
+
+传统题的正式数据发布同时绑定本次实际使用的不可变 `make.cpp`、`std.cpp` 和输入校验器版本，供以后已开启 Self Eval 的 NOI / OI 比赛复用。其它题型和普通题库不开放 Self Eval 运行。
+
+比赛管理员可在赛前从比赛题目页的“自测”进入“配置 Self Eval”，点击“AI 生成正式数据与 Self Eval 程序”。该按钮运行已有 AI `testdata` 流程，会重新生成并更新本题正式评测数据；需要自己的已配置 AI 服务及相应 AI、出题和数据编辑权限。任务完成后界面载入同版 make/std，管理员再点击“准备预测试数据”，并沿用正式 checker/SPJ。生成或准备失败不会开放不完整的预测试集。手工维护 make/std 和全场次数限制见 [Self Eval](Self-Evaluation.zh-CN.md)。

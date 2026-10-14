@@ -46,3 +46,7 @@ export const deleteSubmission = createPostApi<
   ApiTypes.DeleteSubmissionRequestDto,
   ApiTypes.DeleteSubmissionResponseDto
 >("submission/deleteSubmission", {});
+export const fakeSubmission = createPostApi<ApiTypes.FakeSubmissionRequestDto, ApiTypes.FakeSubmissionResponseDto>(
+  "submission/fakeSubmission",
+  {}
+);

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Breadcrumb, Button, Header, Icon, Label, Menu, Segment, Table } from "semantic-ui-react";
-import { URLDescriptor } from "navi";
+import { URLDescriptor, redirect } from "navi";
 import { observer } from "mobx-react";
 import { v4 as uuid } from "uuid";
 
@@ -20,11 +20,15 @@ import { Localizer, makeToBeLocalizedText } from "@/locales";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
 import { DiscussionSearch } from "@/components/DiscussionSearch";
 
-export function getNewDiscussionUrl(problemId: number): Partial<URLDescriptor> {
+export function getNewDiscussionUrl(
+  problemId: number,
+  type: "Discussion" | "Solution" = "Discussion"
+): Partial<URLDescriptor> {
   return {
     pathname: "/d/new",
-    query: problemId && {
-      problemId: String(problemId)
+    query: {
+      ...(problemId ? { problemId: String(problemId) } : {}),
+      ...(type === "Solution" ? { type } : {})
     }
   };
 }
@@ -33,13 +37,40 @@ export function getBreadcrumb(
   problem: { meta: ApiTypes.ProblemMetaDto; title: string },
   _: Localizer,
   inTopLevelList?: "general" | "allProblems",
-  extra?: React.ReactNode
+  extra?: React.ReactNode,
+  type?: "Discussion" | "Solution"
 ) {
+  if (type === "Solution" && problem) {
+    return (
+      <Breadcrumb className={style.breadcrumb}>
+        <Breadcrumb.Section as={Link} href={getProblemUrl(problem.meta)}>
+          {getProblemDisplayName(problem.meta, problem.title, _, "all")}
+        </Breadcrumb.Section>
+        <Breadcrumb.Divider icon="right angle" />
+        <Breadcrumb.Section as={Link} href={`${getProblemUrl(problem.meta)}?tab=solutions`}>
+          {_("discussions.solutions")}
+        </Breadcrumb.Section>
+        {extra}
+      </Breadcrumb>
+    );
+  }
   return (
     <Breadcrumb className={style.breadcrumb}>
-      <Breadcrumb.Section>{_("discussions.breadcrumb.discussion")}</Breadcrumb.Section>
+      <Breadcrumb.Section as={Link} href={type === "Solution" ? "/solutions" : "/d"}>
+        {_(type === "Solution" ? "discussions.solutions" : "discussions.breadcrumb.discussion")}
+      </Breadcrumb.Section>
       <Breadcrumb.Divider icon="right angle" />
-      {inTopLevelList ? (
+      {type === "Solution" ? (
+        <Breadcrumb.Section active>
+          {problem ? (
+            <Link href={getProblemUrl(problem.meta)}>
+              {getProblemDisplayName(problem.meta, problem.title, _, "all")}
+            </Link>
+          ) : (
+            _("discussions.all_solutions")
+          )}
+        </Breadcrumb.Section>
+      ) : inTopLevelList ? (
         <>
           <Breadcrumb.Section active className={style.switch}>
             {inTopLevelList === "general" ? _("discussions.breadcrumb.general") : _("discussions.breadcrumb.problem")}
@@ -82,6 +113,7 @@ export function getBreadcrumb(
 
 // Parsed from querystring, without pagination
 interface DiscussionsPageSearchQuery {
+  type?: "Discussion" | "Solution";
   keyword: string;
   problemId: number;
   publisherId: number;
@@ -103,6 +135,7 @@ function generateRequestFromSearchQuery(
   if (searchQuery.problemId) requestBody.problemId = searchQuery.problemId;
   if (searchQuery.publisherId) requestBody.publisherId = searchQuery.publisherId;
   if (searchQuery.nonpublic) requestBody.nonpublic = true;
+  if (searchQuery.type) requestBody.type = searchQuery.type;
 
   return requestBody;
 }
@@ -123,9 +156,19 @@ async function fetchData(
 
 function parseSearchQuery(query: Record<string, string>): DiscussionsPageSearchQuery {
   const searchQuery: DiscussionsPageSearchQuery = {
+    type:
+      query["type"] === "Solution"
+        ? "Solution"
+        : query["type"] === "Discussion"
+        ? "Discussion"
+        : query["publisherId"]
+        ? undefined
+        : "Discussion",
     keyword: query["keyword"] || "",
     problemId:
-      query["problemId"] === "all"
+      query["problemId"] === "any" || (query["publisherId"] && !query["problemId"])
+        ? -2
+        : query["problemId"] === "all"
         ? -1
         : Number.isSafeInteger(Number(query["problemId"]))
         ? Number(query["problemId"])
@@ -139,7 +182,8 @@ function parseSearchQuery(query: Record<string, string>): DiscussionsPageSearchQ
 function generateSearchQuery(searchQuery: DiscussionsPageSearchQuery): Record<string, string> {
   const query: Record<string, string> = {};
   if (searchQuery.keyword) query.keyword = searchQuery.keyword.substr(0, 100);
-  if (searchQuery.problemId) query.problemId = searchQuery.problemId.toString();
+  if (searchQuery.problemId) query.problemId = searchQuery.problemId === -2 ? "any" : searchQuery.problemId.toString();
+  if (searchQuery.type) query.type = searchQuery.type;
   if (searchQuery.publisherId) query.publisherId = searchQuery.publisherId.toString();
   if (searchQuery.nonpublic) query.nonpublic = "";
   return query;
@@ -155,8 +199,8 @@ let DiscussionsPage: React.FC<DiscussionsPageProps> = props => {
   const _ = useLocalizer("discussions");
 
   useEffect(() => {
-    appState.enterNewPage(_(".title"), "discussion");
-  }, [appState.locale]);
+    appState.enterNewPage(_(props.searchQuery.type === "Solution" ? ".solutions" : ".title"), "discussion");
+  }, [appState.locale, props.searchQuery.type]);
 
   const navigation = useNavigationChecked();
 
@@ -164,6 +208,7 @@ let DiscussionsPage: React.FC<DiscussionsPageProps> = props => {
   const isVeryNarrowScreen = useScreenWidthWithin(0, 640);
 
   const allProblems = props.searchQuery.problemId === -1;
+  const isSolutions = props.searchQuery.type === "Solution";
 
   // Begin search
   type SearchMode = "title" | "user";
@@ -316,27 +361,34 @@ let DiscussionsPage: React.FC<DiscussionsPageProps> = props => {
     </>
   );
 
-  const headerButtons = allProblems ? null : (
-    <div className={style.headerButtons}>
-      {props.response.permissions.createDiscussion && (
-        <Button
-          size={isMobileOrPad ? "small" : null}
-          primary
-          className={isMobileOrPad ? "icon" : "labeled icon"}
-          icon="plus"
-          content={isMobileOrPad ? "" : _(".add_discussion")}
-          as={Link}
-          href={getNewDiscussionUrl(props.response.filterProblem?.meta?.id)}
-        />
-      )}
-    </div>
-  );
+  const headerButtons =
+    allProblems && !isSolutions ? null : (
+      <div className={style.headerButtons}>
+        {props.response.permissions.createDiscussion && (
+          <Button
+            size={isMobileOrPad ? "small" : null}
+            primary
+            className={isMobileOrPad ? "icon" : "labeled icon"}
+            icon="plus"
+            content={isMobileOrPad ? "" : _(isSolutions ? ".add_solution" : ".add_discussion")}
+            as={Link}
+            href={getNewDiscussionUrl(props.response.filterProblem?.meta?.id, isSolutions ? "Solution" : "Discussion")}
+          />
+        )}
+      </div>
+    );
 
-  const hideProblemColumn = !allProblems;
+  const hideProblemColumn = !(
+    allProblems ||
+    props.searchQuery.problemId === -2 ||
+    (isSolutions && !props.response.filterProblem)
+  );
   const breadcrumb = getBreadcrumb(
     props.response.filterProblem,
     _,
-    allProblems ? "allProblems" : !props.response.filterProblem ? "general" : null
+    allProblems ? "allProblems" : !props.response.filterProblem ? "general" : null,
+    null,
+    props.searchQuery.type
   );
 
   return (
@@ -365,7 +417,7 @@ let DiscussionsPage: React.FC<DiscussionsPageProps> = props => {
           <Segment placeholder>
             <Header icon>
               <Icon name="search" />
-              {_(".no_discussions.message_search")}
+              {_(isSolutions ? ".no_solutions_search" : ".no_discussions.message_search")}
             </Header>
             <Segment.Inline>
               <Button primary onClick={() => navigation.goBack()}>
@@ -388,12 +440,19 @@ let DiscussionsPage: React.FC<DiscussionsPageProps> = props => {
           <Segment placeholder>
             <Header icon>
               <Icon name="file" />
-              {_(".no_discussions.message_no_search")}
+              {_(isSolutions ? ".no_solutions" : ".no_discussions.message_no_search")}
             </Header>
             {props.response.permissions.createDiscussion && (
               <Segment.Inline>
-                <Button primary as={Link} href={getNewDiscussionUrl(props.response.filterProblem?.meta?.id)}>
-                  {_(".no_discussions.create")}
+                <Button
+                  primary
+                  as={Link}
+                  href={getNewDiscussionUrl(
+                    props.response.filterProblem?.meta?.id,
+                    isSolutions ? "Solution" : "Discussion"
+                  )}
+                >
+                  {_(isSolutions ? ".add_solution" : ".no_discussions.create")}
                 </Button>
               </Segment.Inline>
             )}
@@ -435,6 +494,11 @@ let DiscussionsPage: React.FC<DiscussionsPageProps> = props => {
                 {(() => {
                   const columnTitle = (
                     <>
+                      {discussion.meta.type === "Solution" && (
+                        <Label size="small" color="blue" basic>
+                          {_(".solution")}
+                        </Label>
+                      )}
                       <EmojiRenderer>
                         <Link href={getDiscussionUrl(discussion.meta)}>
                           {getDiscussionDisplayTitle(discussion.meta.title, _)}
@@ -513,9 +577,21 @@ let DiscussionsPage: React.FC<DiscussionsPageProps> = props => {
 DiscussionsPage = observer(DiscussionsPage);
 
 export default defineRoute(async request => {
-  const page = parseInt(request.query.page) || 1;
+  const page = Math.max(1, parseInt(request.query.page) || 1);
   const searchQuery = parseSearchQuery(request.query);
+  if (searchQuery.type === "Solution" && !searchQuery.publisherId) {
+    return redirect(
+      searchQuery.problemId > 0 ? { pathname: getProblemUrl(searchQuery.problemId), query: { tab: "solutions" } } : "/p"
+    );
+  }
   const response = await fetchData(searchQuery, page);
 
   return <DiscussionsPage key={uuid()} searchQuery={searchQuery} currentPage={page} response={response} />;
+});
+
+export const solutionsRoute = redirect(request => {
+  const problemId = Number(request.query.problemId);
+  return Number.isSafeInteger(problemId) && problemId > 0
+    ? { pathname: getProblemUrl(problemId), query: { tab: "solutions" } }
+    : "/p";
 });

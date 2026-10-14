@@ -11,7 +11,7 @@ export class FileEntity {
   uuid: string;
 
   // The size of the origin file, not the compressed file
-  @Column({ type: "integer" })
+  @Column({ type: "bigint", transformer: { to: (value: number) => value, from: (value: string) => Number(value) } })
   size: number;
 
   @Column({ type: "datetime" })

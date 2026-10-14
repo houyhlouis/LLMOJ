@@ -29,6 +29,7 @@ import {
 import { SimplePagination } from "@/components/Pagination";
 import { defineRoute, RouteError } from "@/AppRouter";
 import { SubmissionProgressMessageMetaOnly, SubmissionProgressType } from "../common";
+import { SubmissionPreviewProvider } from "../SubmissionPreview";
 
 const SUBMISSIONS_PER_PAGE = appState.serverPreference.pagination.submissions;
 
@@ -385,5 +386,9 @@ export default defineRoute(async request => {
   const query = normalizeQuery(request.query);
   const queryResult = await fetchData(query);
 
-  return <SubmissionsPage key={uuid()} query={query} queryResult={queryResult} />;
+  return (
+    <SubmissionPreviewProvider>
+      <SubmissionsPage key={uuid()} query={query} queryResult={queryResult} />
+    </SubmissionPreviewProvider>
+  );
 });

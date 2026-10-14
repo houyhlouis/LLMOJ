@@ -7,7 +7,7 @@ export class RegistrationMigrationError extends Error {
 }
 
 const CLEANUP = new Set(['registration_review.userId', 'user_auth.userId', 'user_information.userId', 'user_preference.userId']);
-const USER_COLUMNS = new Set(['userId', 'ownerId', 'publisherId', 'submitterId', 'reviewedBy']);
+const USER_COLUMNS = new Set(['userId', 'ownerId', 'publisherId', 'submitterId', 'reviewedBy', 'uploaderId','hackerId','configuredById']);
 const INFORMATION = ['organization', 'location', 'url', 'telegram', 'qq', 'github'];
 const quote = name => {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new RegistrationMigrationError('UNEXPECTED_IDENTIFIER');
@@ -134,6 +134,14 @@ async function inspect(connection, dataSource, lock = false) {
       }
       if (await hasTable(connection, 'contest')) {
         const related = await connection.query('SELECT COUNT(*) AS n FROM contest WHERE JSON_CONTAINS(adminIds, ?) OR JSON_CONTAINS(adminIds, ?)', [JSON.stringify(row.userId), JSON.stringify(String(row.userId))]);
+        if (Number(related[0].n)) throw new RegistrationMigrationError('LEGACY_BUSINESS_REFERENCES');
+      }
+      for (const [table, column] of [['team_resource', 'invitedUserIds'], ['team_assignment', 'assignedUserIds']]) {
+        if (!await hasTable(connection, table)) continue;
+        const related = await connection.query(
+          'SELECT COUNT(*) AS n FROM '+quote(table)+' WHERE JSON_CONTAINS('+quote(column)+', ?) OR JSON_CONTAINS('+quote(column)+', ?)',
+          [JSON.stringify(row.userId), JSON.stringify(String(row.userId))]
+        );
         if (Number(related[0].n)) throw new RegistrationMigrationError('LEGACY_BUSINESS_REFERENCES');
       }
       const ownHistory = await connection.query('SELECT * FROM audit_log WHERE userId=? ORDER BY id', [row.userId]);

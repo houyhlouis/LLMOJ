@@ -3,24 +3,30 @@ import { Readable, Transform } from "stream";
 import fs from "fs";
 import { pipeline } from "stream/promises";
 
-import { Injectable, OnModuleInit } from "@nestjs/common";
+import { BadRequestException, Injectable, OnModuleInit } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 
-import { Repository, EntityManager, In } from "typeorm";
+import { Repository, EntityManager, In, MoreThan } from "typeorm";
 import { v4 as UUID } from "uuid";
 import { Client as MinioClient, ClientOptions } from "minio";
+import * as minioHelpers from "minio/dist/main/helpers";
 
 import { FileEntity } from "./file.entity";
 
 import { FileUploadInfoDto, SignedFileUploadRequestDto } from "./dto";
 
+import { TeamFileUploadEntity } from "../team/team.entity";
 import { logger } from "../logger";
 import { ConfigService } from "../config/config.service";
 
 // 10 minutes upload expire time
 const FILE_UPLOAD_EXPIRE_TIME = 10 * 60;
-// 20 minutes download expire time
+// Default download links last 20 hours; private team files explicitly request 60 seconds.
 const FILE_DOWNLOAD_EXPIRE_TIME = 20 * 60 * 60;
+
+// MinIO 7 exposes these constructors from its helpers module, while its public
+// declarations expose their types from minio. Composition copies on the server.
+const minioCopy = minioHelpers as Pick<typeof import("minio"), "CopySourceOptions" | "CopyDestinationOptions">;
 
 // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURIComponent
 function encodeRFC5987ValueChars(str: string) {
@@ -220,7 +226,8 @@ export class FileService implements OnModuleInit {
    * e.g. When a user uploaded other files before upload this file, the quota is enough before uploading but
    *      not enough after uploading.
    *
-   * If the file is checked to be exceeding the limit after uploaded, it will be deleted.
+   * Rejected uploads are left for maintenance cleanup. A caller-supplied UUID must
+   * never cause another registered or concurrently accepted object to be deleted.
    *
    * @return A `SignedFileUploadRequestDto` to return to the client if the file is not uploaded.
    * @return `string` error message if client says the file is uploaded but we do not accept it according to some errors.
@@ -233,17 +240,12 @@ export class FileService implements OnModuleInit {
   ): Promise<FileEntity | SignedFileUploadRequestDto | LimitCheckErrorType | "FILE_UUID_EXISTS" | "FILE_NOT_UPLOADED"> {
     if (!uploadInfo.uuid) return await this.prepareUploadRequest(uploadInfo.size, checkLimit);
 
-    const limitCheckError = await checkLimit(uploadInfo.size);
-    if (limitCheckError) {
-      this.deleteUnfinishedUploadedFile(uploadInfo.uuid);
-      return limitCheckError;
-    }
-
     if ((await transactionalEntityManager.countBy(FileEntity, { uuid: uploadInfo.uuid })) !== 0)
       return "FILE_UUID_EXISTS";
 
+    let actualSize: number;
     try {
-      await this.minioClient.statObject(this.bucket, uploadInfo.uuid);
+      actualSize = (await this.minioClient.statObject(this.bucket, uploadInfo.uuid)).size;
     } catch (e) {
       if (e.message === "The specified key does not exist.") {
         return "FILE_NOT_UPLOADED";
@@ -251,9 +253,14 @@ export class FileService implements OnModuleInit {
       throw e;
     }
 
+    if (!Number.isSafeInteger(actualSize) || actualSize < 0 || actualSize !== uploadInfo.size)
+      throw new BadRequestException("FILE_SIZE_MISMATCH");
+    const limitCheckError = await checkLimit(actualSize);
+    if (limitCheckError) return limitCheckError;
+
     const file = new FileEntity();
     file.uuid = uploadInfo.uuid;
-    file.size = uploadInfo.size;
+    file.size = actualSize;
     file.uploadTime = new Date();
 
     await transactionalEntityManager.save(FileEntity, file);
@@ -273,13 +280,18 @@ export class FileService implements OnModuleInit {
   /**
    * Sign a upload request for given size. The alternative MinIO endpoint for user will be used in the POST URL.
    */
-  private async signUploadRequest(minSize?: number, maxSize?: number): Promise<SignedFileUploadRequestDto> {
+  private async signUploadRequest(
+    minSize?: number,
+    maxSize?: number,
+    objectUuid = UUID(),
+    expiresAt = new Date(Date.now() + FILE_UPLOAD_EXPIRE_TIME * 1000)
+  ): Promise<SignedFileUploadRequestDto> {
     const signer = this.minioSigner[MinioSignFor.UserUpload];
-    const uuid = UUID();
+    const uuid = objectUuid;
     const policy = signer.client.newPostPolicy();
     policy.setBucket(this.bucket);
     policy.setKey(uuid);
-    policy.setExpires(new Date(Date.now() + FILE_UPLOAD_EXPIRE_TIME * 1000));
+    policy.setExpires(expiresAt);
     if (minSize != null || maxSize != null) {
       policy.setContentLengthRange(minSize || 0, maxSize || 0);
     }
@@ -292,6 +304,47 @@ export class FileService implements OnModuleInit {
       extraFormData: policyResult.formData,
       fileFieldName: "file"
     };
+  }
+
+  async signTeamUploadPart(uuid: string, size: number, expiresAt: Date): Promise<SignedFileUploadRequestDto> {
+    return await this.signUploadRequest(
+      size,
+      size,
+      uuid,
+      new Date(Math.min(+expiresAt, Date.now() + FILE_UPLOAD_EXPIRE_TIME * 1000))
+    );
+  }
+
+  async composeTeamUpload(uuid: string, parts: { uuid: string; size: number }[]): Promise<void> {
+    const sources = await Promise.all(
+      parts.map(async part => {
+        let stored: Awaited<ReturnType<MinioClient["statObject"]>>;
+        try {
+          stored = await this.minioClient.statObject(this.bucket, part.uuid);
+        } catch (error) {
+          if (
+            error.code === "NoSuchKey" ||
+            error.code === "NotFound" ||
+            error.message === "The specified key does not exist."
+          )
+            throw new BadRequestException("FILE_NOT_UPLOADED");
+          throw error;
+        }
+        if (stored.size !== part.size) throw new BadRequestException("FILE_SIZE_MISMATCH");
+        return new minioCopy.CopySourceOptions({ Bucket: this.bucket, Object: part.uuid, MatchETag: stored.etag });
+      })
+    );
+    await this.minioClient.composeObject(
+      new minioCopy.CopyDestinationOptions({ Bucket: this.bucket, Object: uuid }),
+      sources
+    );
+  }
+
+  async discardTeamUploadObjects(uuids: string[]): Promise<void> {
+    const registered = await this.fileRepository.findBy({ uuid: In(uuids) });
+    const retained = new Set(registered.map(file => file.uuid));
+    const unused = uuids.filter(uuid => !retained.has(uuid));
+    if (unused.length) await this.minioClient.removeObjects(this.bucket, unused);
   }
 
   /**
@@ -341,19 +394,26 @@ export class FileService implements OnModuleInit {
     uuid,
     downloadFilename,
     noExpire,
-    signFor
+    signFor,
+    expiresSeconds
   }: {
     uuid: string;
     downloadFilename?: string;
     noExpire?: boolean;
     signFor?: MinioSignFor;
+    expiresSeconds?: number;
   }): Promise<string> {
+    if (
+      expiresSeconds !== undefined &&
+      (!Number.isSafeInteger(expiresSeconds) || expiresSeconds < 1 || expiresSeconds > 604800)
+    )
+      throw new BadRequestException("Invalid download expiry");
     const client = signFor ? this.minioSigner[signFor].client : this.minioClient;
     const url = await client.presignedGetObject(
       this.bucket,
       uuid,
       // The maximum expire time is 7 days
-      noExpire ? 24 * 60 * 60 * 7 : FILE_DOWNLOAD_EXPIRE_TIME,
+      expiresSeconds ?? (noExpire ? 24 * 60 * 60 * 7 : FILE_DOWNLOAD_EXPIRE_TIME),
       !downloadFilename
         ? {}
         : {
@@ -366,6 +426,10 @@ export class FileService implements OnModuleInit {
   }
 
   async runMaintainceTasks(): Promise<void> {
+    const activeUploads = await this.fileRepository.manager.findBy(TeamFileUploadEntity, {
+      expiresAt: MoreThan(new Date())
+    });
+    const pendingTeamObjects = new Set(activeUploads.flatMap(upload => [upload.uuid, ...upload.parts]));
     // Delete unused files
     const stream = this.minioClient.listObjectsV2(this.bucket);
     const deleteList: string[] = [];
@@ -375,6 +439,10 @@ export class FileService implements OnModuleInit {
         promises.push(
           (async () => {
             const uuid = object.name;
+            // Keep active team chunks and recent signed uploads while their
+            // policies can still be used. Expired/cancelled chunks are collected.
+            if (pendingTeamObjects.has(uuid) || +object.lastModified > Date.now() - FILE_UPLOAD_EXPIRE_TIME * 1000)
+              return;
             if (!(await this.fileRepository.countBy({ uuid }))) {
               deleteList.push(uuid);
             }

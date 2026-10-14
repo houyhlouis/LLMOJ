@@ -1,7 +1,7 @@
 import { Injectable, Inject, forwardRef } from "@nestjs/common";
 import { InjectRepository, InjectDataSource } from "@nestjs/typeorm";
 
-import { Repository, DataSource, Like } from "typeorm";
+import { Repository, DataSource } from "typeorm";
 
 import { GroupMembershipEntity } from "./group-membership.entity";
 
@@ -44,7 +44,11 @@ export class GroupService {
   }
 
   async findGroupById(id: number): Promise<GroupEntity> {
-    return await this.groupRepository.findOneBy({ id });
+    return await this.groupRepository
+      .createQueryBuilder("g")
+      .where("g.id = :id", { id })
+      .andWhere("NOT EXISTS (SELECT 1 FROM team t WHERE t.permissionGroupId = g.id)")
+      .getOne();
   }
 
   async findGroupsByExistingIds(groupIds: number[]): Promise<GroupEntity[]> {
@@ -181,32 +185,42 @@ export class GroupService {
     if (wildcard === "Start" || wildcard === "Both") query = `%${query}`;
     if (wildcard === "End" || wildcard === "Both") query += "%";
 
-    return await this.groupRepository.find({
-      where: {
-        name: Like(query)
-      },
-      order: {
-        name: "ASC"
-      },
-      take: maxTakeCount
-    });
+    return await this.groupRepository
+      .createQueryBuilder("g")
+      .where("g.name LIKE :query", { query })
+      .andWhere("NOT EXISTS (SELECT 1 FROM team t WHERE t.permissionGroupId = g.id)")
+      .orderBy("g.name", "ASC")
+      .take(maxTakeCount)
+      .getMany();
   }
 
   async getUserJoinedGroups(user: UserEntity): Promise<[groups: GroupEntity[], groupsWithAdminPermission: number[]]> {
     const groupMemberships = await this.groupMembershipRepository.findBy({
       userId: user.id
     });
-    const groups = await this.findGroupsByExistingIds(groupMemberships.map(groupMembership => groupMembership.groupId));
+    const ids = groupMemberships.map(groupMembership => groupMembership.groupId);
+    const groups = ids.length
+      ? await this.groupRepository
+          .createQueryBuilder("g")
+          .where("g.id IN (:...ids)", { ids })
+          .andWhere("NOT EXISTS (SELECT 1 FROM team t WHERE t.permissionGroupId = g.id)")
+          .getMany()
+      : [];
     return [
       groups,
       groupMemberships
-        .filter(groupMembership => groupMembership.isGroupAdmin)
+        .filter(
+          groupMembership => groupMembership.isGroupAdmin && groups.some(group => group.id === groupMembership.groupId)
+        )
         .map(groupMembership => groupMembership.groupId)
     ];
   }
 
   async getAllGroups(): Promise<GroupEntity[]> {
-    return await this.groupRepository.find();
+    return await this.groupRepository
+      .createQueryBuilder("g")
+      .where("NOT EXISTS (SELECT 1 FROM team t WHERE t.permissionGroupId = g.id)")
+      .getMany();
   }
 
   async getGroupMemberList(group: GroupEntity): Promise<GroupMembershipEntity[]> {
@@ -216,8 +230,10 @@ export class GroupService {
   }
 
   async getUserJoinedGroupsCount(user: UserEntity): Promise<number> {
-    return await this.groupMembershipRepository.countBy({
-      userId: user.id
-    });
+    return await this.groupMembershipRepository
+      .createQueryBuilder("m")
+      .where("m.userId = :userId", { userId: user.id })
+      .andWhere("NOT EXISTS (SELECT 1 FROM team t WHERE t.permissionGroupId = m.groupId)")
+      .getCount();
   }
 }

@@ -220,6 +220,16 @@ let UserPage: React.FC<UserPageProps> = props => {
       ) : (
         !isMobile && <Divider className={style.editProfileButton} />
       )}
+      {props.meta.id === appState.currentUser?.id && appState.currentUserHasPrivilege("ViewTeam") && (
+        <Button
+          className={style.myTeamsButton}
+          fluid
+          icon="users"
+          content={appState.locale === "zh_CN" ? "我的团队" : "My teams"}
+          as={Link}
+          href="/teams"
+        />
+      )}
       <List className={style.informationList}>
         <List.Item className={style.item}>
           <div className={style.iconWrapper}>
