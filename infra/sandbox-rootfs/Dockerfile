@@ -11,12 +11,14 @@ RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.
       'Suites: noble noble-updates' \
       'Components: main universe' \
       'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' \
+      'Snapshot: 20260715T000000Z' \
       '' \
       'Types: deb' \
       'URIs: http://security.ubuntu.com/ubuntu/' \
       'Suites: noble-security' \
       'Components: main universe' \
       'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' \
+      'Snapshot: 20260715T000000Z' \
       > /etc/apt/sources.list.d/ubuntu.sources \
     && apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends --no-install-suggests \
