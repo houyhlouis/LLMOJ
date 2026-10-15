@@ -231,6 +231,18 @@ class SecurityConfig {
   @Type(() => SecurityConfigRateLimit)
   @IsOptional()
   readonly rateLimit: SecurityConfigRateLimit;
+
+  // A login session expires after this many days without use (default 30; 0: never)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  readonly sessionIdleTimeoutDays?: number;
+
+  // A login session expires this many days after login, even if used (default 90; 0: never)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  readonly sessionMaxAgeDays?: number;
 }
 
 // These config items will be sent to client

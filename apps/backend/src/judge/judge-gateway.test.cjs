@@ -27,7 +27,14 @@ vm.runInNewContext(
     }`,
     { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS } }
   ).outputText,
-  { module: moduleObject, exports: moduleObject.exports, logger: { warn() {}, verbose() {} } },
+  {
+    module: moduleObject,
+    exports: moduleObject.exports,
+    logger: { warn() {}, verbose() {}, error() {} },
+    setTimeout,
+    CONSUME_TASK_RETRY_DELAY: 0,
+    ACKNOWLEDGED_TASK_GRACE_TIME: 60000
+  },
   { timeout: 1000 }
 );
 const { Gateway } = moduleObject.exports;
@@ -57,8 +64,8 @@ function fixture() {
   });
   const oldSocket = socket("old");
   const healthySocket = socket("healthy");
-  const oldState = { judgeClient: { name: "old" }, pendingTasks: new Set() };
-  const healthyState = { judgeClient: { name: "healthy" }, pendingTasks: new Set() };
+  const oldState = { judgeClient: { name: "old" }, pendingTasks: new Set(), assignedTasks: new Map() };
+  const healthyState = { judgeClient: { name: "healthy" }, pendingTasks: new Set(), assignedTasks: new Map() };
   gateway.mapSessionIdToJudgeClient = new Map([
     [oldSocket.id, oldState],
     [healthySocket.id, healthyState]
@@ -96,6 +103,8 @@ test("healthy consumption sends one task, routes cancellation, and acknowledgeme
   f.acknowledgements.get("old")();
   assert.equal(f.oldState.pendingTasks.size, 0);
   assert.equal(f.gateway.mapTaskIdToSocket.has(f.task.taskId), false);
+  // Late progress from older judge clients is still accepted for a short grace period.
+  assert.equal(f.oldState.assignedTasks.get(f.task.taskId), f.task);
   f.gateway.onCancelTask(f.task.taskId);
   assert.equal(f.events.length, 2);
   evidence.cases.push({ name: "normal consumption and acknowledgement", events: f.events, requeues: f.requeues });
@@ -141,7 +150,9 @@ test("requeue interleaving preserves the healthy consumer's cancellation route w
     { socket: "healthy", event: "cancel", taskId: f.task.taskId }
   ]);
   assert.equal(f.oldState.pendingTasks.size, 0);
+  assert.equal(f.oldState.assignedTasks.size, 0);
   assert.equal(f.healthyState.pendingTasks.has(f.task), true);
+  assert.equal(f.healthyState.assignedTasks.get(f.task.taskId), f.task);
   evidence.cases.push({
     name: "healthy socket dequeues during old socket's requeue await",
     consumeCount,

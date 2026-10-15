@@ -29,17 +29,15 @@ require.extensions[".ts"] = (module, filename) =>
     }).outputText,
     filename
   );
-const { providerRequest, listModels, generateText, validateBaseUrl } = require(path.join(
-  backendRoot,
-  "src/ai/ai-provider.ts"
-));
+const { providerRequest, listModels, generateText, validateBaseUrl, isPublicAddress, isAllowedPrivateHost } =
+  require(path.join(backendRoot, "src/ai/ai-provider.ts"));
 const { withAiRuntime } = require(path.join(backendRoot, "src/ai/ai-runtime.ts"));
 const { AiError } = require(path.join(backendRoot, "src/ai/ai.types.ts"));
 const initialAllowlist = process.env.HYHOJ_AI_PRIVATE_HOSTS;
 const syntheticKey = "synthetic-private-policy-key";
 
 before(() => {
-  // Empty means no implicit exception from the legacy environment variable.
+  // Empty means no private host is allowed for every user; each test opts in explicitly.
   process.env.HYHOJ_AI_PRIVATE_HOSTS = "";
 });
 after(() => {
@@ -130,8 +128,39 @@ async function fixture(host = "127.0.0.1") {
   };
 }
 
+async function withPrivateHosts(value, work) {
+  const previous = process.env.HYHOJ_AI_PRIVATE_HOSTS;
+  process.env.HYHOJ_AI_PRIVATE_HOSTS = value;
+  try {
+    return await work();
+  } finally {
+    process.env.HYHOJ_AI_PRIVATE_HOSTS = previous;
+  }
+}
+// The AI service allows private destinations in the runtime of a site administrator's own configuration.
+function asUser(allowPrivateNetwork, work) {
+  return withAiRuntime(
+    { ownerId: allowPrivateNetwork ? 1 : 2, record: async () => {}, allowPrivateNetwork: async () => allowPrivateNetwork },
+    work
+  );
+}
+function syntheticConfig(f, hostname) {
+  const baseUrl = (hostname ? "http://" + hostname + ":" + f.port : f.origin) + "/v1";
+  return { type: "chat", baseUrl, apiKey: syntheticKey, model: "synthetic-model", maxTokens: 1024 };
+}
+
+async function proveBlocked(f, hostname) {
+  const config = syntheticConfig(f, hostname);
+  await assert.rejects(listModels(config), errorCode("PRIVATE_ENDPOINT_BLOCKED"));
+  await assert.rejects(asUser(false, () => listModels(config)), errorCode("PRIVATE_ENDPOINT_BLOCKED"));
+  await assert.rejects(
+    asUser(false, () => generateText(config, "Synthetic local test.", "Reply synthetic-ok.")),
+    errorCode("PRIVATE_ENDPOINT_BLOCKED")
+  );
+  assert.equal(f.requests.length, 0, "A blocked destination must not receive any request.");
+}
+
 async function proveSyntheticModelsAndChat(f, hostname) {
-  assert.equal(process.env.HYHOJ_AI_PRIVATE_HOSTS, "");
   const baseUrl = (hostname ? "http://" + hostname + ":" + f.port : f.origin) + "/v1";
   const config = { type: "chat", baseUrl, apiKey: syntheticKey, model: "synthetic-model", maxTokens: 1024 };
   assert.deepEqual(await listModels(config), ["synthetic-model"]);
@@ -143,28 +172,117 @@ async function proveSyntheticModelsAndChat(f, hostname) {
   assert.equal(f.requests[1].body.model, "synthetic-model");
 }
 
+test("public and non-public addresses are classified, including IPv4-mapped IPv6", () => {
+  for (const address of ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111", "::ffff:8.8.8.8", "::ffff:808:808", "64:ff9b::808:808"])
+    assert.equal(isPublicAddress(address), true, address);
+  for (const address of [
+    "127.0.0.1",
+    "127.255.255.254",
+    "10.1.2.3",
+    "172.16.0.1",
+    "172.31.255.255",
+    "192.168.1.1",
+    "169.254.169.254",
+    "100.64.0.1",
+    "0.0.0.0",
+    "192.0.2.1",
+    "198.18.0.1",
+    "224.0.0.1",
+    "255.255.255.255",
+    "::",
+    "::1",
+    "fe80::1",
+    "fd00::1",
+    "fc00::1",
+    "ff02::1",
+    "::ffff:127.0.0.1",
+    "::ffff:7f00:1",
+    "::ffff:a9fe:a9fe",
+    "2001:db8::1",
+    "64:ff9b:1::1",
+    "2002:a00:1::1",
+    "not-an-address"
+  ])
+    assert.equal(isPublicAddress(address), false, address);
+  for (const address of ["172.15.255.255", "172.32.0.1", "100.128.0.1", "11.0.0.1"])
+    assert.equal(isPublicAddress(address), true, address);
+});
+
+test("HYHOJ_AI_PRIVATE_HOSTS matches hosts and optional ports exactly", () => {
+  const env = { HYHOJ_AI_PRIVATE_HOSTS: "LLM.lan, 10.0.0.5:8000 [fd00::5]:8080 [::1] fd00::6" };
+  for (const url of [
+    "http://llm.lan/v1",
+    "https://llm.lan:9000/v1",
+    "http://10.0.0.5:8000/v1",
+    "http://[fd00::5]:8080/v1",
+    "http://[::1]:1234/v1",
+    "http://[fd00:0::6]/v1"
+  ])
+    assert.equal(isAllowedPrivateHost(new URL(url), env), true, url);
+  for (const url of [
+    "http://10.0.0.5/v1",
+    "http://10.0.0.5:8001/v1",
+    "http://other.lan/v1",
+    "http://llm.lan.evil.example/v1",
+    "http://[fd00::5]/v1",
+    "http://127.0.0.1/v1"
+  ])
+    assert.equal(isAllowedPrivateHost(new URL(url), env), false, url);
+  assert.equal(isAllowedPrivateHost(new URL("http://127.0.0.1/v1"), {}), false);
+  assert.equal(isAllowedPrivateHost(new URL("https://127.0.0.1/v1"), { HYHOJ_AI_PRIVATE_HOSTS: "127.0.0.1:443" }), true);
+});
+
 // A parent with concurrency:false keeps the temporary DNS override and shared
 // allowlist setting isolated from every sibling in this file.
 test("AI provider private-address policy regression", { concurrency: false, timeout: 30000 }, async t => {
-  await t.test("127.0.0.1 HTTP models and generation work with an empty allowlist", { timeout: 4000 }, async () => {
+  await t.test("loopback is blocked for ordinary users and calls without an owner", { timeout: 4000 }, async () => {
     const f = await fixture();
     try {
-      await proveSyntheticModelsAndChat(f);
+      await proveBlocked(f);
+      await proveBlocked(f, "localhost");
     } finally {
       await f.close();
     }
   });
 
-  await t.test("localhost HTTP uses real DNS and works with an empty allowlist", { timeout: 4000 }, async () => {
+  await t.test("127.0.0.1 HTTP models and generation work when allowlisted", { timeout: 4000 }, async () => {
     const f = await fixture();
     try {
-      await proveSyntheticModelsAndChat(f, "localhost");
+      await withPrivateHosts("127.0.0.1", () => proveSyntheticModelsAndChat(f));
     } finally {
       await f.close();
     }
   });
 
-  await t.test("local LAN HTTP models and generation work with an empty allowlist", { timeout: 4000 }, async t => {
+  await t.test("localhost HTTP uses real DNS and works when allowlisted by name", { timeout: 4000 }, async () => {
+    const f = await fixture();
+    try {
+      await withPrivateHosts("localhost", () => proveSyntheticModelsAndChat(f, "localhost"));
+    } finally {
+      await f.close();
+    }
+  });
+
+  await t.test("an allowlist entry with a port only allows that port", { timeout: 4000 }, async () => {
+    const f = await fixture();
+    try {
+      await withPrivateHosts("127.0.0.1:" + (f.port === 1 ? 2 : 1), () => proveBlocked(f));
+      await withPrivateHosts("127.0.0.1:" + f.port, () => proveSyntheticModelsAndChat(f));
+    } finally {
+      await f.close();
+    }
+  });
+
+  await t.test("site administrators can use loopback without an allowlist", { timeout: 4000 }, async () => {
+    const f = await fixture();
+    try {
+      await asUser(true, () => proveSyntheticModelsAndChat(f));
+    } finally {
+      await f.close();
+    }
+  });
+
+  await t.test("local LAN HTTP is blocked for users and works for administrators", { timeout: 4000 }, async t => {
     const localAddresses = Object.values(os.networkInterfaces()).flat().filter(Boolean);
     const ipv4 = localAddresses.filter(x => (x.family === "IPv4" || x.family === 4) && !x.internal);
     const preferred = ipv4.find(x => /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(x.address));
@@ -180,13 +298,14 @@ test("AI provider private-address policy regression", { concurrency: false, time
     t.diagnostic("Synthetic provider bound only to local interface " + lanHost);
     const f = await fixture(lanHost);
     try {
-      await proveSyntheticModelsAndChat(f);
+      if (!isPublicAddress(lanHost)) await proveBlocked(f);
+      await asUser(true, () => proveSyntheticModelsAndChat(f));
     } finally {
       await f.close();
     }
   });
 
-  await t.test("IPv6 loopback HTTP works when ::1 is available", { timeout: 4000 }, async t => {
+  await t.test("IPv6 loopback HTTP is blocked by default and works when allowed", { timeout: 4000 }, async t => {
     let f;
     try {
       f = await fixture("::1");
@@ -198,7 +317,8 @@ test("AI provider private-address policy regression", { concurrency: false, time
       throw error;
     }
     try {
-      await proveSyntheticModelsAndChat(f);
+      await proveBlocked(f);
+      await withPrivateHosts("[::1]:" + f.port, () => proveSyntheticModelsAndChat(f));
     } finally {
       await f.close();
     }
@@ -207,9 +327,8 @@ test("AI provider private-address policy regression", { concurrency: false, time
   await t.test("302 is rejected without following its Location", { timeout: 3000 }, async () => {
     const f = await fixture();
     try {
-      await assert.rejects(
-        providerRequest(f.origin + "/redirect", {}, undefined, 1000),
-        errorCode("PROVIDER_HTTP_ERROR")
+      await withPrivateHosts("127.0.0.1", () =>
+        assert.rejects(providerRequest(f.origin + "/redirect", {}, undefined, 1000), errorCode("PROVIDER_HTTP_ERROR"))
       );
       await delay(30);
       assert.deepEqual(
@@ -240,9 +359,11 @@ test("AI provider private-address policy regression", { concurrency: false, time
   await t.test("responses larger than 16 MiB are still rejected", { timeout: 5000 }, async () => {
     const f = await fixture();
     try {
-      await assert.rejects(
-        providerRequest(f.origin + "/oversize", {}, undefined, 2000),
-        errorCode("PROVIDER_RESPONSE_TOO_LARGE")
+      await withPrivateHosts("127.0.0.1", () =>
+        assert.rejects(
+          providerRequest(f.origin + "/oversize", {}, undefined, 2000),
+          errorCode("PROVIDER_RESPONSE_TOO_LARGE")
+        )
       );
       await eventually(() => f.closed.size === 1, "Oversize response socket did not close.");
     } finally {
@@ -254,7 +375,9 @@ test("AI provider private-address policy regression", { concurrency: false, time
     const f = await fixture();
     try {
       const start = Date.now();
-      await assert.rejects(providerRequest(f.origin + "/stall", {}, undefined, 150), errorCode("PROVIDER_TIMEOUT"));
+      await withPrivateHosts("127.0.0.1", () =>
+        assert.rejects(providerRequest(f.origin + "/stall", {}, undefined, 150), errorCode("PROVIDER_TIMEOUT"))
+      );
       assert(Date.now() - start < 2000, "Timeout did not finish promptly.");
       assert.equal(f.requests.length, 1);
       await eventually(() => f.closed.size === 1, "Timed-out response socket did not close.");
@@ -267,8 +390,9 @@ test("AI provider private-address policy regression", { concurrency: false, time
     const f = await fixture();
     const controller = new AbortController();
     try {
-      const pending = withAiRuntime({ ownerId: 991, signal: controller.signal, record: async () => {} }, () =>
-        providerRequest(f.origin + "/stall", {}, undefined, 10000)
+      const pending = withAiRuntime(
+        { ownerId: 991, signal: controller.signal, record: async () => {}, allowPrivateNetwork: async () => true },
+        () => providerRequest(f.origin + "/stall", {}, undefined, 10000)
       );
       // Attach the rejection handler before aborting to avoid unhandled rejection noise.
       const rejected = assert.rejects(pending, errorCode("JOB_CANCELLED"));
@@ -280,6 +404,37 @@ test("AI provider private-address policy regression", { concurrency: false, time
       await eventually(() => f.closed.size === 1, "Cancelled response socket did not close.");
     } finally {
       controller.abort();
+      await f.close();
+    }
+  });
+
+  await t.test("a name resolving to any non-public address is blocked before connecting", { timeout: 4000 }, async () => {
+    const f = await fixture();
+    const originalLookup = dns.promises.lookup;
+    const hostname = "synthetic-rebinding-provider.invalid";
+    try {
+      for (const records of [
+        [{ address: "127.0.0.1", family: 4 }],
+        [
+          { address: "8.8.8.8", family: 4 },
+          { address: "127.0.0.1", family: 4 }
+        ],
+        [{ address: "::ffff:7f00:1", family: 6 }],
+        [{ address: "169.254.169.254", family: 4 }]
+      ]) {
+        dns.promises.lookup = async (name, options) => {
+          assert.equal(name, hostname, "No external hostname may be resolved by this test.");
+          assert.equal(options.all, true);
+          return records;
+        };
+        await assert.rejects(
+          asUser(false, () => providerRequest("http://" + hostname + ":" + f.port + "/models", {}, undefined, 1000)),
+          errorCode("PRIVATE_ENDPOINT_BLOCKED")
+        );
+      }
+      assert.equal(f.requests.length, 0);
+    } finally {
+      dns.promises.lookup = originalLookup;
       await f.close();
     }
   });
@@ -297,7 +452,9 @@ test("AI provider private-address policy regression", { concurrency: false, time
         assert.equal(count, 1, "Provider unexpectedly resolved DNS more than once.");
         return [{ address: "127.0.0.1", family: 4 }];
       };
-      const result = await providerRequest("http://" + hostname + ":" + f.port + "/models", {}, undefined, 1000);
+      const result = await withPrivateHosts(hostname, () =>
+        providerRequest("http://" + hostname + ":" + f.port + "/models", {}, undefined, 1000)
+      );
       assert.deepEqual(result.data, { data: [{ id: "synthetic-model" }] });
       assert.equal(count, 1);
       assert.equal(f.requests.length, 1, "The request must reach the real local HTTP server.");

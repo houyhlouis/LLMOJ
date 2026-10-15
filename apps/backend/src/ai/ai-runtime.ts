@@ -37,6 +37,8 @@ export interface AiRuntimeContext {
   ownerId: number;
   jobId?: string;
   signal?: AbortSignal;
+  /** Whether the owner may reach private and local provider addresses not listed in HYHOJ_AI_PRIVATE_HOSTS. */
+  allowPrivateNetwork?: () => Promise<boolean>;
   record: (record: AiUsageRecord) => Promise<void>;
   checkActive?: () => Promise<void>;
   loadResponse?: (requestHash: string) => Promise<AiResponseCheckpoint | null>;

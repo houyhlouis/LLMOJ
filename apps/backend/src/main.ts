@@ -30,6 +30,8 @@ String.prototype.format = function format(...args) {
 
 export const appGitRepoInfo = getGitRepoInfo();
 
+const JSON_BODY_LIMIT = "32mb";
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function initialize(): Promise<[packageInfo: any, configService: ConfigService, app: NestExpressApplication]> {
   // Get package info
@@ -52,7 +54,7 @@ async function initialize(): Promise<[packageInfo: any, configService: ConfigSer
   app.setGlobalPrefix("api");
   app.useGlobalFilters(app.get(ErrorFilter));
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }));
-  app.use(json({ limit: "1024mb" }));
+  // Rate limiting is registered before body parsing so rejected requests are never buffered or parsed.
   if (configService.config.security.rateLimit) {
     const clusterService = app.get(ClusterService);
     const rateLimiterConfig: IRateLimiterOptions = {
@@ -81,6 +83,9 @@ async function initialize(): Promise<[packageInfo: any, configService: ConfigSer
         });
     });
   }
+  // File contents go to object storage through signed uploads. The largest JSON body is an AI import
+  // image (at most 15 MB of base64, see StartAiJobDto), so keep a margin without exposing the heap.
+  app.use(json({ limit: JSON_BODY_LIMIT }));
   app.set("trust proxy", configService.config.server.trustProxy);
 
   const options = new DocumentBuilder()

@@ -1,3 +1,5 @@
+import { randomUUID } from "crypto";
+
 import { ExceptionFilter, Catch, ArgumentsHost, HttpException, Logger } from "@nestjs/common";
 
 import { Response } from "express"; // eslint-disable-line import/no-extraneous-dependencies
@@ -21,34 +23,29 @@ export class ErrorFilter implements ExceptionFilter {
   catch(error: Error, host: ArgumentsHost) {
     const contextType = host.getType();
     let request: RequestWithSession;
+    // Unhandled errors are only described in server logs; clients get a stable code and an ID to quote.
+    const requestId = randomUUID();
     if (contextType === "http") {
       request = host.switchToHttp().getRequest<RequestWithSession>();
       const response = host.switchToHttp().getResponse<Response>();
       if (error instanceof HttpException) response.status(error.getStatus()).send(error.getResponse());
-      else
-        response
-          .status(500)
-          .send(
-            isAiRequest(request.originalUrl)
-              ? { error: "INTERNAL_ERROR" }
-              : { error: String(error), stack: error?.stack }
-          );
+      else response.status(500).send({ error: "INTERNAL_ERROR", requestId });
     }
 
     if (!(error instanceof HttpException)) {
       if (error instanceof Error) {
         if (this.isignoredError(error)) return;
 
-        if (isAiRequest(request?.originalUrl)) logger.error(AI_ERROR_REPORT_MESSAGE);
-        else logger.error(error.message, error.stack);
-      } else logger.error(isAiRequest(request?.originalUrl) ? AI_ERROR_REPORT_MESSAGE : error);
+        if (isAiRequest(request?.originalUrl)) logger.error(`[${requestId}] ${AI_ERROR_REPORT_MESSAGE}`);
+        else logger.error(`[${requestId}] ${error.message}`, error.stack);
+      } else logger.error(isAiRequest(request?.originalUrl) ? `[${requestId}] ${AI_ERROR_REPORT_MESSAGE}` : error);
 
       this.metricErrorCount.inc({ error: error.constructor.name });
       this.eventReportService.report({
         type: EventReportType.Error,
         error,
         request,
-        message: "ErrorFilter has caught a uncaught exception."
+        message: `ErrorFilter has caught a uncaught exception (request ${requestId}).`
       });
     }
   }

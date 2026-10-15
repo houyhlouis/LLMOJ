@@ -16,7 +16,7 @@ require.extensions[".ts"] = (module, filename) =>
     }).outputText,
     filename
   );
-const { FileService, MinioSignFor } = require("./file.service.ts");
+const { FileService, MinioSignFor, JUDGE_FILE_DOWNLOAD_EXPIRE_TIME } = require("./file.service.ts");
 function fixture({ registered = false, actualSize = 10, statError } = {}) {
   const service = Object.create(FileService.prototype),
     calls = { deletes: [], saved: [], expiry: [], checks: [] };
@@ -99,8 +99,9 @@ test("team download links expire after 60 seconds and invalid lifetimes are reje
   await service.signDownloadLink({ uuid: "private-team-file", signFor: MinioSignFor.UserDownload, expiresSeconds: 60 });
   assert.deepEqual(calls.expiry, [60]);
   await service.signDownloadLink({ uuid: "ordinary-file" });
-  await service.signDownloadLink({ uuid: "judge-file", noExpire: true });
-  assert.deepEqual(calls.expiry, [60, 72000, 604800]);
+  await service.signDownloadLink({ uuid: "judge-file", expiresSeconds: JUDGE_FILE_DOWNLOAD_EXPIRE_TIME });
+  assert.equal(JUDGE_FILE_DOWNLOAD_EXPIRE_TIME, 21600);
+  assert.deepEqual(calls.expiry, [60, 72000, 21600]);
   for (const expiry of [0, -1, 1.5, 604801, NaN])
     await assert.rejects(
       service.signDownloadLink({ uuid: "private", expiresSeconds: expiry }),

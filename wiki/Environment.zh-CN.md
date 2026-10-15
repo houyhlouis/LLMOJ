@@ -13,7 +13,7 @@
 | `LIBREOJ_CONFIG_FILE` | 后端必填：完整 YAML 路径（建议绝对路径）；安装器设为 `<root>/config/backend.yaml` |
 | `LIBREOJ_JUDGE_CONFIG_FILE` | 评测端必填：完整 YAML 路径；安装器设为 `<root>/config/judge.yaml` |
 | `LIBREOJ_JUDGE_LOG_LEVEL` | 评测日志级别，缺省 `info`；采用 Winston 等级（如 error、warn、info、debug） |
-| `LIBREOJ_SCHEMA_SYNC` | 值恰为 `0` 时禁止后端启动时自动同步数据库结构；未设或其它值保留旧行为。升级器先执行受控迁移，再用独立 systemd drop-in 固定为 0；不要靠开启自动同步绕过升级检查。 |
+| `LIBREOJ_SCHEMA_SYNC` | 在 `NODE_ENV=production`（安装后的服务）下，除非值恰为 `1`，后端启动时从不修改数据库结构；值为 `0` 时任何环境都禁止，开发环境其它情况下仍自动同步。新安装用 `deploy/initialize-schema.mjs` 创建结构；升级器执行受控迁移，并用独立 systemd drop-in 固定为 0；不要靠开启自动同步绕过升级检查。 |
 | `LIBREOJ_LOG_SQL` | 后端 SQL 日志；任意非空字符串都开启，包括 `0` 和 `false`；关闭应移除或留空 |
 | `NODE_ENV` | 服务设为 `production`；后端仅输出 warn/error 等生产日志；也影响前端构建模式 |
 | `NODE_OPTIONS` | 服务生成值 `--max-old-space-size=512`，构建脚本设为 `--max-old-space-size=2300`；单位 MiB，仅 V8 堆，不是总进程或沙盒上限 |
@@ -22,7 +22,7 @@
 | `PATH` | systemd 显式把实例的 `runtime/node/bin` 放在前面；交互终端的 Node 版本不能代表服务版本 |
 | `LIBREOJ_MIGRATION_CONFIG_FILE` | 存在时后端改为执行旧站迁移而非 HTTP 服务；单次离线工具，见下表 |
 
-AI 运行变量 `HYHOJ_AI_STATE_DIR`、`HYHOJ_AI_GENERATED_DIR`、`HYHOJ_AI_SAMPLE_INPUTS_DIR`、`HYHOJ_AI_RUNNER_SOCKET` 与共享 `HYHOJ_ARCHIVE_WORK_DIRECTORY` 的完整目录、权限和服务归属见 [AI 环境](AI-Environment.zh-CN.md)。`HYHOJ_AI_PRIVATE_HOSTS` 已无生产读取点，不是当前 URL 放行开关。
+AI 运行变量 `HYHOJ_AI_STATE_DIR`、`HYHOJ_AI_GENERATED_DIR`、`HYHOJ_AI_SAMPLE_INPUTS_DIR`、`HYHOJ_AI_RUNNER_SOCKET` 与共享 `HYHOJ_ARCHIVE_WORK_DIRECTORY` 的完整目录、权限和服务归属见 [AI 环境](AI-Environment.zh-CN.md)。`HYHOJ_AI_PRIVATE_HOSTS` 列出允许所有用户使用的内网或本机服务主机。
 
 ## 安装与配置生成器
 
@@ -117,7 +117,7 @@ AI 运行变量 `HYHOJ_AI_STATE_DIR`、`HYHOJ_AI_GENERATED_DIR`、`HYHOJ_AI_SAMP
 | `deploy/sandbox/build.sh` | 位置参数 `plan`（默认）、`build` 或 `stage ABS_ARCHIVE`；环境变量见上表 |
 | `deploy/export-wiki.py` | 必填 `--repository OWNER/REPO`、`--output DIR`；只导出本地文档，见发布页 |
 | `deploy/prepare-github.py` | 可选 `--archive PATH`；源码发布筛选／打包工具，需可读取 Git 清单；已有归档不覆盖 |
-| `deploy/backup.sh` | `--prefix PATH` 优先于 `HYHOJ_ROOT`，默认 `/opt/LLMOJ`；停服务、备份后恢复 target；旧安装或自定义目录须指定实际路径 |
+| `deploy/backup.sh` | `--prefix PATH` 优先于 `HYHOJ_ROOT`，默认 `/opt/LLMOJ`；获取维护锁、停止已安装的服务、备份后只启动原本运行的服务；旧安装或自定义目录须指定实际路径 |
 
 核对来源：[deploy/configure-local.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py), [deploy/configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-judge.py), [deploy/install.sh](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/install.sh), [deploy/build-frontend-offline.mjs](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/build-frontend-offline.mjs), [apps/backend/src/main.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/main.ts), [apps/backend/src/migration/migration-config.schema.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/migration/migration-config.schema.ts), [apps/judge/src/config.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/config.ts).
 

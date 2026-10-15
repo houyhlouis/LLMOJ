@@ -52,6 +52,9 @@ security:
   rateLimit:
     maxRequests: 200
     durationSeconds: 10
+  # Login sessions expire after this many days without use, and this many days after login (0: never)
+  sessionIdleTimeoutDays: 30
+  sessionMaxAgeDays: 90
 preference:
   siteName: LLMOJ
   copyrightNotice: LLMOJ

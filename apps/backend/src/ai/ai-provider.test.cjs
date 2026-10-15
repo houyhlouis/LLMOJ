@@ -221,7 +221,7 @@ test("errors never expose upstream response or secrets", async () => {
   await assert.rejects(generateText({ ...config("chat"), apiKey: "" }, "", ""), /LLM_NOT_CONFIGURED/);
   await assert.rejects(searchWeb({ type: "tavily", baseUrl, apiKey: "" }, ""), /SEARCH_NOT_CONFIGURED/);
 });
-test("private providers are permitted while credential URL validation remains enforced", async () => {
+test("private providers need the server allowlist while credential URL validation remains enforced", async () => {
   for (const url of [
     "file:///etc/passwd",
     "https://u:p@example.org",
@@ -230,8 +230,9 @@ test("private providers are permitted while credential URL validation remains en
   ])
     assert.throws(() => validateBaseUrl(url), /INVALID_BASE_URL/);
   delete process.env.HYHOJ_AI_PRIVATE_HOSTS;
-  assert.deepEqual((await providerRequest(`${baseUrl}/models`, {})).data.data, [{ id: "model-a" }]);
+  await assert.rejects(providerRequest(`${baseUrl}/models`, {}), /PRIVATE_ENDPOINT_BLOCKED/);
   process.env.HYHOJ_AI_PRIVATE_HOSTS = "127.0.0.1";
+  assert.deepEqual((await providerRequest(`${baseUrl}/models`, {})).data.data, [{ id: "model-a" }]);
 });
 test("strict JSON output accepts fences but rejects surrounding text", () => {
   assert.deepEqual(parseModelJson('```json\n{"a":1}\n```'), { a: 1 });

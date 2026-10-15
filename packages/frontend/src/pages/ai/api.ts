@@ -164,8 +164,12 @@ const errors: Record<string, [string, string]> = {
     "Model discovery is unsupported; enter the model ID manually."
   ],
   PRIVATE_ENDPOINT_BLOCKED: [
-    "内网 API 地址需要服务器管理员将主机名加入 HYHOJ_AI_PRIVATE_HOSTS。",
-    "A private API host must be allowed by the server administrator in HYHOJ_AI_PRIVATE_HOSTS."
+    "内网或本机 API 地址仅限站点管理员使用；其他用户需要服务器管理员将主机加入 HYHOJ_AI_PRIVATE_HOSTS。",
+    "Private or local API hosts are limited to site administrators unless the server administrator lists the host in HYHOJ_AI_PRIVATE_HOSTS."
+  ],
+  AI_DIAGNOSTICS_BUSY: [
+    "模型列表或连接测试请求过多，请等待当前请求完成后重试。",
+    "Too many model-list or connection-test requests are running. Wait for them to finish and retry."
   ],
   HTTPS_REQUIRED: ["请使用 HTTPS API 地址。", "Use an HTTPS API endpoint."],
   INVALID_BASE_URL: [

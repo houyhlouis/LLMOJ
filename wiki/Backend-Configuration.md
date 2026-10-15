@@ -111,6 +111,8 @@ The installer creates configuration only when absent and preserves existing file
 | `security.crossOrigin.whiteList` | `string[]`; required | `[]` | Array of frontend origins allowed by xdomain, such as https://oj.example.com. Use only controlled origins; consulted when enabled=true. |
 | `security.rateLimit.maxRequests` | `number`; required when parent enabled | `200` | Request-point allowance per client IP per window. Schema checks integer only; use a positive value operationally. Exceeded limits return HTTP 429. Omit/null the entire rateLimit object to disable this layer. |
 | `security.rateLimit.durationSeconds` | `number`; required when parent enabled | `10` | Rate-limit window in seconds. Schema checks integer only; use a positive value. Counters are in memory, coordinated by the primary in Node cluster mode, not shared across independent hosts. |
+| `security.sessionIdleTimeoutDays` | `number`; optional | `30` | A login session not used for this many days expires and must log in again. Integer ≥0; 0 disables the limit; omitted means 30. Enforced by the server on every request. |
+| `security.sessionMaxAgeDays` | `number`; optional | `90` | A login session expires this many days after login, even if used regularly. Integer ≥0; 0 disables the limit; omitted means 90. |
 
 ## `preference` — Public and server-only preferences
 

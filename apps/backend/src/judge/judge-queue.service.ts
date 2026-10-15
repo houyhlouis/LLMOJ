@@ -23,6 +23,8 @@ export enum JudgeTaskPriorityType {
 
 export interface QueuedJudgeTaskMeta extends JudgeTaskMeta {
   enqueueTime: number;
+  // How many times preparing this task for a judge client has failed (absent for a new task)
+  failures?: number;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
@@ -48,6 +50,11 @@ export class JudgeTask<ExtraInfo extends JudgeTaskExtraInfo> implements JudgeTas
 
 const REDIS_KEY_JUDGE_QUEUE = "judge-queue";
 const REDIS_CONSUME_TIMEOUT = 10;
+
+// A task whose preparation fails (e.g. the database is briefly unavailable) is put back to the queue,
+// unless it keeps failing. Its consumer waits before consuming again to avoid spinning on the error.
+const MAX_TASK_PREPARATION_FAILURES = 5;
+const TASK_PREPARATION_RETRY_DELAY = 1000;
 
 @Injectable()
 export class JudgeQueueService {
@@ -76,18 +83,26 @@ export class JudgeQueueService {
     this.taskServices.set(taskType, service);
   }
 
-  async pushTask(taskId: string, type: JudgeTaskType, priority: number, repush = false): Promise<void> {
+  /**
+   * @param retry Keeps the original enqueue time and counts failures when a task is put back after its
+   * preparation failed.
+   */
+  async pushTask(
+    taskId: string,
+    type: JudgeTaskType,
+    priority: number,
+    repush = false,
+    retry: { enqueueTime: number; failures: number } | null = null
+  ): Promise<void> {
     if (repush) logger.verbose(`Repush judge task: { taskId: ${taskId}, type: ${type}, priority: ${priority} }`);
     else logger.verbose(`New judge task: { taskId: ${taskId}, type: ${type}, priority: ${priority} }`);
-    await this.redisForPush.zadd(
-      REDIS_KEY_JUDGE_QUEUE,
-      priority,
-      JSON.stringify({
-        taskId,
-        type,
-        enqueueTime: Date.now()
-      })
-    );
+    const taskMeta: QueuedJudgeTaskMeta = {
+      taskId,
+      type,
+      enqueueTime: retry?.enqueueTime ?? Date.now(),
+      ...(retry ? { failures: retry.failures } : {})
+    };
+    await this.redisForPush.zadd(REDIS_KEY_JUDGE_QUEUE, priority, JSON.stringify(taskMeta));
   }
 
   async consumeTask(): Promise<JudgeTask<JudgeTaskExtraInfo>> {
@@ -106,9 +121,41 @@ export class JudgeQueueService {
 
     const [, taskJson, priorityString] = redisResponse;
     const priority = Number(priorityString);
-    const taskMeta: QueuedJudgeTaskMeta = JSON.parse(taskJson);
+    let taskMeta: QueuedJudgeTaskMeta;
+    try {
+      taskMeta = JSON.parse(taskJson);
+    } catch {
+      logger.error(`Dropped malformed judge queue entry: ${taskJson}`);
+      return null;
+    }
     const dequeuedTime = Date.now();
-    const task = await this.taskServices.get(taskMeta.type).getTaskToBeSentToJudgeByTaskId(taskMeta.taskId, priority);
+
+    let task: JudgeTask<JudgeTaskExtraInfo>;
+    try {
+      const taskService = this.taskServices.get(taskMeta.type);
+      if (!taskService) throw new Error(`Unknown judge task type ${taskMeta.type}`);
+      task = await taskService.getTaskToBeSentToJudgeByTaskId(taskMeta.taskId, priority);
+    } catch (e) {
+      const failures = (taskMeta.failures || 0) + 1;
+      const taskInfo = `{ taskId: ${taskMeta.taskId}, type: ${taskMeta.type} }`;
+      if (failures >= MAX_TASK_PREPARATION_FAILURES) {
+        logger.error(`Failed to prepare judge task ${taskInfo} ${failures} times, dropping it: ${e}`);
+        return null;
+      }
+
+      logger.error(`Failed to prepare judge task ${taskInfo} (attempt ${failures}), putting it back: ${e}`);
+      try {
+        await this.pushTask(taskMeta.taskId, taskMeta.type, priority, true, {
+          enqueueTime: taskMeta.enqueueTime,
+          failures
+        });
+      } catch (pushError) {
+        logger.error(`Failed to put judge task ${taskInfo} back to the queue, it is lost: ${pushError}`);
+      }
+      await new Promise(resolve => setTimeout(resolve, TASK_PREPARATION_RETRY_DELAY));
+      return null;
+    }
+
     if (!task) {
       logger.verbose(
         `Consumed judge task { taskId: ${taskMeta.taskId}, type: ${taskMeta.type} }, but taskId is invalid, maybe canceled?`
@@ -122,7 +169,7 @@ export class JudgeQueueService {
           type: task.type,
           priority_type: task.priorityType
         },
-        (Date.now() - dequeuedTime) / 1000
+        (dequeuedTime - taskMeta.enqueueTime) / 1000
       );
     }
 

@@ -13,7 +13,7 @@ Administrators can also set registration policy immediately through [Site manage
 | `LIBREOJ_CONFIG_FILE` | Required backend YAML path; installed as `<root>/config/backend.yaml` |
 | `LIBREOJ_JUDGE_CONFIG_FILE` | Required judge YAML path; installed as `<root>/config/judge.yaml` |
 | `LIBREOJ_JUDGE_LOG_LEVEL` | Judge log level; fallback `info`; Winston levels such as error, warn, info, debug |
-| `LIBREOJ_SCHEMA_SYNC` | Exactly `0` disables automatic schema synchronization at backend startup. Unset/other values preserve legacy behavior. The updater applies checked DDL first and installs a dedicated systemd drop-in setting this to 0. Do not enable synchronization to bypass upgrade checks. |
+| `LIBREOJ_SCHEMA_SYNC` | With `NODE_ENV=production` (the installed services), the backend never changes the database schema at startup unless this is exactly `1`; `0` disables it in every environment, and development builds synchronize otherwise. A new installation creates its schema with `deploy/initialize-schema.mjs`; the updater applies checked DDL and installs a dedicated systemd drop-in setting this to 0. Do not enable synchronization to bypass upgrade checks. |
 | `LIBREOJ_LOG_SQL` | Backend SQL logging; any nonempty string enables it, including `0` and `false`; remove or empty to disable |
 | `NODE_ENV` | Services use `production`; backend production logging selects warn/error; also affects frontend build mode |
 | `NODE_OPTIONS` | Generated services use `--max-old-space-size=512`; build scripts use `--max-old-space-size=2300`; MiB of V8 heap, not total process/sandbox memory |
@@ -22,7 +22,7 @@ Administrators can also set registration policy immediately through [Site manage
 | `PATH` | systemd puts instance `runtime/node/bin` first; the interactive shell Node version need not match the service |
 | `LIBREOJ_MIGRATION_CONFIG_FILE` | When present, backend performs legacy migration instead of HTTP service; one-off offline tool, see below |
 
-For AI runtime variables `HYHOJ_AI_STATE_DIR`, `HYHOJ_AI_GENERATED_DIR`, `HYHOJ_AI_SAMPLE_INPUTS_DIR`, `HYHOJ_AI_RUNNER_SOCKET`, and shared `HYHOJ_ARCHIVE_WORK_DIRECTORY`, see [AI environment](AI-Environment.md) for paths, permissions, and service ownership. `HYHOJ_AI_PRIVATE_HOSTS` has no production consumer and is not a current URL allow switch.
+For AI runtime variables `HYHOJ_AI_STATE_DIR`, `HYHOJ_AI_GENERATED_DIR`, `HYHOJ_AI_SAMPLE_INPUTS_DIR`, `HYHOJ_AI_RUNNER_SOCKET`, and shared `HYHOJ_ARCHIVE_WORK_DIRECTORY`, see [AI environment](AI-Environment.md) for paths, permissions, and service ownership. `HYHOJ_AI_PRIVATE_HOSTS` lists private or local provider hosts allowed for every user.
 
 ## Installation and generators
 
@@ -117,7 +117,7 @@ Sources: [discussion boundaries](https://github.com/houyhlouis/LLMOJ/blob/43a88b
 | `deploy/sandbox/build.sh` | Positional `plan` (default), `build`, or `stage ABS_ARCHIVE`; environment above |
 | `deploy/export-wiki.py` | Required `--repository OWNER/REPO`, `--output DIR`; local document export only; see Publishing |
 | `deploy/prepare-github.py` | Optional `--archive PATH`; source selection/archive helper requiring a readable Git file list; refuses to replace an archive |
-| `deploy/backup.sh` | `--prefix PATH` overrides `HYHOJ_ROOT`, default `/opt/LLMOJ`; stops services, backs up, restores target; specify the actual path for existing/custom installations |
+| `deploy/backup.sh` | `--prefix PATH` overrides `HYHOJ_ROOT`, default `/opt/LLMOJ`; takes the maintenance lock, stops the installed services, backs up, then starts only what was running; specify the actual path for existing/custom installations |
 
 Audited sources: [deploy/configure-local.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py), [deploy/configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-judge.py), [deploy/install.sh](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/install.sh), [deploy/build-frontend-offline.mjs](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/build-frontend-offline.mjs), [apps/backend/src/main.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/main.ts), [apps/backend/src/migration/migration-config.schema.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/migration/migration-config.schema.ts), [apps/judge/src/config.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/config.ts).
 

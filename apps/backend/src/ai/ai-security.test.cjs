@@ -200,7 +200,7 @@ test("non-AI exception reports retain their diagnostic information", async () =>
   assert(messages[0].fileContent.includes("ordinary-body"));
 });
 
-test("global filter hides AI errors from HTTP and logs but retains non-AI diagnostics", () => {
+test("global filter hides unhandled errors from HTTP, redacts AI logs and logs non-AI diagnostics", () => {
   const reports = [],
     logs = [],
     originalLogger = Logger.prototype.error;
@@ -227,16 +227,25 @@ test("global filter hides AI errors from HTTP and logs but retains non-AI diagno
       });
       return { body, status };
     }
-    assert.deepEqual(invoke("/api/ai/saveConfiguration", new Error("synthetic-llm-secret")), {
-      body: { error: "INTERNAL_ERROR" },
-      status: 500
-    });
+    const requestId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    const ai = invoke("/api/ai/saveConfiguration", new Error("synthetic-llm-secret"));
+    assert.equal(ai.status, 500);
+    assert.deepEqual(Object.keys(ai.body).sort(), ["error", "requestId"]);
+    assert.equal(ai.body.error, "INTERNAL_ERROR");
+    assert.match(ai.body.requestId, requestId);
     assert(!JSON.stringify(logs).includes("synthetic-llm-secret"));
+    assert(JSON.stringify(logs).includes(ai.body.requestId));
     assert.equal(reports.length, 1);
     const ordinary = invoke("/api/problem/update", new Error("ordinary-error"));
-    assert(ordinary.body.error.includes("ordinary-error"));
-    assert(ordinary.body.stack.includes("ordinary-error"));
+    assert.equal(ordinary.status, 500);
+    assert.deepEqual(Object.keys(ordinary.body).sort(), ["error", "requestId"]);
+    assert.equal(ordinary.body.error, "INTERNAL_ERROR");
+    assert.match(ordinary.body.requestId, requestId);
+    assert.notEqual(ordinary.body.requestId, ai.body.requestId);
+    assert(!JSON.stringify(ordinary.body).includes("ordinary-error"));
+    // Server-side diagnostics are retained and can be found by the request ID shown to the client.
     assert(JSON.stringify(logs).includes("ordinary-error"));
+    assert(JSON.stringify(logs).includes(ordinary.body.requestId));
     assert.equal(invoke("/api/ai/saveConfiguration", new BadRequestException("validation-error")).status, 400);
   } finally {
     Logger.prototype.error = originalLogger;

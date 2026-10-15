@@ -34,7 +34,7 @@
 - **Source discovery:** combine search results and semantic checks to help identify a problem's original source.
 - **Test data:** for traditional problems, run at least 64 small differential cases against an independent oracle, cross-check every full case with another correct solution, and require executable wrong or slow candidates to fail before installing data. Validation reports retain counterexamples and verdicts. Interactive and communication problems use protocol simulation.
 - **Task management:** view progress, cancel or retry jobs; problem writes recheck current permissions and the problem version.
-- **Per-user configuration:** bring your own model and search services (Tavily/MCP). API keys are encrypted at rest; HTTP/HTTPS, public, private-network and loopback endpoints are supported.
+- **Per-user configuration:** bring your own model and search services (Tavily/MCP). API keys are encrypted at rest; HTTP/HTTPS public endpoints are supported; private-network and loopback endpoints are limited to site administrators unless the server administrator allows them in `HYHOJ_AI_PRIVATE_HOSTS`.
 
 Review AI-generated content. Executing reference solutions and test-data generation requires a local sandbox on the web node; see the deployment modes below and the [AI guide](wiki/AI.md).
 

@@ -111,6 +111,8 @@
 | `security.crossOrigin.whiteList` | `string[]`; 必填 | `[]` | xdomain 允许的前端 origin 字符串数组，如 https://oj.example.com；不填未经控制的站点。仅 enabled=true 时使用。 |
 | `security.rateLimit.maxRequests` | `number`; 必填（父对象启用时） | `200` | 每个客户端 IP、每个窗口的请求点数上限。schema 只要求整数，运维应使用正数；超限返回 HTTP 429。rateLimit 整段省略/null 才是关闭该层。 |
 | `security.rateLimit.durationSeconds` | `number`; 必填（父对象启用时） | `10` | 限流窗口秒数。schema 只校验整数，应设置正数。单进程内存计数，Node cluster 通过主进程协调；不跨独立服务器共享。 |
+| `security.sessionIdleTimeoutDays` | `number`; 可选 | `30` | 登录会话连续这么多天未使用即失效，需要重新登录。整数 ≥0；0 表示不限制；省略时为 30。服务器在每次请求时检查。 |
+| `security.sessionMaxAgeDays` | `number`; 可选 | `90` | 登录会话自登录起这么多天后失效，即使一直在使用。整数 ≥0；0 表示不限制；省略时为 90。 |
 
 ## `preference` — 公开偏好与服务端偏好
 

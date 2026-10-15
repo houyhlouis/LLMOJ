@@ -481,6 +481,8 @@ for ((attempt=0; attempt<90; attempt++)); do
 done
 [[ "$DB_READY" == 1 ]] || die "Project MariaDB readiness timed out"
 support database
+# The production backend never changes the schema at startup; create it explicitly before its first start.
+"$NODE" deploy/initialize-schema.mjs --root "$PROJECT_ROOT" --config "$PROJECT_ROOT/config/backend.yaml"
 wait_http http://127.0.0.1:19000/minio/health/ready
 "$NODE" deploy/bootstrap-services.mjs --root "$PROJECT_ROOT" --phase storage
 

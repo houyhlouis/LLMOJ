@@ -31,6 +31,8 @@ http {
             error_log /opt/LLMOJ/logs/nginx/error.log crit;
         }
         location /api/ {
+            # API requests are JSON (files go through /storage/); matches the backend's 32 MiB JSON limit.
+            client_max_body_size 32m;
             proxy_pass http://127.0.0.1:2002;
             proxy_http_version 1.1;
             proxy_set_header Host $http_host;

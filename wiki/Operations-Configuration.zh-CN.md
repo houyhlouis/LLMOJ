@@ -11,7 +11,7 @@
 | `user`, `worker_processes`, `events.worker_connections` | `www-data`、`auto`、`1024`；Nginx 工作进程及连接，不等于评测并发 |
 | `pid`, `access_log`, `error_log`, `log_format` | PID 在 `<root>/data/nginx/nginx.pid`；日志在 `<root>/logs/nginx`；`private_request` 使用 `$uri`，不记录含密钥的查询串 |
 | `include`, `default_type` | `/etc/nginx/mime.types` 与 `application/octet-stream` |
-| `client_max_body_size` | `128m`；外层代理和后端单项上传限制还可能更小 |
+| `client_max_body_size` | 经 `/storage/` 传输文件为 `128m`；`/api/` 为 `32m`，与后端 JSON 请求上限一致。外层代理和后端单项上传限制还可能更小 |
 | `client_body_temp_path`, `proxy_temp_path` | `<root>/data/nginx/client_body` 和 `proxy`；保持 www-data 可写 |
 | `listen`, `server_name`, `root` | 安装参数生成监听地址／端口，默认 `0.0.0.0:80`；`server_name _`；静态目录 `<root>/public` |
 | `map $http_upgrade $connection_upgrade` | 有 Upgrade 时用 `upgrade`，空时 `close`；支持 WebSocket |
@@ -96,6 +96,6 @@ sudo systemctl reload libreoj-nginx
 
 AI 状态目录保存主密钥，用户 API 配置密文保存于 MariaDB 的 `ai_configuration.encrypted`；数据库与主密钥的备份、恢复必须配套，修改目录路径还需迁移对应主密钥，见 [AI 环境](AI-Environment.zh-CN.md)。不要递归 chown 整个实例来修复权限，rootfs 和评测工作区有特定 UID／挂载权限要求。
 
-`deploy/backup.sh` 默认目录为 `/opt/LLMOJ`，可用 `HYHOJ_ROOT` 或优先级更高的 `--prefix PATH` 指定旧安装／自定义实例的实际路径；停掉站点服务后备份 `config`、`data`、`deploy`，排除 `data/judge`、`data/tmp`、`data/nginx`、`data/ai-generated`，并在退出时启动 target。它不包含完整 rootfs、运行时二进制和 `/etc/systemd/system` drop-in；这些需另存或能够按同一版本重建。`data/ai-generated` 中未发布的生成结果也不会进入该备份。它仍不是完整运行环境或远程评测节点的备份；保存额外数据后进行恢复演练。
+`deploy/backup.sh` 默认目录为 `/opt/LLMOJ`，可用 `HYHOJ_ROOT` 或优先级更高的 `--prefix PATH` 指定旧安装／自定义实例的实际路径；安装、升级或调整评测实例期间拒绝运行（共用维护锁）；只停止当前角色已安装的服务（仅网页部署没有评测服务），备份 `config`、`data`、`deploy`，排除 `data/judge`、`data/tmp`、`data/nginx`、`data/ai-generated`；退出时（包括失败时）只启动原本运行的 target 和服务，原本停止的实例保持停止。它不包含完整 rootfs、运行时二进制和 `/etc/systemd/system` drop-in；这些需另存或能够按同一版本重建。`data/ai-generated` 中未发布的生成结果也不会进入该备份。它仍不是完整运行环境或远程评测节点的备份；保存额外数据后进行恢复演练。
 
 来源：[deploy/configure-local.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py), [config/nginx.conf.example](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/config/nginx.conf.example), [deploy/configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-judge.py), [deploy/backup.sh](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/backup.sh).

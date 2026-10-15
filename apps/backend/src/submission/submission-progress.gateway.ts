@@ -19,6 +19,7 @@ import { SubmissionEntity } from "./submission.entity";
 import { SubmissionBasicMetaDto } from "./dto";
 
 import { AuthSessionService } from "../auth/auth-session.service";
+import { SOCKET_IO_MAX_MESSAGE_SIZE } from "../socket-io.constants";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
 import { ProblemService, ProblemPermissionType } from "../problem/problem.service";
 
@@ -55,7 +56,7 @@ interface SubmissionProgressMessage {
 // TODO: This should be refactored if we add hack, custom judge, etc
 //       Maybe refactor to a general "task progress"
 @WebSocketGateway({
-  maxHttpBufferSize: 1e9,
+  maxHttpBufferSize: SOCKET_IO_MAX_MESSAGE_SIZE,
   namespace: "submission-progress",
   path: "/api/socket",
   transports: ["websocket"],

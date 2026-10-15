@@ -660,6 +660,28 @@ test("model discovery and connection failures are audited without provider error
   assert.equal(audits.at(-1).details.errorCode,"INTERNAL_ERROR");
   assert(!JSON.stringify(audits).includes("provider-secret-or-body"));
 });
+test("model listing and connection tests are bounded per user and for the whole site", async () => {
+  const service = Object.create(AiService.prototype);
+  const releases = [];
+  service.requirePrivilege = async () => {};
+  service.recordAiAudit = async () => {};
+  service.config = async () => ({ llm: {}, search: {} });
+  service.withRuntime = () => new Promise(resolve => releases.push(() => resolve([])));
+  const tick = () => new Promise(resolve => setImmediate(resolve));
+  const running = [service.models({ id: 1 }), service.test({ id: 1 }, "llm")];
+  await tick();
+  await assert.rejects(service.models({ id: 1 }), /AI_DIAGNOSTICS_BUSY/);
+  for (const id of [2, 3, 4, 5, 6, 7]) running.push(service.models({ id }));
+  await tick();
+  await assert.rejects(service.test({ id: 8 }, "search"), /AI_DIAGNOSTICS_BUSY/);
+  assert.equal(releases.length, 8);
+  releases.splice(0).forEach(release => release());
+  await Promise.all(running);
+  const again = service.models({ id: 1 });
+  await tick();
+  releases.splice(0).forEach(release => release());
+  assert.deepEqual(await again, { models: [] });
+});
 test("a post-commit failure preserves artifact flags and localized discussion IDs stored by the transaction",async()=>{
   const service=Object.create(AiService.prototype);
   const persisted={id:"committed",runToken:"lease",status:"running",state:{completed:["import"],attachmentAdditionalDone:true,attachmentHiddenDone:true,discussionIds:{zh_CN:11,en_US:12}}};

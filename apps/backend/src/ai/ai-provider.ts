@@ -1,7 +1,7 @@
 import http from "http";
 import https from "https";
 import { promises as dns } from "dns";
-import { isIP } from "net";
+import { BlockList, isIP } from "net";
 
 import { AiError, LlmConfiguration, SearchConfiguration } from "./ai.types";
 import {
@@ -51,6 +51,73 @@ export interface ProviderResponse {
     tools?: Array<{ name: string; inputSchema?: { properties?: Record<string, unknown> } }>;
     content?: unknown;
   };
+}
+
+// Addresses outside the public Internet (RFC 6890): this host, private and shared networks, link-local
+// (including cloud metadata services), documentation/benchmark ranges, multicast and reserved space.
+// IPv4 rules also match IPv4-mapped IPv6 addresses.
+const nonPublicAddresses = new BlockList();
+for (const [network, prefix] of [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.0.2.0", 24],
+  ["192.88.99.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["198.51.100.0", 24],
+  ["203.0.113.0", 24],
+  ["224.0.0.0", 3]
+] as const)
+  nonPublicAddresses.addSubnet(network, prefix, "ipv4");
+for (const [network, prefix] of [
+  ["64:ff9b:1::", 48],
+  ["100::", 64],
+  ["2001::", 23],
+  ["2001:db8::", 32],
+  ["2002::", 16]
+] as const)
+  nonPublicAddresses.addSubnet(network, prefix, "ipv6");
+// Public IPv6 addresses are global unicast, IPv4-mapped or NAT64 (which never translates to private IPv4).
+const publicIpv6Addresses = new BlockList();
+publicIpv6Addresses.addSubnet("2000::", 3, "ipv6");
+publicIpv6Addresses.addSubnet("::ffff:0:0", 96, "ipv6");
+publicIpv6Addresses.addSubnet("64:ff9b::", 96, "ipv6");
+
+export function isPublicAddress(address: string): boolean {
+  const family = isIP(address);
+  if (family === 4) return !nonPublicAddresses.check(address, "ipv4");
+  if (family === 6) return publicIpv6Addresses.check(address, "ipv6") && !nonPublicAddresses.check(address, "ipv6");
+  return false;
+}
+
+function normalizedHostname(host: string): string | null {
+  try {
+    return new URL(`http://${isIP(host) === 6 ? `[${host}]` : host}/`).hostname.replace(/^\[|\]$/g, "");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Private or local endpoints the server administrator allows for every user, as a comma- or space-separated
+ * list of hosts with optional ports: `HYHOJ_AI_PRIVATE_HOSTS="llm.lan, 10.0.0.5:8000, [fd00::5]:8080"`.
+ */
+export function isAllowedPrivateHost(url: URL, env: Record<string, string | undefined> = process.env): boolean {
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  const port = url.port || (url.protocol === "https:" ? "443" : "80");
+  return (env.HYHOJ_AI_PRIVATE_HOSTS || "")
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .some(entry => {
+      const [, host, entryPort] = /^\[([^\]]+)\](?::(\d+))?$/.exec(entry) ||
+        /^([^:]+):(\d+)$/.exec(entry) || [entry, entry, undefined];
+      return normalizedHostname(host) === hostname && (!entryPort || Number(entryPort) === Number(port));
+    });
 }
 
 /** A URL may never contain a secret. Keys are added to the outgoing request only. */
@@ -122,6 +189,15 @@ async function rawProviderRequest(
       );
   if (signal?.aborted) throw aiCancellationError(signal);
   if (!records.length) throw new AiError("PROVIDER_NETWORK_ERROR");
+  // Every resolved address is checked, and the connection is pinned to these addresses below. A private or
+  // local destination is reachable from the server, not from the user, so it needs the server's permission.
+  if (
+    records.some(record => !isPublicAddress(record.address)) &&
+    !isAllowedPrivateHost(url) &&
+    !(await currentAiRuntime()?.allowPrivateNetwork?.())
+  )
+    throw new AiError("PRIVATE_ENDPOINT_BLOCKED");
+  if (signal?.aborted) throw aiCancellationError(signal);
   const data = body === undefined ? null : JSON.stringify(body);
   return await new Promise((resolve, reject) => {
     const req = (url.protocol === "https:" ? https : http).request(
@@ -187,7 +263,10 @@ async function rawProviderRequest(
   });
 }
 
-/** DNS is checked and pinned for each request; redirects are intentionally not followed. */
+/**
+ * DNS is checked and pinned for each request; redirects are intentionally not followed. Private and local
+ * destinations require `HYHOJ_AI_PRIVATE_HOSTS` or a runtime context that allows them (site administrators).
+ */
 export async function providerRequest(
   urlText: string,
   headers: Record<string, string>,

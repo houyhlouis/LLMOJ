@@ -63,7 +63,7 @@ sudo systemctl is-active libreoj-backend.service
 
 | 名称 | 当前实际行为 |
 | --- | --- |
-| `HYHOJ_AI_PRIVATE_HOSTS` | **旧名称，当前生产实现不读取。** 仅残留在部分测试的设置/恢复逻辑中；设置它不会建立允许名单，清空它也不会阻止内网访问。当前允许 HTTP/HTTPS 的域名、内网及本机地址，按解析结果绑定连接且禁止跟随重定向。按账号权限管理谁能配置服务。 |
+| `HYHOJ_AI_PRIVATE_HOSTS` | 允许所有用户使用的内网或本机服务主机，以逗号或空格分隔，可带端口：`llm.lan, 10.0.0.5:8000, [fd00::5]:8080`。设置在 `libreoj-backend.service` 上（例如用 systemd drop-in）。未列出时，内网、本机和链路本地地址只允许站点管理员自己的配置使用；公网 HTTP/HTTPS 地址无需列出。每个解析结果都会检查并绑定到本次连接，禁止跟随重定向。 |
 | `autoOnSave` | 账号 API 的兼容字段，不是环境变量；保存和读取均强制 `false`。旧 `automatic: true` 请求被跳过。 |
 | `llm.maxTokens` / `maxConcurrentJobs` | 账号配置，不是 `NODE_OPTIONS` 或 judge 槽位。分别控制模型输出预算和每用户运行 AI 任务数。 |
 | `aiRunnerSocket` / `aiGeneratedDirectory` / `aiRunnerGid` | judge YAML 字段，不是环境变量；详见 [Judge 配置](Judge-Configuration.zh-CN.md)。 |

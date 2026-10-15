@@ -63,7 +63,7 @@ This example relocates shared temporary archive storage; it is not a migration s
 
 | Name | Current behavior |
 | --- | --- |
-| `HYHOJ_AI_PRIVATE_HOSTS` | **Legacy name; production code no longer reads it.** Some tests still set/restore it. Setting it does not create an allowlist, and clearing it does not block private networks. The implementation permits HTTP/HTTPS domains, private and local addresses, pins resolved addresses to connections, and refuses redirects. Control who may configure providers through account privileges. |
+| `HYHOJ_AI_PRIVATE_HOSTS` | Private or local provider hosts that every user may use, separated by commas or spaces, each with an optional port: `llm.lan, 10.0.0.5:8000, [fd00::5]:8080`. Set it on `libreoj-backend.service` (for example with a systemd drop-in). Without a listing, private-network, loopback and link-local destinations are limited to site administrators' own configurations. Public HTTP/HTTPS destinations need no listing. Every resolved address is checked and pinned to the connection; redirects are refused. |
 | `autoOnSave` | Account API compatibility field, not an environment variable. Saving and reading force `false`; legacy `automatic: true` requests are skipped. |
 | `llm.maxTokens` / `maxConcurrentJobs` | Account settings, not `NODE_OPTIONS` or judge slots. They control output budget and running AI jobs per user respectively. |
 | `aiRunnerSocket` / `aiGeneratedDirectory` / `aiRunnerGid` | Judge YAML fields, not environment variables; see [judge configuration](Judge-Configuration.md). |

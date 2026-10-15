@@ -29,6 +29,12 @@ export interface SessionInfo extends SessionInfoInternal {
   lastAccessTime: number;
 }
 
+const DAY_MILLISECONDS = 24 * 60 * 60 * 1000;
+
+// Used when the configuration doesn't set `security.sessionIdleTimeoutDays` / `security.sessionMaxAgeDays`.
+export const DEFAULT_SESSION_IDLE_TIMEOUT_DAYS = 30;
+export const DEFAULT_SESSION_MAX_AGE_DAYS = 90;
+
 @Injectable()
 export class AuthSessionService {
   private redis: RedisWithSessionManager;
@@ -65,6 +71,17 @@ export class AuthSessionService {
     return jwtString.split(" ").map(s => Number(s)) as [userId: number, sessionId: number];
   }
 
+  /**
+   * A session expires when unused for the idle timeout, or when older than the maximum age (0: no limit).
+   */
+  private sessionLimits(): [idleTimeout: number, maxAge: number] {
+    const { sessionIdleTimeoutDays, sessionMaxAgeDays } = this.configService.config.security;
+    return [
+      (sessionIdleTimeoutDays ?? DEFAULT_SESSION_IDLE_TIMEOUT_DAYS) * DAY_MILLISECONDS,
+      (sessionMaxAgeDays ?? DEFAULT_SESSION_MAX_AGE_DAYS) * DAY_MILLISECONDS
+    ];
+  }
+
   async revokeSession(userId: number, sessionId: number): Promise<void> {
     await this.redis.callSessionManager("revoke", userId, sessionId);
   }
@@ -86,7 +103,13 @@ export class AuthSessionService {
     try {
       const [userId, sessionId] = this.decodeSessionKey(sessionKey);
 
-      const success = await this.redis.callSessionManager("access", +new Date(), userId, sessionId);
+      const success = await this.redis.callSessionManager(
+        "access",
+        +new Date(),
+        userId,
+        sessionId,
+        ...this.sessionLimits()
+      );
       if (!success) return [null, null];
 
       const user = await this.userService.findUserById(userId);
@@ -99,7 +122,13 @@ export class AuthSessionService {
 
   // Subscription credentials carry the issuing session's IDs, never its login token.
   async accessSessionById(userId: number, sessionId: number): Promise<UserEntity> {
-    const success = await this.redis.callSessionManager("access", Date.now(), userId, sessionId);
+    const success = await this.redis.callSessionManager(
+      "access",
+      Date.now(),
+      userId,
+      sessionId,
+      ...this.sessionLimits()
+    );
     if (!success) return null;
     const user = await this.userService.findUserById(userId);
     try {
@@ -111,7 +140,7 @@ export class AuthSessionService {
   }
 
   async listUserSessions(userId: number): Promise<SessionInfo[]> {
-    const result = (await this.redis.callSessionManager("list", userId)) as [
+    const result = (await this.redis.callSessionManager("list", userId, Date.now(), ...this.sessionLimits())) as [
       sessionId: string,
       lastAccessTime: string,
       sessionInfo: string

@@ -23,6 +23,8 @@ import { ConfigService } from "../config/config.service";
 const FILE_UPLOAD_EXPIRE_TIME = 10 * 60;
 // Default download links last 20 hours; private team files explicitly request 60 seconds.
 const FILE_DOWNLOAD_EXPIRE_TIME = 20 * 60 * 60;
+// Judge clients download a task's files as soon as they receive it; allow for slow links to large test data.
+export const JUDGE_FILE_DOWNLOAD_EXPIRE_TIME = 6 * 60 * 60;
 
 // MinIO 7 exposes these constructors from its helpers module, while its public
 // declarations expose their types from minio. Composition copies on the server.
@@ -393,13 +395,11 @@ export class FileService implements OnModuleInit {
   async signDownloadLink({
     uuid,
     downloadFilename,
-    noExpire,
     signFor,
     expiresSeconds
   }: {
     uuid: string;
     downloadFilename?: string;
-    noExpire?: boolean;
     signFor?: MinioSignFor;
     expiresSeconds?: number;
   }): Promise<string> {
@@ -413,7 +413,7 @@ export class FileService implements OnModuleInit {
       this.bucket,
       uuid,
       // The maximum expire time is 7 days
-      expiresSeconds ?? (noExpire ? 24 * 60 * 60 * 7 : FILE_DOWNLOAD_EXPIRE_TIME),
+      expiresSeconds ?? FILE_DOWNLOAD_EXPIRE_TIME,
       !downloadFilename
         ? {}
         : {

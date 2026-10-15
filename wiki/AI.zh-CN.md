@@ -15,7 +15,7 @@
 5. “保存并测试连通性”先保存整个表单，再对当前页签做真实服务请求。模型测试要求回答 `OK`；搜索测试执行一次搜索，可能消耗额度。测试失败不会撤销已保存配置或清空已保存 Key。
 6. 保存只更新配置，不会自动运行题面、题解或数据任务。回到导入页或题目编辑页，明确点击所需 AI 操作。
 
-Base URL 必须是 HTTP/HTTPS，不能包含用户名、密码、查询参数或片段；长度为 1–2000 字符。模型接口会在地址后追加路径，不要把 `/chat/completions`、`/responses`、`/messages` 或 `/models` 填进模型 Base URL。搜索 MCP 则填写完整 MCP 端点路径。域名、内网和本机地址均允许；DNS 本次解析结果绑定到本次连接，不跟随 HTTP 重定向。对于公网访问的 OJ，先设置 [HTTPS](HTTPS.zh-CN.md)。
+Base URL 必须是 HTTP/HTTPS，不能包含用户名、密码、查询参数或片段；长度为 1–2000 字符。模型接口会在地址后追加路径，不要把 `/chat/completions`、`/responses`、`/messages` 或 `/models` 填进模型 Base URL。搜索 MCP 则填写完整 MCP 端点路径。公网域名和地址对所有用户开放。内网、本机和链路本地地址由服务器发起访问而非用户自己的浏览器，因此只允许站点管理员自己的配置使用，或由服务器管理员在 `HYHOJ_AI_PRIVATE_HOSTS` 中列出的主机使用（见 [AI 环境](AI-Environment.zh-CN.md)）；其他用户会得到 `PRIVATE_ENDPOINT_BLOCKED`。每个解析结果都会检查，DNS 本次解析结果绑定到本次连接，不跟随 HTTP 重定向。模型列表和连接测试每个用户最多同时 2 个、全站最多同时 8 个。对于公网访问的 OJ，先设置 [HTTPS](HTTPS.zh-CN.md)。
 
 ## 所有账号配置字段
 

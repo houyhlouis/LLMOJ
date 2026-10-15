@@ -38,6 +38,8 @@ class InstallationFlow(unittest.TestCase):
             node.write_text('''#!/bin/bash
 printf 'node|%s\\n' "$*" >> "$FLOW_TRACE"
 case "$*" in
+  *initialize-schema.mjs*)
+    if [[ "$FLOW_FAIL" == schema ]]; then exit 26; fi ;;
   *bootstrap-admin.mjs*)
     if [[ "$FLOW_FAIL" == admin ]]; then exit 17; fi
     case "$*" in
@@ -136,9 +138,17 @@ cd "$PROJECT_ROOT"
                     for event in events:
                         if event.startswith(("wait_http|", "wait_judge|", "systemd-run|", "support|finish")):
                             self.assertLess(events.index(event), events.index(bootstrap[1]))
+                    schema = [event for event in events if "initialize-schema.mjs" in event]
                     if branch == "complete":
+                        self.assertEqual(schema, [])
                         self.assertTrue(all(event.startswith(f"node|{source}/deploy/bootstrap-admin.mjs") for event in bootstrap))
                     else:
+                        # The production backend no longer creates its schema; it must exist before its first start.
+                        self.assertEqual(schema, [f"node|deploy/initialize-schema.mjs --root {project} "
+                                                  f"--config {project}/config/backend.yaml"])
+                        backend_start = events.index("systemctl|start libreoj-backend.service")
+                        self.assertLess(events.index("support|database"), events.index(schema[0]))
+                        self.assertLess(events.index(schema[0]), backend_start)
                         self.assertEqual(bootstrap[0], f"node|deploy/bootstrap-admin.mjs --root {project}")
                         self.assertEqual(bootstrap[1], f"node|{project}/deploy/bootstrap-admin.mjs --root {project} --show-credentials")
 
@@ -146,7 +156,7 @@ cd "$PROJECT_ROOT"
         for branch in ("first", "complete"):
             failures = ["host-setting", "service-start", "health", "judge", "admin"]
             if branch == "first":
-                failures += ["database-init", "sandbox", "finish"]
+                failures += ["database-init", "schema", "sandbox", "finish"]
             for failure in failures:
                 with self.subTest(branch=branch, failure=failure):
                     result, events, _, _ = self.run_flow(branch, fail=failure)
@@ -155,6 +165,8 @@ cd "$PROJECT_ROOT"
                     self.assertFalse(any("--show-credentials" in event for event in events))
                     if failure in ("host-setting", "database-init"):
                         self.assertFalse(any(event.startswith("systemctl|start") for event in events))
+                    if failure == "schema":
+                        self.assertNotIn("systemctl|start libreoj-backend.service", events)
 
 
 if __name__ == "__main__":

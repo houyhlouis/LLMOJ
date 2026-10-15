@@ -40,24 +40,6 @@ local function new_session(timestamp, user_id, session_info)
   return session_id
 end
 
--- Access a existing session
--- The session's timestamp will be refreshed
--- Returns true if the session is valid, false if the session has been deleted
-local function access_session(timestamp, user_id, session_id)
-  -- Update timestamp in the session list
-  local session_list_key = string.format(REDIS_KEY_USER_SESSION_LIST, user_id)
-  local elements_updates = redis.call("zadd", session_list_key, "XX", "CH", timestamp, session_id)
-
-  -- If we updated a element's score successfully, the session EXISTS in the list
-  if elements_updates == 1 then
-    return true
-  end
-
-  -- If no elements are updated, we need to check if the session doesn't EXIST in the list
-  -- or the timestamp didn't changed
-  return redis.call("zscore", session_list_key, session_id) ~= false
-end
-
 -- Delete a session manmully (when user logout)
 -- Returns success or not
 local function revoke_session(user_id, session_id)
@@ -71,6 +53,49 @@ local function revoke_session(user_id, session_id)
   end
 
   return false
+end
+
+-- A session expires when it has not been accessed for `idle_timeout` milliseconds,
+-- or when it was created more than `max_age` milliseconds ago. 0 disables a limit.
+local function session_expired(timestamp, last_access_time, session_info, idle_timeout, max_age)
+  if idle_timeout > 0 and timestamp - last_access_time > idle_timeout then
+    return true
+  end
+
+  if max_age > 0 then
+    if not session_info then
+      return true
+    end
+    local login_time = tonumber(cjson.decode(session_info).loginTime)
+    if login_time == nil or timestamp - login_time > max_age then
+      return true
+    end
+  end
+
+  return false
+end
+
+-- Access a existing session
+-- The session's timestamp will be refreshed, unless the session has expired, which revokes it
+-- Returns true if the session is valid, false if the session has been deleted or has expired
+local function access_session(timestamp, user_id, session_id, idle_timeout, max_age)
+  local session_list_key = string.format(REDIS_KEY_USER_SESSION_LIST, user_id)
+  local last_access_time = redis.call("zscore", session_list_key, session_id)
+
+  -- The session doesn't EXIST in the list
+  if last_access_time == false then
+    return false
+  end
+
+  local session_info = redis.call("hget", REDIS_KEY_USER_SESSION_INFO_MAP, session_id)
+  if session_expired(timestamp, tonumber(last_access_time), session_info, idle_timeout, max_age) then
+    revoke_session(user_id, session_id)
+    return false
+  end
+
+  -- Update timestamp in the session list
+  redis.call("zadd", session_list_key, "XX", timestamp, session_id)
+  return true
 end
 
 -- Delete a user's ALL sessions except one
@@ -107,8 +132,9 @@ local function revoke_all_sessions_except(user_id, except_session_id)
 end
 
 -- Get a list of sessions of a user
+-- Expired sessions are revoked instead of being listed
 -- Returns a table of sessions, each is {session_id, timestamp, session_info}
-local function list_sessions(user_id)
+local function list_sessions(user_id, now, idle_timeout, max_age)
   local result = {}
 
   local session_list_key = string.format(REDIS_KEY_USER_SESSION_LIST, user_id)
@@ -119,7 +145,11 @@ local function list_sessions(user_id)
     local timestamp = session_list[i * 2]
     local session_info = redis.call("hget", REDIS_KEY_USER_SESSION_INFO_MAP, session_id)
 
-    table.insert(result, {session_id, timestamp, session_info})
+    if session_expired(now, tonumber(timestamp), session_info, idle_timeout, max_age) then
+      revoke_session(user_id, session_id)
+    else
+      table.insert(result, {session_id, timestamp, session_info})
+    end
   end
 
   return result
@@ -129,11 +159,11 @@ end
 if ARGV[1] == "new" then
   return new_session(ARGV[2], ARGV[3], ARGV[4])
 elseif ARGV[1] == "access" then
-  return access_session(ARGV[2], ARGV[3], ARGV[4])
+  return access_session(tonumber(ARGV[2]), ARGV[3], ARGV[4], tonumber(ARGV[5]) or 0, tonumber(ARGV[6]) or 0)
 elseif ARGV[1] == "revoke" then
   return revoke_session(ARGV[2], ARGV[3])
 elseif ARGV[1] == "revoke_all_except" then
   return revoke_all_sessions_except(ARGV[2], ARGV[3])
 elseif ARGV[1] == "list" then
-  return list_sessions(ARGV[2])
+  return list_sessions(ARGV[2], tonumber(ARGV[3]) or 0, tonumber(ARGV[4]) or 0, tonumber(ARGV[5]) or 0)
 end

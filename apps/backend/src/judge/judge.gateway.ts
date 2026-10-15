@@ -14,7 +14,7 @@ import SocketIOParser from "socket.io-msgpack-parser";
 import { Redis } from "ioredis";
 import proxyAddr from "proxy-addr";
 
-import { JudgeClientSystemInfo, JudgeTaskMeta } from "@libreoj/judge-protocol";
+import { JudgeClientSystemInfo, JudgeTaskMeta, JudgeTaskType } from "@libreoj/judge-protocol";
 
 import { JudgeClientService } from "./judge-client.service";
 
@@ -23,16 +23,20 @@ import { JudgeClientEntity } from "./judge-client.entity";
 import { JudgeQueueService, JudgeTask, JudgeTaskExtraInfo } from "./judge-queue.service";
 
 import { logger } from "../logger";
-import { MinioSignFor, FileService } from "../file/file.service";
+import { MinioSignFor, FileService, JUDGE_FILE_DOWNLOAD_EXPIRE_TIME } from "../file/file.service";
 import { SubmissionProgress } from "../submission/submission-progress.interface";
 import { ConfigService } from "../config/config.service";
 import { EventReportService, EventReportType } from "../event-report/event-report.service";
 import { RedisService } from "../redis/redis.service";
 import { LockService } from "../redis/lock.service";
+import { SOCKET_IO_MAX_MESSAGE_SIZE } from "../socket-io.constants";
 
 interface JudgeClientState {
   judgeClient: JudgeClientEntity;
   pendingTasks: Set<JudgeTask<JudgeTaskExtraInfo>>;
+  // Tasks sent to this client, by task ID: pending ones and those acknowledged within the grace time.
+  // A client may only report progress for, and download files of, its own assigned tasks.
+  assignedTasks: Map<string, JudgeTask<JudgeTaskExtraInfo>>;
 }
 
 interface SubmissionProgressMessage {
@@ -48,8 +52,41 @@ const REDIS_LOCK_JUDGE_CLIENT_CONNECT_DISCONNECT = "judge-client-connect-disconn
 
 const REDIS_CHANNEL_CANCEL_TASK = "cancel-task";
 
+// Judge clients without progress acknowledgement may send their last (debounced) progress just after
+// acknowledging the task, so an acknowledged task stays assigned to its client for a short while.
+const ACKNOWLEDGED_TASK_GRACE_TIME = 60 * 1000;
+
+const MAX_FILES_PER_REQUEST = 10000;
+
+const CONSUME_TASK_RETRY_DELAY = 1000;
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Sent as the third argument of "ready"; judge clients that predate it ignore it (see apps/judge/src/rpc.ts).
+// progressAck: a "progress" message is acknowledged once processed (for a final result: stored).
+const SERVER_CAPABILITIES = {
+  progressAck: true
+};
+
+function isJudgeTaskMeta(value: unknown): value is JudgeTaskMeta {
+  const taskMeta = value as JudgeTaskMeta;
+  return (
+    !!taskMeta &&
+    typeof taskMeta.taskId === "string" &&
+    (Object.values(JudgeTaskType) as unknown[]).includes(taskMeta.type)
+  );
+}
+
+// Every file a judge client needs for a task is referenced by its UUID somewhere in the task's payload.
+function collectFileUuids(value: unknown, result: Set<string>): void {
+  if (typeof value === "string") {
+    if (UUID_PATTERN.test(value)) result.add(value);
+  } else if (Array.isArray(value)) value.forEach(item => collectFileUuids(item, result));
+  else if (value && typeof value === "object") Object.values(value).forEach(item => collectFileUuids(item, result));
+}
+
 @WebSocketGateway({
-  maxHttpBufferSize: 1e9,
+  maxHttpBufferSize: SOCKET_IO_MAX_MESSAGE_SIZE,
   namespace: "judge",
   path: "/api/socket",
   transports: ["websocket"],
@@ -135,7 +172,8 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       this.mapSessionIdToJudgeClient.set(client.id, {
         judgeClient,
-        pendingTasks: new Set()
+        pendingTasks: new Set(),
+        assignedTasks: new Map()
       });
     });
 
@@ -144,7 +182,7 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     // Now we are ready for consuming task
-    client.emit("ready", judgeClient.name, this.configService.config.judge);
+    client.emit("ready", judgeClient.name, this.configService.config.judge, SERVER_CAPABILITIES);
 
     const message = `Judge client ${client.id} (${judgeClient.name}) connected from ${proxyAddr(
       client.request,
@@ -231,6 +269,25 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return [];
     }
 
+    if (
+      !Array.isArray(fileUuids) ||
+      fileUuids.length > MAX_FILES_PER_REQUEST ||
+      !fileUuids.every(fileUuid => typeof fileUuid === "string")
+    ) {
+      logger.warn(`Invalid "requestFiles" from judge client ${client.id} (${state.judgeClient.name}), ignoring`);
+      return [];
+    }
+
+    const allowedFileUuids = new Set<string>();
+    state.assignedTasks.forEach(task => collectFileUuids(task.extraInfo, allowedFileUuids));
+    const deniedCount = fileUuids.filter(fileUuid => !allowedFileUuids.has(fileUuid)).length;
+    if (deniedCount > 0) {
+      logger.warn(
+        `Judge client ${client.id} (${state.judgeClient.name}) requested ${deniedCount} files not referenced by its assigned tasks, refusing`
+      );
+      return [];
+    }
+
     logger.log(`Judge client ${client.id} (${state.judgeClient.name}) requested ${fileUuids.length} files`);
     return await Promise.all(
       fileUuids.map(
@@ -238,7 +295,7 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect {
           await this.fileService.signDownloadLink({
             uuid: fileUuid,
             downloadFilename: null,
-            noExpire: true,
+            expiresSeconds: JUDGE_FILE_DOWNLOAD_EXPIRE_TIME,
             signFor: MinioSignFor.Judge
           })
       )
@@ -255,7 +312,15 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     /* eslint-disable no-await-in-loop */
     while (await this.checkConnection(client)) {
-      const task = await this.judgeQueueService.consumeTask();
+      let task: JudgeTask<JudgeTaskExtraInfo>;
+      try {
+        task = await this.judgeQueueService.consumeTask();
+      } catch (e) {
+        // The client waits for a task for this thread until it reconnects, so never give up on its request.
+        logger.error(`Failed to consume judge queue for client ${client.id} (${state.judgeClient.name}): ${e}`);
+        await new Promise(resolve => setTimeout(resolve, CONSUME_TASK_RETRY_DELAY));
+        continue;
+      }
       if (!task) continue;
 
       if (!(await this.checkConnection(client))) {
@@ -267,6 +332,7 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       state.pendingTasks.add(task);
+      state.assignedTasks.set(task.taskId, task);
       this.mapTaskIdToSocket.set(task.taskId, client);
       client.emit("task", threadId, task, () => {
         logger.verbose(
@@ -274,6 +340,9 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
         state.pendingTasks.delete(task);
         this.mapTaskIdToSocket.delete(task.taskId);
+        setTimeout(() => {
+          if (state.assignedTasks.get(task.taskId) === task) state.assignedTasks.delete(task.taskId);
+        }, ACKNOWLEDGED_TASK_GRACE_TIME).unref();
       });
 
       return;
@@ -281,15 +350,32 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect {
     /* eslint-enable no-await-in-loop */
   }
 
+  /**
+   * The returned value is sent as the message's acknowledgement after the progress has been processed
+   * (see `SERVER_CAPABILITIES.progressAck`). If processing throws, no acknowledgement is sent.
+   */
   @SubscribeMessage("progress")
   async onProgress(
     @ConnectedSocket() client: Socket,
     @MessageBody() message: SubmissionProgressMessage
-  ): Promise<void> {
+  ): Promise<boolean> {
     const state = this.mapSessionIdToJudgeClient.get(client.id);
     if (!state) {
       logger.warn(`"progress" emitted from an unknown client ${client.id}, ignoring`);
-      return;
+      return false;
+    }
+
+    if (!isJudgeTaskMeta(message?.taskMeta)) {
+      logger.warn(`Invalid "progress" from judge client ${client.id} (${state.judgeClient.name}), ignoring`);
+      return false;
+    }
+
+    const assignedTask = state.assignedTasks.get(message.taskMeta.taskId);
+    if (!assignedTask || assignedTask.type !== message.taskMeta.type) {
+      logger.warn(
+        `Judge client ${client.id} (${state.judgeClient.name}) reported progress for task ${message.taskMeta.taskId} not assigned to it, ignoring`
+      );
+      return false;
     }
 
     const notCanceled = await this.judgeQueueService.onTaskProgress(message.taskMeta, message.progress);
@@ -297,5 +383,6 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect {
       logger.log(`Emitting cancel event for task ${message.taskMeta.taskId}`);
       client.emit("cancel", message.taskMeta.taskId);
     }
+    return notCanceled;
   }
 }
