@@ -137,6 +137,9 @@ const runDemo = async () => {
   assert.match(inspection.stdout, new RegExp(`^affinity=${firstAllowedCpu}$`, "m"));
   assert.match(inspection.stdout, /^readonly=EROFS$/m);
   assert.match(inspection.stdout, /^stack_limit=8388608$/m);
+  const ipcNamespace = inspection.stdout.match(/^ipc_namespace=(ipc:\[\d+\])$/m)?.[1];
+  assert(ipcNamespace, "The fixture reports its IPC namespace");
+  assert.notEqual(ipcNamespace, fs.readlinkSync("/proc/self/ns/ipc"), "Sandboxes get their own IPC namespace");
   assert.equal(fs.readFileSync(path.join(working, "created-by-sandbox"), "utf8"), "created\n");
   inspection.sandbox.stop();
 
@@ -194,6 +197,20 @@ const runDemo = async () => {
   const processLimited = await run("pids", ["pids"], { process: 4 });
   assert.equal(processLimited.result.status, SandboxStatus.OK);
   assert.match(processLimited.stdout, /^forked=3$/m);
+
+  // System V IPC objects of one sandbox are invisible to the host and to later sandboxes.
+  const ipcCreated = await run("ipc-create", ["ipc-create"]);
+  assert.equal(ipcCreated.result.status, SandboxStatus.OK);
+  const ipcFound = await run("ipc-find", ["ipc-find"]);
+  if (/^ipc=shared$/m.test(ipcFound.stdout))
+    childProcess.spawnSync("ipcrm", ["-Q", "0x4c4c4d4a"], { stdio: "ignore" }); // Don't leave it on the host.
+  assert.match(ipcFound.stdout, /^ipc=isolated$/m);
+
+  // Size-limited mounts are not implemented, so they must be refused rather than silently unlimited.
+  await assert.rejects(
+    run("mount-limit", ["exit", "0"], { mounts: [{ src: working, dst: "/sandbox/working", limit: 1024 * 1024 }] }),
+    /not supported/
+  );
 
   const unlimited = await run("unlimited", ["exit", "0"], { time: -1, memory: -1, process: -1 });
   assert.equal(unlimited.result.status, SandboxStatus.OK);

@@ -146,7 +146,9 @@ static int ChildProcess(void *param_ptr)
             }
             else if (info.limit != -1)
             {
-                // TODO: implement.
+                // Size limits are not implemented. Refuse rather than silently mounting without one;
+                // limit writable space with a size-limited filesystem (e.g. tmpfs) instead.
+                throw std::invalid_argument(format("Size limit {} for mount {} is not supported.", info.limit, info.dst));
             }
         }
 
@@ -246,7 +248,7 @@ SandboxExecutionHandle StartSandbox(const SandboxParameter &parameter)
         std::vector<char> childStack(childStackSize); // I don't want to call `delete`
 
         execution->pid = ENSURE(clone(ChildProcess, childStack.data() + childStack.size(),
-                                      CLONE_NEWNET | CLONE_NEWUTS | CLONE_NEWPID | CLONE_NEWNS | SIGCHLD,
+                                      CLONE_NEWNET | CLONE_NEWUTS | CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWIPC | SIGCHLD,
                                       const_cast<void *>(reinterpret_cast<const void *>(execution.get()))));
         // Wait for at most 500ms. If the child process hasn't posted the semaphore,
         // We will assume that the child has already dead.
