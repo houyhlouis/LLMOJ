@@ -40,6 +40,7 @@ vm.runInNewContext(
       return { unref() {} };
     },
     JudgeJobAttemptOutcome: { Disconnected: "Disconnected", Abandoned: "Abandoned" },
+    LEGACY_TASK_TYPES: ["Submission"],
     CONSUME_TASK_RETRY_DELAY: 0,
     ACKNOWLEDGED_TASK_GRACE_TIME: 10000
   },

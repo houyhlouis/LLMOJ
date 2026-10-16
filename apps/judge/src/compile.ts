@@ -20,6 +20,7 @@ import {
 } from "./sandbox";
 import config, { serverSideConfig } from "./config";
 import { runTaskQueued } from "./taskQueue";
+import { COMPILE_RESERVATION } from "./executionScheduler";
 import { getFile, getFileHash } from "./file";
 import * as fsNative from "./fsNative";
 
@@ -196,7 +197,7 @@ export async function compile(compileTask: CompileTask): Promise<CompileResult> 
       compileTaskHash,
       (pendingCompileTask = {
         resultConsumers,
-        promise: runTaskQueued(async taskWorkingDirectory => {
+        promise: runTaskQueued({ memory: COMPILE_RESERVATION }, async taskWorkingDirectory => {
           // The compileResult is already reference()-ed
           const compileResult = await doCompile(
             compileTask,

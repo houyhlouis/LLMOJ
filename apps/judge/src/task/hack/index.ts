@@ -21,6 +21,7 @@ import {
 } from "../../sandbox";
 import { safelyJoinPath, MappedPath } from "../../utils";
 import * as fsNative from "../../fsNative";
+import { checkerMemory } from "../../checkers";
 import { runBuiltinChecker } from "../../checkers/builtin";
 import { runCustomChecker, validateCustomChecker } from "../../checkers/custom";
 import { isOmittableString } from "../../omittableString";
@@ -55,7 +56,7 @@ export async function runProgram(
   fileIo?: JudgeInfoTraditional["fileIo"],
   parameters: string[] = []
 ): Promise<ProgramResult> {
-  return await runTaskQueued(async directory => {
+  return await runTaskQueued({ memory: memoryLimit }, async directory => {
     const working: MappedPath = { outside: safelyJoinPath(directory, "working"), inside: SANDBOX_INSIDE_PATH_WORKING };
     const temp = safelyJoinPath(directory, "temp");
     await fsNative.ensureDir(working.outside);
@@ -235,7 +236,7 @@ export default async function onHack(task: Task<HackExtraInfo, HackProgress>) {
       );
       compiled.push(customCompiled);
     }
-    const verdict = await runTaskQueued(async directory => {
+    const verdict = await runTaskQueued({ memory: checkerMemory(judgeInfo) }, async directory => {
       const working: MappedPath = {
         outside: safelyJoinPath(directory, "checker"),
         inside: SANDBOX_INSIDE_PATH_WORKING

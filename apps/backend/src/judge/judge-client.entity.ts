@@ -14,4 +14,8 @@ export class JudgeClientEntity {
 
   @Column({ type: "json" })
   allowedHosts: string[];
+
+  // A draining judge client is sent no new tasks; it finishes the ones it has.
+  @Column({ type: "boolean", default: false })
+  draining: boolean;
 }

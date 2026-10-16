@@ -21,6 +21,35 @@ return {
   delete: "Delete",
   confirm_delete: "Confirm delete",
   delete_success: "Successfully deleted.",
+  offline_drained: "Offline (drained)",
+  draining: "Draining",
+  drained: "Drained",
+  capacity: "Capacity",
+  running_tasks: "Judging",
+  running_tasks_notes: "Tasks this judge machine is judging now",
+  drain: "Drain",
+  drain_notes:
+    "Send this judge machine no new tasks. It finishes the tasks it has; once it shows Drained, it can be stopped or updated without interrupting judging. It stays drained after reconnecting until you resume it.",
+  confirm_drain: "Confirm drain",
+  drain_success: "Draining: no new tasks are sent to this judge machine.",
+  resume: "Resume",
+  resume_notes: "Send this judge machine tasks again.",
+  confirm_resume: "Resume",
+  resume_success: "Resumed.",
+  reset_key_notes:
+    "The old key stops working at once: the judge machine is disconnected, and its tasks are queued again for other judge machines.",
+  capabilities: {
+    summary: "{slots} slots, {memory} MiB",
+    task_types: "Task types",
+    consumer_threads: "Task threads",
+    execution_slots: "Execution slots",
+    ai_execution_slots: "Slots for AI validation",
+    memory_budget: "Memory budget",
+    protocol_version: "Protocol version",
+    legacy: "Legacy",
+    legacy_notes:
+      "This judge machine runs an older version that doesn't announce what it can do, so it is sent only submissions. Update it to judge Hacks and Self Evals."
+  },
   queue: {
     header: "Judge queue",
     waiting: "Waiting: {count}",

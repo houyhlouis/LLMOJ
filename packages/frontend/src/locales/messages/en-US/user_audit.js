@@ -36,6 +36,12 @@ return {
   "auth.two_factor.new_recovery_codes": "Generate new recovery codes",
   "auth.two_factor.reset_by_manager": "Turn off two-factor sign-in of user [firstObject]",
 
+  "judge_client.add": "Add judge machine",
+  "judge_client.delete": "Delete judge machine",
+  "judge_client.reset_key": "Reset the key of a judge machine",
+  "judge_client.drain": "Drain a judge machine",
+  "judge_client.resume": "Resume a judge machine",
+
   "group.create": "Create group [firstObject]",
   "group.delete": "Delete group [firstObject]",
   "group.rename": "Rename group [firstObject]",

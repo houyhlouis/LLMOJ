@@ -38,6 +38,22 @@ interface TestcaseResultCommon {
   score: number;
 }
 
+// The most memory (MiB) a testcase's sandboxes use at the same time: the program (with an interactor beside it),
+// then a custom checker.
+function testcaseMemory(
+  judgeInfo: JudgeInfoCommon<TestcaseConfigCommon> & {
+    interactor?: { memoryLimit?: number };
+    checker?: { type?: string; memoryLimit?: number };
+  },
+  testcase: TestcaseConfigCommon
+) {
+  const program = testcase?.memoryLimit || judgeInfo.memoryLimit || 0;
+  const interactor = judgeInfo.interactor ? judgeInfo.interactor.memoryLimit || judgeInfo.memoryLimit || 0 : 0;
+  const checker =
+    judgeInfo.checker?.type === "custom" ? judgeInfo.checker.memoryLimit || judgeInfo.memoryLimit || 0 : 0;
+  return Math.max(program + interactor, checker);
+}
+
 function getSubtaskOrder(judgeInfo: JudgeInfoCommon<TestcaseConfigCommon>) {
   return toposort.array(
     [...judgeInfo.subtasks.keys()],
@@ -117,9 +133,10 @@ export async function runCommonTask<
       ? await task.events.sampleTestcaseWillEnqueue(sampleId, sample, extraParameters)
       : await task.events.testcaseWillEnqueue(subtaskIndex, testcaseIndex, extraParameters);
 
+    const reservation = { memory: testcaseMemory(judgeInfo, testcase) };
     const result =
       existingResult ||
-      (await runTaskQueued(async (taskWorkingDirectory, disposer) => {
+      (await runTaskQueued(reservation, async (taskWorkingDirectory, disposer) => {
         if (isSample) {
           winston.verbose(`Running sample testcase ${sampleId}`);
           task.events.sampleTestcaseRunning(sampleId);

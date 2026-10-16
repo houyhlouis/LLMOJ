@@ -16,18 +16,23 @@ import {
   ListJudgeClientsResponseDto,
   ResetJudgeClientKeyRequestDto,
   ResetJudgeClientKeyResponseDto,
-  ResetJudgeClientKeyResponseError
+  ResetJudgeClientKeyResponseError,
+  SetJudgeClientDrainingRequestDto,
+  SetJudgeClientDrainingResponseDto,
+  SetJudgeClientDrainingResponseError
 } from "./dto";
 
 import { CurrentUser } from "../common/user.decorator";
 import { UserEntity } from "../user/user.entity";
+import { AuditService } from "../audit/audit.service";
 
 @ApiTags("Judge Client")
 @Controller("judgeClient")
 export class JudgeClientController {
   constructor(
     private readonly judgeClientService: JudgeClientService,
-    private readonly judgeQueueService: JudgeQueueService
+    private readonly judgeQueueService: JudgeQueueService,
+    private readonly auditService: AuditService
   ) {}
 
   @ApiOperation({
@@ -45,6 +50,7 @@ export class JudgeClientController {
       };
 
     const judgeClient = await this.judgeClientService.addJudgeClient(request.name, request.allowedHosts);
+    await this.auditService.log("judge_client.add", { judgeClientId: judgeClient.id, name: judgeClient.name });
 
     return {
       judgeClient: await this.judgeClientService.getJudgeClientInfo(judgeClient, true)
@@ -72,6 +78,7 @@ export class JudgeClientController {
       };
 
     await this.judgeClientService.deleteJudgeClient(judgeClient);
+    await this.auditService.log("judge_client.delete", { judgeClientId: judgeClient.id, name: judgeClient.name });
 
     return {};
   }
@@ -97,10 +104,32 @@ export class JudgeClientController {
       };
 
     await this.judgeClientService.resetJudgeClientKey(judgeClient);
+    await this.auditService.log("judge_client.reset_key", { judgeClientId: judgeClient.id, name: judgeClient.name });
 
     return {
       key: judgeClient.key
     };
+  }
+
+  @ApiOperation({
+    summary:
+      "Stop sending new tasks to a judge client, which finishes the ones it has (e.g. before maintenance), or resume it."
+  })
+  @ApiBearerAuth()
+  @Post("setJudgeClientDraining")
+  async setJudgeClientDraining(
+    @CurrentUser() currentUser: UserEntity,
+    @Body() request: SetJudgeClientDrainingRequestDto
+  ): Promise<SetJudgeClientDrainingResponseDto> {
+    if (!currentUser || !currentUser.isAdmin) return { error: SetJudgeClientDrainingResponseError.PERMISSION_DENIED };
+    const judgeClient = await this.judgeClientService.findJudgeClientById(request.id);
+    if (!judgeClient) return { error: SetJudgeClientDrainingResponseError.NO_SUCH_JUDGE_CLIENT };
+    await this.judgeClientService.setJudgeClientDraining(judgeClient, request.draining);
+    await this.auditService.log(request.draining ? "judge_client.drain" : "judge_client.resume", {
+      judgeClientId: judgeClient.id,
+      name: judgeClient.name
+    });
+    return {};
   }
 
   @ApiOperation({

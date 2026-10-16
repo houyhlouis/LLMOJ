@@ -5,6 +5,21 @@ export enum JudgeTaskType {
   SelfEval = "SelfEval"
 }
 
+// Raised when judge clients announce something new to the server. Judge clients that announce nothing are version 1.
+export const JUDGE_PROTOCOL_VERSION = 2;
+
+/** Sent by a judge client after "ready", as the "capabilities" event. */
+export interface JudgeClientCapabilities {
+  protocolVersion: number;
+  // The task types it can judge; it's sent no others
+  taskTypes: JudgeTaskType[];
+  consumerThreads: number;
+  executionSlots: number;
+  // MiB the sandboxes of concurrent work may reserve together
+  memoryBudget: number;
+  aiExecutionSlots: number;
+}
+
 export interface JudgeTaskMeta {
   taskId: string;
   type: JudgeTaskType;

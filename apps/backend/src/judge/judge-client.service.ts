@@ -6,10 +6,11 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { Redis } from "ioredis";
 
-import { JudgeClientSystemInfo } from "@libreoj/judge-protocol";
+import { JudgeClientCapabilities, JudgeClientSystemInfo } from "@libreoj/judge-protocol";
 
 import { JudgeClientEntity } from "./judge-client.entity";
 import { JudgeClientInfoDto } from "./dto/judge-client-info.dto";
+import { JudgeJobEntity, JudgeJobState } from "./judge-job.entity";
 
 import { RedisService } from "../redis/redis.service";
 
@@ -21,6 +22,16 @@ function generateKey(): string {
 
 const REDIS_KEY_JUDGE_CLIENT_SESSION_ID = "judge-client-session-id:%d";
 const REDIS_KEY_JUDGE_CLIENT_SYSTEM_INFO = "judge-client-system-info:%s";
+const REDIS_KEY_JUDGE_CLIENT_CAPABILITIES = "judge-client-capabilities:%d";
+
+// Tells every backend process that a judge client changed: its key was reset or it was deleted (`revoked`: its
+// connections are closed), or it was drained or resumed.
+export const REDIS_CHANNEL_JUDGE_CLIENT_CHANGED = "judge-client-changed";
+
+export interface JudgeClientChange {
+  id: number;
+  revoked: boolean;
+}
 
 @Injectable()
 export class JudgeClientService {
@@ -29,6 +40,8 @@ export class JudgeClientService {
   constructor(
     @InjectRepository(JudgeClientEntity)
     private readonly judgeClientRepository: Repository<JudgeClientEntity>,
+    @InjectRepository(JudgeJobEntity)
+    private readonly judgeJobRepository: Repository<JudgeJobEntity>,
     private readonly redisService: RedisService
   ) {
     this.redis = this.redisService.getClient();
@@ -53,7 +66,13 @@ export class JudgeClientService {
       key: !showSensitive ? null : judgeClient.key,
       allowedHosts: !showSensitive ? null : judgeClient.allowedHosts,
       online: await this.isJudgeClientOnline(judgeClient),
-      systemInfo: await this.getJudgeClientSystemInfo(judgeClient)
+      systemInfo: await this.getJudgeClientSystemInfo(judgeClient),
+      draining: judgeClient.draining,
+      runningTasks: await this.judgeJobRepository.countBy({
+        judgeClientId: judgeClient.id,
+        state: JudgeJobState.Leased
+      }),
+      capabilities: (await this.getJudgeClientCapabilities(judgeClient)) ?? undefined
     };
   }
 
@@ -67,10 +86,12 @@ export class JudgeClientService {
     return judgeClient;
   }
 
+  // The old key stops working at once: connections using it are closed, and their tasks are queued again.
   async resetJudgeClientKey(judgeClient: JudgeClientEntity): Promise<void> {
     judgeClient.key = generateKey();
     await this.judgeClientRepository.save(judgeClient);
     await this.disconnectJudgeClient(judgeClient);
+    await this.publishChange({ id: judgeClient.id, revoked: true });
   }
 
   async deleteJudgeClient(judgeClient: JudgeClientEntity): Promise<void> {
@@ -78,6 +99,17 @@ export class JudgeClientService {
       id: judgeClient.id
     });
     await this.disconnectJudgeClient(judgeClient);
+    await this.publishChange({ id: judgeClient.id, revoked: true });
+  }
+
+  async setJudgeClientDraining(judgeClient: JudgeClientEntity, draining: boolean): Promise<void> {
+    await this.judgeClientRepository.update({ id: judgeClient.id }, { draining });
+    judgeClient.draining = draining;
+    await this.publishChange({ id: judgeClient.id, revoked: false });
+  }
+
+  private async publishChange(change: JudgeClientChange): Promise<void> {
+    await this.redis.publish(REDIS_CHANNEL_JUDGE_CLIENT_CHANGED, JSON.stringify(change));
   }
 
   async setJudgeClientOnlineSessionId(judgeClient: JudgeClientEntity, sessionId: string): Promise<void> {
@@ -94,6 +126,21 @@ export class JudgeClientService {
 
   async updateJudgeClientSystemInfo(judgeClient: JudgeClientEntity, systemInfo: JudgeClientSystemInfo): Promise<void> {
     await this.redis.set(REDIS_KEY_JUDGE_CLIENT_SYSTEM_INFO.format(judgeClient.id), JSON.stringify(systemInfo));
+  }
+
+  async updateJudgeClientCapabilities(
+    judgeClient: JudgeClientEntity,
+    capabilities: JudgeClientCapabilities
+  ): Promise<void> {
+    await this.redis.set(REDIS_KEY_JUDGE_CLIENT_CAPABILITIES.format(judgeClient.id), JSON.stringify(capabilities));
+  }
+
+  async getJudgeClientCapabilities(judgeClient: JudgeClientEntity): Promise<JudgeClientCapabilities> {
+    try {
+      return JSON.parse(await this.redis.get(REDIS_KEY_JUDGE_CLIENT_CAPABILITIES.format(judgeClient.id)));
+    } catch {
+      return null;
+    }
   }
 
   async getJudgeClientSystemInfo(judgeClient: JudgeClientEntity): Promise<JudgeClientSystemInfo> {

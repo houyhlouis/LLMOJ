@@ -115,6 +115,65 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
     return "-";
   }
 
+  // A drained judge machine has finished its tasks and gets no new ones, so it can be stopped or updated
+  function getStatus(judgeClient: ApiTypes.JudgeClientInfoDto) {
+    if (!judgeClient.online)
+      return { color: "red" as const, text: judgeClient.draining ? _(".offline_drained") : _(".offline") };
+    if (!judgeClient.draining) return { color: "green" as const, text: _(".online") };
+    if (judgeClient.runningTasks) return { color: "yellow" as const, text: _(".draining") };
+    return { color: "grey" as const, text: _(".drained") };
+  }
+
+  function getCapacity(judgeClient: ApiTypes.JudgeClientInfoDto) {
+    const capabilities = judgeClient.capabilities;
+    if (!capabilities) {
+      if (!judgeClient.online) return "-";
+      return (
+        <Popup
+          trigger={<Label size="small" content={_(".capabilities.legacy")} />}
+          content={_(".capabilities.legacy_notes")}
+          position="bottom center"
+        />
+      );
+    }
+    const rows: [string, React.ReactNode][] = [
+      [_(".capabilities.task_types"), capabilities.taskTypes.map(type => _(`.queue.types.${type}`)).join(", ")],
+      [_(".capabilities.consumer_threads"), capabilities.consumerThreads],
+      [_(".capabilities.execution_slots"), capabilities.executionSlots],
+      [_(".capabilities.ai_execution_slots"), capabilities.aiExecutionSlots],
+      [_(".capabilities.memory_budget"), capabilities.memoryBudget + " MiB"],
+      [_(".capabilities.protocol_version"), capabilities.protocolVersion]
+    ];
+    return (
+      <Popup
+        trigger={
+          <span>
+            {_(".capabilities.summary", {
+              slots: String(capabilities.executionSlots),
+              memory: String(capabilities.memoryBudget)
+            })}
+          </span>
+        }
+        content={
+          <table className={style.capabilities}>
+            <tbody>
+              {rows.map(([name, value]) => (
+                <tr key={name}>
+                  <td className={style.capabilityName}>
+                    <strong>{name}</strong>
+                  </td>
+                  <td>{value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        }
+        hoverable
+        position="bottom center"
+      />
+    );
+  }
+
   const [resetPopupOpened, setResetPopupOpened] = useState<number>(null);
   async function onResetKey(id: number) {
     const { requestError, response } = await api.judgeClient.resetJudgeClientKey({
@@ -128,6 +187,18 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
       setResetPopupOpened(null);
     }
   }
+
+  const [drainPopupOpened, setDrainPopupOpened] = useState<number>(null);
+  const [drainPending, onSetDraining] = useAsyncCallbackPending(async (id: number, draining: boolean) => {
+    const { requestError, response } = await api.judgeClient.setJudgeClientDraining({ id, draining });
+    if (requestError) toast.error(requestError(_));
+    else if (response.error) toast.error(_(`.error.${response.error}`));
+    else {
+      toast.success(draining ? _(".drain_success") : _(".resume_success"));
+      navigation.refresh();
+      setDrainPopupOpened(null);
+    }
+  });
 
   const [deletePopupOpened, setDeletePopupOpened] = useState<number>(null);
   async function onDelete(id: number) {
@@ -212,6 +283,10 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
               <Table.HeaderCell>{_(".cpu")}</Table.HeaderCell>
               <Table.HeaderCell>{_(".memory")}</Table.HeaderCell>
               <Table.HeaderCell className={style.nowrap}>{_(".kernel")}</Table.HeaderCell>
+              <Table.HeaderCell className={style.nowrap}>{_(".capacity")}</Table.HeaderCell>
+              <Table.HeaderCell className={style.nowrap} title={_(".running_tasks_notes")}>
+                {_(".running_tasks")}
+              </Table.HeaderCell>
               {props.hasManagePermission && (
                 <Table.HeaderCell textAlign="center" className={style.columnOperations}>
                   {_(".operations")}
@@ -224,8 +299,8 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
               <Table.Row key={judgeClient.id}>
                 <Table.Cell className={style.nowrap}>
                   <div className={style.status}>
-                    <Label className={style.onlineStatus} circular color={judgeClient.online ? "green" : "red"} empty />
-                    {judgeClient.online ? _(".online") : _(".offline")}
+                    <Label className={style.onlineStatus} circular color={getStatus(judgeClient).color} empty />
+                    {getStatus(judgeClient).text}
                   </div>
                 </Table.Cell>
                 <EmojiRenderer>
@@ -234,6 +309,8 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
                 <Table.Cell>{getCpu(judgeClient)}</Table.Cell>
                 <Table.Cell>{getMemory(judgeClient)}</Table.Cell>
                 <Table.Cell className={style.nowrap}>{getKernel(judgeClient)}</Table.Cell>
+                <Table.Cell className={style.nowrap}>{getCapacity(judgeClient)}</Table.Cell>
+                <Table.Cell>{judgeClient.runningTasks}</Table.Cell>
                 {props.hasManagePermission && (
                   <Table.Cell textAlign="center" className={style.columnOperations}>
                     <Popup
@@ -248,7 +325,41 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
                       onClose={() => setResetPopupOpened(null)}
                       trigger={<Icon name="refresh" title={_(".reset_key")} />}
                       content={
-                        <Button negative content={_(".confirm_reset_key")} onClick={() => onResetKey(judgeClient.id)} />
+                        <>
+                          <p className={style.confirmNotes}>{_(".reset_key_notes")}</p>
+                          <Button
+                            negative
+                            content={_(".confirm_reset_key")}
+                            onClick={() => onResetKey(judgeClient.id)}
+                          />
+                        </>
+                      }
+                      on="click"
+                      position="left center"
+                    />
+                    <Popup
+                      open={drainPopupOpened === judgeClient.id}
+                      onOpen={() => setDrainPopupOpened(judgeClient.id)}
+                      onClose={() => setDrainPopupOpened(null)}
+                      trigger={
+                        judgeClient.draining ? (
+                          <Icon name="play circle outline" title={_(".resume")} />
+                        ) : (
+                          <Icon name="pause circle outline" title={_(".drain")} />
+                        )
+                      }
+                      content={
+                        <>
+                          <p className={style.confirmNotes}>
+                            {judgeClient.draining ? _(".resume_notes") : _(".drain_notes")}
+                          </p>
+                          <Button
+                            primary={judgeClient.draining}
+                            loading={drainPending}
+                            content={judgeClient.draining ? _(".confirm_resume") : _(".confirm_drain")}
+                            onClick={() => onSetDraining(judgeClient.id, !judgeClient.draining)}
+                          />
+                        </>
                       }
                       on="click"
                       position="left center"

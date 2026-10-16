@@ -116,8 +116,11 @@ class RuntimeUpgradeTests(unittest.TestCase):
         source = HERE.parents[1]
         contract = json.loads((source/'deploy/community-runtime-contract.json').read_text())
         after = {entry['path']: entry['newSha256'] for entry in contract['files']}
+        # Later runtime changes may move on from the reviewed target, but never back to an older baseline
+        current = {entry['path']: u.digest(source/entry['path']) for entry in contract['files']}
         for entry in contract['files']:
-            self.assertEqual(u.digest(source/entry['path']), entry['newSha256'])
+            self.assertNotIn(current[entry['path']], entry['oldSha256'])
+        self.assertEqual(u.community_runtime_transition(source, after, current), set())
         for baseline in range(3):
             before = {entry['path']: entry['oldSha256'][min(baseline, len(entry['oldSha256']) - 1)]
                       for entry in contract['files']}
@@ -453,6 +456,9 @@ class RuntimeUpgradeTests(unittest.TestCase):
 
     def test_judge_queue_ddl_preserves_schema_sync_guard_on_empty_data_rollback(self):
         self.assert_guard_survives('CREATE TABLE `judge_job_attempt` (...)')
+
+    def test_judge_client_draining_ddl_preserves_schema_sync_guard(self):
+        self.assert_guard_survives('ALTER TABLE `judge_client` ADD `draining` tinyint NOT NULL DEFAULT 0')
 
     def test_self_eval_ddl_preserves_schema_sync_guard_on_empty_data_rollback(self):
         self.assert_guard_survives('CREATE TABLE `self_eval_quota` (...)')

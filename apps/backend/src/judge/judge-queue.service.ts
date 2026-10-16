@@ -245,16 +245,21 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Leases the next available job to a judge client connection and prepares its task.
+   * Leases the next available job of one of `taskTypes` to a judge client connection and prepares its task.
    * Returns `null` if there's no job to judge now.
    */
-  async claim(owner: JudgeJobOwner): Promise<LeasedJudgeTask> {
+  async claim(
+    owner: JudgeJobOwner,
+    taskTypes: JudgeTaskType[] = Object.values(JudgeTaskType)
+  ): Promise<LeasedJudgeTask> {
+    if (taskTypes.length === 0) return null;
     /* eslint-disable no-await-in-loop */
     for (let round = 0; round < MAX_CLAIM_ROUNDS; round++) {
       const candidates: JudgeJobRow[] = await this.connection.query(
-        `SELECT taskId, type, priority, fence, createdAt FROM judge_job WHERE state = ? AND availableAt <= NOW(3)
+        `SELECT taskId, type, priority, fence, createdAt FROM judge_job
+         WHERE state = ? AND availableAt <= NOW(3) AND type IN (?)
          ORDER BY priority, createdAt LIMIT ${CLAIM_CANDIDATES}`,
-        [JudgeJobState.Queued]
+        [JudgeJobState.Queued, taskTypes]
       );
       let contended = false;
       for (const job of candidates) {

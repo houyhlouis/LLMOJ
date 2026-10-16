@@ -85,6 +85,7 @@ function componentHarness(file, options = {}) {
     "Label",
     "Loader",
     "Modal",
+    "Popup",
     "Table"
   ]) {
     // Stable nested widget identities make assertions independent of CSS / markup.
@@ -106,6 +107,7 @@ function componentHarness(file, options = {}) {
     )
   };
   api.user = api.auth;
+  api.judgeClient = api.auth;
   for (const name of ["createGetApi", "createPostApi"]) {
     api[name] = endpoint => async body => {
       calls.push({ name: endpoint, body });
@@ -133,7 +135,10 @@ function componentHarness(file, options = {}) {
           confirmations.push(value);
         }
       ],
-      useNavigationChecked: () => ({ navigate: value => calls.push({ name: "navigate", body: value }) }),
+      useNavigationChecked: () => ({
+        navigate: value => calls.push({ name: "navigate", body: value }),
+        refresh: () => calls.push({ name: "refresh" })
+      }),
       useLoginOrRegisterNavigation: () => () => {},
       useFieldCheck: value => [() => {}, async () => true, () => false, () => "", () => value],
       useAsyncCallbackPending: callback => [false, callback],
@@ -157,7 +162,8 @@ function componentHarness(file, options = {}) {
       }
     },
     "@/utils/onEnterPress": { onEnterPress: callback => callback },
-    "class-validator": { isEmail: value => value.includes("@") }
+    "class-validator": { isEmail: value => value.includes("@") },
+    ...options.deps
   };
   const modules = new Map();
   function load(filename) {

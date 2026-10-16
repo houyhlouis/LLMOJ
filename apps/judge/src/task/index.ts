@@ -17,6 +17,8 @@ const taskHandlers: Record<JudgeTaskType, TaskHandler<unknown>> = {
   [JudgeTaskType.SelfEval]: onSelfEval
 };
 
+export const supportedTaskTypes = Object.keys(taskHandlers) as JudgeTaskType[];
+
 export default async function taskHandler(task: Task<unknown, unknown>) {
   await taskHandlers[task.type](task);
 }

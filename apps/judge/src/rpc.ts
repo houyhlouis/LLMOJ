@@ -3,8 +3,11 @@ import winston from "winston";
 import lodashDebounce from "lodash.debounce";
 import SocketIOParser from "socket.io-msgpack-parser";
 
+import { JUDGE_PROTOCOL_VERSION, JudgeClientCapabilities } from "@libreoj/judge-protocol";
+
 import config, { updateServerSideConfig } from "./config";
-import taskHandler, { Task } from "./task";
+import taskHandler, { supportedTaskTypes, Task } from "./task";
+import { executionScheduler } from "./taskQueue";
 
 import getSystemInfo from "./systemInfo";
 import { CanceledError } from "./error";
@@ -79,6 +82,16 @@ export class RPC {
           this.serverCapabilities =
             capabilities && typeof capabilities === "object" ? (capabilities as JudgeServerCapabilities) : {};
           this.socket.emit("systemInfo", await getSystemInfo());
+          // Older servers ignore it
+          const announced: JudgeClientCapabilities = {
+            protocolVersion: JUDGE_PROTOCOL_VERSION,
+            taskTypes: supportedTaskTypes,
+            consumerThreads: config.taskConsumingThreads,
+            executionSlots: executionScheduler.slots,
+            memoryBudget: executionScheduler.memoryBudget,
+            aiExecutionSlots: executionScheduler.aiSlots
+          };
+          this.socket.emit("capabilities", announced);
 
           resolve();
         });

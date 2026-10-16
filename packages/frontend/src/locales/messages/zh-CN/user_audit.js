@@ -36,6 +36,12 @@ return {
   "auth.two_factor.new_recovery_codes": "生成新的恢复码",
   "auth.two_factor.reset_by_manager": "关闭用户 [firstObject] 的两步验证",
 
+  "judge_client.add": "添加评测机",
+  "judge_client.delete": "删除评测机",
+  "judge_client.reset_key": "重置评测机密钥",
+  "judge_client.drain": "暂停向评测机分配任务",
+  "judge_client.resume": "恢复向评测机分配任务",
+
   "group.create": "创建用户组 [firstObject]",
   "group.delete": "删除用户组 [firstObject]",
   "group.rename": "重命名用户组 [firstObject]",

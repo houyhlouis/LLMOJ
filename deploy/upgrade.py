@@ -82,7 +82,7 @@ NATIVE_PACKAGES = {
     }
 }
 JUDGE_REGRESSIONS = ('apps/judge/src/task/hack/hack.test.cjs', 'apps/judge/src/task/self-eval/self-eval.test.cjs',
-                     'apps/judge/src/rpc.test.cjs')
+                     'apps/judge/src/rpc.test.cjs', 'apps/judge/src/executionScheduler.test.cjs')
 COMMUNITY_PERMISSIONS = (
     'ViewTeam', 'CreateTeam', 'ManageTeams', 'FakeSubmission',
     'ViewHack', 'CreateHack', 'ManageHack', 'CreateSelfEval'
@@ -863,7 +863,7 @@ class Upgrade:
         # record the guard before the first mutation so rollback cannot let an
         # older backend synchronize away a partially applied schema.
         self.manifest['communitySchemaApplied'] = any(
-            re.search(r'`(?:team(?:_[a-z]+)*|file|discussion|submission|hack(?:_[a-z]+)*|self_eval(?:_[a-z]+)*|contest|user_privilege|user_permission_rule|user_two_factor|user_passkey|judge_job(?:_attempt)?)`', query)
+            re.search(r'`(?:team(?:_[a-z]+)*|file|discussion|submission|hack(?:_[a-z]+)*|self_eval(?:_[a-z]+)*|contest|user_privilege|user_permission_rule|user_two_factor|user_passkey|judge_job(?:_attempt)?|judge_client)`', query)
             for query in self.manifest['schemaQueries']
         )
         self.save()

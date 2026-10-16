@@ -16,6 +16,7 @@ import { runTaskQueued } from "../../taskQueue";
 import { safelyJoinPath, MappedPath } from "../../utils";
 import { SANDBOX_INSIDE_PATH_WORKING } from "../../sandbox";
 import * as fsNative from "../../fsNative";
+import { checkerMemory } from "../../checkers";
 import { runBuiltinChecker } from "../../checkers/builtin";
 import { runCustomChecker, validateCustomChecker } from "../../checkers/custom";
 import { isOmittableString } from "../../omittableString";
@@ -223,7 +224,7 @@ export async function onSelfEval(task: Task<ExtraInfo, SelfEvalProgress>) {
       let score = 0;
       if (actual.status === SandboxStatus.OK && !actual.outputExceeded && !actual.missingOutput) {
         // eslint-disable-next-line no-await-in-loop
-        const checked = await runTaskQueued(async directory => {
+        const checked = await runTaskQueued({ memory: checkerMemory(judgeInfo) }, async directory => {
           const working: MappedPath = {
             outside: safelyJoinPath(directory, "checker"),
             inside: SANDBOX_INSIDE_PATH_WORKING

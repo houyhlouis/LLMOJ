@@ -32,6 +32,14 @@ Judge tasks are kept in the database (table `judge_job`), not only in Redis: a s
 - Site administrators see the queue at the bottom of **Judge Machine** (`/judge-machine`): tasks waiting or being judged, the judge machine holding each, retries, and the tasks given up on in the last 7 days. The `libreoj_judge_jobs` metric reports waiting and running tasks.
 - Every lease is recorded in `judge_job_attempt` with how it ended. Finished tasks and their records are deleted after 30 days.
 
+## Drain, revoke and capabilities
+
+These are on the **Judge Machine** page for site administrators, and every change is recorded in the audit log (`judge_client.add`, `delete`, `reset_key`, `drain`, `resume`).
+
+- **Drain** (pause icon) stops sending new tasks to one judge machine; it finishes the tasks it has. Its status shows **Draining** while it still judges, then **Drained**: it can now be stopped, updated or resized without interrupting judging, while the other judge machines take the queue. It stays drained after reconnecting or a backend restart until you **Resume** it (play icon). Draining doesn't affect local AI validation, which doesn't use the queue.
+- **Reset key** and **Delete** take effect at once: every backend process disconnects the connections using the old key, and their unfinished tasks are queued again for other judge machines. Reset the key when it may have leaked, then put the new key on the judge machine.
+- **Capabilities**: when a judge machine connects, it announces its protocol version, the task types it can run, its task threads, execution slots, slots for AI validation and memory budget; the **Capacity** column shows them. The backend sends it only the task types it announced. A judge machine of an older version announces nothing and is marked **Legacy**: it is sent only submissions, so Hacks and Self Evals wait until an updated judge machine is online.
+
 ## Web node
 
 ```bash
@@ -92,6 +100,8 @@ Backend model calls, editing, translation and search can still be configured. AI
 - Nodes replace one another: check for shared keys.
 - cgroup errors: check systemd delegation, cgroup v2 and kernel support.
 - AI execution fails despite remote judges: check whether the web node retains a local worker.
+- Hacks or Self Evals stay waiting: check that an online judge machine that isn't drained runs the current version (not **Legacy**) and lists them under **Capacity**.
+- A judge machine gets no tasks: check whether it is drained, and resume it.
 
 Real multi-machine deployment has not yet been validated end to end; complete the on-site tests above.
 

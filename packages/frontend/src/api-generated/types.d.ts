@@ -806,6 +806,20 @@ declare namespace ApiTypes {
     difficulty: number;
     expiresAt: number;
   }
+  export interface JudgeClientCapabilitiesDto {
+    protocolVersion: number;
+    /**
+     * The task types it is sent
+     */
+    taskTypes: string[];
+    consumerThreads: number;
+    executionSlots: number;
+    /**
+     * MiB the sandboxes of concurrent work may reserve together
+     */
+    memoryBudget: number;
+    aiExecutionSlots: number;
+  }
   export interface JudgeClientInfoDto {
     id: number;
     name: string;
@@ -813,6 +827,31 @@ declare namespace ApiTypes {
     allowedHosts: string[];
     online: boolean;
     systemInfo?: {};
+    /**
+     * Sent no new tasks; finishes the ones it has
+     */
+    draining: boolean;
+    /**
+     * Tasks it is judging now
+     */
+    runningTasks: number;
+    /**
+     * What it announced when it last connected; absent for judge clients older than protocol version 2
+     */
+    capabilities?: {
+      protocolVersion: number;
+      /**
+       * The task types it is sent
+       */
+      taskTypes: string[];
+      consumerThreads: number;
+      executionSlots: number;
+      /**
+       * MiB the sandboxes of concurrent work may reserve together
+       */
+      memoryBudget: number;
+      aiExecutionSlots: number;
+    };
   }
   export interface JudgeJobInfoDto {
     taskId: string;
@@ -1493,6 +1532,16 @@ declare namespace ApiTypes {
   }
   export interface SetGroupAdminResponseDto {
     error?: "PERMISSION_DENIED" | "NO_SUCH_USER" | "NO_SUCH_GROUP" | "USER_NOT_IN_GROUP";
+  }
+  export interface SetJudgeClientDrainingRequestDto {
+    id: number;
+    /**
+     * true: send it no new tasks; false: resume
+     */
+    draining: boolean;
+  }
+  export interface SetJudgeClientDrainingResponseDto {
+    error?: "PERMISSION_DENIED" | "NO_SUCH_JUDGE_CLIENT";
   }
   export interface SetPermissionsDto {}
   export interface SetProblemDisplayIdRequestDto {

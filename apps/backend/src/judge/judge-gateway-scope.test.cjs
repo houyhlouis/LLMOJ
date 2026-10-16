@@ -49,6 +49,7 @@ const { JudgeGateway } = load("judge.gateway.ts", {
   "proxy-addr": () => "127.0.0.1",
   "@libreoj/judge-protocol": protocol,
   "./judge-queue.service": { LEASE_RENEW_INTERVAL: 30000 },
+  "./judge-client.service": { REDIS_CHANNEL_JUDGE_CLIENT_CHANGED: "judge-client-changed" },
   "./judge-job.entity": {
     JudgeJobAttemptOutcome: { Disconnected: "Disconnected", Abandoned: "Abandoned", Expired: "Expired" }
   },
@@ -68,23 +69,40 @@ function fixture() {
   const released = [];
   const renewed = [];
   const canceled = [];
+  const claims = [];
+  const stored = [];
+  const clients = new Map();
   let fence = 0;
+  let waits = 0;
+  let notified = 0;
   const redis = { on: noop, subscribe: noop, publish: noop, del: async () => 1, setex: async () => "OK" };
   const gateway = new JudgeGateway(
     {
-      findJudgeClientByKey: async key => ({ id: Number(key), name: `judge-${key}` }),
+      findJudgeClientByKey: async key => {
+        const judgeClient = { id: Number(key), name: `judge-${key}`, draining: false };
+        clients.set(judgeClient.id, judgeClient);
+        return judgeClient;
+      },
+      findJudgeClientById: async id => (clients.has(id) ? { ...clients.get(id) } : null),
+      updateJudgeClientCapabilities: async (judgeClient, capabilities) => stored.push([judgeClient.id, capabilities]),
       setJudgeClientOnlineSessionId: async () => {},
       checkJudgeClientSession: async () => true,
       disconnectJudgeClient: async () => {},
       isJudgeClientOnline: async () => true
     },
     {
-      claim: async () => {
+      claim: async (owner, taskTypes) => {
+        claims.push([owner.connectionId, taskTypes]);
         const next = queue.shift();
         if (next instanceof Error) throw next;
         return next ? { task: next, fence: ++fence } : null;
       },
-      waitForJobs: async () => {},
+      waitForJobs: async () => {
+        waits++;
+        if (waits > 1000) throw new Error("waiting forever");
+        await new Promise(resolve => setTimeout(resolve, 2));
+      },
+      notifyJobsAvailable: () => notified++,
       release: async (...args) => released.push(args),
       renewLeases: async leases => renewed.push(leases),
       cancel: async taskId => canceled.push(taskId),
@@ -109,15 +127,33 @@ function fixture() {
     const client = {
       id: `socket-${key}`,
       connected: true,
+      disconnected: false,
       handshake: { query: { key: String(key) } },
       request: {},
       emit: (...args) => emitted.push(args),
-      disconnect: noop
+      disconnect() {
+        client.disconnected = true;
+        client.connected = false;
+      }
     };
     await gateway.handleConnection(client);
     return { client, emitted };
   }
-  return { gateway, queue, progress, signed, released, renewed, canceled, connect };
+  return {
+    gateway,
+    queue,
+    progress,
+    signed,
+    released,
+    renewed,
+    canceled,
+    claims,
+    stored,
+    clients,
+    connect,
+    waits: () => waits,
+    notified: () => notified
+  };
 }
 
 const submissionTask = (taskId, files) => ({
@@ -178,7 +214,9 @@ test("an acknowledged task stays assigned for late progress from older clients, 
   assert.deepEqual(released, [["task-a", 1, "socket-1", "Abandoned"]]);
 });
 
-test("a disconnected client's leases are released, and only connected tasks are renewed", async () => {
+test("a disconnected client's leases are released, and only connected tasks are renewed", async t => {
+  // The disconnect report waits a minute
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const { gateway, queue, released, renewed, connect } = fixture();
   const a = await connect(1);
   const b = await connect(2);
@@ -240,4 +278,74 @@ test("a queue error does not drop the client's request for a task", async () => 
   queue.push(new Error("database unavailable"), submissionTask("task-a", []));
   await gateway.onConsumeTask(a.client, 3);
   assert(a.emitted.some(([event, threadId, task]) => event === "task" && threadId === 3 && task.taskId === "task-a"));
+});
+
+const capabilities = (overrides = {}) => ({
+  protocolVersion: 2,
+  taskTypes: ["Submission", "Hack", "SelfEval", "SelfEvalPrepare"],
+  consumerThreads: 3,
+  executionSlots: 7,
+  memoryBudget: 2374,
+  aiExecutionSlots: 6,
+  ...overrides
+});
+
+test("judge clients are sent only the task types they announce; ones that announce nothing get submissions", async () => {
+  const { gateway, queue, claims, stored, connect } = fixture();
+  const a = await connect(1);
+  queue.push(submissionTask("task-a", []));
+  await gateway.onConsumeTask(a.client, 0);
+  assert.deepEqual(claims.at(-1), ["socket-1", ["Submission"]]);
+  assert.deepEqual(stored, [[1, null]], "stale capabilities are cleared on connect");
+
+  await gateway.onCapabilities(a.client, capabilities({ taskTypes: ["Submission", "Hack", "FutureType", "Hack"] }));
+  assert.deepEqual(stored.at(-1), [1, capabilities({ taskTypes: ["Submission", "Hack"] })]);
+  queue.push(submissionTask("task-b", []));
+  await gateway.onConsumeTask(a.client, 1);
+  assert.deepEqual(claims.at(-1), ["socket-1", ["Submission", "Hack"]]);
+
+  for (const invalid of [
+    null,
+    "x",
+    capabilities({ protocolVersion: 1 }),
+    capabilities({ taskTypes: "Submission" }),
+    capabilities({ consumerThreads: -1 }),
+    capabilities({ memoryBudget: 1.5 })
+  ])
+    await gateway.onCapabilities(a.client, invalid);
+  assert.equal(stored.length, 2, "invalid announcements are ignored");
+});
+
+test("a draining judge client gets no new task until it is resumed, in every backend process", async () => {
+  const { gateway, queue, claims, clients, connect, waits, notified } = fixture();
+  const a = await connect(1);
+  clients.get(1).draining = true;
+  await gateway.onJudgeClientChanged(JSON.stringify({ id: 1, revoked: false }));
+  queue.push(submissionTask("task-a", []));
+  const consuming = gateway.onConsumeTask(a.client, 0);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(claims.length, 0, "no claim while draining");
+  assert(waits() > 0);
+  clients.get(1).draining = false;
+  await gateway.onJudgeClientChanged(JSON.stringify({ id: 1, revoked: false }));
+  assert.equal(notified(), 1, "waiting consumers are woken up on resume");
+  await consuming;
+  assert.equal(claims.length, 1);
+  assert(a.emitted.some(([event, , task]) => event === "task" && task.taskId === "task-a"));
+});
+
+test("resetting a judge client's key disconnects it at once, releasing its tasks", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { gateway, queue, released, connect } = fixture();
+  const a = await connect(1);
+  const b = await connect(2);
+  queue.push(submissionTask("task-a", []));
+  await gateway.onConsumeTask(a.client, 0);
+  await gateway.onJudgeClientChanged(JSON.stringify({ id: 1, revoked: true }));
+  assert.equal(a.client.disconnected, true);
+  assert.equal(b.client.disconnected, false, "other judge clients stay connected");
+  await gateway.handleDisconnect(a.client);
+  assert.deepEqual(released, [["task-a", 1, "socket-1", "Disconnected"]]);
+  await gateway.onJudgeClientChanged("not json");
+  await gateway.onJudgeClientChanged(JSON.stringify({ id: 99, revoked: true }));
 });

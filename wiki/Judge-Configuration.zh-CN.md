@@ -21,6 +21,8 @@
 | `taskConsumingThreads` | positive integer; example `2` | 同时从后端领取并处理的任务/提交消费者数，不是 CPU 数；每个任务可含多个测试点。大于 3 启动警告。安装生成 `min(3,max(1,slots//2))`。 |
 | `maxConcurrentDownloads` | positive integer; example `10` | 测试文件下载队列并发；大于 20 警告。安装生成 `min(4,slots)`；提高它不会增加执行槽。 |
 | `maxConcurrentTasks` | positive integer; example `3` | 执行队列容量；实际为与工作目录数的较小值，编译、运行、AI 验证共用。安装器要求恰好等于工作目录数；大于 OS 报告逻辑 CPU 数会警告。 |
+| `memoryBudget` | optional positive integer MiB; example omitted | 同时运行的工作的沙箱合计可预留的内存。默认为评测主机内存的 85% 减 512 MiB（至少 256）。工作在其声明的内存限制装得下时才开始，因此多道大内存限制的题目不会耗尽主机内存。与其他服务共用主机时可调低。 |
+| `aiExecutionSlots` | optional positive integer; example omitted | 本机 AI 验证同时可用的执行槽位数。默认为除一个之外的全部槽位（只有一个槽位时为 1），保证评测总有槽位。 |
 | `taskWorkingDirectories` | nonempty string array; example 3 paths | 每个执行槽一个唯一绝对路径；解析后的重复路径会拒绝。安装为 `<root>/data/judge/work/1..N`，每个单独 tmpfs，启动时清空。不得复用缓存/数据目录。缺少 tmpfs 可能只警告，不能据此认为部署合格。 |
 | `rpcTimeout` | positive integer milliseconds; example `20000` | RPC/认证等待超时；超时重启进程并取消在途任务。安装生成 `30000`。 |
 | `downloadTimeout` | positive integer milliseconds; example `20000` | 每次下载取得响应后的流传输计时；当前代码不是覆盖 DNS/连接/响应头等待的完整请求截止时间。安装保留 `20000`。 |
@@ -51,7 +53,7 @@
 - `NODE_OPTIONS=--max-old-space-size=512` 是安装服务的 Node 堆设置，不是用户程序内存上限；`PATH` 指向安装的 Node 和宿主工具。
 - `HYHOJ_AI_SAMPLE_INPUTS_DIR`：宿主 AI 输入样例目录，代码缺省 `/opt/LLMOJ/data/ai-sample-inputs`，服务生成 `<root>/data/ai-sample-inputs`；与后端必须一致，不能当作公共静态目录。
 
-普通提交消费者由 `taskConsumingThreads` 控制；编译/测试点和本机 AI 验证共用 `min(maxConcurrentTasks, 工作目录数)` 的执行槽；文件下载另有 `maxConcurrentDownloads` 队列。AI runner 还有固定 3 个生成管线并发、最多 8 个已接收的未完成请求（包含等待），它们不是额外的 3/8 个 CPU 槽，也没有对应 YAML 调节项；后端 AI 并发又是另一层限制。不要仅增加消费者或后台 AI 并发来“扩 CPU”。
+普通提交消费者由 `taskConsumingThreads` 控制；编译/测试点和本机 AI 验证共用 `min(maxConcurrentTasks, 工作目录数)` 的执行槽；执行槽还须在内存装得下 `memoryBudget` 时才分配：测试点预留程序与交互器内存限制之和（若校验器更大则取校验器的），编译预留 512 MiB，未声明的工作预留 256 MiB。按到达顺序分配；超过全部预算的工作单独运行。本机 AI 验证最多使用 `aiExecutionSlots` 个槽位，不会阻塞其后的评测；文件下载另有 `maxConcurrentDownloads` 队列。AI runner 还有固定 3 个生成管线并发、最多 8 个已接收的未完成请求（包含等待），它们不是额外的 3/8 个 CPU 槽，也没有对应 YAML 调节项；后端 AI 并发又是另一层限制。不要仅增加消费者或后台 AI 并发来“扩 CPU”。
 
 后端认证时下发 `limit.compilerMessage`、`limit.outputSize`、`limit.dataDisplay`、`limit.dataDisplayForSubmitAnswer`、`limit.stderrDisplay`，这些不是 judge.yaml 键。代码对 compilerMessage 超过 1 MiB、dataDisplay 超过 1 KiB、stderrDisplay 超过 10 KiB 发警告；binaryCacheMaxSize 小于 outputSize 为致命错误。题目/语言本身的时间与内存限制也来自后端。
 
@@ -73,7 +75,7 @@
 | 16 | 15 |
 | 32 | 31 |
 
-**8 个有效逻辑 CPU、8 GiB RAM 的 all 示例**：若允许 ID 为 0–7，则默认使用 1–7 的 7 槽、3 个消费者、4 个下载并发、工作目录 1–7、线程池 16。8 CPU、4 GiB 可用内存仍允许 7 槽；内存为 512 MiB 时，默认与最大值均为 2 槽，使用 CPU 6–7、线程池 6。高内存题或 AI 工作负载可明确选择更少槽数。
+**8 个有效逻辑 CPU、8 GiB RAM 的 all 示例**：若允许 ID 为 0–7，则默认使用 1–7 的 7 槽、3 个消费者、4 个下载并发、工作目录 1–7、线程池 16。8 CPU、4 GiB 可用内存仍允许 7 槽；内存为 512 MiB 时，默认与最大值均为 2 槽，使用 CPU 6–7、线程池 6。高内存题或 AI 工作负载可明确选择更少槽数。有了上述内存准入，大内存限制的题目会等待内存而不会超额使用，只有此类题目很常见时才需要减少槽数。
 
 每槽 512 MiB 是 **tmpfs 最大容量**，不是预分配，也不是进程内存上限。编译器、选手程序、页缓存、AI、数据库同时占 RAM。`TasksMax`、父 cgroup、CPU quota 和物理核心共享仍可能形成瓶颈。`lscpu -e=CPU,CORE,SOCKET,ONLINE` 可分辨逻辑 CPU 与物理核；SMT 不等于独占物理核，`cpuAffinity` 与 systemd `AllowedCPUs` 也不会自动给每槽分配独占核心。
 
@@ -102,7 +104,7 @@
 | `Service.TasksMax` | `2048` | 宿主服务的任务/线程数量上限；不是并发提交数或评测槽数。 |
 | `Service.Restart` | `on-failure` | 异常退出时重启；配置错误可能导致重复失败，应检查日志。 |
 | `Service.RestartSec` | `3` | 失败重启等待 3 秒。 |
-| `Service.TimeoutStopSec` | `30` | 停止超时为 30 秒；不等于排空队列，不保证在途任务完成。 |
+| `Service.TimeoutStopSec` | `30` | 停止超时为 30 秒；不等于排空队列，不保证在途任务完成。请先在评测机页面排空该评测机。 |
 | `Service.UMask` | `0022` | judge 新建普通文件的默认掩码；私有配置和 AI 目录/socket 仍有显式更严格权限。 |
 | `Service.LimitCORE` | `0` | 禁止 core dump。其他 Limit*（如 LimitNOFILE）未由生成器显式设置，继承宿主/systemd 配置。 |
 | `Service.StandardOutput` | `journal` | 标准输出进入 systemd journal；诊断日志应私有保存。 |
@@ -142,7 +144,7 @@ sudo bash /opt/LLMOJ/deploy/resize-judge.sh --prefix /opt/LLMOJ --slots 6 --plan
 
 ### 2. 排空并应用
 
-安排维护时间，阻止新的提交、重评、测试运行及 AI 任务，确认**所有用户**的排队/运行任务结束；CPU 空闲或只看自己的 AI 列表不能证明已排空。脚本的 `--drained` 是操作者确认，不是自动排空队列的功能。
+安排维护时间，阻止新的提交、重评、测试运行及 AI 任务，确认**所有用户**的排队/运行任务结束；若其他评测机可以处理队列，也可在评测机页面 **排空** 该评测机并等待 **已排空**，但本机 AI 任务仍须结束，排空不包括它们，验收后再恢复；CPU 空闲或只看自己的 AI 列表不能证明已排空。脚本的 `--drained` 是操作者确认，不是自动排空队列的功能。
 
 默认交互方式会用中文展示容量和排空要求，只询问实例数。**提交该数字（或按回车接受默认值）即表示已经排空，并立即执行维护，没有第二次确认。** 未排空时按 Ctrl+C 退出：
 

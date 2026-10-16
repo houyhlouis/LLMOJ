@@ -101,6 +101,11 @@ export function parseTestlibMessage(message: OmittableString): CheckerResult | O
   }
 }
 
+/** The memory (MiB) a checker's sandbox may use: none for a built-in checker, which runs in the judge process. */
+export function checkerMemory(judgeInfo: { memoryLimit?: number; checker: Checker }): number {
+  return judgeInfo.checker.type === "custom" ? judgeInfo.checker.memoryLimit || judgeInfo.memoryLimit || 0 : 0;
+}
+
 export function getCheckerMeta<JudgeInfo extends { timeLimit?: number; memoryLimit?: number; checker: Checker }>(
   judgeInfo: JudgeInfo
 ): Checker {

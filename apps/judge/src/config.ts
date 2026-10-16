@@ -130,6 +130,19 @@ export class Config {
   @IsInt()
   maxConcurrentTasks: number;
 
+  // MiB the sandboxes of concurrent work may reserve together (default: 85% of RAM minus 512 MiB). Work waits until
+  // the memory limits it declares fit, so running problems with large memory limits can't exhaust the host.
+  @IsPositive()
+  @IsInt()
+  @IsOptional()
+  memoryBudget?: number;
+
+  // Execution slots local AI validation may use (default: all but one), keeping capacity for judging
+  @IsPositive()
+  @IsInt()
+  @IsOptional()
+  aiExecutionSlots?: number;
+
   @IsString({ each: true })
   @ArrayMinSize(1)
   @IsArray()

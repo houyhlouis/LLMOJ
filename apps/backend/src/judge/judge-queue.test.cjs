@@ -151,6 +151,7 @@ test(
       const metric = metrics();
       const queue = new JudgeQueueService(ds, redisService, metric);
       queue.registerTaskType("Submission", tasks);
+      queue.registerTaskType("Hack", tasks);
       await queue.onModuleInit();
       instances.push(queue);
       return Object.assign(queue, { observed: metric.observed });
@@ -380,6 +381,23 @@ test(
       })
     );
     assert.equal(Number((await ds.query("SELECT COUNT(*) AS n FROM judge_job WHERE state = 'Queued'"))[0].n), 1);
+
+    // A judge client is only sent the task types it can judge.
+    const hackTask = crypto.randomUUID();
+    tasks.active.set(hackTask, 0.5);
+    await a.enqueue(hackTask, "Hack", 0.5);
+    assert.equal(await a.claim(owner(30), []), null);
+    const submissionOnly = await a.claim(owner(30), ["Submission"]);
+    assert.equal(submissionOnly.task.taskId, unqueued, "the Hack task is skipped although it comes first");
+    const hackCapable = await a.claim(owner(31), ["Submission", "Hack"]);
+    assert.equal(hackCapable.task.taskId, hackTask);
+    for (const [taskId, claimed, id] of [
+      [unqueued, submissionOnly, 30],
+      [hackTask, hackCapable, 31]
+    ])
+      await a.release(taskId, claimed.fence, `socket-${id}`, "Disconnected");
+    await a.cancel(hackTask);
+    tasks.active.delete(hackTask);
 
     // Waiting consumers in other backend processes are woken up by notifications.
     const started = Date.now();

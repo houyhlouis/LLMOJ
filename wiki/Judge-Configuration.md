@@ -21,6 +21,8 @@ Unchanged field sources are pinned to `43a88bdd62fbf200889b36932fa921439a293190`
 | `taskConsumingThreads` | positive integer; example `2` | Concurrent backend task/submission consumers, not CPU count; each task can contain many testcases. Values above 3 warn. Generated as `min(3,max(1,slots//2))`. |
 | `maxConcurrentDownloads` | positive integer; example `10` | Test-file download queue concurrency; values above 20 warn. Generated as `min(4,slots)`; increasing it does not add execution slots. |
 | `maxConcurrentTasks` | positive integer; example `3` | Execution queue capacity, effectively the smaller of this and workspace count; shared by compilation, execution and AI validation. Generator requires equality with workspace count; exceeding OS-reported logical CPU count warns. |
+| `memoryBudget` | optional positive integer MiB; example omitted | Memory the sandboxes of concurrent work may reserve together. Default: 85% of the judge host's RAM minus 512 MiB (at least 256). Work waits until the memory limits it declares fit, so several problems with large memory limits can't exhaust the host. Lower it on a host shared with other services. |
+| `aiExecutionSlots` | optional positive integer; example omitted | Execution slots local AI validation may use at the same time. Default: all slots but one (1 with a single slot), so judging always has a slot. |
 | `taskWorkingDirectories` | nonempty string array; example 3 paths | One unique absolute directory per execution slot; duplicate resolved paths are rejected. Installer uses `<root>/data/judge/work/1..N`, separate tmpfs mounts, cleared on startup. Never reuse data/cache directories. A missing tmpfs may only warn; that is not a valid deployment. |
 | `rpcTimeout` | positive integer milliseconds; example `20000` | RPC/authorization timeout; expiry restarts the process and cancels in-flight tasks. Generated value is `30000`. |
 | `downloadTimeout` | positive integer milliseconds; example `20000` | Per-attempt stream timer starts after receiving the response; not a complete DNS/connection/response-header deadline in current code. Installer retains `20000`. |
@@ -51,7 +53,7 @@ The complete example mapping keys are `sandbox.environments.PATH`, `sandbox.envi
 - Generated `NODE_OPTIONS=--max-old-space-size=512` controls Node heap, not contestant memory; `PATH` selects installed Node and host tools.
 - `HYHOJ_AI_SAMPLE_INPUTS_DIR`: private host AI sample-input directory, default `/opt/LLMOJ/data/ai-sample-inputs`, generated as `<root>/data/ai-sample-inputs`. Must agree with backend and must not be publicly served.
 
-Ordinary backend consumers use `taskConsumingThreads`. Compilation, testcase execution and local AI validation share `min(maxConcurrentTasks, workspace count)` execution slots. Downloads have a separate `maxConcurrentDownloads` queue. AI runner has a fixed three concurrent generation pipelines and up to eight accepted unfinished requests, including queued work; these are not another three/eight CPU slots and have no YAML tuning keys. Backend AI concurrency is another layer. Raising consumer/AI concurrency alone does not add CPU capacity.
+Ordinary backend consumers use `taskConsumingThreads`. Compilation, testcase execution and local AI validation share `min(maxConcurrentTasks, workspace count)` execution slots. A slot is also admitted only when its memory fits `memoryBudget`: a testcase reserves the memory limit of the program plus the interactor (or the checker's, when larger), a compilation 512 MiB, and work that declares nothing 256 MiB. Work is admitted in order of arrival; work larger than the whole budget runs alone. Local AI validation uses at most `aiExecutionSlots` slots, and judging behind it isn't held up. Downloads have a separate `maxConcurrentDownloads` queue. AI runner has a fixed three concurrent generation pipelines and up to eight accepted unfinished requests, including queued work; these are not another three/eight CPU slots and have no YAML tuning keys. Backend AI concurrency is another layer. Raising consumer/AI concurrency alone does not add CPU capacity.
 
 Backend authorization supplies `limit.compilerMessage`, `limit.outputSize`, `limit.dataDisplay`, `limit.dataDisplayForSubmitAnswer`, and `limit.stderrDisplay`; these are not judge.yaml fields. Compiler messages over 1 MiB, data display over 1 KiB and stderr display over 10 KiB warn. Binary cache smaller than outputSize is fatal. Problem/language time and memory limits also come from backend.
 
@@ -73,7 +75,7 @@ Effective RAM is the smaller of host RAM and applicable cgroup `memory.max`. Bud
 | 16 | 15 |
 | 32 | 31 |
 
-With eight effective CPUs (IDs 0–7) and 8 GiB RAM, all mode defaults to CPUs 1–7, seven slots, three consumers, four concurrent downloads, workspaces 1–7 and thread pool 16. Eight CPUs with 4 GiB effective RAM still allow seven slots; with 512 MiB RAM the default and maximum are two slots, using CPUs 6–7 and thread pool 6. High-memory workloads may need a lower explicit count.
+With eight effective CPUs (IDs 0–7) and 8 GiB RAM, all mode defaults to CPUs 1–7, seven slots, three consumers, four concurrent downloads, workspaces 1–7 and thread pool 16. Eight CPUs with 4 GiB effective RAM still allow seven slots; with 512 MiB RAM the default and maximum are two slots, using CPUs 6–7 and thread pool 6. High-memory workloads may need a lower explicit count. Since the memory admission above, problems with large memory limits wait for memory rather than overcommitting it, so fewer slots are needed only when such problems are common.
 
 Each slot's 512 MiB tmpfs is a **maximum filesystem size**, not preallocated RAM or a process memory cap. Compilers, programs, page cache, AI and databases share RAM. High-memory workloads may require fewer slots. `TasksMax`, parent cgroups and CPU quotas still apply; 511 is not a performance or acceptance guarantee. `lscpu -e=CPU,CORE,SOCKET,ONLINE` distinguishes logical CPUs from physical cores. SMT siblings share a core; affinity/AllowedCPUs do not provide exclusive cores per slot.
 
@@ -102,7 +104,7 @@ The table covers every directive emitted by `configure-judge.py` and identifies 
 | `Service.TasksMax` | `2048` | Host service task/thread limit, not submission or execution-slot count. |
 | `Service.Restart` | `on-failure` | Restarts after failure; bad configuration may repeatedly fail, requiring log inspection. |
 | `Service.RestartSec` | `3` | Wait three seconds before restarting after failure. |
-| `Service.TimeoutStopSec` | `30` | Thirty-second stop timeout is not queue draining and does not guarantee in-flight completion. |
+| `Service.TimeoutStopSec` | `30` | Thirty-second stop timeout is not queue draining and does not guarantee in-flight completion. Drain the judge machine on the Judge Machine page first. |
 | `Service.UMask` | `0022` | Default mask for ordinary new judge files; private config and AI paths/socket use explicit stricter permissions. |
 | `Service.LimitCORE` | `0` | Disables core dumps. Other Limit* settings such as LimitNOFILE are not emitted and inherit host/systemd settings. |
 | `Service.StandardOutput` | `journal` | Standard output goes to journal; keep diagnostic logs private. |
@@ -142,7 +144,7 @@ sudo bash /opt/LLMOJ/deploy/resize-judge.sh --prefix /opt/LLMOJ --slots 6 --plan
 
 ### 2. Drain and apply
 
-Schedule maintenance, prevent new submissions, rejudges, test runs and AI jobs, then wait for queued/running work from **every user**. Idle CPUs or your own AI list do not prove draining. `--drained` is operator confirmation; it does not automatically drain queues.
+Schedule maintenance, prevent new submissions, rejudges, test runs and AI jobs, then wait for queued/running work from **every user**. When other judge machines can take the queue, **Drain** this one on the Judge Machine page instead and wait for **Drained**; local AI jobs still need to finish, because draining doesn't cover them. Resume it after verifying. Idle CPUs or your own AI list do not prove draining. `--drained` is operator confirmation; it does not automatically drain queues.
 
 Default interactive mode displays capacity and the draining requirement in Chinese, then asks only for instance count. **Submitting the number (or Enter for the default) confirms draining and immediately applies maintenance, with no second confirmation.** Press Ctrl+C if work has not drained:
 

@@ -27,6 +27,7 @@ import { AiQuality, QualityRequest, QualityVerdict, qualitySources, validateQual
 import config from "./config";
 import getLanguage from "./languages";
 import { runTaskQueued } from "./taskQueue";
+import { COMPILE_RESERVATION } from "./executionScheduler";
 import { ensureDirectoryEmpty } from "./utils";
 import {
   runSandbox,
@@ -241,7 +242,7 @@ async function readRegular(filename: string, limit = MAX_FILE): Promise<Buffer> 
 }
 
 async function compileSource(source: string, name: string, binaryDirectory: string, request: Request) {
-  await runTaskQueued(async taskDirectory => {
+  await runTaskQueued({ memory: COMPILE_RESERVATION, ai: true }, async taskDirectory => {
     const sourceDirectory = path.join(taskDirectory, "source");
     const buildDirectory = path.join(taskDirectory, "build");
     const temp = path.join(taskDirectory, "temp");
@@ -324,7 +325,8 @@ async function execute(
   files: Record<string, Buffer | { path: string }> = {},
   outputPath?: string
 ): Promise<Buffer> {
-  return await runTaskQueued(async taskDirectory => {
+  const reservation = { memory: Math.max(request.memoryLimitMiB, request.stdMemoryLimitMiB), ai: true };
+  return await runTaskQueued(reservation, async taskDirectory => {
     const working = path.join(taskDirectory, "working");
     const temp = path.join(taskDirectory, "temp");
     await Promise.all([ensureDirectoryEmpty(working), ensureDirectoryEmpty(temp)]);
@@ -436,7 +438,9 @@ async function execute(
 }
 
 async function executeProtocol(binaryDirectory: string, request: Request, input: Buffer) {
-  return await runTaskQueued(async directory => {
+  // The program and its interactor or manager run together
+  const reservation = { memory: request.memoryLimitMiB + request.stdMemoryLimitMiB, ai: true };
+  return await runTaskQueued(reservation, async directory => {
     const disposer = new Disposer();
     const communication = request.problemType === "Communication";
     const program = communication ? "manager" : "interactor";

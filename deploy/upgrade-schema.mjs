@@ -8,10 +8,10 @@ import { inspectLegacyRegistration, migrateLegacyRegistration, RegistrationMigra
 import { inspectVerifiedSolutions, migrateVerifiedSolutions } from './community-solutions.mjs';
 import { TEAM_STORAGE_SQL, validateTeamStorageSchema, normalizeTeamStorageQueries, inspectTeamStorage, migrateTeamStorage } from './team-storage.mjs';
 import { TWO_FACTOR_SQL, validateTwoFactorSchema } from './two-factor-schema.mjs';
-import { JUDGE_QUEUE_SQL, validateJudgeQueueSchema } from './judge-queue-schema.mjs';
+import { JUDGE_QUEUE_SQL, JUDGE_CLIENT_DRAINING_SQL, validateJudgeQueueSchema } from './judge-queue-schema.mjs';
 export { FILE_SIZE_BIGINT_SQL, TEAM_FILE_SIZE_BIGINT_SQL, TEAM_QUOTA_DEFAULT_SQL } from './team-storage.mjs';
 export { TWO_FACTOR_SQL, TWO_FACTOR_TABLES } from './two-factor-schema.mjs';
-export { JUDGE_QUEUE_SQL, JUDGE_QUEUE_TABLES } from './judge-queue-schema.mjs';
+export { JUDGE_QUEUE_SQL, JUDGE_QUEUE_TABLES, JUDGE_CLIENT_DRAINING_SQL } from './judge-queue-schema.mjs';
 
 export class SchemaCompatibilityError extends Error {}
 
@@ -192,7 +192,7 @@ export function validateQueries(queries) {
       if (normalized !== expected) throw new SchemaCompatibilityError('Unexpected application table definition');
     } else if (!foreign && !applicationForeign && sql !== PRIVILEGE_EXPANSION_SQL &&
         sql !== SUBMISSION_FAKE_EXPANSION_SQL && sql !== CONTEST_RULE_EXPANSION_SQL && sql !== CONTEST_RULE_OPTIONS_SQL && sql !== HACK_STANDARD_CONTENT_SQL && sql !== DISCUSSION_TYPE_ADD_SQL &&
-        sql !== DISCUSSION_TYPE_INDEX_SQL && !TEAM_STORAGE_SQL.includes(sql) && !TWO_FACTOR_SQL.includes(sql) && !JUDGE_QUEUE_SQL.includes(sql) &&
+        sql !== DISCUSSION_TYPE_INDEX_SQL && !TEAM_STORAGE_SQL.includes(sql) && !TWO_FACTOR_SQL.includes(sql) && !JUDGE_QUEUE_SQL.includes(sql) && sql !== JUDGE_CLIENT_DRAINING_SQL &&
         !communityCreateSql.has(normalizeGeneratedIndexes(sql))) {
       throw new SchemaCompatibilityError('Existing schema is outside this upgrader compatibility contract');
     }

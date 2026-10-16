@@ -14,9 +14,9 @@ import SocketIOParser from "socket.io-msgpack-parser";
 import { Redis } from "ioredis";
 import proxyAddr from "proxy-addr";
 
-import { JudgeClientSystemInfo, JudgeTaskMeta, JudgeTaskType } from "@libreoj/judge-protocol";
+import { JudgeClientCapabilities, JudgeClientSystemInfo, JudgeTaskMeta, JudgeTaskType } from "@libreoj/judge-protocol";
 
-import { JudgeClientService } from "./judge-client.service";
+import { JudgeClientChange, JudgeClientService, REDIS_CHANNEL_JUDGE_CLIENT_CHANGED } from "./judge-client.service";
 
 import { JudgeClientEntity } from "./judge-client.entity";
 
@@ -45,7 +45,10 @@ interface JudgeTaskAssignment {
 }
 
 interface JudgeClientState {
+  socket: Socket;
   judgeClient: JudgeClientEntity;
+  // As announced by the judge client; null for one that announces nothing (protocol version 1)
+  capabilities: JudgeClientCapabilities;
   // Tasks sent to this client, by task ID: until it acknowledges them, plus a grace time.
   // A client may only report progress for, and download files of, its own assigned tasks.
   assignedTasks: Map<string, JudgeTaskAssignment>;
@@ -80,6 +83,40 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const SERVER_CAPABILITIES = {
   progressAck: true
 };
+
+// Judge clients older than protocol version 2 announce nothing and are sent only submissions.
+const LEGACY_TASK_TYPES = [JudgeTaskType.Submission];
+
+const isCount = (value: unknown, maximum: number) =>
+  Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= maximum;
+
+// The announced capabilities, or null if they aren't valid
+function parseCapabilities(value: unknown): JudgeClientCapabilities {
+  const capabilities = value as JudgeClientCapabilities;
+  const taskTypes = Object.values(JudgeTaskType) as unknown[];
+  if (
+    !capabilities ||
+    typeof capabilities !== "object" ||
+    !isCount(capabilities.protocolVersion, 1000) ||
+    capabilities.protocolVersion < 2 ||
+    !Array.isArray(capabilities.taskTypes) ||
+    capabilities.taskTypes.length > 100 ||
+    !isCount(capabilities.consumerThreads, 1024) ||
+    !isCount(capabilities.executionSlots, 1024) ||
+    !isCount(capabilities.memoryBudget, 1024 * 1024 * 1024) ||
+    !isCount(capabilities.aiExecutionSlots, 1024)
+  )
+    return null;
+  return {
+    protocolVersion: capabilities.protocolVersion,
+    // Unknown types are newer than this backend
+    taskTypes: [...new Set(capabilities.taskTypes.filter(type => taskTypes.includes(type)))],
+    consumerThreads: capabilities.consumerThreads,
+    executionSlots: capabilities.executionSlots,
+    memoryBudget: capabilities.memoryBudget,
+    aiExecutionSlots: capabilities.aiExecutionSlots
+  };
+}
 
 function isJudgeTaskMeta(value: unknown): value is JudgeTaskMeta {
   const taskMeta = value as JudgeTaskMeta;
@@ -135,9 +172,11 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     this.redisForSubscribe = this.redisService.getClient();
 
     this.redisForSubscribe.on("message", (channel: string, message: string) => {
-      this.onCancelTask(message);
+      if (channel === REDIS_CHANNEL_JUDGE_CLIENT_CHANGED)
+        this.onJudgeClientChanged(message).catch(e => logger.error(`Failed to apply a judge client change: ${e}`));
+      else this.onCancelTask(message);
     });
-    this.redisForSubscribe.subscribe(REDIS_CHANNEL_CANCEL_TASK);
+    this.redisForSubscribe.subscribe(REDIS_CHANNEL_CANCEL_TASK, REDIS_CHANNEL_JUDGE_CLIENT_CHANGED);
   }
 
   onModuleInit(): void {
@@ -163,6 +202,32 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
   cancelTask(taskId: string) {
     this.redis.publish(REDIS_CHANNEL_CANCEL_TASK, taskId);
     this.judgeQueueService.cancel(taskId).catch(e => logger.error(`Failed to cancel the job of task ${taskId}: ${e}`));
+  }
+
+  // A revoked judge client (its key was reset, or it was deleted) is disconnected at once, in every backend process;
+  // its unfinished tasks are queued again. A drained or resumed one gets its new state.
+  async onJudgeClientChanged(message: string): Promise<void> {
+    let change: JudgeClientChange;
+    try {
+      change = JSON.parse(message);
+    } catch {
+      return;
+    }
+    const states = [...this.mapSessionIdToJudgeClient.values()].filter(state => state.judgeClient.id === change.id);
+    if (states.length === 0) return;
+    const judgeClient = change.revoked ? null : await this.judgeClientService.findJudgeClientById(change.id);
+    for (const state of states) {
+      if (!judgeClient) {
+        logger.log(`Disconnecting judge client ${state.socket.id} (${state.judgeClient.name}): its key was revoked`);
+        state.socket.disconnect(true);
+      } else {
+        state.judgeClient = judgeClient;
+        logger.log(
+          `Judge client ${state.socket.id} (${judgeClient.name}) ${judgeClient.draining ? "drains" : "resumes"}`
+        );
+      }
+    }
+    if (judgeClient && !judgeClient.draining) this.judgeQueueService.notifyJobsAvailable();
   }
 
   onCancelTask(taskId: string): void {
@@ -200,13 +265,17 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
 
     await this.lockService.lock(REDIS_LOCK_JUDGE_CLIENT_CONNECT_DISCONNECT.format(judgeClient.id), async () => {
       await this.judgeClientService.setJudgeClientOnlineSessionId(judgeClient, client.id);
+      // Until it announces them again
+      await this.judgeClientService.updateJudgeClientCapabilities(judgeClient, null);
 
       if (!client.connected) {
         await this.judgeClientService.disconnectJudgeClient(judgeClient);
       }
 
       this.mapSessionIdToJudgeClient.set(client.id, {
+        socket: client,
         judgeClient,
+        capabilities: null,
         assignedTasks: new Map()
       });
     });
@@ -301,6 +370,27 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     await this.judgeClientService.updateJudgeClientSystemInfo(state.judgeClient, systemInfo);
   }
 
+  @SubscribeMessage("capabilities")
+  async onCapabilities(@ConnectedSocket() client: Socket, @MessageBody() message: unknown): Promise<void> {
+    const state = this.mapSessionIdToJudgeClient.get(client.id);
+    if (!state) {
+      logger.warn(`"capabilities" emitted from an unknown client ${client.id}, ignoring`);
+      return;
+    }
+    const capabilities = parseCapabilities(message);
+    if (!capabilities) {
+      logger.warn(`Invalid "capabilities" from judge client ${client.id} (${state.judgeClient.name}), ignoring`);
+      return;
+    }
+    state.capabilities = capabilities;
+    logger.log(
+      `Judge client ${client.id} (${state.judgeClient.name}) judges ${capabilities.taskTypes.join(", ")} (protocol ${
+        capabilities.protocolVersion
+      })`
+    );
+    await this.judgeClientService.updateJudgeClientCapabilities(state.judgeClient, capabilities);
+  }
+
   @SubscribeMessage("requestFiles")
   async onRequestFiles(@ConnectedSocket() client: Socket, @MessageBody() fileUuids: string[]): Promise<string[]> {
     const state = this.mapSessionIdToJudgeClient.get(client.id);
@@ -352,9 +442,17 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
 
     /* eslint-disable no-await-in-loop */
     while (await this.checkConnection(client)) {
+      // A draining judge client is sent no new tasks until it's resumed
+      if (state.judgeClient.draining) {
+        await this.judgeQueueService.waitForJobs();
+        continue;
+      }
       let leased: LeasedJudgeTask;
       try {
-        leased = await this.judgeQueueService.claim({ connectionId: client.id, judgeClientId: state.judgeClient.id });
+        leased = await this.judgeQueueService.claim(
+          { connectionId: client.id, judgeClientId: state.judgeClient.id },
+          state.capabilities?.taskTypes ?? LEGACY_TASK_TYPES
+        );
       } catch (e) {
         // The client waits for a task for this thread until it reconnects, so never give up on its request.
         logger.error(`Failed to consume judge queue for client ${client.id} (${state.judgeClient.name}): ${e}`);

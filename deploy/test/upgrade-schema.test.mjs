@@ -66,11 +66,30 @@ test('exact durable judge queue tables accepted; altered definitions refused', a
 });
 test('judge queue tables are created exactly when absent', async () => {
   const { validateJudgeQueueSchema, JUDGE_QUEUE_SQL } = await import('../judge-queue-schema.mjs');
-  const existing = names => ({ query: async () => names.map(name => ({ name })) });
+  // An existing draining column, so only the tables are checked here
+  const draining = { columnType: 'tinyint(4)', isNullable: 'NO', defaultValue: '0', extra: '', comment: '' };
+  const existing = names => ({ query: async sql => sql.includes('information_schema.COLUMNS') ? [draining] : names.map(name => ({ name })) });
   await validateJudgeQueueSchema(existing([]), JUDGE_QUEUE_SQL);
   await validateJudgeQueueSchema(existing(['judge_job', 'judge_job_attempt']), []);
   await validateJudgeQueueSchema(existing(['judge_job']), JUDGE_QUEUE_SQL.slice(1));
   await assert.rejects(() => validateJudgeQueueSchema(existing([]), []));
   await assert.rejects(() => validateJudgeQueueSchema(existing(['judge_job']), JUDGE_QUEUE_SQL));
   await assert.rejects(() => validateJudgeQueueSchema(existing([]), [...JUDGE_QUEUE_SQL, JUDGE_QUEUE_SQL[0]]));
+});
+
+test('the judge client draining flag is added exactly once, and only when absent', async () => {
+  const { validateJudgeQueueSchema, JUDGE_QUEUE_SQL, JUDGE_CLIENT_DRAINING_SQL } = await import('../judge-queue-schema.mjs');
+  assert.deepEqual(validateQueries([JUDGE_CLIENT_DRAINING_SQL]), [JUDGE_CLIENT_DRAINING_SQL]);
+  assert.throws(() => validateQueries([JUDGE_CLIENT_DRAINING_SQL.replace('DEFAULT 0', 'DEFAULT 1')]));
+  const tables = ['judge_job', 'judge_job_attempt'].map(name => ({ name }));
+  const fixture = column => ({ query: async sql => sql.includes('information_schema.COLUMNS') ? (column ? [column] : []) : tables });
+  const column = { columnType: 'tinyint(4)', isNullable: 'NO', defaultValue: '0', extra: '', comment: '' };
+  await validateJudgeQueueSchema(fixture(null), [JUDGE_CLIENT_DRAINING_SQL]);
+  await validateJudgeQueueSchema(fixture(column), []);
+  await validateJudgeQueueSchema(fixture({ ...column, defaultValue: "'0'" }), []);
+  await assert.rejects(() => validateJudgeQueueSchema(fixture(null), []));
+  await assert.rejects(() => validateJudgeQueueSchema(fixture(column), [JUDGE_CLIENT_DRAINING_SQL]));
+  for (const changed of [{ isNullable: 'YES' }, { defaultValue: '1' }, { columnType: 'int(11)' }])
+    await assert.rejects(() => validateJudgeQueueSchema(fixture({ ...column, ...changed }), []), /Unsupported existing judge client/);
+  assert.equal(JUDGE_QUEUE_SQL.length, 2);
 });
