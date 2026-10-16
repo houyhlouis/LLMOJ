@@ -75,6 +75,7 @@ export class GetProblemRequestDto {
   @IsOptional()
   readonly statistics?: boolean;
 
+  // Also returns `solutionCount`.
   @ApiProperty({ required: false })
   @IsBoolean()
   @IsOptional()

@@ -20,6 +20,7 @@ import { isValidUsername } from "@/utils/validators";
 import toast from "@/utils/toast";
 import { refreshSession } from "@/initApp";
 import PseudoLink from "@/components/PseudoLink";
+import TwoFactorPrompt, { TwoFactorProof } from "@/components/TwoFactorPrompt";
 import { onEnterPress } from "@/utils/onEnterPress";
 import { isEmail } from "class-validator";
 
@@ -58,6 +59,9 @@ let LoginPage: React.FC = () => {
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
   const [registrationError, setRegistrationError] = useState<string>(null);
+  // After the password is accepted for an account with two-factor sign-in.
+  const [twoFactorChallenge, setTwoFactorChallenge] = useState<ApiTypes.TwoFactorChallengeDto>(null);
+  const [twoFactorError, setTwoFactorError] = useState<string>(null);
 
   const refUsernameInput = useRef<HTMLInputElement>();
   const refPasswordInput = useRef<HTMLInputElement>();
@@ -206,7 +210,11 @@ let LoginPage: React.FC = () => {
 
       if (requestError) toast.error(requestError(_));
       else if (response.error && response.error !== "USER_NOT_MIGRATED") handleCommonError(response.error);
-      else {
+      else if (!response.error && response.twoFactorChallenge) {
+        setError(null, null);
+        setTwoFactorError(null);
+        setTwoFactorChallenge(response.twoFactorChallenge);
+      } else {
         setError(null, null);
 
         let token = "";
@@ -214,23 +222,44 @@ let LoginPage: React.FC = () => {
         if (response.error === "USER_NOT_MIGRATED") token = await tryMigrate();
 
         if (token) {
-          // Login success
-          appState.token = token;
-
-          {
-            setSuccess(_(".welcome", { username: refNewUsername.current || response.username }));
-
-            setTimeout(async () => {
-              await refreshSession();
-              redirect();
-            }, 1000);
-          }
-
+          loginSucceeded(token, refNewUsername.current || response.username);
           return;
         }
       }
     }
 
+    setPending(false);
+  }
+
+  function loginSucceeded(token: string, username: string) {
+    appState.token = token;
+    setSuccess(_(".welcome", { username }));
+    setTimeout(async () => {
+      await refreshSession();
+      redirect();
+    }, 1000);
+  }
+
+  async function onSubmitTwoFactor(proof: TwoFactorProof) {
+    if (pending) return;
+    setPending(true);
+    const { requestError, response } = await api.twoFactor.completeLogin({
+      challenge: twoFactorChallenge.token,
+      ...proof
+    });
+    if (requestError) toast.error(requestError(_));
+    else if (response.error === "INVALID_CODE" || response.error === "INVALID_PASSKEY")
+      setTwoFactorError(response.error);
+    else if (response.error) {
+      // The challenge can't be answered again: sign in from the start.
+      setTwoFactorChallenge(null);
+      if (response.error === "REGISTRATION_PENDING" || response.error === "REGISTRATION_REJECTED")
+        setRegistrationError(response.error);
+      else toast.error(_(`components.two_factor.errors.${response.error}`));
+    } else {
+      loginSucceeded(response.token, response.username);
+      return;
+    }
     setPending(false);
   }
 
@@ -245,72 +274,101 @@ let LoginPage: React.FC = () => {
           {_(".login_to_your_account")}
         </Header>
         {registrationError && <Message warning role="alert" content={_(`.errors.${registrationError}`)} />}
-        <Form size="large">
-          <Segment>
-            <Ref innerRef={field => field && (refUsernameInput.current = field.querySelector("input"))}>
-              <Form.Field
-                control={Input}
-                error={
-                  formError.type === "usernameOrEmail" && {
-                    content: formError.message,
-                    pointing: "left"
-                  }
-                }
-                fluid
-                icon="user"
-                iconPosition="left"
-                placeholder={_(".username_or_email")}
-                value={usernameOrEmail}
-                autoComplete="username"
-                readOnly={pending}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUsernameOrEmail(e.target.value)}
-                onKeyPress={onEnterPress(() => refPasswordInput.current.focus())}
-              />
-            </Ref>
-            <PseudoLink onClick={() => navigateTo("forgot")} tabIndex={-1} className={style.inputAction}>
-              {_(".forgot_password")}
-            </PseudoLink>
-            <Ref innerRef={field => field && (refPasswordInput.current = field.querySelector("input"))}>
-              <Form.Field
-                control={Input}
-                error={
-                  formError.type === "password" && {
-                    content: formError.message,
-                    pointing: "left"
-                  }
-                }
-                fluid
-                icon="lock"
-                iconPosition="left"
-                placeholder={_(".password")}
-                value={password}
-                type="password"
-                autoComplete="current-password"
-                readOnly={pending}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
-              />
-            </Ref>
-
-            <Button
-              className={successMessage && style.successButton}
-              primary={!successMessage}
-              color={successMessage ? "green" : null}
-              fluid
-              size="large"
-              loading={pending && !successMessage}
-              onClick={() => onSubmit()}
-            >
+        {twoFactorChallenge ? (
+          <Form size="large" onSubmit={e => e.preventDefault()}>
+            <Segment textAlign="left">
+              <Header size="small" content={_(".two_factor_header")} />
               {successMessage ? (
-                <>
+                <Button className={style.successButton} color="green" fluid size="large">
                   <Icon name="checkmark" />
                   {successMessage}
-                </>
+                </Button>
               ) : (
-                _(".login")
+                <>
+                  <TwoFactorPrompt
+                    challenge={twoFactorChallenge}
+                    pending={pending}
+                    error={twoFactorError}
+                    onSubmit={onSubmitTwoFactor}
+                  />
+                  <div style={{ marginTop: "0.75em" }}>
+                    <PseudoLink onClick={() => !pending && setTwoFactorChallenge(null)}>
+                      <Icon name="arrow left" />
+                      {_(".back_to_password")}
+                    </PseudoLink>
+                  </div>
+                </>
               )}
-            </Button>
-          </Segment>
-        </Form>
+            </Segment>
+          </Form>
+        ) : (
+          <Form size="large">
+            <Segment>
+              <Ref innerRef={field => field && (refUsernameInput.current = field.querySelector("input"))}>
+                <Form.Field
+                  control={Input}
+                  error={
+                    formError.type === "usernameOrEmail" && {
+                      content: formError.message,
+                      pointing: "left"
+                    }
+                  }
+                  fluid
+                  icon="user"
+                  iconPosition="left"
+                  placeholder={_(".username_or_email")}
+                  value={usernameOrEmail}
+                  autoComplete="username"
+                  readOnly={pending}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUsernameOrEmail(e.target.value)}
+                  onKeyPress={onEnterPress(() => refPasswordInput.current.focus())}
+                />
+              </Ref>
+              <PseudoLink onClick={() => navigateTo("forgot")} tabIndex={-1} className={style.inputAction}>
+                {_(".forgot_password")}
+              </PseudoLink>
+              <Ref innerRef={field => field && (refPasswordInput.current = field.querySelector("input"))}>
+                <Form.Field
+                  control={Input}
+                  error={
+                    formError.type === "password" && {
+                      content: formError.message,
+                      pointing: "left"
+                    }
+                  }
+                  fluid
+                  icon="lock"
+                  iconPosition="left"
+                  placeholder={_(".password")}
+                  value={password}
+                  type="password"
+                  autoComplete="current-password"
+                  readOnly={pending}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
+                />
+              </Ref>
+
+              <Button
+                className={successMessage && style.successButton}
+                primary={!successMessage}
+                color={successMessage ? "green" : null}
+                fluid
+                size="large"
+                loading={pending && !successMessage}
+                onClick={() => onSubmit()}
+              >
+                {successMessage ? (
+                  <>
+                    <Icon name="checkmark" />
+                    {successMessage}
+                  </>
+                ) : (
+                  _(".login")
+                )}
+              </Button>
+            </Segment>
+          </Form>
+        )}
         <Message className={style.message}>
           {appState.serverPreference.security.registrationMode === "closed" ? (
             _(".registration_closed")

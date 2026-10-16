@@ -186,7 +186,7 @@ test("ManageUser cannot replace an administrator password or recovery email", as
     authService: { changePassword: () => assert.fail("admin password changed") }
   });
   const manager = { id: 2, isAdmin: false };
-  assert.deepEqual(await users.updateUserPassword(manager, { userId: 1, password: "synthetic" }), {
+  assert.deepEqual(await users.updateUserPassword({}, manager, { userId: 1, password: "synthetic" }), {
     error: "PERMISSION_DENIED"
   });
   assert.deepEqual(await users.updateUserProfile(manager, { userId: 1, email: "attacker@example.test" }), {

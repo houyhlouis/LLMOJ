@@ -93,8 +93,12 @@ export class GetProblemResponseDto {
   @ApiProperty({ type: ProblemFileDto, isArray: true })
   additionalFiles?: ProblemFileDto[];
 
+  // Discussions only: solutions are counted separately in `solutionCount`.
   @ApiProperty()
   discussionCount?: number;
+
+  @ApiProperty()
+  solutionCount?: number;
 
   @ApiProperty({ enum: ProblemPermissionType, isArray: true })
   permissionOfCurrentUser?: ProblemPermissionType[];

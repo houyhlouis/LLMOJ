@@ -9,6 +9,8 @@ return {
   retype_password: "Retype Password",
   submit: "Submit",
   success: "Password reset",
+  two_factor_required: "Your password has been changed. Confirm with your second sign-in step to sign in.",
+  back_to_login: "Back to sign in",
   errors: {
     REGISTRATION_PENDING:
       "Your registration application is awaiting review. No site account has been created, and resetting a password does not bypass registration review.",

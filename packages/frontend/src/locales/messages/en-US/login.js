@@ -16,6 +16,8 @@ return {
   no_such_user: "No such user",
   wrong_password: "Wrong password",
   welcome: "Welcome back, {username}!",
+  two_factor_header: "Two-step verification",
+  back_to_password: "Back to sign in",
   errors: {
     REGISTRATION_PENDING:
       "Your registration application is awaiting review. A site account will be created after approval, and you can then sign in.",

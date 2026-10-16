@@ -16,7 +16,8 @@ return {
     DUPLICATE_EMAIL: "Email already used.",
     FAILED: "Unknown error.",
     FAILED_TO_SEND: "Failed to send mail: {errorMessage}",
-    RATE_LIMITED: "Your operations are too frequent. Please try again later."
+    RATE_LIMITED: "Your operations are too frequent. Please try again later.",
+    REAUTHENTICATION_REQUIRED: "Confirm your password to make this change."
   },
   profile: {
     title: "Profile",
@@ -161,6 +162,88 @@ return {
       invalid_email_verification_code: "Invalid email verification code",
       success: "Email changed successfully.",
       submit: "Submit"
+    },
+    two_factor: {
+      header: "Two-factor sign-in",
+      on: "On",
+      off: "Off",
+      on_notes: "Signing in asks for your password, then {methods}.",
+      off_notes:
+        "Add a second sign-in step: a code from an authenticator app, or a passkey. Then someone who learns your password still can't sign in.",
+      on_notes_other: "This user signs in with a password, then {methods}.",
+      off_notes_other: "This user doesn't use two-factor sign-in.",
+      method_totp: "an authenticator code",
+      method_passkeys: "a passkey",
+      separator: " or ",
+      cancel: "Cancel",
+      totp: {
+        header: "Authenticator app",
+        notes:
+          "Use an app such as Google Authenticator, Microsoft Authenticator or a password manager. It shows a new 6-digit code every 30 seconds.",
+        set_up: "Set up",
+        scan: "Scan this QR code with your authenticator app, then enter the 6-digit code it shows.",
+        qr_title: "QR code for the authenticator app",
+        manual: "Or enter this key in the app:",
+        code: "6-digit code",
+        invalid_code: "Incorrect code. Check that your phone's clock is correct, or wait for the next code.",
+        enable: "Turn on",
+        enabled: "Authenticator app sign-in is on.",
+        enabled_since: "Turned on {time}",
+        disable: "Remove",
+        confirm_disable: "Confirm remove",
+        disabled: "Authenticator app removed."
+      },
+      passkeys: {
+        header: "Passkeys",
+        notes:
+          "A passkey signs in with your device's fingerprint, face, screen lock or a security key. It works only at the site address where you add it.",
+        name: "Passkey name",
+        add: "Add passkey",
+        added: "Passkey added.",
+        removed: "Passkey removed.",
+        remove: "Remove",
+        confirm_remove: "Confirm remove",
+        details: "Works on {site}   ·   Added {created}   ·   Last used {used}",
+        never_used: "never",
+        cancelled: "Adding the passkey was cancelled or timed out.",
+        already_added: "This device already has a passkey for your account.",
+        browser_error: "Your browser couldn't create the passkey: {message}",
+        unavailable:
+          "Passkeys need the site to be opened over HTTPS. Use an authenticator app, or ask the site administrator to enable HTTPS."
+      },
+      recovery_codes: {
+        header: "Recovery codes",
+        remaining: "Unused recovery codes: {count}",
+        regenerate: "Generate new codes",
+        confirm_regenerate: "Confirm: the old codes stop working",
+        notes: "If you lose your phone or passkey, sign in with a recovery code. Each code works once.",
+        save_notes:
+          "Save these recovery codes somewhere safe, such as a password manager. Each code works once. They won't be shown again.",
+        download: "Download",
+        copy: "Copy",
+        copied: "Recovery codes copied.",
+        copy_failed: "Couldn't copy. Select the codes and copy them yourself.",
+        done: "I've saved them"
+      },
+      reset: {
+        button: "Turn off two-factor sign-in",
+        confirm: "Confirm turn off",
+        notes:
+          "For a user who lost their phone, passkeys and recovery codes. This removes all their second factors: they sign in with their password and can set up new ones.",
+        success: "Two-factor sign-in is turned off for this user."
+      },
+      errors: {
+        PERMISSION_DENIED: "Permission denied.",
+        NO_SUCH_USER: "No such user.",
+        ALREADY_ENABLED: "The authenticator app is already set up.",
+        NOT_ENABLED: "Two-factor sign-in isn't on.",
+        SETUP_EXPIRED: "The setup expired. Start again.",
+        INVALID_CODE: "Incorrect code.",
+        INVALID_PASSKEY: "The passkey couldn't be added. Try again.",
+        PASSKEY_UNAVAILABLE: "Passkeys need the site to be opened over HTTPS.",
+        TOO_MANY_PASSKEYS: "You can add at most 10 passkeys. Remove one first.",
+        NO_SUCH_PASSKEY: "This passkey was already removed."
+      }
     },
     sessions: {
       header: "Sessions",

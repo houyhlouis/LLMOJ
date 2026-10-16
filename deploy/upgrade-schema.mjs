@@ -7,7 +7,9 @@ import { pathToFileURL } from 'node:url';
 import { inspectLegacyRegistration, migrateLegacyRegistration, RegistrationMigrationError } from './upgrade-registration.mjs';
 import { inspectVerifiedSolutions, migrateVerifiedSolutions } from './community-solutions.mjs';
 import { TEAM_STORAGE_SQL, validateTeamStorageSchema, normalizeTeamStorageQueries, inspectTeamStorage, migrateTeamStorage } from './team-storage.mjs';
+import { TWO_FACTOR_SQL, validateTwoFactorSchema } from './two-factor-schema.mjs';
 export { FILE_SIZE_BIGINT_SQL, TEAM_FILE_SIZE_BIGINT_SQL, TEAM_QUOTA_DEFAULT_SQL } from './team-storage.mjs';
+export { TWO_FACTOR_SQL, TWO_FACTOR_TABLES } from './two-factor-schema.mjs';
 
 export class SchemaCompatibilityError extends Error {}
 
@@ -188,7 +190,8 @@ export function validateQueries(queries) {
       if (normalized !== expected) throw new SchemaCompatibilityError('Unexpected application table definition');
     } else if (!foreign && !applicationForeign && sql !== PRIVILEGE_EXPANSION_SQL &&
         sql !== SUBMISSION_FAKE_EXPANSION_SQL && sql !== CONTEST_RULE_EXPANSION_SQL && sql !== CONTEST_RULE_OPTIONS_SQL && sql !== HACK_STANDARD_CONTENT_SQL && sql !== DISCUSSION_TYPE_ADD_SQL &&
-        sql !== DISCUSSION_TYPE_INDEX_SQL && !TEAM_STORAGE_SQL.includes(sql) && !communityCreateSql.has(normalizeGeneratedIndexes(sql))) {
+        sql !== DISCUSSION_TYPE_INDEX_SQL && !TEAM_STORAGE_SQL.includes(sql) && !TWO_FACTOR_SQL.includes(sql) &&
+        !communityCreateSql.has(normalizeGeneratedIndexes(sql))) {
       throw new SchemaCompatibilityError('Existing schema is outside this upgrader compatibility contract');
     }
   }
@@ -244,6 +247,7 @@ export async function auditSchema(connection) {
   await validateContestSchema(connection, queries);
   await validateHackStandardSchema(connection, queries);
   await validateTeamStorageSchema(connection, queries, SchemaCompatibilityError);
+  await validateTwoFactorSchema(connection, queries, SchemaCompatibilityError);
   const migration = await inspectLegacyRegistration(connection);
   const solutions = await inspectVerifiedSolutions(connection);
   const teamStorage = await inspectTeamStorage(connection);
@@ -261,6 +265,7 @@ export async function applySchema(connection) {
   await validateContestSchema(connection, []);
   await validateHackStandardSchema(connection, []);
   await validateTeamStorageSchema(connection, [], SchemaCompatibilityError);
+  await validateTwoFactorSchema(connection, [], SchemaCompatibilityError);
   const migration = await migrateLegacyRegistration(connection);
   const remaining = await inspectLegacyRegistration(connection);
   if (remaining.pending || remaining.rejected || remaining.approvedHistory)

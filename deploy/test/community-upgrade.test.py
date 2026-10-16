@@ -39,7 +39,7 @@ class CommunityHost(fixtures.FakeHost):
         if args[0] == 'mariadb' and isinstance(query, bytes):
             query = query.decode()
             self.sql_queries.append(query)
-            table = re.search(r"TABLE_NAME='(team|file|team_file_upload|submission|discussion|hack|hack_problem|self_eval|self_eval_set|self_eval_quota)'", query)
+            table = re.search(r"TABLE_NAME='(team|file|team_file_upload|submission|discussion|hack|hack_problem|self_eval|self_eval_set|self_eval_quota|user_two_factor|user_passkey)'", query)
             output = None
             if table and 'information_schema.TABLES' in query:
                 output = int(table[1] in self.feature_tables)
@@ -54,6 +54,10 @@ class CommunityHost(fixtures.FakeHost):
                 output = self.feature_rows['submission']
             elif "FROM `discussion` WHERE type='Solution'" in query:
                 output = self.feature_rows['discussion']
+            elif query.startswith('SELECT COUNT(*) FROM `user_two_factor` WHERE totpSecret IS NOT NULL'):
+                output = self.feature_rows.get('user_two_factor', 0)
+            elif query.startswith('SELECT COUNT(*) FROM `user_passkey` WHERE 1=1'):
+                output = self.feature_rows.get('user_passkey', 0)
             else:
                 counted = re.match(r'SELECT COUNT\(\*\) FROM `(hack|hack_problem|team_file_upload|self_eval|self_eval_set|self_eval_quota)` WHERE', query)
                 if counted:
@@ -404,6 +408,31 @@ class CommunityUpgradeTests(unittest.TestCase):
         self.assertEqual((self.root/'apps/backend/dist/main.js').read_text(), 'new backend')
         self.assertEqual(self.host.feature_rows['submission'], 1)
         self.assertTrue(self.up.guard.exists())
+
+    def two_factor_fixture(self):
+        self.activate_fixture()
+        self.host.feature_tables.update(('user_two_factor', 'user_passkey'))
+        self.host.feature_columns.add(('user_two_factor', 'totpSecret'))
+
+    def test_two_factor_accounts_block_a_backend_without_second_factor_checks(self):
+        self.two_factor_fixture()
+        for table in ('user_two_factor', 'user_passkey'):
+            with self.subTest(table=table):
+                self.host.feature_rows[table] = 1
+                self.assert_manual_rollback_refused_without_service_changes('two-factor sign-in')
+                self.assertEqual(self.host.feature_rows[table], 1)
+                self.host.feature_rows[table] = 0
+        # Empty tables (or factors an administrator turned off) do not block it.
+        self.up.rollback(manual=True)
+        self.assertEqual(self.up.manifest['status'], 'rolled-back')
+
+    def test_a_two_factor_backend_may_restore_enrolled_accounts(self):
+        self.two_factor_fixture()
+        self.candidate_capability('backend/dist/auth/two-factor/two-factor.service.js', 'two-factor backend')
+        self.host.feature_rows.update(user_two_factor=1, user_passkey=1)
+        self.up.rollback(manual=True)
+        self.assertEqual(self.up.manifest['status'], 'rolled-back')
+        self.assertEqual((self.host.feature_rows['user_two_factor'], self.host.feature_rows['user_passkey']), (1, 1))
 
     def test_community_ddl_application_keeps_the_guard_when_empty_feature_data_allows_rollback(self):
         self.prepare()

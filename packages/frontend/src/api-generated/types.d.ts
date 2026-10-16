@@ -41,6 +41,55 @@ declare namespace ApiTypes {
   export interface AiTestDto {
     target: "llm" | "search";
   }
+  export interface BeginPasskeyRegistrationResponseDto {
+    error?:
+      | "PERMISSION_DENIED"
+      | "NO_SUCH_USER"
+      | "ALREADY_LOGGEDIN"
+      | "REAUTHENTICATION_REQUIRED"
+      | "WRONG_PASSWORD"
+      | "REGISTRATION_PENDING"
+      | "REGISTRATION_REJECTED"
+      | "ALREADY_ENABLED"
+      | "NOT_ENABLED"
+      | "SETUP_EXPIRED"
+      | "INVALID_CODE"
+      | "INVALID_PASSKEY"
+      | "PASSKEY_UNAVAILABLE"
+      | "TOO_MANY_PASSKEYS"
+      | "NO_SUCH_PASSKEY"
+      | "CHALLENGE_EXPIRED"
+      | "TOO_MANY_ATTEMPTS";
+    /**
+     * PublicKeyCredentialCreationOptions with base64url binary fields.
+     */
+    options?: {};
+  }
+  export interface BeginTotpSetupResponseDto {
+    error?:
+      | "PERMISSION_DENIED"
+      | "NO_SUCH_USER"
+      | "ALREADY_LOGGEDIN"
+      | "REAUTHENTICATION_REQUIRED"
+      | "WRONG_PASSWORD"
+      | "REGISTRATION_PENDING"
+      | "REGISTRATION_REJECTED"
+      | "ALREADY_ENABLED"
+      | "NOT_ENABLED"
+      | "SETUP_EXPIRED"
+      | "INVALID_CODE"
+      | "INVALID_PASSKEY"
+      | "PASSKEY_UNAVAILABLE"
+      | "TOO_MANY_PASSKEYS"
+      | "NO_SUCH_PASSKEY"
+      | "CHALLENGE_EXPIRED"
+      | "TOO_MANY_ATTEMPTS";
+    secret?: string;
+    /**
+     * otpauth:// URI for authenticator apps
+     */
+    uri?: string;
+  }
   export interface CancelSubmissionRequestDto {
     submissionId: number;
   }
@@ -57,6 +106,37 @@ declare namespace ApiTypes {
   export interface CheckAvailabilityResponseDto {
     usernameAvailable?: boolean;
     emailAvailable?: boolean;
+  }
+  export interface CompleteTwoFactorLoginRequestDto {
+    totpCode?: string;
+    recoveryCode?: string;
+    passkey?: ApiTypes.PasskeyAssertionDto;
+    challenge: string;
+  }
+  export interface CompleteTwoFactorLoginResponseDto {
+    error?:
+      | "PERMISSION_DENIED"
+      | "NO_SUCH_USER"
+      | "ALREADY_LOGGEDIN"
+      | "REAUTHENTICATION_REQUIRED"
+      | "WRONG_PASSWORD"
+      | "REGISTRATION_PENDING"
+      | "REGISTRATION_REJECTED"
+      | "ALREADY_ENABLED"
+      | "NOT_ENABLED"
+      | "SETUP_EXPIRED"
+      | "INVALID_CODE"
+      | "INVALID_PASSKEY"
+      | "PASSKEY_UNAVAILABLE"
+      | "TOO_MANY_PASSKEYS"
+      | "NO_SUCH_PASSKEY"
+      | "CHALLENGE_EXPIRED"
+      | "TOO_MANY_ATTEMPTS";
+    token?: string;
+    username?: string;
+  }
+  export interface ConfirmTotpSetupRequestDto {
+    code: string; // [object Object]
   }
   export interface ContestRequestDto {
     id?: number;
@@ -226,6 +306,10 @@ declare namespace ApiTypes {
     uuid?: string;
     size: number;
   }
+  export interface FinishPasskeyRegistrationRequestDto {
+    name: string;
+    credential: ApiTypes.PasskeyRegistrationDto;
+  }
   export interface GetAllProblemTagsOfAllLocalesResponseDto {
     error?: "PERMISSION_DENIED";
     tags?: ApiTypes.ProblemTagWithAllLocalesDto[];
@@ -378,6 +462,7 @@ declare namespace ApiTypes {
     testData?: ApiTypes.ProblemFileDto[];
     additionalFiles?: ApiTypes.ProblemFileDto[];
     discussionCount?: number;
+    solutionCount?: number;
     permissionOfCurrentUser?: ("View" | "Modify" | "ManagePermission" | "ManagePublicness" | "Delete")[];
     permissions?: ApiTypes.ProblemPermissionsDto;
     lastSubmission?: ApiTypes.ProblemLastSubmissionDto;
@@ -390,6 +475,30 @@ declare namespace ApiTypes {
     id?: number;
     color?: string;
     localizedNames?: ApiTypes.ProblemTagLocalizedNameDto[];
+  }
+  export interface GetReauthenticationOptionsResponseDto {
+    error?:
+      | "PERMISSION_DENIED"
+      | "NO_SUCH_USER"
+      | "ALREADY_LOGGEDIN"
+      | "REAUTHENTICATION_REQUIRED"
+      | "WRONG_PASSWORD"
+      | "REGISTRATION_PENDING"
+      | "REGISTRATION_REJECTED"
+      | "ALREADY_ENABLED"
+      | "NOT_ENABLED"
+      | "SETUP_EXPIRED"
+      | "INVALID_CODE"
+      | "INVALID_PASSKEY"
+      | "PASSKEY_UNAVAILABLE"
+      | "TOO_MANY_PASSKEYS"
+      | "NO_SUCH_PASSKEY"
+      | "CHALLENGE_EXPIRED"
+      | "TOO_MANY_ATTEMPTS";
+    /**
+     * Present when the account uses two-factor sign-in.
+     */
+    twoFactor?: ApiTypes.TwoFactorChallengeDto;
   }
   export interface GetSessionInfoResponseDto {
     userMeta?: ApiTypes.UserMetaDto;
@@ -485,6 +594,30 @@ declare namespace ApiTypes {
     appId: string;
     encryptedAppId: string;
     encryptedAppIdType: "gcm";
+  }
+  export interface GetTwoFactorStatusRequestDto {
+    userId: number;
+  }
+  export interface GetTwoFactorStatusResponseDto {
+    error?:
+      | "PERMISSION_DENIED"
+      | "NO_SUCH_USER"
+      | "ALREADY_LOGGEDIN"
+      | "REAUTHENTICATION_REQUIRED"
+      | "WRONG_PASSWORD"
+      | "REGISTRATION_PENDING"
+      | "REGISTRATION_REJECTED"
+      | "ALREADY_ENABLED"
+      | "NOT_ENABLED"
+      | "SETUP_EXPIRED"
+      | "INVALID_CODE"
+      | "INVALID_PASSKEY"
+      | "PASSKEY_UNAVAILABLE"
+      | "TOO_MANY_PASSKEYS"
+      | "NO_SUCH_PASSKEY"
+      | "CHALLENGE_EXPIRED"
+      | "TOO_MANY_ATTEMPTS";
+    status?: ApiTypes.TwoFactorStatusDto;
   }
   export interface GetUserDetailRequestDto {
     userId?: number;
@@ -725,6 +858,7 @@ declare namespace ApiTypes {
       | "USER_NOT_MIGRATED";
     token?: string;
     username?: string;
+    twoFactorChallenge?: ApiTypes.TwoFactorChallengeDto;
   }
   export interface MigrateUserRequestDto {
     email?: string;
@@ -749,6 +883,28 @@ declare namespace ApiTypes {
     export type Wildcard = "Start" | "End" | "Both";
     export type XCaptchaResult = string;
     export type XProofOfWork = string;
+  }
+  export interface PasskeyAssertionDto {
+    id: string; // [object Object]
+    clientDataJSON: string; // [object Object]
+    authenticatorData: string; // [object Object]
+    signature: string; // [object Object]
+  }
+  export interface PasskeyInfoDto {
+    id: number;
+    name: string;
+    /**
+     * The site domain the passkey works on.
+     */
+    rpId: string;
+    createdAt: string; // date-time
+    lastUsedAt?: string; // date-time
+  }
+  export interface PasskeyRegistrationDto {
+    id: string; // [object Object]
+    clientDataJSON: string; // [object Object]
+    attestationObject: string; // [object Object]
+    transports?: string[];
   }
   export interface PreferenceConfig {
     siteName: string;
@@ -1068,6 +1224,9 @@ declare namespace ApiTypes {
     reviews?: ApiTypes.RegistrationReviewDto[];
     count?: number;
   }
+  export interface ResetUserTwoFactorRequestDto {
+    userId: number;
+  }
   export interface ReviewRegistrationRequestDto {
     applicationId: number;
     decision: "approved" | "rejected";
@@ -1076,6 +1235,40 @@ declare namespace ApiTypes {
   export interface ReviewRegistrationResponseDto {
     error?: "PERMISSION_DENIED" | "NO_SUCH_APPLICATION" | "ALREADY_REVIEWED" | "DUPLICATE_USERNAME" | "DUPLICATE_EMAIL";
     review?: ApiTypes.RegistrationReviewDto;
+  }
+  export interface ReauthenticateRequestDto {
+    totpCode?: string;
+    recoveryCode?: string;
+    passkey?: ApiTypes.PasskeyAssertionDto;
+    password: string;
+    /**
+     * The challenge from getReauthenticationOptions, with 2FA.
+     */
+    challenge?: string;
+  }
+  export interface RecoveryCodesResponseDto {
+    error?:
+      | "PERMISSION_DENIED"
+      | "NO_SUCH_USER"
+      | "ALREADY_LOGGEDIN"
+      | "REAUTHENTICATION_REQUIRED"
+      | "WRONG_PASSWORD"
+      | "REGISTRATION_PENDING"
+      | "REGISTRATION_REJECTED"
+      | "ALREADY_ENABLED"
+      | "NOT_ENABLED"
+      | "SETUP_EXPIRED"
+      | "INVALID_CODE"
+      | "INVALID_PASSKEY"
+      | "PASSKEY_UNAVAILABLE"
+      | "TOO_MANY_PASSKEYS"
+      | "NO_SUCH_PASSKEY"
+      | "CHALLENGE_EXPIRED"
+      | "TOO_MANY_ATTEMPTS";
+    /**
+     * Shown once: only hashes are stored.
+     */
+    recoveryCodes?: string[];
   }
   export interface RegisterRequestDto {
     username: string;
@@ -1098,6 +1291,9 @@ declare namespace ApiTypes {
   }
   export interface RejudgeSubmissionResponseDto {
     error?: "NO_SUCH_SUBMISSION" | "PERMISSION_DENIED";
+  }
+  export interface RemovePasskeyRequestDto {
+    id: number;
   }
   export interface RemoveProblemFilesRequestDto {
     problemId: number;
@@ -1156,6 +1352,7 @@ declare namespace ApiTypes {
       | "NO_SUCH_USER"
       | "INVALID_EMAIL_VERIFICATION_CODE";
     token?: string;
+    twoFactorChallenge?: ApiTypes.TwoFactorChallengeDto;
   }
   namespace Responses {
     export interface $200 {}
@@ -1461,6 +1658,44 @@ declare namespace ApiTypes {
   export interface ToggleReactionResponseDto {
     error?: "PERMISSION_DENIED" | "NO_SUCH_DISCUSSION" | "NO_SUCH_DISCUSSION_REPLY" | "INVALID_EMOJI";
   }
+  export interface TwoFactorActionResponseDto {
+    error?:
+      | "PERMISSION_DENIED"
+      | "NO_SUCH_USER"
+      | "ALREADY_LOGGEDIN"
+      | "REAUTHENTICATION_REQUIRED"
+      | "WRONG_PASSWORD"
+      | "REGISTRATION_PENDING"
+      | "REGISTRATION_REJECTED"
+      | "ALREADY_ENABLED"
+      | "NOT_ENABLED"
+      | "SETUP_EXPIRED"
+      | "INVALID_CODE"
+      | "INVALID_PASSKEY"
+      | "PASSKEY_UNAVAILABLE"
+      | "TOO_MANY_PASSKEYS"
+      | "NO_SUCH_PASSKEY"
+      | "CHALLENGE_EXPIRED"
+      | "TOO_MANY_ATTEMPTS";
+  }
+  export interface TwoFactorChallengeDto {
+    /**
+     * Single-use, expires after 5 minutes.
+     */
+    token: string;
+    methods: ("totp" | "passkey" | "recoveryCode")[];
+    /**
+     * PublicKeyCredentialRequestOptions with base64url binary fields.
+     */
+    passkey?: {};
+  }
+  export interface TwoFactorStatusDto {
+    enabled: boolean;
+    totp: boolean;
+    totpEnabledAt?: string; // date-time
+    recoveryCodesRemaining: number;
+    passkeys: ApiTypes.PasskeyInfoDto[];
+  }
   export interface UpdateDiscussionReplyRequestDto {
     discussionReplyId: number;
     content: string;
@@ -1525,7 +1760,7 @@ declare namespace ApiTypes {
     password: string;
   }
   export interface UpdateUserPasswordResponseDto {
-    error?: "PERMISSION_DENIED" | "NO_SUCH_USER" | "WRONG_OLD_PASSWORD";
+    error?: "PERMISSION_DENIED" | "NO_SUCH_USER" | "WRONG_OLD_PASSWORD" | "REAUTHENTICATION_REQUIRED";
   }
   export interface UpdateUserPreferenceRequestDto {
     userId: number;
@@ -1552,7 +1787,7 @@ declare namespace ApiTypes {
     emailVerificationCode?: string;
   }
   export interface UpdateUserSelfEmailResponseDto {
-    error?: "PERMISSION_DENIED" | "DUPLICATE_EMAIL" | "INVALID_EMAIL_VERIFICATION_CODE";
+    error?: "PERMISSION_DENIED" | "DUPLICATE_EMAIL" | "INVALID_EMAIL_VERIFICATION_CODE" | "REAUTHENTICATION_REQUIRED";
   }
   export interface UserAvatarDto {
     type: "gravatar" | "github" | "qq";

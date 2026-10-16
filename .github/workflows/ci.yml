@@ -59,9 +59,9 @@ jobs:
       - name: Run community and moderation regressions
         run: |
           node apps/backend/src/access/access-permissions.test.cjs
-          node --test --test-concurrency=1 apps/backend/src/discussion/*.test.cjs apps/backend/src/team/*.test.cjs apps/backend/src/hack/*.test.cjs apps/backend/src/self-eval/*.test.cjs apps/backend/src/submission/submission-progress.test.cjs apps/backend/src/submission/submission-fake.mariadb.test.cjs apps/backend/src/submission/submission-delete.mariadb.test.cjs apps/backend/src/file/file-upload-security.test.cjs apps/backend/src/contest/*.test.cjs apps/backend/src/problem/problem-statement.test.cjs apps/backend/src/problem/problem-mutations.mariadb.test.cjs apps/backend/src/judge/*.test.cjs apps/backend/src/submission/submission-priority.test.cjs apps/backend/src/auth/session-manager.test.cjs apps/backend/src/database/database-providers.test.cjs
+          node --test --test-concurrency=1 apps/backend/src/discussion/*.test.cjs apps/backend/src/team/*.test.cjs apps/backend/src/hack/*.test.cjs apps/backend/src/self-eval/*.test.cjs apps/backend/src/submission/submission-progress.test.cjs apps/backend/src/submission/submission-fake.mariadb.test.cjs apps/backend/src/submission/submission-delete.mariadb.test.cjs apps/backend/src/file/file-upload-security.test.cjs apps/backend/src/contest/*.test.cjs apps/backend/src/problem/problem-statement.test.cjs apps/backend/src/problem/problem-mutations.mariadb.test.cjs apps/backend/src/judge/*.test.cjs apps/backend/src/submission/submission-priority.test.cjs apps/backend/src/auth/session-manager.test.cjs apps/backend/src/database/database-providers.test.cjs apps/backend/src/auth/two-factor/*.test.cjs
           node --test deploy/fake-migration.test.cjs
-          node --test packages/frontend/test/file-upload.test.cjs
+          node --test packages/frontend/test/file-upload.test.cjs packages/frontend/test/qrcode.test.cjs
           node --test deploy/test/upgrade-schema.test.mjs deploy/test/community-schema.test.mjs deploy/test/team-storage.test.mjs deploy/test/upgrade-registration.test.mjs
           node --test deploy/test/community-schema.mariadb.test.mjs deploy/test/initialize-schema.test.mjs
           python3 deploy/test/install-flow.test.py

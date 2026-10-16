@@ -94,7 +94,7 @@ sudo systemctl reload libreoj-nginx
 
 `config/secrets.json` 的 `database`、`redis`、`minioAccess`、`minioSecret`、`session`、`maintenance`、`judge`、`instanceId` 是生成器的实例记录，不会热更新正在运行的服务。轮换应逐项同步真实数据库／服务端配置、backend.yaml、judge 节点记录和客户端，不能删除整个文件后重跑。`config/admin-credentials.json` 记录初始管理员凭据，安装器会核验后在终端显示；它不是修改管理员密码的入口。`config/install-state.json` 记录初次安装参数和阶段，不是后续扩容控制面板。
 
-AI 状态目录保存主密钥，用户 API 配置密文保存于 MariaDB 的 `ai_configuration.encrypted`；数据库与主密钥的备份、恢复必须配套，修改目录路径还需迁移对应主密钥，见 [AI 环境](AI-Environment.zh-CN.md)。不要递归 chown 整个实例来修复权限，rootfs 和评测工作区有特定 UID／挂载权限要求。
+AI 状态目录保存主密钥和 `two-factor.key`，用户 API 配置密文保存于 MariaDB 的 `ai_configuration.encrypted`，身份验证器密钥密文保存于 `user_two_factor`；数据库与主密钥的备份、恢复必须配套，修改目录路径还需迁移对应主密钥，见 [AI 环境](AI-Environment.zh-CN.md)。不要递归 chown 整个实例来修复权限，rootfs 和评测工作区有特定 UID／挂载权限要求。
 
 `deploy/backup.sh` 默认目录为 `/opt/LLMOJ`，可用 `HYHOJ_ROOT` 或优先级更高的 `--prefix PATH` 指定旧安装／自定义实例的实际路径；安装、升级或调整评测实例期间拒绝运行（共用维护锁）；只停止当前角色已安装的服务（仅网页部署没有评测服务），备份 `config`、`data`、`deploy`，排除 `data/judge`、`data/tmp`、`data/nginx`、`data/ai-generated`；退出时（包括失败时）只启动原本运行的 target 和服务，原本停止的实例保持停止。它不包含完整 rootfs、运行时二进制和 `/etc/systemd/system` drop-in；这些需另存或能够按同一版本重建。`data/ai-generated` 中未发布的生成结果也不会进入该备份。它仍不是完整运行环境或远程评测节点的备份；保存额外数据后进行恢复演练。
 

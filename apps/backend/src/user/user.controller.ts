@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, Inject, forwardRef } from "@nestjs/common";
+import { Controller, Get, Post, Body, Query, Inject, Req, forwardRef } from "@nestjs/common";
 import { ApiOperation, ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 
 import { UserEntity } from "./user.entity";
@@ -56,6 +56,9 @@ import { ConfigService } from "../config/config.service";
 import { SubmissionService } from "../submission/submission.service";
 import { AuditLogObjectType, AuditService } from "../audit/audit.service";
 import { AuthIpLocationService } from "../auth/auth-ip-location.service";
+import { AuthSessionService } from "../auth/auth-session.service";
+import { RequestWithSession } from "../auth/auth.middleware";
+import { TwoFactorService } from "../auth/two-factor/two-factor.service";
 import { UserMigrationService } from "../migration/user-migration.service";
 
 @ApiTags("User")
@@ -70,7 +73,9 @@ export class UserController {
     private readonly submissionService: SubmissionService,
     private readonly auditService: AuditService,
     private readonly authIpLocationService: AuthIpLocationService,
-    private readonly userMigrationService: UserMigrationService
+    private readonly userMigrationService: UserMigrationService,
+    private readonly authSessionService: AuthSessionService,
+    private readonly twoFactorService: TwoFactorService
   ) {}
 
   @Get("searchUser")
@@ -559,6 +564,7 @@ export class UserController {
     summary: "Change a user's password by its old password."
   })
   async updateUserPassword(
+    @Req() req: RequestWithSession,
     @CurrentUser() currentUser: UserEntity,
     @Body() request: UpdateUserPasswordRequestDto
   ): Promise<UpdateUserPasswordResponseDto> {
@@ -592,6 +598,14 @@ export class UserController {
         };
     }
 
+    // Without the old password (user managers), or with a second factor the old password alone doesn't satisfy,
+    // the change needs a recent sign-in or re-authentication of the acting user.
+    if (
+      (hasPrivilege || (await this.twoFactorService.isEnabled(currentUser.id))) &&
+      !(await this.authSessionService.isRecentlyAuthenticated(currentUser.id, req.session?.sessionId))
+    )
+      return { error: UpdateUserPasswordResponseError.REAUTHENTICATION_REQUIRED };
+
     if (this.authService.checkUserMigrated(userAuth)) await this.authService.changePassword(userAuth, request.password);
     else {
       // If the user has NOT been migrated, change its "password in old system"
@@ -614,6 +628,7 @@ export class UserController {
     summary: "Change the current user itself's email."
   })
   async updateUserSelfEmail(
+    @Req() req: RequestWithSession,
     @CurrentUser() currentUser: UserEntity,
     @Body() request: UpdateUserSelfEmailRequestDto
   ): Promise<UpdateUserSelfEmailResponseDto> {
@@ -624,6 +639,10 @@ export class UserController {
 
     if (!(await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.EditOwnProfile)))
       return { error: UpdateUserSelfEmailResponseError.PERMISSION_DENIED };
+
+    // The email address can reset the password, so changing it needs a recent sign-in or re-authentication.
+    if (!(await this.authSessionService.isRecentlyAuthenticated(currentUser.id, req.session?.sessionId)))
+      return { error: UpdateUserSelfEmailResponseError.REAUTHENTICATION_REQUIRED };
     const oldEmail = currentUser.email;
 
     const error = await this.userService.updateUserSelfEmail(currentUser, request.email, request.emailVerificationCode);

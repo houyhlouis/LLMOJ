@@ -63,6 +63,26 @@ COMMUNITY_RUNTIME_PATHS = frozenset({
     'apps/judge/src/task/self-eval/index.ts',
     'apps/judge/src/task/self-eval/self-eval.test.cjs'
 })
+# Judge runtime source an upgrade may change once the reviewed community runtime is deployed. Dependencies
+# (package manifests and the lockfile), infrastructure and other shared packages stay frozen, because the
+# installed node_modules and rootfs are reused. Changes are verified by the staged build, the judge regression
+# tests, a native rebuild and a real sandbox run instead of a hash list.
+RUNTIME_SOURCE_PREFIXES = ('apps/judge/', 'packages/judge-protocol/', 'packages/simple-sandbox/')
+# Native inputs of each package rebuilt with cmake-js, and the addons the rebuild must produce.
+NATIVE_PACKAGES = {
+    'packages/simple-sandbox': {
+        'name': 'simple-sandbox',
+        'inputs': ('packages/simple-sandbox/native/', 'packages/simple-sandbox/CMakeLists.txt'),
+        'addons': ('sandbox.node',)
+    },
+    'apps/judge': {
+        'name': '@libreoj/judge',
+        'inputs': ('apps/judge/native/', 'apps/judge/CMakeLists.txt', 'apps/judge/vendor/'),
+        'addons': ('builtin_checkers.node', 'fs_native.node', 'posix.node')
+    }
+}
+JUDGE_REGRESSIONS = ('apps/judge/src/task/hack/hack.test.cjs', 'apps/judge/src/task/self-eval/self-eval.test.cjs',
+                     'apps/judge/src/rpc.test.cjs')
 COMMUNITY_PERMISSIONS = (
     'ViewTeam', 'CreateTeam', 'ManageTeams', 'FakeSubmission',
     'ViewHack', 'CreateHack', 'ManageHack', 'CreateSelfEval'
@@ -115,7 +135,11 @@ def compatibility_digest(relative, path):
 
 
 def community_runtime_transition(source, before, after):
-    """Accept one pinned runtime transition; no wildcard or unreviewed hash."""
+    """Accept one pinned runtime transition from older baselines; no wildcard or unreviewed hash.
+
+    Paths already at the reviewed target are not part of the transition; later runtime changes to them
+    follow the general runtime policy, but may not revert them to an older baseline.
+    """
     contract_path = Path(source)/'deploy/community-runtime-contract.json'
     if not contract_path.is_file() or contract_path.is_symlink() or contract_path.stat().st_size > 32768:
         fail('Dependencies changed without the frozen community runtime contract')
@@ -145,14 +169,28 @@ def community_runtime_transition(source, before, after):
             for value in old_hashes
         ) or not isinstance(target_hash, str) or not re.fullmatch(r'[0-9a-f]{64}', target_hash):
             fail('Invalid runtime contract digest')
+        if before.get(relative) == target_hash:
+            if after.get(relative) != target_hash and after.get(relative) in old_hashes:
+                fail('Target runtime code reverts the reviewed community runtime')
+            continue
+        if before.get(relative) not in old_hashes:
+            fail('Deployed runtime code differs from the supported community baselines')
         if after.get(relative) != target_hash:
             fail('Target runtime code differs from the reviewed frozen contract')
-        if before.get(relative) != target_hash and before.get(relative) not in old_hashes:
-            fail('Deployed runtime code differs from the supported community baselines')
         approved.add(relative)
     if paths != COMMUNITY_RUNTIME_PATHS:
         fail('Incomplete community runtime contract')
     return approved
+
+
+def runtime_source(relative):
+    return relative.startswith(RUNTIME_SOURCE_PREFIXES) and Path(relative).name != 'package.json'
+
+
+def protocol_enums(text):
+    """Exported enums of the shared judge protocol, as {enum: {member: value}}."""
+    return {match[1]: dict(re.findall(r'^\s*(\w+)\s*=\s*("[^"]*"|-?\d+)\s*,?\s*$', match[2], re.M))
+            for match in re.finditer(r'export enum (\w+)\s*\{([^}]*)\}', text)}
 
 
 def source_files(root):
@@ -346,6 +384,9 @@ class Upgrade:
         self.manifest = None
         self.stage = None
         self.paused = False
+        self.runtime_changes = []
+        self.native_rebuild = []
+        self.sandbox_changed = False
 
     def sql(self, query, database=None):
         args = ['mariadb', '--protocol=socket', f'--socket={self.root}/data/mariadb/mysql.sock', '--user=root', '--batch', '--skip-column-names']
@@ -467,21 +508,27 @@ class Upgrade:
         shared = lambda name: (name.startswith(('packages/', 'apps/judge/', 'infra/')) and not name.startswith('packages/frontend/')) or name.endswith('/package.json') or name in ('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc')
         source_dependencies = {name: compatibility_digest(name, source/name) for name in source_map if shared(name)}
         old_dependencies = {name: compatibility_digest(name, self.root/name) for name in old_map if shared(name)}
-        approved_runtime = set()
-        if source_dependencies != old_dependencies:
-            approved_runtime = community_runtime_transition(source, old_map, source_map)
-            remaining_source = {name: value for name, value in source_dependencies.items() if name not in approved_runtime}
-            remaining_old = {name: value for name, value in old_dependencies.items() if name not in approved_runtime}
-            if remaining_source != remaining_old:
-                fail('Dependencies, shared packages, native judge or infrastructure changed outside the frozen runtime contract')
-            if self.role != 'all':
-                fail('The new Hack/SelfEval runtime requires an all installation; remote judges need a separately coordinated upgrade')
+        changed = {name for name in set(source_dependencies) | set(old_dependencies)
+                   if source_dependencies.get(name) != old_dependencies.get(name)}
+        approved_runtime = community_runtime_transition(source, old_map, source_map) if changed else set()
+        runtime_changes = changed - approved_runtime
+        if any(not runtime_source(name) for name in runtime_changes):
+            fail('Dependencies, infrastructure or unsupported shared packages changed outside the frozen runtime contract')
+        if approved_runtime and self.role != 'all':
+            fail('The new Hack/SelfEval runtime requires an all installation; remote judges need a separately coordinated upgrade')
+        self.runtime_changes = sorted(runtime_changes)
+        # A web installation runs no local judge or sandbox, so there is nothing native to rebuild.
+        self.native_rebuild = sorted(package for package, native in NATIVE_PACKAGES.items()
+                                     if self.role == 'all' and any(name.startswith(native['inputs']) for name in runtime_changes))
+        self.sandbox_changed = self.role == 'all' and any(name.startswith('packages/simple-sandbox/') for name in runtime_changes)
         protocol = 'packages/judge-protocol/src/index.ts'
         if protocol in source_map and protocol in old_map:
-            before = (self.root/protocol).read_text()
-            after = (source/protocol).read_text()
-            if protocol not in approved_runtime and before != after and '  JudgementFailed = "JudgementFailed",\n  Fake = "Fake"\n}' in before:
-                fail('Removing or changing the deployed Fake protocol status is unsupported; use a reviewed rollback')
+            # Judges and the backend may run different releases (remote judges, rollback), so deployed protocol
+            # values may only be added to, never removed or changed.
+            before = protocol_enums((self.root/protocol).read_text())
+            after = protocol_enums((source/protocol).read_text())
+            if any(after.get(enum, {}).get(member) != value for enum, members in before.items() for member, value in members.items()):
+                fail('Removing or changing deployed judge protocol values is unsupported; use a reviewed rollback')
         runtime_pin = re.search(r'^NODE_VERSION=([0-9.]+)$', (source/'deploy/install.sh').read_text(), re.M)
         if not runtime_pin or self.node_version != 'v'+runtime_pin[1]:
             fail('Target Node runtime differs; runtime upgrades require a separate procedure')
@@ -554,16 +601,26 @@ class Upgrade:
 
     def build(self):
         env = dict(os.environ, PATH=str(self.root/'runtime/node/bin')+':'+os.environ.get('PATH', ''), NODE_OPTIONS='--max-old-space-size=1200',
-                   pnpm_config_verify_deps_before_run='false', PNPM_BINARY=str(self.pnpm), HYHOJ_PUBLIC_DIR=str(self.stage/'public'), OJ_SITE_NAME=self.site_name)
+                   pnpm_config_verify_deps_before_run='false', PNPM_BINARY=str(self.pnpm), HYHOJ_PUBLIC_DIR=str(self.stage/'public'), OJ_SITE_NAME=self.site_name,
+                   # Native addons build offline against the installed Node headers, as the installer does.
+                   npm_config_nodedir=str(self.root/'runtime/node'))
         fd = os.open(self.backup/'build.log', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, 'wb') as log:
-            commands = [
-                [self.node, self.pnpm, '--filter', '@libreoj/judge-protocol', 'run', 'build'],
-                [self.node, self.pnpm, '--filter', '@libreoj/judge', 'run', 'check-types']
-            ]
-            regression = self.stage/'apps/judge/src/task/hack/hack.test.cjs'
-            if regression.is_file():
-                commands.append([self.node, regression])
+            commands = [[self.node, self.pnpm, '--filter', '@libreoj/judge-protocol', 'run', 'build']]
+            if self.role == 'all':
+                if self.sandbox_changed:
+                    # The sandbox's compiled TypeScript (lib) is not part of the source tree.
+                    commands.append([self.node, self.pnpm, '--filter', 'simple-sandbox', 'run', 'build'])
+                for package in self.native_rebuild:
+                    # The copied build directory belongs to the live tree; configure from scratch.
+                    shutil.rmtree(self.stage/package/'build', ignore_errors=True)
+                    commands.append([self.node, self.pnpm, '--filter', NATIVE_PACKAGES[package]['name'], 'run', 'build:native'])
+                if 'apps/judge' in self.native_rebuild:
+                    commands.append([self.node, self.pnpm, '--filter', '@libreoj/judge', 'run', 'test:native'])
+            commands.append([self.node, self.pnpm, '--filter', '@libreoj/judge', 'run', 'check-types'])
+            for regression in JUDGE_REGRESSIONS:
+                if (self.stage/regression).is_file():
+                    commands.append([self.node, '--test', self.stage/regression])
             commands.extend([
                 [self.node, self.pnpm, '--filter', '@libreoj/backend', 'run', 'build'],
                 [self.node, self.pnpm, '--filter', '@libreoj/frontend', 'run', 'build'],
@@ -573,6 +630,9 @@ class Upgrade:
                 self.host.run(command, cwd=self.stage, env=env, output=log, error_output=log, timeout=1800, umask=0o022)
         if not (self.stage/'apps/backend/dist/main.js').is_file() or not (self.stage/'public/index.html').is_file() or not (self.stage/'public/offline-manifest.json').is_file():
             fail('Build did not produce required artifacts')
+        for package in self.native_rebuild:
+            if not all((self.stage/package/'build/Release'/addon).is_file() for addon in NATIVE_PACKAGES[package]['addons']):
+                fail('Native rebuild did not produce the required addons')
         if 'LIBREOJ_SCHEMA_SYNC' not in (self.stage/'apps/backend/dist/database/database.providers.js').read_text():
             fail('Built backend does not support the schema guard')
         manifest = json.loads((self.stage/'public/offline-manifest.json').read_text())
@@ -697,6 +757,17 @@ class Upgrade:
             if self.host.active('libreoj-'+name+'.service'):
                 fail('Application service did not stop')
 
+    def verify_sandbox(self):
+        """Run the installer's sandbox check with the staged sandbox, while the judge is stopped."""
+        if not self.sandbox_changed:
+            return
+        self.host.run(['systemd-run', '--unit=libreoj-install-sandbox-check', '--wait', '--pipe', '--collect',
+                       '--property=Delegate=cpu memory pids', '--property=DelegateSubgroup=supervisor',
+                       '--property=LimitCORE=0', '--property=RuntimeMaxSec=120', '--property=TimeoutStopSec=15',
+                       '--property=WorkingDirectory='+str(self.stage/'apps/judge'),
+                       self.node, self.stage/'deploy/sandbox/verify-installed.mjs', '--root', self.root,
+                       '--sandbox', self.stage/'packages/simple-sandbox'], timeout=180)
+
     def guard_install(self):
         if not self.guard.parent.exists():
             self.guard.parent.mkdir(mode=0o755)
@@ -776,6 +847,8 @@ class Upgrade:
         self.assert_drained()
         self.manifest['status'] = 'maintenance'
         self.save()
+        # Before any database change: a sandbox that fails its check leaves nothing to undo but service states.
+        self.verify_sandbox()
         self.dump(self.backup/'database.sql')
         self.schema_on_clone(self.backup/'database.sql')
         # Audit and apply before swapping stage paths; only additive compatible DDL.
@@ -786,7 +859,7 @@ class Upgrade:
         # record the guard before the first mutation so rollback cannot let an
         # older backend synchronize away a partially applied schema.
         self.manifest['communitySchemaApplied'] = any(
-            re.search(r'`(?:team(?:_[a-z]+)*|file|discussion|submission|hack(?:_[a-z]+)*|self_eval(?:_[a-z]+)*|contest|user_privilege|user_permission_rule)`', query)
+            re.search(r'`(?:team(?:_[a-z]+)*|file|discussion|submission|hack(?:_[a-z]+)*|self_eval(?:_[a-z]+)*|contest|user_privilege|user_permission_rule|user_two_factor|user_passkey)`', query)
             for query in self.manifest['schemaQueries']
         )
         self.save()
@@ -873,6 +946,10 @@ class Upgrade:
         feature_options = "ruleOptions IS NOT NULL AND JSON_CONTAINS_PATH(ruleOptions, 'one', '$.hackEnabled', '$.hackStartTime', '$.hackEndTime', '$.selfEvalEnabled', '$.selfEvalMaxAttempts')"
         if not (supports('dist/contest/contest-rules.js', 'selfEvalEnabled') and supports('dist/contest/contest-rules.js', 'hackEnabled')) and requires('contest', feature_options, 'ruleOptions'):
             fail('Rollback refused: saved contest Hack/SelfEval settings require this release')
+        # An older backend would sign these accounts in with the password alone.
+        if not supports('dist/auth/two-factor/two-factor.service.js') and (
+            requires('user_two_factor', 'totpSecret IS NOT NULL', 'totpSecret') or requires('user_passkey')):
+            fail('Rollback refused: accounts with two-factor sign-in would be signed in by password alone; an administrator can turn it off for those accounts first, or repair this release')
         permission_catalog = candidate/'dist/access/permission-catalog.js'
         understands_permissions = permission_catalog.is_file() and all(value in permission_catalog.read_text() for value in COMMUNITY_PERMISSIONS)
         permissions = ','.join("'"+value+"'" for value in COMMUNITY_PERMISSIONS)
@@ -1013,6 +1090,10 @@ def main(argv=None):
         if args.source_sha256 and args.source_sha256 != source_hash:
             fail('Local source digest differs from the supplied trusted release digest')
         upgrade.compatibility(source)
+        info['runtimeChanges'] = len(upgrade.runtime_changes)
+        info['nativeRebuild'] = upgrade.native_rebuild
+        if upgrade.runtime_changes and upgrade.role == 'web':
+            info['remoteJudges'] = 'Judge runtime changed: update remote judges separately (wiki/Remote-Judge.md)'
         info['sourceSha256'] = source_hash
         info['requiredFreeBytes'] = upgrade.check_space(source)
     else:

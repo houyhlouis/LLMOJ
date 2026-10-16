@@ -32,3 +32,24 @@ test('unknown existing privilege values/order or custom column properties cannot
  const old=enumColumn(LEGACY_PRIVILEGES);
  for (const column of [null,enumColumn([...LEGACY_PRIVILEGES,'CustomPrivilege']),enumColumn([...LEGACY_PRIVILEGES].reverse()),enumColumn(CURRENT_PRIVILEGES.slice(0,-1)),{...old,isNullable:'YES'},{...old,defaultValue:'ManageUser'},{...old,collation:'utf8mb4_bin'},{...old,columnKey:''},{...old,comment:'custom'}]) await assert.rejects(()=>validatePrivilegeSchema(fakeColumn(column),[PRIVILEGE_EXPANSION_SQL]));
 });
+
+test('exact two-factor tables and their user foreign keys accepted', async () => {
+  const { TWO_FACTOR_SQL } = await import('../upgrade-schema.mjs');
+  assert.deepEqual(validateQueries(TWO_FACTOR_SQL.map(query => ({ query }))), [...TWO_FACTOR_SQL]);
+  const [settings, settingsForeign, passkey] = TWO_FACTOR_SQL;
+  for (const sql of [settings.replace('`totpSecret` varchar(255) NULL', '`totpSecret` varchar(255) NOT NULL'),
+    passkey.replace('UNIQUE INDEX `IDX_abafa7c255ab9f20d3398fbe5b`', 'INDEX `IDX_abafa7c255ab9f20d3398fbe5b`'),
+    settingsForeign.replace('ON DELETE CASCADE', 'ON DELETE SET NULL'), settings.replaceAll('user_two_factor', 'user_other')])
+    assert.throws(() => validateQueries([sql]));
+});
+test('two-factor tables are created with their foreign keys exactly when absent', async () => {
+  const { validateTwoFactorSchema, TWO_FACTOR_SQL } = await import('../two-factor-schema.mjs');
+  const existing = names => ({ query: async () => names.map(name => ({ name })) });
+  await validateTwoFactorSchema(existing([]), TWO_FACTOR_SQL);
+  await validateTwoFactorSchema(existing(['user_two_factor', 'user_passkey']), []);
+  await validateTwoFactorSchema(existing(['user_two_factor']), TWO_FACTOR_SQL.slice(2));
+  await assert.rejects(() => validateTwoFactorSchema(existing([]), []));
+  await assert.rejects(() => validateTwoFactorSchema(existing([]), TWO_FACTOR_SQL.filter((_, index) => index !== 3)));
+  await assert.rejects(() => validateTwoFactorSchema(existing(['user_passkey']), TWO_FACTOR_SQL));
+  await assert.rejects(() => validateTwoFactorSchema(existing([]), [...TWO_FACTOR_SQL, TWO_FACTOR_SQL[0]]));
+});

@@ -13,6 +13,7 @@ import { RequestWithSession } from "./auth.middleware";
 
 import { RegistrationReviewService } from "./registration-review.service";
 import { RegistrationReviewStatus } from "./registration-review.entity";
+import { TwoFactorService } from "./two-factor/two-factor.service";
 import {
   ListRegistrationReviewsRequestDto,
   ListRegistrationReviewsResponseDto,
@@ -82,7 +83,8 @@ export class AuthController {
     private readonly auditService: AuditService,
     private readonly userMigrationService: UserMigrationService,
     private readonly registrationReviews: RegistrationReviewService,
-    private readonly registrationSettings: RegistrationSettingsService
+    private readonly registrationSettings: RegistrationSettingsService,
+    private readonly twoFactorService: TwoFactorService
   ) {}
 
   @Get("getSessionInfo")
@@ -198,6 +200,14 @@ export class AuthController {
       return { error: LoginResponseError.REGISTRATION_PENDING };
     if (registrationStatus === RegistrationReviewStatus.Rejected)
       return { error: LoginResponseError.REGISTRATION_REJECTED };
+
+    if (await this.twoFactorService.isEnabled(user.id)) {
+      await this.auditService.log(user.id, "auth.login_two_factor_challenge");
+      return {
+        username: user.username,
+        twoFactorChallenge: await this.twoFactorService.createChallenge(user.id, req.headers.origin)
+      };
+    }
 
     await this.auditService.log(user.id, "auth.login");
 
@@ -449,6 +459,10 @@ export class AuthController {
     await this.authSessionService.revokeAllSessionsExcept(user.id, null);
 
     await this.auditService.log(user.id, "auth.reset_password");
+
+    // An email reset replaces the password, not the second factor.
+    if (await this.twoFactorService.isEnabled(user.id))
+      return { twoFactorChallenge: await this.twoFactorService.createChallenge(user.id, req.headers.origin) };
 
     return {
       token: await this.authSessionService.newSession(user, req.ip, req.headers["user-agent"])

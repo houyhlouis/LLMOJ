@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { auditSchema, applySchema, COMMUNITY_TABLES, LEGACY_SUBMISSION_STATUSES, LEGACY_PRIVILEGES, HACK_STANDARD_CONTENT_SQL,
-  FILE_SIZE_BIGINT_SQL, TEAM_FILE_SIZE_BIGINT_SQL, TEAM_QUOTA_DEFAULT_SQL } from '../upgrade-schema.mjs';
+  FILE_SIZE_BIGINT_SQL, TEAM_FILE_SIZE_BIGINT_SQL, TEAM_QUOTA_DEFAULT_SQL, TWO_FACTOR_SQL, TWO_FACTOR_TABLES } from '../upgrade-schema.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(path.join(root, 'apps/backend/package.json'));
 const configPath = process.env.HYHOJ_COMMUNITY_SCHEMA_TEST_DB_CONFIG;
@@ -38,6 +38,7 @@ test('real metadata: mature legacy upgrade, new-schema no-op, preserved data, re
     const noop = await applySchema(ds);
     assert.deepEqual(noop.queries, []); assert.equal(noop.solutions.classified, 0);
     for (const table of COMMUNITY_TABLES) await ds.query('DROP TABLE `' + table + '`');
+    for (const table of [...TWO_FACTOR_TABLES].reverse()) await ds.query('DROP TABLE `' + table + '`');
     await ds.query('ALTER TABLE `file` CHANGE `size` `size` int NOT NULL');
     await ds.query('ALTER TABLE `contest` DROP COLUMN `ruleOptions`');
     await ds.query('ALTER TABLE `contest` CHANGE `rule` `rule` varchar(8) NOT NULL');
@@ -63,11 +64,12 @@ test('real metadata: mature legacy upgrade, new-schema no-op, preserved data, re
       console.error('Rejected legacy schema proposal:', (await ds.driver.createSchemaBuilder().log()).upQueries.map(query => query.query));
       throw error;
     }
-    assert.equal(legacy.queries.length, 24);
+    assert.equal(legacy.queries.length, 28);
+    for (const sql of TWO_FACTOR_SQL) assert(legacy.queries.includes(sql), sql);
     assert.deepEqual(legacy.solutions, { pending: 0, schemaPending: true });
     assert(!legacy.queries.some(query => /DROP|TRUNCATE/.test(query)));
     const applied = await applySchema(ds);
-    assert.equal(applied.queries.length, 24);
+    assert.equal(applied.queries.length, 28);
     assert.equal(applied.solutions.classified, 1); assert.equal(applied.solutions.pending, 0);
     assert.deepEqual(await ds.query('SELECT * FROM submission ORDER BY id'), submissions);
     assert.deepEqual(await ds.query('SELECT * FROM user ORDER BY id'), accounts);
@@ -110,6 +112,17 @@ test('real metadata: mature legacy upgrade, new-schema no-op, preserved data, re
     assert.equal(Number((await ds.query('SELECT size FROM team_file'))[0].size),128);
     assert.deepEqual((await applySchema(ds)).queries,[]);
     assert.deepEqual((await auditSchema(ds)).teamStorage,{pending:0,schemaPending:false});
+    // A later release adding passkeys keeps every saved authenticator secret and recovery code.
+    await ds.query("INSERT INTO user_two_factor(userId,totpSecret,totpEnabledAt,recoveryCodes,updatedAt) VALUES (1,'v1.a.b.c','2026-10-10','[\"hash\"]','2026-10-10')");
+    const twoFactorBefore = await ds.query('SELECT * FROM user_two_factor');
+    await ds.query('DROP TABLE `user_passkey`');
+    assert.deepEqual((await auditSchema(ds)).queries, TWO_FACTOR_SQL.slice(2));
+    assert.deepEqual((await applySchema(ds)).queries, TWO_FACTOR_SQL.slice(2));
+    assert.deepEqual(await ds.query('SELECT * FROM user_two_factor'), twoFactorBefore);
+    await ds.query('ALTER TABLE `user_passkey` ADD `futureField` int NULL');
+    await assert.rejects(() => auditSchema(ds), /Unsupported schema change/);
+    await ds.query('ALTER TABLE `user_passkey` DROP COLUMN `futureField`');
+    assert.deepEqual((await auditSchema(ds)).queries, []);
     await ds.query('ALTER TABLE `submission` CHANGE `status` `status` ' + enumSql([...LEGACY_SUBMISSION_STATUSES, 'Fake', 'Hacked', 'FutureVerdict']) + ' NOT NULL');
     await assert.rejects(() => auditSchema(ds), /Unsupported existing submission status enum/);
     const unknown = (await ds.query("SELECT COLUMN_TYPE AS value FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='submission' AND COLUMN_NAME='status'"))[0].value;

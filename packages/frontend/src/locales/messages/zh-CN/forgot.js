@@ -9,6 +9,8 @@ return {
   retype_password: "确认密码",
   submit: "提交",
   success: "密码已重置",
+  two_factor_required: "密码已重置。请完成两步验证以登录。",
+  back_to_login: "返回登录",
   errors: {
     REGISTRATION_PENDING: "你的注册申请正在等待审核。尚未创建站点账户，重置密码不能代替注册审核。",
     REGISTRATION_REJECTED: "你的注册申请未获通过，尚未创建站点账户。如有疑问，请联系管理员。",

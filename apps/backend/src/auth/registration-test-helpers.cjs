@@ -49,6 +49,10 @@ function sessionService(reviews, users) {
     async callSessionManager(...args) {
       calls.push(args);
       return 1;
+    },
+    // Recent-authentication markers for sensitive changes.
+    async set() {
+      return "OK";
     }
   };
   const sessions = new AuthSessionService(

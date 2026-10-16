@@ -31,6 +31,10 @@ export interface SessionInfo extends SessionInfoInternal {
 
 const DAY_MILLISECONDS = 24 * 60 * 60 * 1000;
 
+// Sensitive account changes require a password (and second factor) entered this recently in the same session.
+const RECENT_AUTHENTICATION_SECONDS = 10 * 60;
+const REDIS_KEY_RECENT_AUTHENTICATION = "session-recent-authentication:%d:%d";
+
 // Used when the configuration doesn't set `security.sessionIdleTimeoutDays` / `security.sessionMaxAgeDays`.
 export const DEFAULT_SESSION_IDLE_TIMEOUT_DAYS = 30;
 export const DEFAULT_SESSION_MAX_AGE_DAYS = 90;
@@ -62,8 +66,25 @@ export class AuthSessionService {
     };
 
     const sessionId = await this.redis.callSessionManager("new", timeStamp, user.id, JSON.stringify(sessionInfo));
+    // Signing in is a full authentication.
+    await this.markRecentlyAuthenticated(user.id, Number(sessionId));
 
     return jwt.sign(`${user.id.toString()} ${sessionId}`, this.configService.config.security.sessionSecret);
+  }
+
+  async markRecentlyAuthenticated(userId: number, sessionId: number): Promise<void> {
+    await this.redis.set(
+      REDIS_KEY_RECENT_AUTHENTICATION.format(userId, sessionId),
+      "1",
+      "EX",
+      RECENT_AUTHENTICATION_SECONDS
+    );
+  }
+
+  /** Whether the session's user entered their credentials in the last few minutes. */
+  async isRecentlyAuthenticated(userId: number, sessionId: number): Promise<boolean> {
+    if (!userId || !sessionId) return false;
+    return (await this.redis.exists(REDIS_KEY_RECENT_AUTHENTICATION.format(userId, sessionId))) === 1;
   }
 
   private decodeSessionKey(sessionKey: string): [userId: number, sessionId: number] {

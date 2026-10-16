@@ -29,7 +29,7 @@ import { ProblemEntity } from "../problem/problem.entity";
 import { LockService } from "../redis/lock.service";
 import { escapeLike } from "../database/database.utils";
 import { ProblemPermissionType, ProblemService } from "../problem/problem.service";
-import { teamResourceAccess, teamResourceVisibilitySql } from "../team/team-access";
+import { teamResourceAccess } from "../team/team-access";
 
 export enum DiscussionReactionType {
   Discussion = "Discussion",
@@ -446,6 +446,31 @@ export class DiscussionService {
     takeCount: number,
     type?: DiscussionType
   ): Promise<[discussions: DiscussionEntity[], count: number]> {
+    const queryBuilder = await this.visibleDiscussionsQuery(
+      currentUser,
+      keyword,
+      problemId,
+      publisherId,
+      nonpublic,
+      type
+    );
+    const count = await queryBuilder.getCount();
+    const result = await queryBuilder.limit(takeCount).offset(skipCount).getRawMany();
+
+    return [await this.findDiscussionsByExistingIds(result.map(row => row.id)), count];
+  }
+
+  /**
+   * The discussions `queryDiscussionsAndCount` lists, before pagination.
+   */
+  private async visibleDiscussionsQuery(
+    currentUser: UserEntity,
+    keyword: string,
+    problemId: number,
+    publisherId: number,
+    nonpublic: boolean,
+    type?: DiscussionType
+  ) {
     const queryBuilder = this.discussionRepository.createQueryBuilder("discussion").select("discussion.id", "id");
     const [
       viewDiscussions,
@@ -490,12 +515,7 @@ export class DiscussionService {
 
     if (publisherId) queryBuilder.andWhere("discussion.publisherId = :publisherId", { publisherId });
 
-    queryBuilder.orderBy("discussion.sortTime", "DESC");
-
-    const count = await queryBuilder.getCount();
-    const result = await queryBuilder.limit(takeCount).offset(skipCount).getRawMany();
-
-    return [await this.findDiscussionsByExistingIds(result.map(row => row.id)), count];
+    return queryBuilder.orderBy("discussion.sortTime", "DESC");
   }
 
   private getDiscussionRepliesQueryBuilder(
@@ -915,11 +935,14 @@ export class DiscussionService {
     });
   }
 
-  async getDiscussionCountOfProblem(problem: ProblemEntity): Promise<number> {
-    return await this.discussionRepository
-      .createQueryBuilder("discussion")
-      .where("discussion.problemId = :problemId", { problemId: problem.id })
-      .andWhere(teamResourceVisibilitySql("discussion", "discussion.id", null))
-      .getCount();
+  /**
+   * The number of a problem's discussions or solutions that the user's discussion or solution list shows.
+   */
+  async getDiscussionCountOfProblem(
+    currentUser: UserEntity,
+    problem: ProblemEntity,
+    type: DiscussionType
+  ): Promise<number> {
+    return await (await this.visibleDiscussionsQuery(currentUser, null, problem.id, null, false, type)).getCount();
   }
 }

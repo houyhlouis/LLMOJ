@@ -28,6 +28,7 @@
 | --- | --- | --- |
 | `data/ai` | `libreoj:libreoj`，`0700` | 后端加密状态目录；初始化会检查目录所有权并收紧权限。 |
 | `data/ai/master.key` | 后端服务用户，`0600` | 必须是 32 字节普通文件、单硬链接；不接受符号链接。数据库已有加密配置而该文件丢失时拒绝启动。 |
+| `data/ai/two-factor.key` | 后端服务用户，`0600` | 文件要求相同。用于加密[两步验证](Two-Factor-Sign-In.zh-CN.md)的身份验证器密钥，首次使用时创建。须与数据库配套保存：已有用户设置身份验证器时，缺失的密钥不会被替换，这些用户的验证码将无法使用。 |
 | `data/ai-generated` | `root:libreoj`，`0750` | runner 创建并验证非符号链接目录，结果由 root 写入，后端组读取。不要改为可被任意用户写入。 |
 | `data/ai-sample-inputs` | `libreoj:libreoj`，`0700` | backend 写入，特权 runner 在验证路径、所有者、大小等条件后读取。 |
 | `data/judge/ai-runner.sock` | `root:libreoj`，`0660` | runner 根据 YAML 的正整数 `aiRunnerGid` 设置组权限；并非开放网络接口。 |

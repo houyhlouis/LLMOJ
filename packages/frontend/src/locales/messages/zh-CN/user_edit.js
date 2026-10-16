@@ -16,7 +16,8 @@ return {
     DUPLICATE_EMAIL: "邮箱已被使用。",
     FAILED: "未知错误。",
     FAILED_TO_SEND: "发送邮件失败：{errorMessage}",
-    RATE_LIMITED: "您的操作过于频繁，请稍后再试。"
+    RATE_LIMITED: "您的操作过于频繁，请稍后再试。",
+    REAUTHENTICATION_REQUIRED: "请先确认密码再进行此更改。"
   },
   profile: {
     title: "个人资料",
@@ -158,6 +159,84 @@ return {
       invalid_email_verification_code: "无效的邮箱验证码。",
       success: "修改邮箱地址成功。",
       submit: "提交"
+    },
+    two_factor: {
+      header: "两步验证",
+      on: "已开启",
+      off: "未开启",
+      on_notes: "登录时需要输入密码，然后使用{methods}验证。",
+      off_notes: "为登录增加第二步：身份验证器应用中的验证码，或通行密钥。这样即使密码泄露，他人也无法登录。",
+      on_notes_other: "该用户登录时需要密码，然后使用{methods}验证。",
+      off_notes_other: "该用户未开启两步验证。",
+      method_totp: "身份验证器验证码",
+      method_passkeys: "通行密钥",
+      separator: "或",
+      cancel: "取消",
+      totp: {
+        header: "身份验证器应用",
+        notes:
+          "使用 Google Authenticator、Microsoft Authenticator 或密码管理器等应用，每 30 秒生成一个新的 6 位验证码。",
+        set_up: "设置",
+        scan: "使用身份验证器应用扫描此二维码，然后输入应用显示的 6 位验证码。",
+        qr_title: "身份验证器应用二维码",
+        manual: "或在应用中手动输入此密钥：",
+        code: "6 位验证码",
+        invalid_code: "验证码不正确。请检查手机时间是否准确，或等待下一个验证码。",
+        enable: "开启",
+        enabled: "已开启身份验证器登录验证。",
+        enabled_since: "开启于 {time}",
+        disable: "移除",
+        confirm_disable: "确认移除",
+        disabled: "已移除身份验证器。"
+      },
+      passkeys: {
+        header: "通行密钥",
+        notes: "通行密钥使用设备的指纹、面容、屏幕锁或安全密钥登录。它只在添加时所用的网站地址上有效。",
+        name: "通行密钥名称",
+        add: "添加通行密钥",
+        added: "已添加通行密钥。",
+        removed: "已移除通行密钥。",
+        remove: "移除",
+        confirm_remove: "确认移除",
+        details: "适用于 {site}   ·   添加于 {created}   ·   上次使用 {used}",
+        never_used: "从未使用",
+        cancelled: "添加通行密钥已取消或超时。",
+        already_added: "此设备已有你账号的通行密钥。",
+        browser_error: "浏览器无法创建通行密钥：{message}",
+        unavailable: "通行密钥需要通过 HTTPS 访问本站。请使用身份验证器应用，或请站点管理员启用 HTTPS。"
+      },
+      recovery_codes: {
+        header: "恢复码",
+        remaining: "未使用的恢复码：{count} 个",
+        regenerate: "生成新的恢复码",
+        confirm_regenerate: "确认：旧恢复码将失效",
+        notes: "如果丢失手机或通行密钥，可以使用恢复码登录。每个恢复码只能使用一次。",
+        save_notes: "请将这些恢复码保存在安全的地方，例如密码管理器。每个恢复码只能使用一次，且不会再次显示。",
+        download: "下载",
+        copy: "复制",
+        copied: "已复制恢复码。",
+        copy_failed: "无法复制，请手动选中并复制恢复码。",
+        done: "我已保存"
+      },
+      reset: {
+        button: "关闭两步验证",
+        confirm: "确认关闭",
+        notes:
+          "用于丢失了手机、通行密钥和恢复码的用户。此操作会移除其全部第二步验证方式：该用户可以仅用密码登录，并重新设置。",
+        success: "已为该用户关闭两步验证。"
+      },
+      errors: {
+        PERMISSION_DENIED: "没有权限。",
+        NO_SUCH_USER: "用户不存在。",
+        ALREADY_ENABLED: "已设置身份验证器应用。",
+        NOT_ENABLED: "未开启两步验证。",
+        SETUP_EXPIRED: "设置已过期，请重新开始。",
+        INVALID_CODE: "验证码不正确。",
+        INVALID_PASSKEY: "无法添加通行密钥，请重试。",
+        PASSKEY_UNAVAILABLE: "通行密钥需要通过 HTTPS 访问本站。",
+        TOO_MANY_PASSKEYS: "最多可添加 10 个通行密钥，请先移除一个。",
+        NO_SUCH_PASSKEY: "此通行密钥已被移除。"
+      }
     },
     sessions: {
       header: "会话",

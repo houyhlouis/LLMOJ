@@ -17,6 +17,7 @@ Open the member list (`/u`) using **View all** at the top-right of the site's **
 | Optional NOI Self Eval, make/std editors, formal SPJ and whole-contest quotas | [Self-evaluation](Self-Evaluation.md) |
 | Database and judge-task migration for community and contest features | [Community upgrade](Community-Upgrade.md) |
 | Website registration settings and delegated review | [Registration approval](Registration-Approval.md) |
+| Authenticator codes, passkeys, recovery codes and confirming sensitive changes | [Two-factor sign-in](Two-Factor-Sign-In.md) |
 | Preserve configuration/data while upgrading; compatibility and rollback | [Upgrade](Upgrade.md) |
 | Installation entry points, every flag, and retries | [Installation](Installation.md) |
 | Backend YAML: accounts, security, database, mail, storage, contests, and presentation | [Backend-Configuration](Backend-Configuration.md) |

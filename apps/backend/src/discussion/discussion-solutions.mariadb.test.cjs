@@ -113,6 +113,12 @@ test("solution creation, preserved IDs/replies, My discussions, pagination and i
     await db.query("DELETE FROM " + prefix + "user_permission_rule WHERE userId=1 AND permission='ViewTeam'");
     const [restoredMine, restoredCount] = await service.queryDiscussionsAndCount(owner, false, null, -2, 1, false, 0, 10);
     assert.equal(restoredCount, 3); assert(restoredMine.some(row => row.id === solution.id));
+    // The problem page counts its discussions and solutions separately, exactly as their own lists show them.
+    await service.createDiscussion(owner, "Question", "question", problem);
+    assert.equal(await service.getDiscussionCountOfProblem(owner, problem, DiscussionType.Discussion), 1);
+    assert.equal(await service.getDiscussionCountOfProblem(owner, problem, DiscussionType.Solution), 2);
+    assert.equal(await service.getDiscussionCountOfProblem(null, problem, DiscussionType.Discussion), 1);
+    assert.equal(await service.getDiscussionCountOfProblem(null, problem, DiscussionType.Solution), 1);
     await db.query("CREATE TABLE " + prefix + "migration_discussion (id int PRIMARY KEY, publisherId int, problemId int NULL, title varchar(80))");
     await db.query("CREATE TABLE " + prefix + "migration_ai_job (id int PRIMARY KEY, ownerId int, problemId int NULL, state json)");
     await db.query("INSERT INTO " + prefix + "migration_discussion VALUES (101, 1, 20, '题解'), (102, 1, 20, 'AI proof'), (103, 2, 20, 'Different author')");

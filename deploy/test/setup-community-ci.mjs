@@ -17,7 +17,8 @@ const fixtures = [
   ['discussion', 'llmoj_features_discussion', 'HYHOJ_DISCUSSION_TEST_DB_CONFIG'],
   ['problem', 'llmoj_test_problem', 'HYHOJ_PROBLEM_TEST_DB_CONFIG'],
   ['submission', 'llmoj_test_submission', 'HYHOJ_SUBMISSION_TEST_DB_CONFIG'],
-  ['schema', 'llmoj_test_schema', 'LLMOJ_SCHEMA_TEST_DB_CONFIG']
+  ['schema', 'llmoj_test_schema', 'LLMOJ_SCHEMA_TEST_DB_CONFIG'],
+  ['two_factor', 'llmoj_test_two_factor', 'LLMOJ_TWO_FACTOR_TEST_DB_CONFIG']
 ];
 
 async function main() {
@@ -75,7 +76,7 @@ async function main() {
     }
     fs.appendFileSync(process.env.GITHUB_ENV, environment.join('\n') + '\n');
     complete = true;
-    process.stdout.write('Provisioned seven disposable, separately authorized regression databases.\n');
+    process.stdout.write('Provisioned eight disposable, separately authorized regression databases.\n');
   } finally {
     if (!complete) {
       for (const [database, username] of owned.reverse()) {

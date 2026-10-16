@@ -27,7 +27,7 @@ static bool cannot_read(const std::string &name) {
     return false;
 }
 int main(int argc, char **argv) {
-    if (argc != 5) return 10;
+    if (argc != 6) return 10;
     if (getuid() == 0 || getuid() != static_cast<unsigned>(std::strtoul(argv[4], nullptr, 10))) return 11;
     if (getpid() != 1) return 12;
     struct statvfs filesystem;
@@ -36,6 +36,8 @@ int main(int argc, char **argv) {
     char namespace_name[256] = {};
     const auto length = readlink("/proc/self/ns/net", namespace_name, sizeof(namespace_name) - 1);
     if (length < 0 || std::string(namespace_name, length) == argv[3]) return 15;
+    const auto ipc_length = readlink("/proc/self/ns/ipc", namespace_name, sizeof(namespace_name) - 1);
+    if (ipc_length < 0 || std::string(namespace_name, ipc_length) == argv[5]) return 20;
     const int descriptor = socket(AF_INET, SOCK_STREAM, 0);
     if (descriptor < 0) return 16;
     timeval timeout{1, 0};
@@ -84,7 +86,7 @@ function inspectNewCgroup(delegatedRoot, baseline, parameter) {
 }
 
 export async function verifyWithSandbox({ Sandbox, config, workingDirectory, markerPath,
-  hostNetworkNamespace, hostPort, user, delegatedRoot, active = new Set(),
+  hostNetworkNamespace, hostIpcNamespace, hostPort, user, delegatedRoot, active = new Set(),
   listGroups = listSandboxGroups, inspectCgroup = inspectNewCgroup, interrupted = () => false }) {
   if (config.sandbox.resourceMode !== "default" || !Number.isSafeInteger(user.uid) || user.uid <= 0 ||
       !Number.isSafeInteger(user.gid) || user.gid < 0) {
@@ -137,7 +139,7 @@ export async function verifyWithSandbox({ Sandbox, config, workingDirectory, mar
   const execution = await run("C++ execution/isolation", {
     ...common, time: 3000, memory: 64 * 1024 * 1024, stackSize: 64 * 1024 * 1024,
     cpuAffinity: config.cpuAffinity?.userProgram || [], executable: "/tmp/a.out",
-    parameters: ["/tmp/a.out", markerPath, String(hostPort), hostNetworkNamespace, String(user.uid)],
+    parameters: ["/tmp/a.out", markerPath, String(hostPort), hostNetworkNamespace, String(user.uid), hostIpcNamespace],
     stdin: "input.txt", stdout: "run.out", stderr: "run.err"
   });
   if (await fs.readFile(path.join(workingDirectory, "run.out"), "utf8") !== "43\n") {
@@ -197,19 +199,29 @@ async function cleanupNewCgroups(delegatedRoot, baseline) {
   if (failed) throw new VerificationError("Sandbox verification could not clean up every execution cgroup.");
 }
 
+export function parseArguments(values) {
+  const options = {};
+  for (let index = 0; index < values.length; index += 2) {
+    const key = { "--root": "root", "--sandbox": "sandbox" }[values[index]];
+    if (!key || options[key] !== undefined || !values[index + 1] || values[index + 1].startsWith("--"))
+      throw new VerificationError("Usage: node verify-installed.mjs [--root /opt/LLMOJ] [--sandbox DIRECTORY]");
+    options[key] = values[index + 1];
+  }
+  return options;
+}
+
 async function main() {
   if (process.getuid?.() !== 0) throw new VerificationError("Run the sandbox installation check with sudo through the installer.");
-  const arguments_ = process.argv.slice(2);
-  if (arguments_.length && (arguments_.length !== 2 || arguments_[0] !== "--root")) {
-    throw new VerificationError("Usage: node verify-installed.mjs [--root /opt/LLMOJ]");
-  }
-  const root = await fs.realpath(arguments_[1] || "/opt/LLMOJ");
+  const options = parseArguments(process.argv.slice(2));
+  const root = await fs.realpath(options.root || "/opt/LLMOJ");
   const require = createRequire(path.join(root, "apps/judge/package.json"));
   const config = require("js-yaml").load(await fs.readFile(path.join(root, "config/judge.yaml"), "utf8"));
   const delegatedRoot = readDelegatedRoot();
   const baseline = listSandboxGroups(delegatedRoot);
   const workspace = await installedWorkspace(root, config);
-  const sandboxRequire = createRequire(path.join(root, "packages/simple-sandbox/package.json"));
+  // The upgrader verifies its staged sandbox build before switching to it.
+  const sandboxPackage = options.sandbox ? await fs.realpath(options.sandbox) : path.join(root, "packages/simple-sandbox");
+  const sandboxRequire = createRequire(path.join(sandboxPackage, "package.json"));
   const Sandbox = sandboxRequire("./lib/index.js");
   const user = Sandbox.getUidAndGidInSandbox(config.sandbox.rootfs, config.sandbox.user);
   const active = new Set();
@@ -234,7 +246,8 @@ async function main() {
     server = createServer(socket => socket.destroy());
     await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
     const hostNetworkNamespace = await fs.readlink("/proc/self/ns/net");
-    await verifyWithSandbox({ Sandbox, config, workingDirectory, markerPath, hostNetworkNamespace,
+    const hostIpcNamespace = await fs.readlink("/proc/self/ns/ipc");
+    await verifyWithSandbox({ Sandbox, config, workingDirectory, markerPath, hostNetworkNamespace, hostIpcNamespace,
       hostPort: server.address().port, user, delegatedRoot, active, interrupted: () => interrupted });
   } finally {
     process.removeListener("SIGTERM", onSignal);
@@ -249,7 +262,7 @@ async function main() {
     try { if (temporary) await fs.rm(temporary, { recursive: true, force: true }); } catch { cleanupFailed = true; }
     if (cleanupFailed) throw new VerificationError("Sandbox installation verification failed to clean up all temporary resources; judge was not started by this check.");
   }
-  process.stdout.write("Installed LibreOJ sandbox verified: C++ 42 + 1 = 43; filesystem/PID/network isolation and default cgroup v2 limits passed.\n");
+  process.stdout.write("Installed LibreOJ sandbox verified: C++ 42 + 1 = 43; filesystem/PID/network/IPC isolation and default cgroup v2 limits passed.\n");
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

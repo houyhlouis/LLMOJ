@@ -28,6 +28,7 @@ Standard installation expects the following, with `libreoj` as the backend servi
 | --- | --- | --- |
 | `data/ai` | `libreoj:libreoj`, `0700` | Backend encryption state directory; initialization checks ownership and tightens its permissions. |
 | `data/ai/master.key` | Backend service user, `0600` | A regular 32-byte file with one hard link; symbolic links are rejected. Startup fails if encrypted configurations already exist but the key is missing. |
+| `data/ai/two-factor.key` | Backend service user, `0600` | Same file rules. Encrypts authenticator secrets of [two-factor sign-in](Two-Factor-Sign-In.md); created on first use. Keep it with the database: if users have authenticator apps set up, a missing key is never replaced and their authenticator codes stop working. |
 | `data/ai-generated` | `root:libreoj`, `0750` | Runner creates and verifies a non-symlink directory. Root writes results and the backend group reads them. Do not make it writable by arbitrary users. |
 | `data/ai-sample-inputs` | `libreoj:libreoj`, `0700` | Backend writes files; the privileged runner reads them after checking paths, ownership, size and other bounds. |
 | `data/judge/ai-runner.sock` | `root:libreoj`, `0660` | Runner assigns the positive numeric YAML `aiRunnerGid`; not an open network endpoint. |

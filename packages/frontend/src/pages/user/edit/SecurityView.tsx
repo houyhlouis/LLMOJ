@@ -6,6 +6,7 @@ import { UAParser } from "ua-parser-js";
 import * as timeago from "timeago.js";
 
 import style from "./UserEdit.module.less";
+import TwoFactorSettings from "./TwoFactorSettings";
 
 import api from "@/api";
 import { appState } from "@/appState";
@@ -16,9 +17,11 @@ import { RouteError } from "@/AppRouter";
 import fixChineseSpace from "@/utils/fixChineseSpace";
 import formatDateTime from "@/utils/formatDateTime";
 import { makeToBeLocalizedText } from "@/locales";
+import { useReauthentication } from "@/components/ReauthenticationDialog";
 
 export async function fetchData(username: string) {
   const result = {};
+  let userId: number;
 
   for (const { requestError, response } of await Promise.all([
     api.user.getUserSecuritySettings({ username }),
@@ -27,7 +30,13 @@ export async function fetchData(username: string) {
     if (requestError) throw new RouteError(requestError, { showRefresh: true, showBack: true });
     else if (response.error) throw new RouteError(makeToBeLocalizedText(`user_edit.errors.${response.error}`));
     Object.assign(result, response);
+    if ("meta" in response) userId = response.meta.id;
   }
+
+  const { requestError, response } = await api.twoFactor.getStatus({ userId });
+  if (requestError) throw new RouteError(requestError, { showRefresh: true, showBack: true });
+  else if (response.error) throw new RouteError(makeToBeLocalizedText(`user_edit.errors.${response.error}`));
+  Object.assign(result, { twoFactor: response.status });
 
   return result;
 }
@@ -36,6 +45,7 @@ interface SecurityViewProps {
   meta?: ApiTypes.UserMetaDto;
   sessions?: ApiTypes.UserSessionDto[];
   currentSessionId?: number;
+  twoFactor?: ApiTypes.TwoFactorStatusDto;
 }
 
 const SecurityView: React.FC<SecurityViewProps> = props => {
@@ -46,6 +56,8 @@ const SecurityView: React.FC<SecurityViewProps> = props => {
   }, [appState.locale, props.meta]);
 
   const hasPrivilege = appState.currentUser.isAdmin || appState.currentUserPrivileges.includes("ManageUser");
+  // Password and email changes may ask to confirm the current user's credentials first.
+  const { element: reauthenticationDialog, withReauthentication } = useReauthentication();
 
   // Start change password
   const [oldPassword, setOldPassword] = useState("");
@@ -81,11 +93,13 @@ const SecurityView: React.FC<SecurityViewProps> = props => {
     } else if (!newPassword) setEmptyNewPassword(true);
     else if (!retypePassword) setEmptyRetypePassword(true);
     else {
-      const { requestError, response } = await api.user.updateUserPassword({
-        userId: props.meta.id,
-        oldPassword: oldPassword || null,
-        password: newPassword
-      });
+      const { requestError, response } = await withReauthentication(() =>
+        api.user.updateUserPassword({
+          userId: props.meta.id,
+          oldPassword: oldPassword || null,
+          password: newPassword
+        })
+      );
       if (requestError) toast.error(requestError(_));
       else if (response.error === "WRONG_OLD_PASSWORD") {
         setWrongOldPassword(true);
@@ -149,10 +163,12 @@ const SecurityView: React.FC<SecurityViewProps> = props => {
   const [pendingChangeEmail, onSubmitChangeEmail] = useAsyncCallbackPending(async () => {
     if (emailInvalid || email.toLowerCase() === appState.currentUser.email.toLowerCase()) {
     } else {
-      const { requestError, response } = await api.user.updateUserSelfEmail({
-        email: email,
-        emailVerificationCode: emailVerificationCode
-      });
+      const { requestError, response } = await withReauthentication(() =>
+        api.user.updateUserSelfEmail({
+          email: email,
+          emailVerificationCode: emailVerificationCode
+        })
+      );
       if (requestError) toast.error(requestError(_));
       else if (response.error === "DUPLICATE_EMAIL") setDuplicateEmail(true);
       else if (response.error === "INVALID_EMAIL_VERIFICATION_CODE") setEmailVerificationCodeError(true);
@@ -208,6 +224,7 @@ const SecurityView: React.FC<SecurityViewProps> = props => {
 
   return (
     <>
+      {reauthenticationDialog}
       <form>
         <Header className={style.sectionHeader} size="large" content={_(".password.header")} />
         <input readOnly type="text" hidden autoComplete="username" value={props.meta.username} />
@@ -322,6 +339,7 @@ const SecurityView: React.FC<SecurityViewProps> = props => {
           />
         </>
       )}
+      <TwoFactorSettings meta={props.meta} status={props.twoFactor} withReauthentication={withReauthentication} />
       <Header
         className={style.sectionHeader + " " + style.bottomAttached}
         size="large"

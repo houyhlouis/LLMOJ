@@ -182,21 +182,162 @@ class RuntimeUpgradeTests(unittest.TestCase):
                 with self.assertRaisesRegex(u.UpgradeError, 'contract path|Incomplete'):
                     self.up.compatibility(self.source)
 
-    def test_dependencies_native_and_other_shared_source_changes_remain_rejected(self):
+    def test_dependencies_infrastructure_and_other_shared_packages_remain_rejected(self):
         self.runtime_fixture()
-        for relative in ('pnpm-lock.yaml', 'apps/judge/native/checker.cc', 'packages/shared/src/index.ts', 'infra/unreviewed.txt'):
+        for relative in ('pnpm-lock.yaml', 'apps/judge/package.json', 'packages/simple-sandbox/package.json',
+                         'packages/shared/src/index.ts', 'infra/unreviewed.txt'):
             with self.subTest(path=relative):
                 path = self.source/relative
                 existed = path.exists()
                 original = path.read_bytes() if existed else None
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(b'unreviewed dependency or native change')
-                with self.assertRaisesRegex(u.UpgradeError, 'outside the frozen runtime contract'):
+                path.write_bytes(b'{"dependencies": {"unreviewed": "1.0.0"}}' if relative.endswith('.json') else b'unreviewed change')
+                try:
+                    with self.assertRaisesRegex(u.UpgradeError, 'outside the frozen runtime contract'):
+                        self.up.compatibility(self.source)
+                finally:
+                    if existed:
+                        path.write_bytes(original)
+                    else:
+                        path.unlink()
+
+    def deployed_reviewed_runtime(self):
+        """An installation that already runs the reviewed community runtime."""
+        self.runtime_fixture()
+        for entry in self.contract['files']:
+            (self.root/entry['path']).parent.mkdir(parents=True, exist_ok=True)
+            (self.root/entry['path']).write_bytes((self.source/entry['path']).read_bytes())
+        self.up.compatibility(self.source)
+        self.assertEqual((self.up.runtime_changes, self.up.native_rebuild, self.up.sandbox_changed), ([], [], False))
+
+    def change(self, relative, content=b'reviewed later runtime change'):
+        path = self.source/relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+    def test_later_judge_source_changes_need_no_contract_entry(self):
+        self.deployed_reviewed_runtime()
+        for relative in ('apps/judge/src/rpc.ts', 'apps/judge/src/task/index.ts', 'packages/simple-sandbox/demo/demo.js'):
+            self.change(relative)
+        self.up.compatibility(self.source)
+        self.assertEqual(self.up.runtime_changes, ['apps/judge/src/rpc.ts', 'apps/judge/src/task/index.ts',
+                                                   'packages/simple-sandbox/demo/demo.js'])
+        self.assertEqual(self.up.native_rebuild, [])
+        self.assertTrue(self.up.sandbox_changed)
+
+    def test_native_changes_select_exactly_the_packages_to_rebuild(self):
+        self.deployed_reviewed_runtime()
+        self.change('apps/judge/native/builtin_checkers/tokens.h')
+        self.up.compatibility(self.source)
+        self.assertEqual((self.up.native_rebuild, self.up.sandbox_changed), (['apps/judge'], False))
+        self.change('packages/simple-sandbox/native/sandbox.cc')
+        self.up.compatibility(self.source)
+        self.assertEqual((self.up.native_rebuild, self.up.sandbox_changed), (['apps/judge', 'packages/simple-sandbox'], True))
+
+    def test_a_web_installation_accepts_judge_changes_without_native_work(self):
+        self.deployed_reviewed_runtime()
+        self.up.role = 'web'
+        self.change('packages/simple-sandbox/native/sandbox.cc')
+        self.change('apps/judge/src/rpc.ts')
+        self.up.compatibility(self.source)
+        self.assertEqual(len(self.up.runtime_changes), 2)
+        self.assertEqual((self.up.native_rebuild, self.up.sandbox_changed), ([], False))
+
+    def test_protocol_values_may_be_added_but_never_removed_or_changed(self):
+        self.deployed_reviewed_runtime()
+        relative = 'packages/judge-protocol/src/index.ts'
+        deployed = 'export enum JudgeTaskType {\n  Submission = "Submission",\n  Hack = "Hack"\n}\n'
+        (self.root/relative).write_text(deployed)
+        next(entry for entry in self.contract['files'] if entry['path'] == relative)['newSha256'] = u.digest(self.root/relative)
+        self.repin_test_contract()
+        self.change(relative, deployed.replace('"Hack"\n', '"Hack",\n  Durable = "Durable"\n').encode())
+        self.up.compatibility(self.source)
+        for candidate in (deployed.replace('  Hack = "Hack"\n', ''), deployed.replace('"Hack"\n}', '"Hacks"\n}'),
+                          deployed.replace('JudgeTaskType', 'RenamedTaskType')):
+            with self.subTest(candidate=candidate):
+                self.change(relative, candidate.encode())
+                with self.assertRaisesRegex(u.UpgradeError, 'judge protocol values'):
                     self.up.compatibility(self.source)
-                if existed:
-                    path.write_bytes(original)
-                else:
-                    path.unlink()
+
+    def build_fixture(self, *changes):
+        self.deployed_reviewed_runtime()
+        for relative in changes:
+            self.change(relative)
+        self.prepare()
+        manifest = {'files': [{'path': '/index.html', 'sha256': u.digest(self.up.stage/'public/index.html')}]}
+        (self.up.stage/'public/offline-manifest.json').write_text(json.dumps(manifest))
+        (self.up.stage/'apps/backend/dist/database/database.providers.js').write_text('LIBREOJ_SCHEMA_SYNC')
+        stale = self.up.stage/'packages/simple-sandbox/build/CMakeCache.txt'
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        stale.write_text('configured for the live tree')
+        addons = []
+
+        def run(args, **kwargs):
+            if 'build:native' in map(str, args):
+                package = next(path for path, native in u.NATIVE_PACKAGES.items() if native['name'] in map(str, args))
+                self.assertFalse((self.up.stage/package/'build/CMakeCache.txt').exists(), 'a stale CMake cache is reused')
+                if package not in addons:
+                    for addon in u.NATIVE_PACKAGES[package]['addons']:
+                        target = self.up.stage/package/'build/Release'/addon
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_text('addon')
+            return original(args, **kwargs)
+        original = self.host.run
+        self.host.run = run
+        return addons
+
+    def build_commands(self):
+        start = len(self.host.calls)
+        u.Upgrade.build(self.up)
+        return [call for call in self.host.calls[start:] if call and 'build.log' not in call]
+
+    def test_native_changes_are_rebuilt_offline_and_tested_before_the_backend(self):
+        self.build_fixture('packages/simple-sandbox/native/sandbox.cc', 'apps/judge/native/posix/posix.cc')
+        commands = self.build_commands()
+        scripts = [' '.join(call[call.index('--filter')+1:]) for call in commands if '--filter' in call]
+        self.assertEqual(scripts[:5], ['@libreoj/judge-protocol run build', 'simple-sandbox run build',
+                                       '@libreoj/judge run build:native', 'simple-sandbox run build:native',
+                                       '@libreoj/judge run test:native'])
+        self.assertLess(scripts.index('@libreoj/judge run check-types'), scripts.index('@libreoj/backend run build'))
+        self.assertFalse(any('install' in call for call in commands))
+
+    def test_a_native_rebuild_without_its_addons_fails_before_downtime(self):
+        addons = self.build_fixture('apps/judge/native/posix/posix.cc')
+        addons.append('apps/judge')
+        with self.assertRaisesRegex(u.UpgradeError, 'Native rebuild'):
+            u.Upgrade.build(self.up)
+        self.assertFalse(any(call[0] == 'service' for call in self.host.calls))
+
+    def test_staged_judge_regressions_run_when_present(self):
+        self.build_fixture('apps/judge/src/rpc.ts')
+        for relative in u.JUDGE_REGRESSIONS:
+            (self.up.stage/relative).parent.mkdir(parents=True, exist_ok=True)
+            (self.up.stage/relative).write_text('test')
+        commands = self.build_commands()
+        tested = [call[-1] for call in commands if '--test' in call]
+        self.assertEqual(tested, [str(self.up.stage/relative) for relative in u.JUDGE_REGRESSIONS])
+
+    def test_a_changed_sandbox_is_verified_in_the_maintenance_window_before_schema_changes(self):
+        self.deployed_reviewed_runtime()
+        self.change('packages/simple-sandbox/native/sandbox.cc')
+        self.prepare()
+        self.up.activate()
+        checks = [index for index, call in enumerate(self.host.calls) if call and call[0] == 'systemd-run']
+        self.assertEqual(len(checks), 1)
+        check = self.host.calls[checks[0]]
+        self.assertIn('--unit=libreoj-install-sandbox-check', check)
+        self.assertEqual(check[check.index('--sandbox')+1], str(self.up.stage/'packages/simple-sandbox'))
+        stopped = self.host.calls.index(('service', 'stop', 'libreoj-judge.service'))
+        dumps = [index for index, call in enumerate(self.host.calls) if call and call[0] == 'mariadb-dump']
+        self.assertLess(stopped, checks[0])
+        self.assertLess(checks[0], dumps[-1])
+
+    def test_an_unchanged_sandbox_is_not_reverified(self):
+        self.deployed_reviewed_runtime()
+        self.change('apps/judge/src/rpc.ts')
+        self.prepare()
+        self.up.activate()
+        self.assertFalse(any(call and call[0] == 'systemd-run' for call in self.host.calls))
 
     def test_new_runtime_cannot_be_downgraded_through_the_forward_contract(self):
         self.runtime_fixture()
@@ -306,6 +447,9 @@ class RuntimeUpgradeTests(unittest.TestCase):
 
     def test_hack_ddl_preserves_schema_sync_guard_on_empty_data_rollback(self):
         self.assert_guard_survives('CREATE TABLE `hack_problem` (...)')
+
+    def test_two_factor_ddl_preserves_schema_sync_guard_on_empty_data_rollback(self):
+        self.assert_guard_survives('CREATE TABLE `user_passkey` (...)')
 
     def test_self_eval_ddl_preserves_schema_sync_guard_on_empty_data_rollback(self):
         self.assert_guard_survives('CREATE TABLE `self_eval_quota` (...)')

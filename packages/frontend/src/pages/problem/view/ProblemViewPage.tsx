@@ -782,9 +782,13 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
                 as={Link}
                 href={{ pathname: getProblemUrl(props.problem.meta), query: { tab: "solutions" } }}
                 active={props.showSolutions}
-                icon="book"
-                name={_(".action.solutions")}
-              />
+              >
+                <Icon name="book" />
+                {_(".action.solutions")}
+                {props.problem.solutionCount ? (
+                  <Label className={style.discussionCount} circular content={props.problem.solutionCount} size="tiny" />
+                ) : null}
+              </Menu.Item>
               {props.showSolutions && (
                 <Menu.Item
                   as={Link}

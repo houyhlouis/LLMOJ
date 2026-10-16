@@ -11,6 +11,7 @@
 | [Installation](Installation.zh-CN.md) | 安装入口、全部参数和安装重试 |
 | [Backend-Configuration](Backend-Configuration.zh-CN.md) | 后端 YAML：账号、安全、数据库、邮件、存储、比赛和显示偏好 |
 | [Registration-Approval](Registration-Approval.zh-CN.md) | 网站管理中的注册方式、YAML 回退与委派审核 |
+| [Two-Factor-Sign-In](Two-Factor-Sign-In.zh-CN.md) | 用户自行开启的身份验证器验证码与通行密钥、恢复方式及 `two-factor.key` 文件；无 YAML 设置 |
 | [Judge-Configuration](Judge-Configuration.zh-CN.md) | 评测 YAML、CPU／内存扩缩容、服务单元、验证和回滚 |
 | [AI](AI.zh-CN.md) | 用户 AI 模型、搜索服务、权限和任务设置 |
 | [AI-Environment](AI-Environment.zh-CN.md) | AI 目录、沙盒通信、密钥持久化和环境变量 |

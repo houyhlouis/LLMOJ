@@ -1,5 +1,7 @@
 import { ApiProperty } from "@nestjs/swagger";
 
+import { TwoFactorChallengeDto } from "../two-factor/two-factor.dto";
+
 export enum LoginResponseError {
   REGISTRATION_PENDING = "REGISTRATION_PENDING",
   REGISTRATION_REJECTED = "REGISTRATION_REJECTED",
@@ -18,4 +20,8 @@ export class LoginResponseDto {
 
   @ApiProperty()
   username?: string;
+
+  // The password was right; sign-in continues with twoFactor/completeLogin.
+  @ApiProperty({ required: false })
+  twoFactorChallenge?: TwoFactorChallengeDto;
 }

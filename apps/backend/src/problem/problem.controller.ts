@@ -88,6 +88,7 @@ import { Locale } from "../common/locale.type";
 import { SubmissionService } from "../submission/submission.service";
 import { AuditLogObjectType, AuditService } from "../audit/audit.service";
 import { DiscussionService } from "../discussion/discussion.service";
+import { DiscussionType } from "../discussion/discussion-type.enum";
 
 @ApiTags("Problem")
 @Controller("problem")
@@ -483,8 +484,11 @@ export class ProblemController {
     if (request.discussionCount)
       promises.push(
         this.discussionService
-          .getDiscussionCountOfProblem(problem)
-          .then(discussionCount => (result.discussionCount = discussionCount))
+          .getDiscussionCountOfProblem(currentUser, problem, DiscussionType.Discussion)
+          .then(discussionCount => (result.discussionCount = discussionCount)),
+        this.discussionService
+          .getDiscussionCountOfProblem(currentUser, problem, DiscussionType.Solution)
+          .then(solutionCount => (result.solutionCount = solutionCount))
       );
 
     if (request.permissionOfCurrentUser) {

@@ -16,6 +16,8 @@ return {
   no_such_user: "用户不存在",
   wrong_password: "密码错误",
   welcome: "欢迎回来，{username}！",
+  two_factor_header: "两步验证",
+  back_to_password: "返回登录",
   errors: {
     REGISTRATION_PENDING: "你的注册申请正在等待审核。通过后才会创建站点账户，届时即可登录。",
     REGISTRATION_REJECTED: "你的注册申请未获通过，尚未创建站点账户。如有疑问，请联系管理员。",

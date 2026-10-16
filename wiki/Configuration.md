@@ -11,6 +11,7 @@ This reference is checked against the installer, schemas, examples, consumers, a
 | [Installation](Installation.md) | Installation entry points, every flag, and retries |
 | [Backend-Configuration](Backend-Configuration.md) | Backend YAML: accounts, security, database, mail, storage, contests, and presentation |
 | [Registration-Approval](Registration-Approval.md) | Website registration policy, YAML fallback and delegated review |
+| [Two-Factor-Sign-In](Two-Factor-Sign-In.md) | Per-user authenticator codes and passkeys, recovery, and the `two-factor.key` file; no YAML setting |
 | [Judge-Configuration](Judge-Configuration.md) | Judge YAML, CPU/RAM resizing, service units, verification, and rollback |
 | [AI](AI.md) | Per-user AI models, search, permissions, and jobs |
 | [AI-Environment](AI-Environment.md) | AI directories, sandbox communication, key persistence, and environment |
