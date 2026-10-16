@@ -451,6 +451,9 @@ class RuntimeUpgradeTests(unittest.TestCase):
     def test_two_factor_ddl_preserves_schema_sync_guard_on_empty_data_rollback(self):
         self.assert_guard_survives('CREATE TABLE `user_passkey` (...)')
 
+    def test_judge_queue_ddl_preserves_schema_sync_guard_on_empty_data_rollback(self):
+        self.assert_guard_survives('CREATE TABLE `judge_job_attempt` (...)')
+
     def test_self_eval_ddl_preserves_schema_sync_guard_on_empty_data_rollback(self):
         self.assert_guard_survives('CREATE TABLE `self_eval_quota` (...)')
 

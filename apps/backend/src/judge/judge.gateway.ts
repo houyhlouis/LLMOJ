@@ -1,4 +1,4 @@
-import { forwardRef, Inject } from "@nestjs/common";
+import { forwardRef, Inject, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import {
   ConnectedSocket,
   MessageBody,
@@ -20,7 +20,14 @@ import { JudgeClientService } from "./judge-client.service";
 
 import { JudgeClientEntity } from "./judge-client.entity";
 
-import { JudgeQueueService, JudgeTask, JudgeTaskExtraInfo } from "./judge-queue.service";
+import {
+  JudgeQueueService,
+  JudgeTask,
+  JudgeTaskExtraInfo,
+  LEASE_RENEW_INTERVAL,
+  LeasedJudgeTask
+} from "./judge-queue.service";
+import { JudgeJobAttemptOutcome } from "./judge-job.entity";
 
 import { logger } from "../logger";
 import { MinioSignFor, FileService, JUDGE_FILE_DOWNLOAD_EXPIRE_TIME } from "../file/file.service";
@@ -31,12 +38,17 @@ import { RedisService } from "../redis/redis.service";
 import { LockService } from "../redis/lock.service";
 import { SOCKET_IO_MAX_MESSAGE_SIZE } from "../socket-io.constants";
 
+// A task sent to a judge client connection, under the lease with this fence.
+interface JudgeTaskAssignment {
+  task: JudgeTask<JudgeTaskExtraInfo>;
+  fence: number;
+}
+
 interface JudgeClientState {
   judgeClient: JudgeClientEntity;
-  pendingTasks: Set<JudgeTask<JudgeTaskExtraInfo>>;
-  // Tasks sent to this client, by task ID: pending ones and those acknowledged within the grace time.
+  // Tasks sent to this client, by task ID: until it acknowledges them, plus a grace time.
   // A client may only report progress for, and download files of, its own assigned tasks.
-  assignedTasks: Map<string, JudgeTask<JudgeTaskExtraInfo>>;
+  assignedTasks: Map<string, JudgeTaskAssignment>;
 }
 
 interface SubmissionProgressMessage {
@@ -52,9 +64,10 @@ const REDIS_LOCK_JUDGE_CLIENT_CONNECT_DISCONNECT = "judge-client-connect-disconn
 
 const REDIS_CHANNEL_CANCEL_TASK = "cancel-task";
 
-// Judge clients without progress acknowledgement may send their last (debounced) progress just after
-// acknowledging the task, so an acknowledged task stays assigned to its client for a short while.
-const ACKNOWLEDGED_TASK_GRACE_TIME = 60 * 1000;
+// Judge clients send a task's result before acknowledging the task. Older ones (without progress acknowledgement)
+// may send it a moment after, so an acknowledged task stays assigned to its client for a short while. A lease still
+// held after that ended without a result, and its job is queued again.
+const ACKNOWLEDGED_TASK_GRACE_TIME = 10 * 1000;
 
 const MAX_FILES_PER_REQUEST = 10000;
 
@@ -92,7 +105,7 @@ function collectFileUuids(value: unknown, result: Set<string>): void {
   transports: ["websocket"],
   parser: SocketIOParser
 })
-export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit, OnModuleDestroy {
   @WebSocketServer()
   private server: Server;
 
@@ -104,6 +117,8 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   // To subscribe the "cancel task" event
   private redisForSubscribe: Redis;
+
+  private leaseRenewalTimer: ReturnType<typeof setInterval>;
 
   constructor(
     private readonly judgeClientService: JudgeClientService,
@@ -125,9 +140,29 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.redisForSubscribe.subscribe(REDIS_CHANNEL_CANCEL_TASK);
   }
 
+  onModuleInit(): void {
+    this.leaseRenewalTimer = setInterval(() => {
+      this.renewLeases().catch(e => logger.error(`Failed to renew judge task leases: ${e}`));
+    }, LEASE_RENEW_INTERVAL);
+    this.leaseRenewalTimer.unref();
+  }
+
+  onModuleDestroy(): void {
+    clearInterval(this.leaseRenewalTimer);
+  }
+
+  // The leases of the tasks sent to connected judge clients don't expire while they stay connected.
+  private async renewLeases(): Promise<void> {
+    const leases = [...this.mapSessionIdToJudgeClient].flatMap(([connectionId, state]) =>
+      [...state.assignedTasks.keys()].map(taskId => ({ taskId, connectionId }))
+    );
+    await this.judgeQueueService.renewLeases(leases);
+  }
+
   // Send the cancel task operation to ALL nodes
   cancelTask(taskId: string) {
     this.redis.publish(REDIS_CHANNEL_CANCEL_TASK, taskId);
+    this.judgeQueueService.cancel(taskId).catch(e => logger.error(`Failed to cancel the job of task ${taskId}: ${e}`));
   }
 
   onCancelTask(taskId: string): void {
@@ -172,7 +207,6 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       this.mapSessionIdToJudgeClient.set(client.id, {
         judgeClient,
-        pendingTasks: new Set(),
         assignedTasks: new Map()
       });
     });
@@ -218,17 +252,23 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect {
         await this.judgeClientService.disconnectJudgeClient(state.judgeClient);
     });
 
-    if (state.pendingTasks.size !== 0) {
+    if (state.assignedTasks.size !== 0) {
       logger.log(
-        `Repushing ${state.pendingTasks.size} tasks consumed by judge client ${client.id} (${state.judgeClient.name}).`
+        `Releasing ${state.assignedTasks.size} tasks of judge client ${client.id} (${state.judgeClient.name}).`
       );
-      // Push the pending tasks back to the queue
+      // Queue unfinished tasks again (a finished task's lease is no longer current, so it's left alone)
       await Promise.all(
-        Array.from(state.pendingTasks.values()).map(async task => {
-          this.mapTaskIdToSocket.delete(task.taskId);
-          await this.judgeQueueService.pushTask(task.taskId, task.type, task.priority, true);
+        Array.from(state.assignedTasks.values()).map(async ({ task, fence }) => {
+          if (this.mapTaskIdToSocket.get(task.taskId) === client) this.mapTaskIdToSocket.delete(task.taskId);
+          try {
+            await this.judgeQueueService.release(task.taskId, fence, client.id, JudgeJobAttemptOutcome.Disconnected);
+          } catch (e) {
+            // The lease is no longer renewed, so it expires and is reclaimed
+            logger.error(`Failed to release judge task ${task.taskId}: ${e}`);
+          }
         })
       );
+      state.assignedTasks.clear();
     }
 
     // Report event
@@ -279,7 +319,7 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const allowedFileUuids = new Set<string>();
-    state.assignedTasks.forEach(task => collectFileUuids(task.extraInfo, allowedFileUuids));
+    state.assignedTasks.forEach(({ task }) => collectFileUuids(task.extraInfo, allowedFileUuids));
     const deniedCount = fileUuids.filter(fileUuid => !allowedFileUuids.has(fileUuid)).length;
     if (deniedCount > 0) {
       logger.warn(
@@ -312,42 +352,55 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     /* eslint-disable no-await-in-loop */
     while (await this.checkConnection(client)) {
-      let task: JudgeTask<JudgeTaskExtraInfo>;
+      let leased: LeasedJudgeTask;
       try {
-        task = await this.judgeQueueService.consumeTask();
+        leased = await this.judgeQueueService.claim({ connectionId: client.id, judgeClientId: state.judgeClient.id });
       } catch (e) {
         // The client waits for a task for this thread until it reconnects, so never give up on its request.
         logger.error(`Failed to consume judge queue for client ${client.id} (${state.judgeClient.name}): ${e}`);
         await new Promise(resolve => setTimeout(resolve, CONSUME_TASK_RETRY_DELAY));
         continue;
       }
-      if (!task) continue;
+      if (!leased) {
+        await this.judgeQueueService.waitForJobs();
+        continue;
+      }
 
+      const { task, fence } = leased;
       if (!(await this.checkConnection(client))) {
         logger.verbose(
-          `Consumed task for client ${client.id} (${state.judgeClient.name}), but connection became invalid, repushing task back to queue`
+          `Leased task for client ${client.id} (${state.judgeClient.name}), but connection became invalid, releasing it`
         );
-        await this.judgeQueueService.pushTask(task.taskId, task.type, task.priority, true);
+        await this.judgeQueueService.release(task.taskId, fence, client.id, JudgeJobAttemptOutcome.Disconnected);
         return;
       }
 
-      state.pendingTasks.add(task);
-      state.assignedTasks.set(task.taskId, task);
+      const assignment: JudgeTaskAssignment = { task, fence };
+      state.assignedTasks.set(task.taskId, assignment);
       this.mapTaskIdToSocket.set(task.taskId, client);
-      client.emit("task", threadId, task, () => {
-        logger.verbose(
-          `Judge client ${client.id} (${state.judgeClient.name}) acknowledged task { taskId: ${task.taskId}, type: ${task.type} }`
-        );
-        state.pendingTasks.delete(task);
-        this.mapTaskIdToSocket.delete(task.taskId);
-        setTimeout(() => {
-          if (state.assignedTasks.get(task.taskId) === task) state.assignedTasks.delete(task.taskId);
-        }, ACKNOWLEDGED_TASK_GRACE_TIME).unref();
-      });
+      client.emit("task", threadId, task, () => this.onTaskAcknowledged(client, state, assignment));
 
       return;
     }
     /* eslint-enable no-await-in-loop */
+  }
+
+  private onTaskAcknowledged(client: Socket, state: JudgeClientState, assignment: JudgeTaskAssignment): void {
+    const { task, fence } = assignment;
+    logger.verbose(
+      `Judge client ${client.id} (${state.judgeClient.name}) acknowledged task { taskId: ${task.taskId}, type: ${task.type} }`
+    );
+    if (this.mapTaskIdToSocket.get(task.taskId) === client) this.mapTaskIdToSocket.delete(task.taskId);
+    setTimeout(async () => {
+      if (state.assignedTasks.get(task.taskId) !== assignment) return;
+      state.assignedTasks.delete(task.taskId);
+      try {
+        // A no-op once the result has been stored
+        await this.judgeQueueService.release(task.taskId, fence, client.id, JudgeJobAttemptOutcome.Abandoned);
+      } catch (e) {
+        logger.error(`Failed to release judge task ${task.taskId}: ${e}`);
+      }
+    }, ACKNOWLEDGED_TASK_GRACE_TIME).unref();
   }
 
   /**
@@ -370,15 +423,19 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return false;
     }
 
-    const assignedTask = state.assignedTasks.get(message.taskMeta.taskId);
-    if (!assignedTask || assignedTask.type !== message.taskMeta.type) {
+    const assignment = state.assignedTasks.get(message.taskMeta.taskId);
+    if (!assignment || assignment.task.type !== message.taskMeta.type) {
       logger.warn(
         `Judge client ${client.id} (${state.judgeClient.name}) reported progress for task ${message.taskMeta.taskId} not assigned to it, ignoring`
       );
       return false;
     }
 
-    const notCanceled = await this.judgeQueueService.onTaskProgress(message.taskMeta, message.progress);
+    const notCanceled = await this.judgeQueueService.onTaskProgress(
+      message.taskMeta,
+      { fence: assignment.fence, connectionId: client.id },
+      message.progress
+    );
     if (!notCanceled) {
       logger.log(`Emitting cancel event for task ${message.taskMeta.taskId}`);
       client.emit("cancel", message.taskMeta.taskId);

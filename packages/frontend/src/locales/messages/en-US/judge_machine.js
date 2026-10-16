@@ -21,6 +21,28 @@ return {
   delete: "Delete",
   confirm_delete: "Confirm delete",
   delete_success: "Successfully deleted.",
+  queue: {
+    header: "Judge queue",
+    waiting: "Waiting: {count}",
+    oldest: "(oldest queued {time})",
+    leased: "Being judged: {count}",
+    failed: "Given up in the last 7 days: {count}",
+    empty: "No task is waiting or being judged.",
+    state: "State",
+    states: { Queued: "Waiting", Leased: "Being judged", Failed: "Given up" },
+    type: "Type",
+    types: { Submission: "Submission", Hack: "Hack", SelfEvalPrepare: "Self Eval data", SelfEval: "Self Eval" },
+    task: "Task",
+    judge_machine: "Judge machine",
+    sent: "Sent",
+    sent_notes: "How many times the task has been sent to a judge machine",
+    interrupted: "Retries",
+    interrupted_notes: "Interruptions (a judge machine or backend stopped) and preparation failures",
+    created: "Queued at",
+    last_error: "Last error",
+    notes:
+      "Tasks are kept in the database. A task interrupted by a disconnected judge machine or a stopped backend is queued again by itself. After 5 interruptions or 10 failures to prepare it, the task is given up on: its submission shows System Error and can be rejudged."
+  },
   error: {
     PERMISSION_DENIED: "Permission denied.",
     NO_SUCH_JUDGE_CLIENT: "No such judge machine."

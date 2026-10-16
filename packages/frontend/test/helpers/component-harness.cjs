@@ -148,6 +148,7 @@ function componentHarness(file, options = {}) {
     },
     "@/initApp": { refreshSession: async () => calls.push({ name: "refreshSession" }) },
     "@/components/PseudoLink": { name: "PseudoLink" },
+    "@/components/TwoFactorPrompt": { name: "TwoFactorPrompt" },
     "@/components/UserSearch": { name: "UserSearch" },
     "@/utils/extensionApi": {
       extensionApi: async (name, body) => {

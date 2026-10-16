@@ -64,7 +64,7 @@ test("fake retains evidence, updates statistics and resists judge races (real Ma
     }});
     const events = [], audits = [], canceled = [], queued = [];
     Object.assign(svc, { connection: db, submissionRepository: subs, submissionDetailRepository: details, problemService, userService, lockService: locks,
-      submissionStatisticsService: stats, judgeGateway: { cancelTask: id => canceled.push(id) }, judgeQueueService: { pushTask: async (...args) => queued.push(args) },
+      submissionStatisticsService: stats, judgeGateway: { cancelTask: id => canceled.push(id) }, judgeQueueService: { enqueue: async (...args) => queued.push(args), notifyJobsAvailable() {} },
       submissionProgressService: { emitSubmissionEvent: async (...args) => events.push(args) }, auditService: { log: async (...args) => audits.push(args) },
       configService: { config: { preference: { serverSideOnly: { dynamicTaskPriority: false } } } },
       problemTypeFactoryService: { type: () => ({ getTimeAndMemoryUsedFromFinishedSubmissionProgress: () => ({ timeUsed: 4, memoryUsed: 8 }) }) },

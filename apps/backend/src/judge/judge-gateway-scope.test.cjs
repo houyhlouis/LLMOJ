@@ -48,6 +48,10 @@ const { JudgeGateway } = load("judge.gateway.ts", {
   "socket.io-msgpack-parser": {},
   "proxy-addr": () => "127.0.0.1",
   "@libreoj/judge-protocol": protocol,
+  "./judge-queue.service": { LEASE_RENEW_INTERVAL: 30000 },
+  "./judge-job.entity": {
+    JudgeJobAttemptOutcome: { Disconnected: "Disconnected", Abandoned: "Abandoned", Expired: "Expired" }
+  },
   "../logger": { logger: { log: noop, verbose: noop, error: noop, warn: message => warnings.push(message) } },
   "../file/file.service": { MinioSignFor: { Judge: "Judge" }, JUDGE_FILE_DOWNLOAD_EXPIRE_TIME: 21600 },
   "../event-report/event-report.service": { EventReportType: { Success: "Success", Warning: "Warning" } },
@@ -57,9 +61,14 @@ const { JudgeGateway } = load("judge.gateway.ts", {
 const uuid = n => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 function fixture() {
+  // Tasks to lease next (an Error makes the claim fail once)
   const queue = [];
   const progress = [];
   const signed = [];
+  const released = [];
+  const renewed = [];
+  const canceled = [];
+  let fence = 0;
   const redis = { on: noop, subscribe: noop, publish: noop, del: async () => 1, setex: async () => "OK" };
   const gateway = new JudgeGateway(
     {
@@ -70,16 +79,19 @@ function fixture() {
       isJudgeClientOnline: async () => true
     },
     {
-      consumeTask: async () => {
+      claim: async () => {
         const next = queue.shift();
         if (next instanceof Error) throw next;
-        return next ?? null;
+        return next ? { task: next, fence: ++fence } : null;
       },
-      onTaskProgress: async (taskMeta, value) => {
-        progress.push([taskMeta.taskId, value]);
+      waitForJobs: async () => {},
+      release: async (...args) => released.push(args),
+      renewLeases: async leases => renewed.push(leases),
+      cancel: async taskId => canceled.push(taskId),
+      onTaskProgress: async (taskMeta, lease, value) => {
+        progress.push([taskMeta.taskId, lease, value]);
         return true;
-      },
-      pushTask: async () => {}
+      }
     },
     {
       signDownloadLink: async options => {
@@ -105,7 +117,7 @@ function fixture() {
     await gateway.handleConnection(client);
     return { client, emitted };
   }
-  return { gateway, queue, progress, signed, connect };
+  return { gateway, queue, progress, signed, released, renewed, canceled, connect };
 }
 
 const submissionTask = (taskId, files) => ({
@@ -123,7 +135,7 @@ test("judge clients learn that the server acknowledges processed progress", asyn
   assert.deepEqual(ready.slice(1), ["judge-1", { limit: {} }, { progressAck: true }]);
 });
 
-test("progress is only accepted from the client the task was assigned to", async () => {
+test("progress is only accepted from the client the task was leased to, with that lease", async () => {
   const { gateway, queue, progress, connect } = fixture();
   const a = await connect(1);
   const b = await connect(2);
@@ -134,19 +146,22 @@ test("progress is only accepted from the client the task was assigned to", async
   const meta = { taskId: "task-a", type: "Submission" };
   assert.equal(await gateway.onProgress(b.client, { taskMeta: meta, progress: { forged: true } }), false);
   assert.equal(await gateway.onProgress(a.client, { taskMeta: { ...meta, type: "Hack" }, progress: {} }), false);
-  assert.equal(await gateway.onProgress(a.client, { taskMeta: { taskId: "other", type: "Submission" }, progress: {} }), false);
+  assert.equal(
+    await gateway.onProgress(a.client, { taskMeta: { taskId: "other", type: "Submission" }, progress: {} }),
+    false
+  );
   for (const invalid of [null, {}, { taskMeta: { taskId: 1, type: "Submission" } }, { taskMeta: { taskId: "x" } }])
     assert.equal(await gateway.onProgress(a.client, invalid), false);
   assert.deepEqual(progress, []);
 
   // The returned value is the Socket.IO acknowledgement, sent once the progress has been processed.
   assert.equal(await gateway.onProgress(a.client, { taskMeta: meta, progress: { done: true } }), true);
-  assert.deepEqual(progress, [["task-a", { done: true }]]);
+  assert.deepEqual(progress, [["task-a", { fence: 1, connectionId: "socket-1" }, { done: true }]]);
 });
 
-test("a finished task stays assigned for late progress from older clients, then expires", async t => {
+test("an acknowledged task stays assigned for late progress from older clients, then its lease is released", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const { gateway, queue, progress, connect } = fixture();
+  const { gateway, queue, progress, released, connect } = fixture();
   const a = await connect(1);
   queue.push(submissionTask("task-a", [uuid(1)]));
   await gateway.onConsumeTask(a.client, 0);
@@ -155,9 +170,43 @@ test("a finished task stays assigned for late progress from older clients, then 
 
   const message = { taskMeta: { taskId: "task-a", type: "Submission" }, progress: { late: true } };
   assert.equal(await gateway.onProgress(a.client, message), true);
-  t.mock.timers.tick(60 * 1000);
+  t.mock.timers.tick(10 * 1000);
+  await new Promise(setImmediate);
   assert.equal(await gateway.onProgress(a.client, message), false);
   assert.equal(progress.length, 1);
+  // A no-op in the queue if the result was stored; otherwise the task is judged again
+  assert.deepEqual(released, [["task-a", 1, "socket-1", "Abandoned"]]);
+});
+
+test("a disconnected client's leases are released, and only connected tasks are renewed", async () => {
+  const { gateway, queue, released, renewed, connect } = fixture();
+  const a = await connect(1);
+  const b = await connect(2);
+  queue.push(submissionTask("task-a", []), submissionTask("task-b", []), submissionTask("task-c", []));
+  await gateway.onConsumeTask(a.client, 0);
+  await gateway.onConsumeTask(a.client, 1);
+  await gateway.onConsumeTask(b.client, 0);
+  await gateway.renewLeases();
+  assert.deepEqual(renewed.at(-1), [
+    { taskId: "task-a", connectionId: "socket-1" },
+    { taskId: "task-b", connectionId: "socket-1" },
+    { taskId: "task-c", connectionId: "socket-2" }
+  ]);
+  a.client.connected = false;
+  await gateway.handleDisconnect(a.client);
+  assert.deepEqual(released, [
+    ["task-a", 1, "socket-1", "Disconnected"],
+    ["task-b", 2, "socket-1", "Disconnected"]
+  ]);
+  await gateway.renewLeases();
+  assert.deepEqual(renewed.at(-1), [{ taskId: "task-c", connectionId: "socket-2" }]);
+});
+
+test("canceling a task also cancels its job", async () => {
+  const { gateway, canceled } = fixture();
+  gateway.cancelTask("task-a");
+  await new Promise(setImmediate);
+  assert.deepEqual(canceled, ["task-a"]);
 });
 
 test("files are only signed when referenced by the requesting client's tasks, with a bounded lifetime", async () => {
@@ -188,7 +237,7 @@ test("files are only signed when referenced by the requesting client's tasks, wi
 test("a queue error does not drop the client's request for a task", async () => {
   const { gateway, queue, connect } = fixture();
   const a = await connect(1);
-  queue.push(new Error("redis unavailable"), submissionTask("task-a", []));
+  queue.push(new Error("database unavailable"), submissionTask("task-a", []));
   await gateway.onConsumeTask(a.client, 3);
   assert(a.emitted.some(([event, threadId, task]) => event === "task" && threadId === 3 && task.taskId === "task-a"));
 });

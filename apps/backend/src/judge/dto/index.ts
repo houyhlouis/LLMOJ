@@ -8,3 +8,5 @@ export * from "./delete-judge-client-request.dto";
 export * from "./delete-judge-client-response.dto";
 
 export * from "./list-judge-clients-response.dto";
+
+export * from "./get-judge-queue-status-response.dto";

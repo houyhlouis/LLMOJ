@@ -21,6 +21,28 @@ return {
   delete: "删除",
   confirm_delete: "确认删除",
   delete_success: "删除成功。",
+  queue: {
+    header: "评测队列",
+    waiting: "等待中：{count}",
+    oldest: "（最早于 {time} 入队）",
+    leased: "评测中：{count}",
+    failed: "近 7 天放弃：{count}",
+    empty: "没有等待或正在评测的任务。",
+    state: "状态",
+    states: { Queued: "等待中", Leased: "评测中", Failed: "已放弃" },
+    type: "类型",
+    types: { Submission: "提交", Hack: "Hack", SelfEvalPrepare: "自测数据", SelfEval: "自测" },
+    task: "任务",
+    judge_machine: "评测机",
+    sent: "发送次数",
+    sent_notes: "任务被发送给评测机的次数",
+    interrupted: "重试",
+    interrupted_notes: "中断次数（评测机或后端停止）与准备失败次数",
+    created: "入队时间",
+    last_error: "最近错误",
+    notes:
+      "任务保存在数据库中。评测机断开或后端停止而中断的任务会自动重新排队。中断 5 次或准备失败 10 次后放弃该任务：对应提交显示“系统错误”，可以重测。"
+  },
   error: {
     PERMISSION_DENIED: "权限不足。",
     NO_SUCH_JUDGE_CLIENT: "无此评测机。"

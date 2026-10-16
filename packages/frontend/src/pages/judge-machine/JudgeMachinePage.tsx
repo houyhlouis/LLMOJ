@@ -12,6 +12,8 @@ import { defineRoute, RouteError } from "@/AppRouter";
 import { onEnterPress } from "@/utils/onEnterPress";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
 
+import JudgeQueuePanel from "./JudgeQueuePanel";
+
 interface JudgeClientSystemInfo {
   os: string;
   kernel: string;
@@ -269,6 +271,7 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
           </Table.Body>
         </Table>
       )}
+      {props.hasManagePermission && <JudgeQueuePanel judgeClients={props.judgeClients} />}
     </>
   );
 };

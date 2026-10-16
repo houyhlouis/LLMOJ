@@ -428,6 +428,10 @@ declare namespace ApiTypes {
     annnouncementDiscussions?: ApiTypes.DiscussionMetaDto[];
   }
   export interface GetPermissionsDto {}
+  export interface GetJudgeQueueStatusResponseDto {
+    error?: "PERMISSION_DENIED";
+    status?: ApiTypes.JudgeQueueStatusDto;
+  }
   export interface GetProblemRequestDto {
     id?: number;
     displayId?: number;
@@ -809,6 +813,46 @@ declare namespace ApiTypes {
     allowedHosts: string[];
     online: boolean;
     systemInfo?: {};
+  }
+  export interface JudgeJobInfoDto {
+    taskId: string;
+    /**
+     * Submission, Hack, SelfEvalPrepare or SelfEval
+     */
+    type: string;
+    state: "Queued" | "Leased" | "Failed";
+    createdAt: string; // date-time
+    /**
+     * The judge client of the current or last lease
+     */
+    judgeClientId?: number;
+    /**
+     * How many times the task has been sent to a judge client
+     */
+    fence: number;
+    /**
+     * Leases that ended without a result
+     */
+    unfinishedLeases: number;
+    preparationFailures: number;
+    lastError?: string;
+    finishedAt?: string; // date-time
+  }
+  export interface JudgeQueueStatusDto {
+    queued: number;
+    /**
+     * Being judged
+     */
+    leased: number;
+    /**
+     * Given up on in the last 7 days
+     */
+    failedRecently: number;
+    oldestQueuedAt?: string; // date-time
+    /**
+     * Up to 100: being judged, queued, then failed
+     */
+    jobs: ApiTypes.JudgeJobInfoDto[];
   }
   export interface ListJudgeClientsResponseDto {
     judgeClients: ApiTypes.JudgeClientInfoDto[];

@@ -37,7 +37,7 @@ import { ProblemPermissionType, ProblemService } from "../problem/problem.servic
 import { UserEntity } from "../user/user.entity";
 import { ProblemEntity, ProblemType } from "../problem/problem.entity";
 import { JudgeQueueService, JudgeTaskPriorityType, JudgeTask, JudgeTaskExtraInfo } from "../judge/judge-queue.service";
-import { JudgeTaskService } from "../judge/judge-task-service.interface";
+import { JudgeTaskCompletion, JudgeTaskService } from "../judge/judge-task-service.interface";
 import { ProblemFileType } from "../problem/problem-file.entity";
 import { ProblemJudgeInfo } from "../problem/problem-judge-info.interface";
 import { UserService } from "../user/user.service";
@@ -78,6 +78,9 @@ interface SubmissionTaskExtraInfo extends JudgeTaskExtraInfo {
     url: string;
   };
 }
+
+// The judge task's lease ended before its result was stored: the result is discarded.
+class ObsoleteResultError extends Error {}
 
 @Injectable()
 export class SubmissionService implements JudgeTaskService<SubmissionProgress, SubmissionTaskExtraInfo> {
@@ -477,19 +480,18 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
       submissionDetail.result = null;
       await transactionalEntityManager.save(submissionDetail);
 
+      // The submission and its judge task are committed together, so a new submission is never left unjudged.
+      await this.queueJudgeTask(submission, false, transactionalEntityManager);
+
       return [null, submission];
     });
 
     if (submission) {
+      this.judgeQueueService.notifyJobsAvailable();
+
       if (!contestContext) {
         await this.problemService.updateProblemStatistics(problem.id, 1, 0);
         await this.userService.updateUserSubmissionCount(submitter.id, 1);
-      }
-
-      try {
-        await this.judgeSubmission(submission);
-      } catch (e) {
-        logger.error(`Failed to start judge for submission ${submission.id}: ${e}`);
       }
 
       return [null, submission];
@@ -580,12 +582,28 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
       this.judgeGateway.cancelTask(submission.taskId);
     }
 
+    await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
+      await this.queueJudgeTask(submission, isRejudge, transactionalEntityManager);
+    });
+    this.judgeQueueService.notifyJobsAvailable();
+
+    await this.onSubmissionUpdated(oldSubmission, submission);
+  }
+
+  /**
+   * Gives the submission a new judge task, saving it together with the task's job.
+   */
+  private async queueJudgeTask(
+    submission: SubmissionEntity,
+    isRejudge: boolean,
+    transactionalEntityManager: EntityManager
+  ): Promise<void> {
     submission.taskId = uuid();
     submission.score = null;
     submission.status = SubmissionStatus.Pending;
     submission.timeUsed = null;
     submission.memoryUsed = null;
-    await this.submissionRepository.save(submission);
+    await transactionalEntityManager.save(submission);
 
     const [
       userPendingCount,
@@ -604,8 +622,8 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
 
       // eslint-disable-next-line @typescript-eslint/no-shadow
       const [userPendingCount, userOccupiedTimeRecently, avgAndStdEveryUsersOccupiedTimeRecently] = await Promise.all([
-        // userPendingCount
-        this.submissionRepository.countBy({
+        // userPendingCount (in the transaction, which includes this submission)
+        transactionalEntityManager.countBy(SubmissionEntity, {
           status: SubmissionStatus.Pending,
           submitterId: submission.submitterId
         }),
@@ -641,7 +659,7 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
       ];
     })();
 
-    await this.judgeQueueService.pushTask(
+    await this.judgeQueueService.enqueue(
       submission.taskId,
       JudgeTaskType.Submission,
       makeSubmissionPriority(
@@ -651,10 +669,9 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
         avgEveryUsersOccupiedTimeRecently,
         stdEveryUsersOccupiedTimeRecently,
         isRejudge ? JudgeTaskPriorityType.Medium : JudgeTaskPriorityType.High
-      )
+      ),
+      transactionalEntityManager
     );
-
-    await this.onSubmissionUpdated(oldSubmission, submission);
   }
 
   async rejudgeSubmission(submission: SubmissionEntity, actingUser?: UserEntity): Promise<void> {
@@ -842,8 +859,9 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
   private async onSubmissionFinished(
     submission: SubmissionEntity,
     problem: ProblemEntity,
-    progress: SubmissionFinishedProgress
-  ): Promise<void> {
+    progress: SubmissionFinishedProgress,
+    completion?: JudgeTaskCompletion
+  ): Promise<boolean> {
     const oldSubmission = { ...submission };
 
     const submissionDetail = await this.getSubmissionDetail(submission);
@@ -860,20 +878,34 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
     submission.timeUsed = timeAndMemory.timeUsed;
     submission.memoryUsed = timeAndMemory.memoryUsed;
 
-    await this.connection.transaction(async transactionalEntityManager => {
-      await transactionalEntityManager.save(submission);
-      await transactionalEntityManager.save(submissionDetail);
-    });
+    try {
+      await this.connection.transaction(async transactionalEntityManager => {
+        // Finish the judge task's job first: if the reporting judge client's lease isn't current, store nothing
+        if (completion && !(await completion.confirm(transactionalEntityManager))) throw new ObsoleteResultError();
+        await transactionalEntityManager.save(submission);
+        await transactionalEntityManager.save(submissionDetail);
+      });
+    } catch (e) {
+      if (!(e instanceof ObsoleteResultError)) throw e;
+      Object.assign(submission, oldSubmission);
+      logger.warn(`Ignored the result of submission ${submission.id} from an obsolete judge task lease`);
+      return false;
+    }
 
     logger.log(`Submission ${submission.id} finished with status ${submission.status}`);
 
     await this.onSubmissionUpdated(oldSubmission, submission);
+    return true;
   }
 
   /**
    * @return `false` means the task is canceled.
    */
-  async onTaskProgress(taskId: string, progress: SubmissionProgress): Promise<boolean> {
+  async onTaskProgress(
+    taskId: string,
+    progress: SubmissionProgress,
+    completion?: JudgeTaskCompletion
+  ): Promise<boolean> {
     const submission = await this.findSubmissionByTaskId(taskId);
     if (!submission) {
       logger.warn(`Invalid task Id ${taskId} of task progress, maybe there's a too-early rejudge?`);
@@ -891,9 +923,7 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
       }
 
       // First update database, then report progress
-      if (finished) {
-        await this.onSubmissionFinished(submission, problem, progress);
-      }
+      if (finished && !(await this.onSubmissionFinished(submission, problem, progress, completion))) return false;
 
       await this.submissionProgressService.emitSubmissionEvent(submission.id, SubmissionEventType.Progress, progress);
       return true;
@@ -985,6 +1015,53 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
       logger.error(`Error in getTaskById("${taskId}"): ${e}`);
       throw e;
     }
+  }
+
+  async listActiveTasks(): Promise<{ taskId: string; priority: number }[]> {
+    const submissions = await this.submissionRepository
+      .createQueryBuilder()
+      .select(["id", "taskId"])
+      .where("taskId IS NOT NULL")
+      .getRawMany<{ id: number; taskId: string }>();
+    return submissions.map(({ id, taskId }) => ({
+      taskId,
+      priority: makeSubmissionPriority(id, 0, 0, 0, 0, JudgeTaskPriorityType.Medium)
+    }));
+  }
+
+  /**
+   * The judge queue gave up on the submission's task: show a system error, which can be rejudged.
+   */
+  async onTaskFailed(taskId: string, message: string): Promise<void> {
+    const submission = await this.findSubmissionByTaskId(taskId);
+    if (!submission) return;
+    // eslint-disable-next-line @typescript-eslint/no-shadow
+    await this.lockSubmission(submission, true, async submission => {
+      if (!submission || submission.taskId !== taskId) return;
+      const oldSubmission = { ...submission };
+      const submissionDetail = await this.getSubmissionDetail(submission);
+      const result: SubmissionFinishedProgress = {
+        progressType: SubmissionProgressType.Finished,
+        status: SubmissionStatus.SystemError,
+        score: 0,
+        totalOccupiedTime: 0,
+        systemMessage: message
+      };
+      submissionDetail.result = result;
+      submission.taskId = null;
+      submission.status = SubmissionStatus.SystemError;
+      submission.score = 0;
+      submission.totalOccupiedTime = 0;
+      submission.timeUsed = null;
+      submission.memoryUsed = null;
+      await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
+        await transactionalEntityManager.save(submission);
+        await transactionalEntityManager.save(submissionDetail);
+      });
+      logger.error(`Submission ${submission.id} could not be judged: ${message}`);
+      await this.onSubmissionUpdated(oldSubmission, submission);
+      await this.submissionProgressService.emitSubmissionEvent(submission.id, SubmissionEventType.Progress, result);
+    });
   }
 
   /**

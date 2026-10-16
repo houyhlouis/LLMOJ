@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { auditSchema, applySchema, COMMUNITY_TABLES, LEGACY_SUBMISSION_STATUSES, LEGACY_PRIVILEGES, HACK_STANDARD_CONTENT_SQL,
-  FILE_SIZE_BIGINT_SQL, TEAM_FILE_SIZE_BIGINT_SQL, TEAM_QUOTA_DEFAULT_SQL, TWO_FACTOR_SQL, TWO_FACTOR_TABLES } from '../upgrade-schema.mjs';
+  FILE_SIZE_BIGINT_SQL, TEAM_FILE_SIZE_BIGINT_SQL, TEAM_QUOTA_DEFAULT_SQL, TWO_FACTOR_SQL, TWO_FACTOR_TABLES, JUDGE_QUEUE_SQL, JUDGE_QUEUE_TABLES } from '../upgrade-schema.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(path.join(root, 'apps/backend/package.json'));
 const configPath = process.env.HYHOJ_COMMUNITY_SCHEMA_TEST_DB_CONFIG;
@@ -39,6 +39,7 @@ test('real metadata: mature legacy upgrade, new-schema no-op, preserved data, re
     assert.deepEqual(noop.queries, []); assert.equal(noop.solutions.classified, 0);
     for (const table of COMMUNITY_TABLES) await ds.query('DROP TABLE `' + table + '`');
     for (const table of [...TWO_FACTOR_TABLES].reverse()) await ds.query('DROP TABLE `' + table + '`');
+    for (const table of JUDGE_QUEUE_TABLES) await ds.query('DROP TABLE `' + table + '`');
     await ds.query('ALTER TABLE `file` CHANGE `size` `size` int NOT NULL');
     await ds.query('ALTER TABLE `contest` DROP COLUMN `ruleOptions`');
     await ds.query('ALTER TABLE `contest` CHANGE `rule` `rule` varchar(8) NOT NULL');
@@ -64,12 +65,12 @@ test('real metadata: mature legacy upgrade, new-schema no-op, preserved data, re
       console.error('Rejected legacy schema proposal:', (await ds.driver.createSchemaBuilder().log()).upQueries.map(query => query.query));
       throw error;
     }
-    assert.equal(legacy.queries.length, 28);
-    for (const sql of TWO_FACTOR_SQL) assert(legacy.queries.includes(sql), sql);
+    assert.equal(legacy.queries.length, 30);
+    for (const sql of [...TWO_FACTOR_SQL, ...JUDGE_QUEUE_SQL]) assert(legacy.queries.includes(sql), sql);
     assert.deepEqual(legacy.solutions, { pending: 0, schemaPending: true });
     assert(!legacy.queries.some(query => /DROP|TRUNCATE/.test(query)));
     const applied = await applySchema(ds);
-    assert.equal(applied.queries.length, 28);
+    assert.equal(applied.queries.length, 30);
     assert.equal(applied.solutions.classified, 1); assert.equal(applied.solutions.pending, 0);
     assert.deepEqual(await ds.query('SELECT * FROM submission ORDER BY id'), submissions);
     assert.deepEqual(await ds.query('SELECT * FROM user ORDER BY id'), accounts);

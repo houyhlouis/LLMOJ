@@ -2,6 +2,7 @@ import { Controller, Post, Body, Get } from "@nestjs/common";
 import { ApiOperation, ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 
 import { JudgeClientService } from "./judge-client.service";
+import { JudgeQueueService } from "./judge-queue.service";
 
 import {
   AddJudgeClientRequestDto,
@@ -10,6 +11,8 @@ import {
   DeleteJudgeClientRequestDto,
   DeleteJudgeClientResponseDto,
   DeleteJudgeClientResponseError,
+  GetJudgeQueueStatusResponseDto,
+  GetJudgeQueueStatusResponseError,
   ListJudgeClientsResponseDto,
   ResetJudgeClientKeyRequestDto,
   ResetJudgeClientKeyResponseDto,
@@ -22,7 +25,10 @@ import { UserEntity } from "../user/user.entity";
 @ApiTags("Judge Client")
 @Controller("judgeClient")
 export class JudgeClientController {
-  constructor(private readonly judgeClientService: JudgeClientService) {}
+  constructor(
+    private readonly judgeClientService: JudgeClientService,
+    private readonly judgeQueueService: JudgeQueueService
+  ) {}
 
   @ApiOperation({
     summary: "Add a new judge client."
@@ -112,6 +118,28 @@ export class JudgeClientController {
         )
       ),
       hasManagePermission: currentUser && currentUser.isAdmin
+    };
+  }
+
+  @ApiOperation({
+    summary: "Get the judge queue: tasks queued or being judged, and recent failures (site administrators only)."
+  })
+  @ApiBearerAuth()
+  @Post("getJudgeQueueStatus")
+  async getJudgeQueueStatus(@CurrentUser() currentUser: UserEntity): Promise<GetJudgeQueueStatusResponseDto> {
+    if (!currentUser || !currentUser.isAdmin) return { error: GetJudgeQueueStatusResponseError.PERMISSION_DENIED };
+    const status = await this.judgeQueueService.getStatus();
+    return {
+      status: {
+        ...status,
+        oldestQueuedAt: status.oldestQueuedAt ?? undefined,
+        jobs: status.jobs.map(job => ({
+          ...job,
+          judgeClientId: job.judgeClientId ?? undefined,
+          lastError: job.lastError ?? undefined,
+          finishedAt: job.finishedAt ?? undefined
+        }))
+      }
     };
   }
 }

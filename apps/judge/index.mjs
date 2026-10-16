@@ -16,14 +16,16 @@ while (true) {
   });
 
   await new Promise(resolve => {
-    child.on("exit", code => {
+    child.on("exit", (code, signal) => {
       // 100: Disconnected
       if (code === 100) {
         // Restart child
         return resolve();
       }
-  
-      process.exit(code);
+
+      // Killed by a signal (e.g. the OOM killer): exit as failed, so the service manager restarts the judge.
+      if (code === null) console.error(`Judge process killed by ${signal}`);
+      process.exit(code ?? 1);
     });
   });
 };

@@ -6,7 +6,7 @@ import path from "path";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 
-import { DataSource } from "typeorm";
+import { DataSource, EntityManager } from "typeorm";
 import { v4 as uuid } from "uuid";
 import { JudgeTaskType, SelfEvalProgress, SubmissionStatus } from "@libreoj/judge-protocol";
 
@@ -28,7 +28,7 @@ import { FileService } from "../file/file.service";
 import { CodeLanguage } from "../code-language/code-language.type";
 import { CodeLanguageService } from "../code-language/code-language.service";
 import { JudgeQueueService, JudgeTask, JudgeTaskPriorityType } from "../judge/judge-queue.service";
-import { JudgeTaskService } from "../judge/judge-task-service.interface";
+import { JudgeTaskCompletion, JudgeTaskService } from "../judge/judge-task-service.interface";
 import { LockService } from "../redis/lock.service";
 
 const hash = (value: unknown) =>
@@ -337,7 +337,7 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
         snapshot: { judgeInfo: ctx.judgeInfo, testData: ctx.testData, scope: ctx.scope }
       });
       await repository.save(set);
-      await this.queue.pushTask(set.taskId, JudgeTaskType.SelfEvalPrepare, JudgeTaskPriorityType.Medium);
+      await this.queue.enqueue(set.taskId, JudgeTaskType.SelfEvalPrepare, JudgeTaskPriorityType.Medium);
       return { ok: true };
     });
   }
@@ -432,7 +432,7 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
         if (quota.used >= freshContext.limit) throw new BadRequestException("Self evaluation attempt limit reached");
         quota.used++;
         await manager.save(quota);
-        return await manager.save(SelfEvalEntity, {
+        const saved = await manager.save(SelfEvalEntity, {
           scope: ctx.scope,
           problemId: ctx.problem.id,
           contestId: request.contestId || null,
@@ -443,15 +443,16 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
           snapshot: { judgeInfo: ctx.judgeInfo, testData: ctx.testData, scope: ctx.scope },
           createTime: new Date()
         });
+        // Committed together with the record and its quota use
+        await this.queue.enqueue(
+          saved.taskId,
+          JudgeTaskType.SelfEval,
+          JudgeTaskPriorityType.Low + saved.id / 1e9,
+          manager
+        );
+        return saved;
       });
-      try {
-        await this.queue.pushTask(record.taskId, JudgeTaskType.SelfEval, JudgeTaskPriorityType.Low + record.id / 1e9);
-      } catch (error) {
-        await this.db
-          .getRepository(SelfEvalEntity)
-          .update(record.id, { taskId: null, status: "SystemError", finishTime: new Date() });
-        throw error;
-      }
+      this.queue.notifyJobsAvailable();
       return { id: record.id };
     });
   }
@@ -574,7 +575,12 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
       return null;
     }
     const prepared = await this.db.getRepository(SelfEvalSetEntity).findOneBy({ scope: record.scope });
-    if (!prepared || prepared.status !== "Ready") return null;
+    if (!prepared || prepared.status !== "Ready") {
+      await this.db
+        .getRepository(SelfEvalEntity)
+        .update({ id: record.id, taskId }, { taskId: null, status: "Canceled", finishTime: new Date() });
+      return null;
+    }
     return new JudgeTask(taskId, JudgeTaskType.SelfEval, JudgeTaskPriorityType.Low, priority, {
       ...(record.snapshot as SelfEvalSnapshot),
       cases: prepared.cases,
@@ -582,7 +588,56 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
     });
   }
 
-  async onTaskProgress(taskId: string, progress: SelfEvalProgress) {
+  async listActiveTasks() {
+    const [sets, records] = await Promise.all([
+      this.db
+        .getRepository(SelfEvalSetEntity)
+        .createQueryBuilder("s")
+        .select(["s.scope", "s.taskId"])
+        .where("s.taskId IS NOT NULL")
+        .getMany(),
+      this.db
+        .getRepository(SelfEvalEntity)
+        .createQueryBuilder("e")
+        .select(["e.id", "e.taskId"])
+        .where("e.taskId IS NOT NULL")
+        .getMany()
+    ]);
+    return [
+      ...sets.map(set => ({ taskId: set.taskId, priority: JudgeTaskPriorityType.Medium })),
+      ...records.map(record => ({ taskId: record.taskId, priority: JudgeTaskPriorityType.Low + record.id / 1e9 }))
+    ];
+  }
+
+  async onTaskFailed(taskId: string, message: string) {
+    const set = await this.db.getRepository(SelfEvalSetEntity).findOneBy({ taskId });
+    if (set) {
+      await this.locks.lock(`SelfEvalSet_${set.scope}`, async () => {
+        await this.db
+          .getRepository(SelfEvalSetEntity)
+          .update({ scope: set.scope, taskId }, { taskId: null, status: "SystemError", cases: null, message });
+      });
+      return;
+    }
+    const record = await this.db.getRepository(SelfEvalEntity).findOneBy({ taskId });
+    if (!record) return;
+    await this.locks.lock(`SelfEval_${record.id}`, async () => {
+      await this.db
+        .getRepository(SelfEvalEntity)
+        .update({ id: record.id, taskId }, { taskId: null, status: "SystemError", finishTime: new Date() });
+    });
+  }
+
+  // Stores a result together with finishing its judge task's job; `false` if the reporting lease is obsolete.
+  private async saveResult<T>(entity: T, completion: JudgeTaskCompletion) {
+    return await this.db.transaction("READ COMMITTED", async (manager: EntityManager) => {
+      if (completion && !(await completion.confirm(manager))) return false;
+      await manager.save(entity);
+      return true;
+    });
+  }
+
+  async onTaskProgress(taskId: string, progress: SelfEvalProgress, completion?: JudgeTaskCompletion) {
     if (!progress || typeof progress.finished !== "boolean") return false;
     const set = await this.db.getRepository(SelfEvalSetEntity).findOneBy({ taskId });
     if (set)
@@ -611,8 +666,7 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
         current.message = valid
           ? null
           : "Prediction set preparation failed; a manager must inspect the configured programs";
-        await this.db.getRepository(SelfEvalSetEntity).save(current);
-        return true;
+        return await this.saveResult(current, completion);
       });
     const record = await this.db.getRepository(SelfEvalEntity).findOneBy({ taskId });
     if (!record) return false;
@@ -654,8 +708,7 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
           fullScore: Math.max(0, Math.min(100, Number(value.fullScore) || 0))
         }))
       };
-      await this.db.getRepository(SelfEvalEntity).save(current);
-      return true;
+      return await this.saveResult(current, completion);
     });
   }
 }

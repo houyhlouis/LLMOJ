@@ -22,6 +22,16 @@ flowchart LR
 
 Judges initiate connections and need no inbound web port. They do not hold database, Redis or MinIO administrator credentials. They receive tasks, download/cache test files through signed URLs and return results. This deployment uses a single backend, not a highly available backend/database cluster.
 
+## Judge queue
+
+Judge tasks are kept in the database (table `judge_job`), not only in Redis: a submission, Hack or Self Eval and its task are saved in one transaction, so restarting the backend or Redis loses no queued work. Redis only wakes up waiting judges; they also look for tasks every few seconds.
+
+- A task is sent to one judge connection at a time, under a lease that the backend renews while the judge stays connected. The result is stored together with finishing the task, and a result from an older lease (for example after a reconnect) is ignored.
+- When a judge disconnects, its unfinished tasks are queued again at once. When the backend itself stops, its leases expire after 90 seconds and another backend process, or the restarted one, queues them again. A task can therefore be judged more than once, but its result counts once.
+- A task is given up on after 5 interruptions, or after 10 failures to prepare it (for example missing test data). Its submission then shows **System Error** with the reason and can be rejudged.
+- Site administrators see the queue at the bottom of **Judge Machine** (`/judge-machine`): tasks waiting or being judged, the judge machine holding each, retries, and the tasks given up on in the last 7 days. The `libreoj_judge_jobs` metric reports waiting and running tasks.
+- Every lease is recorded in `judge_job_attempt` with how it ended. Finished tasks and their records are deleted after 30 days.
+
 ## Web node
 
 ```bash

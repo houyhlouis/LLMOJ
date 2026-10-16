@@ -31,6 +31,7 @@ class CommunityHost(fixtures.FakeHost):
         self.storage_quota_rows = 0
         self.large_file_rows = 0
         self.active_feature_rows = {}
+        self.active_judge_jobs = 0
         self.sql_queries = []
 
     def run(self, args, **kwargs):
@@ -39,7 +40,7 @@ class CommunityHost(fixtures.FakeHost):
         if args[0] == 'mariadb' and isinstance(query, bytes):
             query = query.decode()
             self.sql_queries.append(query)
-            table = re.search(r"TABLE_NAME='(team|file|team_file_upload|submission|discussion|hack|hack_problem|self_eval|self_eval_set|self_eval_quota|user_two_factor|user_passkey)'", query)
+            table = re.search(r"TABLE_NAME='(team|file|team_file_upload|submission|discussion|hack|hack_problem|self_eval|self_eval_set|self_eval_quota|user_two_factor|user_passkey|judge_job)'", query)
             output = None
             if table and 'information_schema.TABLES' in query:
                 output = int(table[1] in self.feature_tables)
@@ -54,6 +55,8 @@ class CommunityHost(fixtures.FakeHost):
                 output = self.feature_rows['submission']
             elif "FROM `discussion` WHERE type='Solution'" in query:
                 output = self.feature_rows['discussion']
+            elif query.startswith("SELECT COUNT(*) FROM `judge_job` WHERE state IN ('Queued','Leased')"):
+                output = self.active_judge_jobs
             elif query.startswith('SELECT COUNT(*) FROM `user_two_factor` WHERE totpSecret IS NOT NULL'):
                 output = self.feature_rows.get('user_two_factor', 0)
             elif query.startswith('SELECT COUNT(*) FROM `user_passkey` WHERE 1=1'):
@@ -408,6 +411,19 @@ class CommunityUpgradeTests(unittest.TestCase):
         self.assertEqual((self.root/'apps/backend/dist/main.js').read_text(), 'new backend')
         self.assertEqual(self.host.feature_rows['submission'], 1)
         self.assertTrue(self.up.guard.exists())
+
+    def test_queued_or_running_durable_judge_jobs_must_drain_before_rollback(self):
+        self.activate_fixture()
+        self.host.feature_tables.add('judge_job')
+        self.host.active_judge_jobs = 1
+        before = len(self.host.calls)
+        with self.assertRaisesRegex(u.UpgradeError, 'Active or queued judge work'):
+            self.up.rollback(manual=True)
+        self.assertFalse(any(call[0] == 'service' for call in self.host.calls[before:]))
+        self.assertEqual((self.root/'apps/backend/dist/main.js').read_text(), 'new backend')
+        self.host.active_judge_jobs = 0
+        self.up.rollback(manual=True)
+        self.assertEqual(self.up.manifest['status'], 'rolled-back')
 
     def two_factor_fixture(self):
         self.activate_fixture()

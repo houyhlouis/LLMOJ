@@ -6,7 +6,7 @@ import path from "path";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 
-import { Brackets, DataSource, MoreThan } from "typeorm";
+import { Brackets, DataSource, EntityManager, MoreThan } from "typeorm";
 import { v4 as uuid } from "uuid";
 import { HackProgress, HackStatus, JudgeTaskType, SubmissionStatus } from "@libreoj/judge-protocol";
 
@@ -24,7 +24,7 @@ import { SubmissionEntity } from "../submission/submission.entity";
 import { ContestService } from "../contest/contest.service";
 import { ContestEntity } from "../contest/contest.entity";
 import { JudgeQueueService, JudgeTask, JudgeTaskPriorityType } from "../judge/judge-queue.service";
-import { JudgeTaskService } from "../judge/judge-task-service.interface";
+import { JudgeTaskCompletion, JudgeTaskService } from "../judge/judge-task-service.interface";
 import { LockService } from "../redis/lock.service";
 import { teamResourceVisibilitySql } from "../team/team-access";
 import { CodeLanguage } from "../code-language/code-language.type";
@@ -87,6 +87,9 @@ export function safeHackTargetResult(value: unknown): HackTargetResult | undefin
   }
   return result;
 }
+
+// The judge task's lease ended before its result was stored: the result is discarded.
+class ObsoleteResultError extends Error {}
 
 @Injectable()
 export class HackService implements JudgeTaskService<HackProgress, HackSnapshot & { inputData: string }> {
@@ -440,7 +443,7 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
           })
         );
         try {
-          await this.queue.pushTask(hack.taskId, JudgeTaskType.Hack, JudgeTaskPriorityType.Low + hack.id / 1e9);
+          await this.queue.enqueue(hack.taskId, JudgeTaskType.Hack, JudgeTaskPriorityType.Low + hack.id / 1e9);
         } catch (error) {
           await repository.update(hack.id, {
             taskId: null,
@@ -605,7 +608,7 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
       delete snapshot.targetResult;
       fresh.snapshot = snapshot;
       await this.db.getRepository(HackEntity).save(fresh);
-      await this.queue.pushTask(fresh.taskId, JudgeTaskType.Hack, JudgeTaskPriorityType.Low + fresh.id / 1e9);
+      await this.queue.enqueue(fresh.taskId, JudgeTaskType.Hack, JudgeTaskPriorityType.Low + fresh.id / 1e9);
       return { ok: true };
     });
   }
@@ -667,7 +670,30 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
     }
   }
 
-  async onTaskProgress(taskId: string, progress: HackProgress) {
+  async listActiveTasks() {
+    const hacks = await this.db
+      .getRepository(HackEntity)
+      .createQueryBuilder("h")
+      .select(["h.id", "h.taskId"])
+      .where("h.taskId IS NOT NULL")
+      .getMany();
+    return hacks.map(hack => ({ taskId: hack.taskId, priority: JudgeTaskPriorityType.Low + hack.id / 1e9 }));
+  }
+
+  async onTaskFailed(taskId: string, message: string) {
+    const hack = await this.db.getRepository(HackEntity).findOneBy({ taskId });
+    if (!hack) return;
+    await this.locks.lock(`Hack_${hack.id}`, async () => {
+      await this.db
+        .getRepository(HackEntity)
+        .update(
+          { id: hack.id, taskId },
+          { taskId: null, status: HackStatus.SystemError, message: message.slice(0, 4096), finishTime: new Date() }
+        );
+    });
+  }
+
+  async onTaskProgress(taskId: string, progress: HackProgress, completion?: JudgeTaskCompletion) {
     if (!progress || typeof progress.finished !== "boolean" || !Object.values(HackStatus).includes(progress.status))
       return false;
     const hack = await this.db.getRepository(HackEntity).findOneBy({ taskId });
@@ -712,24 +738,32 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
           memoryUsed: fresh.memoryUsed
         })
       };
-      if (progress.status === HackStatus.Success) {
-        const target = await this.submissions.findSubmissionById(fresh.submissionId);
-        const applied =
-          target &&
-          (await this.submissions.markSubmissionHacked(
-            target,
-            fresh.hackerId,
-            fresh.id,
-            fresh.targetFingerprint,
-            async manager => {
-              await manager.save(fresh);
-            }
-          ));
-        if (applied) return true;
-        fresh.status = HackStatus.Canceled;
-        fresh.message = "Target changed or was invalidated while the hack was running";
+      // The judge task's job is finished in the transaction that stores the result, unless its lease is obsolete
+      const saveResult = async (manager: EntityManager) => {
+        if (completion && !(await completion.confirm(manager))) throw new ObsoleteResultError();
+        await manager.save(fresh);
+      };
+      try {
+        if (progress.status === HackStatus.Success) {
+          const target = await this.submissions.findSubmissionById(fresh.submissionId);
+          const applied =
+            target &&
+            (await this.submissions.markSubmissionHacked(
+              target,
+              fresh.hackerId,
+              fresh.id,
+              fresh.targetFingerprint,
+              saveResult
+            ));
+          if (applied) return true;
+          fresh.status = HackStatus.Canceled;
+          fresh.message = "Target changed or was invalidated while the hack was running";
+        }
+        await this.db.transaction("READ COMMITTED", saveResult);
+      } catch (e) {
+        if (!(e instanceof ObsoleteResultError)) throw e;
+        return false;
       }
-      await this.db.getRepository(HackEntity).save(fresh);
       return true;
     });
   }

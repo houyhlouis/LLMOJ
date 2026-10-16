@@ -53,3 +53,24 @@ test('two-factor tables are created with their foreign keys exactly when absent'
   await assert.rejects(() => validateTwoFactorSchema(existing(['user_passkey']), TWO_FACTOR_SQL));
   await assert.rejects(() => validateTwoFactorSchema(existing([]), [...TWO_FACTOR_SQL, TWO_FACTOR_SQL[0]]));
 });
+
+test('exact durable judge queue tables accepted; altered definitions refused', async () => {
+  const { JUDGE_QUEUE_SQL } = await import('../upgrade-schema.mjs');
+  assert.deepEqual(validateQueries(JUDGE_QUEUE_SQL.map(query => ({ query }))), [...JUDGE_QUEUE_SQL]);
+  const [jobs, attempts] = JUDGE_QUEUE_SQL;
+  for (const sql of [jobs.replace('`fence` int UNSIGNED NOT NULL', '`fence` int NOT NULL'),
+    jobs.replace('PRIMARY KEY (`taskId`)', 'PRIMARY KEY (`type`)'),
+    attempts.replace('UNIQUE INDEX `IDX_4a6ad01ae52602fbc78c82bba4`', 'INDEX `IDX_4a6ad01ae52602fbc78c82bba4`'),
+    jobs.replaceAll('judge_job', 'judge_other')])
+    assert.throws(() => validateQueries([sql]));
+});
+test('judge queue tables are created exactly when absent', async () => {
+  const { validateJudgeQueueSchema, JUDGE_QUEUE_SQL } = await import('../judge-queue-schema.mjs');
+  const existing = names => ({ query: async () => names.map(name => ({ name })) });
+  await validateJudgeQueueSchema(existing([]), JUDGE_QUEUE_SQL);
+  await validateJudgeQueueSchema(existing(['judge_job', 'judge_job_attempt']), []);
+  await validateJudgeQueueSchema(existing(['judge_job']), JUDGE_QUEUE_SQL.slice(1));
+  await assert.rejects(() => validateJudgeQueueSchema(existing([]), []));
+  await assert.rejects(() => validateJudgeQueueSchema(existing(['judge_job']), JUDGE_QUEUE_SQL));
+  await assert.rejects(() => validateJudgeQueueSchema(existing([]), [...JUDGE_QUEUE_SQL, JUDGE_QUEUE_SQL[0]]));
+});

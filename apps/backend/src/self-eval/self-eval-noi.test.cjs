@@ -34,7 +34,7 @@ function fixture() {
     },
     locks:{lock:async(_key,callback)=>callback()},
     files:{uploadFile:async(id,bytes)=>uploads.set(id,bytes),deleteUnfinishedUploadedFile:async id=>uploads.delete(id)},
-    queue:{pushTask:async()=>{}}
+    queue:{enqueue:async()=>{},notifyJobsAvailable(){}}
   });
   return {service,user,contest,judgeInfo,files,uploads,events,setManager:value=>manager=value,setAllowed:value=>allowed=value,setFailUpload:()=>failSecondUpload=true};
 }

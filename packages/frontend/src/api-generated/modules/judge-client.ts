@@ -19,3 +19,7 @@ export const resetJudgeClientKey = createPostApi<
 export const listJudgeClients = createGetApi<void, ApiTypes.ListJudgeClientsResponseDto>(
   "judgeClient/listJudgeClients"
 );
+export const getJudgeQueueStatus = createPostApi<void, ApiTypes.GetJudgeQueueStatusResponseDto>(
+  "judgeClient/getJudgeQueueStatus",
+  {}
+);

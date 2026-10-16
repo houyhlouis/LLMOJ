@@ -729,6 +729,10 @@ class Upgrade:
             exists = self.sql(f"SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='libreoj' AND TABLE_NAME='{table}'")
             if exists == '1' and int(self.sql(f"SELECT COUNT(*) FROM `{table}` WHERE status IN ('Pending','Running') OR taskId IS NOT NULL", 'libreoj')):
                 fail('Active or queued Hack/SelfEval work remains; drain it before maintenance')
+        # The durable judge queue's own record of queued and running tasks
+        exists = self.sql("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='libreoj' AND TABLE_NAME='judge_job'")
+        if exists == '1' and int(self.sql("SELECT COUNT(*) FROM `judge_job` WHERE state IN ('Queued','Leased')", 'libreoj')):
+            fail('Active or queued judge work remains; drain it before maintenance')
         # A cancelled/completed AI row may still be unwinding its worker. Its
         # existing database-scoped advisory lease spans those final side effects.
         lock = 'hyhoj_ai_worker:'+hashlib.sha256(b'libreoj').hexdigest()[:48]
@@ -859,7 +863,7 @@ class Upgrade:
         # record the guard before the first mutation so rollback cannot let an
         # older backend synchronize away a partially applied schema.
         self.manifest['communitySchemaApplied'] = any(
-            re.search(r'`(?:team(?:_[a-z]+)*|file|discussion|submission|hack(?:_[a-z]+)*|self_eval(?:_[a-z]+)*|contest|user_privilege|user_permission_rule|user_two_factor|user_passkey)`', query)
+            re.search(r'`(?:team(?:_[a-z]+)*|file|discussion|submission|hack(?:_[a-z]+)*|self_eval(?:_[a-z]+)*|contest|user_privilege|user_permission_rule|user_two_factor|user_passkey|judge_job(?:_attempt)?)`', query)
             for query in self.manifest['schemaQueries']
         )
         self.save()

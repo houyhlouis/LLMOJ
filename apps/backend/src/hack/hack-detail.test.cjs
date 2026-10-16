@@ -22,7 +22,7 @@ function fixture() {
   const service = Object.create(HackService.prototype);
   let manage = false, accessible = true;
   Object.assign(service, {
-    db: { getRepository: entity => {
+    db: { transaction: async (_isolation, callback) => callback({ save: async value => value }), getRepository: entity => {
       if (entity === HackEntity) return { findOneBy: async () => hack, save: async value => value };
       if (entity === ContestEntity) return { findOneBy: async () => contest };
       assert.equal(entity, UserEntity);
@@ -31,7 +31,7 @@ function fixture() {
     canView: async () => accessible,
     canConfigure: async () => manage,
     taskAuthorised: async () => true,
-    locks: { lock: async (_key, callback) => callback() }, queue: { pushTask: async () => {} }
+    locks: { lock: async (_key, callback) => callback() }, queue: { enqueue: async () => {}, notifyJobsAvailable() {} }
   });
   return { service, hack, contest, allowManage: () => manage = true, denyAccess: () => accessible = false };
 }

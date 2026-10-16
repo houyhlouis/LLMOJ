@@ -30,7 +30,7 @@ test('private fixed prediction sets and contest-wide quotas (real MariaDB)', {sk
     const locks = {lock:async(key, fn)=>{const previous=tails.get(key)||Promise.resolve(); let release; const gate=new Promise(done=>release=done); tails.set(key,previous.then(()=>gate)); await previous; try{return await fn();}finally{release();}}};
     const queued=[]; const service=Object.create(SelfEvalService.prototype);
     let allowed=true;
-    Object.assign(service,{db,locks,queue:{pushTask:async(...args)=>queued.push(args)},privileges:{userHasPrivilege:async()=>allowed,permissionDecision:async()=>allowed},contests:{get:async()=>({contest:{rule:"noi",ruleOptions:{selfEvalEnabled:true}}})}});
+    Object.assign(service,{db,locks,queue:{enqueue:async(...args)=>queued.push(args),notifyJobsAvailable(){}},privileges:{userHasPrivilege:async()=>allowed,permissionDecision:async()=>allowed},contests:{get:async()=>({contest:{rule:"noi",ruleOptions:{selfEvalEnabled:true}}})}});
     const contexts = problemId => ({problem:{id:problemId},manager:true,enabled:true,active:true,limit:2,scope:`contest:7:problem:${problemId}`,quotaScope:'contest:7',recipeHash:'recipe',configHash:'config',languages:['cpp:c++17'],judgeInfo:{selfEval:{subtaskIds:[1]},timeLimit:1000,memoryLimit:128,subtasks:[{testcases:[],scoringType:'Sum'}],checker:{type:'tokens'}},testData:{}});
     service.context=async(_u, request)=>contexts(request.problemId);
     for(const problemId of [1,2]) await db.getRepository(SelfEvalSetEntity).save({scope:contexts(problemId).scope,problemId,contestId:7,recipeHash:'recipe',configHash:'config',status:'Ready',taskId:null,cases:[{subtask:1,input:Buffer.from('SECRET INPUT').toString('base64'),output:Buffer.from('SECRET EXPECTED').toString('base64')}],snapshot:{judgeInfo:contexts(problemId).judgeInfo},createdAt:new Date()});
@@ -102,6 +102,33 @@ test('private fixed prediction sets and contest-wide quotas (real MariaDB)', {sk
       hackService.taskAuthorised=async()=>false;
       assert.equal(await hackService.onTaskProgress('task-3',{finished:true,status:'Success'}),false);
       assert.equal((await hacks.findOneBy({id:denied.id})).status,'Canceled');
+    });
+    await t.test('results from an obsolete judge lease store nothing; current ones commit with the job',async()=>{
+      // The judge queue's completion: confirmed in the transaction that stores the result
+      const completion=current=>({calls:0,async confirm(manager){this.calls++;assert.equal(manager.queryRunner.isTransactionActive,true);return current;}});
+      const records=db.getRepository(SelfEvalEntity);
+      const record=await records.save({scope:contexts(1).scope,problemId:1,contestId:7,submitterId:user.id,status:'Pending',taskId:'eval-lease',content:request(1).content,snapshot:{},createTime:new Date()});
+      const stale=completion(false);
+      assert.equal(await service.onTaskProgress('eval-lease',{finished:true,status:'Accepted',score:100},stale),false);
+      assert.equal(stale.calls,1);
+      assert.deepEqual([(await records.findOneBy({id:record.id})).status,(await records.findOneBy({id:record.id})).taskId],['Pending','eval-lease']);
+      const fresh=completion(true);
+      assert.equal(await service.onTaskProgress('eval-lease',{finished:true,status:'Accepted',score:100},fresh),true);
+      assert.equal(fresh.calls,1);
+      assert.deepEqual([(await records.findOneBy({id:record.id})).status,(await records.findOneBy({id:record.id})).taskId],['Accepted',null]);
+
+      const hacks=db.getRepository(HackEntity);
+      const hack=await hacks.save({submissionId:99,problemId:1,submitterId:2,hackerId:user.id,status:'Pending',taskId:'hack-lease',inputData:'input',snapshot:{},targetFingerprint:'fingerprint',createTime:new Date()});
+      const hackService=Object.create(HackService.prototype);
+      Object.assign(hackService,{db,locks,submissions:{findSubmissionById:async()=>({id:99}),markSubmissionHacked:async(_target,_hacker,_id,_fingerprint,persist)=>{await db.transaction(persist);return true;}}});
+      hackService.taskAuthorised=async()=>true;
+      assert.equal(await hackService.onTaskProgress('hack-lease',{finished:true,status:'Success'},completion(false)),false);
+      assert.deepEqual([(await hacks.findOneBy({id:hack.id})).status,(await hacks.findOneBy({id:hack.id})).taskId],['Pending','hack-lease']);
+      assert.equal(await hackService.onTaskProgress('hack-lease',{finished:true,status:'Success'},completion(true)),true);
+      assert.equal((await hacks.findOneBy({id:hack.id})).status,'Success');
+      const failed=await hacks.save({...hack,id:undefined,taskId:'hack-failed',status:'Pending'});
+      assert.equal(await hackService.onTaskProgress('hack-failed',{finished:true,status:'Failed'},completion(false)),false);
+      assert.equal((await hacks.findOneBy({id:failed.id})).status,'Pending');
     });
   } finally { if(db.isInitialized) {if(owned) await db.dropDatabase(); await db.destroy();} }
 });
