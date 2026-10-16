@@ -5,7 +5,8 @@ export interface MountInfo {
     dst: string;
     // The maximum length (in bytes) the sandboxed process may write to the mount.
     // 0 for readonly; -1 for no limit.
-    // Length limit requires fuse and has not yet been implemented! (Readonly works, however)
+    // Length limit requires fuse and has not yet been implemented: a positive value is rejected when
+    // the sandbox starts. (Readonly works, however.)
     limit: number;
 }
 

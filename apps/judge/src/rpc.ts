@@ -9,6 +9,16 @@ import taskHandler, { Task } from "./task";
 import getSystemInfo from "./systemInfo";
 import { CanceledError } from "./error";
 
+// Storing a result may first wait for the problem's and submission's locks (up to about 30 seconds).
+const FINAL_PROGRESS_ACK_TIMEOUT = 120 * 1000;
+
+// Sent by the server as the third argument of "ready" (see apps/backend/src/judge/judge.gateway.ts).
+// Older servers send none, which means none of these are supported.
+interface JudgeServerCapabilities {
+  // A "progress" message is acknowledged once the server has processed (for a final result: stored) it.
+  progressAck?: boolean;
+}
+
 export class RPC {
   // eslint-disable-next-line no-undef
   private socket: Socket;
@@ -20,6 +30,8 @@ export class RPC {
    * * Otherwise a empty set
    */
   private pendingTaskCancelCallback: Map<string, Set<() => void>> = new Map();
+
+  private serverCapabilities: JudgeServerCapabilities = {};
 
   async connect() {
     winston.info("Trying to connect to the server...");
@@ -60,9 +72,12 @@ export class RPC {
 
     await this.withTimeout(
       new Promise<void>(resolve => {
-        this.socket.on("ready", async (name: string, serverSideConfig: unknown) => {
+        this.socket.on("ready", async (name: string, serverSideConfig: unknown, capabilities?: unknown) => {
           winston.info(`Successfully authorized as ${name}`);
           updateServerSideConfig(serverSideConfig);
+          // Older servers don't send capabilities.
+          this.serverCapabilities =
+            capabilities && typeof capabilities === "object" ? (capabilities as JudgeServerCapabilities) : {};
           this.socket.emit("systemInfo", await getSystemInfo());
 
           resolve();
@@ -77,12 +92,12 @@ export class RPC {
     process.exit(100);
   }
 
-  async withTimeout<T>(promise: Promise<T>): Promise<T> {
+  async withTimeout<T>(promise: Promise<T>, timeout = config.rpcTimeout): Promise<T> {
     return await new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
-        winston.error(`Timed out after ${config.rpcTimeout} milliseconds, assuming disconnected`);
+        winston.error(`Timed out after ${timeout} milliseconds, assuming disconnected`);
         this.restart();
-      }, config.rpcTimeout);
+      }, timeout);
 
       function onPromiseReady(action: () => void) {
         clearTimeout(timer);
@@ -177,16 +192,24 @@ export class RPC {
         ])
       );
 
+      // Resolved when the server has processed the last progress sent (if it acknowledges progress)
+      let lastProgressProcessed: Promise<void> = Promise.resolve();
+
       // Debounce the onProgress function so we won't send progress too fast to the server
-      const reportProgress = lodashDebounce(async (progress: unknown) => {
+      const reportProgress = lodashDebounce((progress: unknown) => {
         winston.verbose(`[Thread ${threadId}] Reporting progress for task ${taskInfo}`);
-        this.socket.emit("progress", {
+        const message = {
           taskMeta: {
             taskId: task.taskId,
             type: task.type
           },
           progress
-        });
+        };
+        if (this.serverCapabilities.progressAck)
+          lastProgressProcessed = new Promise<void>(resolve => {
+            this.socket.emit("progress", message, () => resolve());
+          });
+        else this.socket.emit("progress", message);
       }, 100);
       task.reportProgressRaw = (progress: unknown) => {
         if (canceled) throw new CanceledError();
@@ -200,6 +223,12 @@ export class RPC {
           winston.error(`Unexpected error caught from taskHandler: ${e}`);
         }
       }
+
+      // The last progress is the task's result. Send it now rather than after the debounce delay, and make sure
+      // the server has stored it before acknowledging the task: an acknowledged task is never judged again.
+      // If the server doesn't confirm in time, we restart and the server puts the unacknowledged task back.
+      reportProgress.flush();
+      await this.withTimeout(lastProgressProcessed, Math.max(config.rpcTimeout, FINAL_PROGRESS_ACK_TIMEOUT));
 
       this.pendingTaskCancelCallback.delete(task.taskId);
 

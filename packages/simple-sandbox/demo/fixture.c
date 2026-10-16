@@ -8,10 +8,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
 #include <sys/resource.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+// A System V message queue key shared by the "ipc-create" and "ipc-find" modes
+static const key_t demo_ipc_key = 0x4c4c4d4a;
 
 static int inspect(void)
 {
@@ -59,6 +64,11 @@ static int inspect(void)
     printf("affinity=%d\n", CPU_COUNT(&affinity) == 1 ? affinity_cpu : -1);
     printf("readonly=%s\n", readonly_error == EROFS ? "EROFS" : strerror(readonly_error));
     printf("stack_limit=%llu\n", (unsigned long long)stack_limit.rlim_cur);
+
+    char ipc_namespace[256] = {0};
+    if (readlink("/proc/self/ns/ipc", ipc_namespace, sizeof(ipc_namespace) - 1) < 0)
+        return 13;
+    printf("ipc_namespace=%s\n", ipc_namespace);
     return 0;
 }
 
@@ -123,6 +133,16 @@ int main(int argc, char **argv)
     }
     if (strcmp(argv[1], "pids") == 0)
         return exhaust_processes();
+    if (strcmp(argv[1], "ipc-create") == 0)
+        return msgget(demo_ipc_key, IPC_CREAT | 0600) == -1 ? 30 : 0;
+    if (strcmp(argv[1], "ipc-find") == 0)
+    {
+        if (msgget(demo_ipc_key, 0) != -1)
+            printf("ipc=shared\n");
+        else
+            printf("ipc=%s\n", errno == ENOENT ? "isolated" : strerror(errno));
+        return 0;
+    }
     if (strcmp(argv[1], "descendants") == 0)
     {
         if (fork() == 0)
