@@ -46,6 +46,7 @@ const { signAiAttachment } = backendRequire("./ai-attachment.ts");
 const { AiService } = backendRequire("./ai.service.ts");
 const { AiJobEntity } = backendRequire("./ai.entity.ts");
 const { UserEntity } = backendRequire("../user/user.entity.ts");
+const { TeamResourceEntity } = backendRequire("../team/team.entity.ts");
 const { ProblemService } = backendRequire("../problem/problem.service.ts");
 const { ProblemEntity } = backendRequire("../problem/problem.entity.ts");
 const { ProblemJudgeInfoEntity } = backendRequire("../problem/problem-judge-info.entity.ts");
@@ -178,6 +179,10 @@ test(
         filename: {...text, primary: true}, uuid: text}],
       [FileEntity, "file", {id: {...integer, primary: true, generated: true}, uuid: {...text, unique: true},
         size: integer, uploadTime: {type: Date}}],
+      // ProblemService.userHasPermission consults team ACLs first; no row means an ordinary problem.
+      [TeamResourceEntity, "team_resource", {id: {...integer, primary: true, generated: true}, teamId: integer,
+        kind: {type: String, length: 16}, resourceId: integer, visibility: {type: String, length: 16, default: "private"},
+        invitedUserIds: json, inviteCode: {type: String, length: 36, nullable: true}, archived: {type: Boolean, default: false}}],
       [
         AiJobEntity,
         "job",
@@ -498,6 +503,12 @@ test(
       backendRequire('node:child_process').execFileSync('python3', ['-c',
         'import sys,zipfile\nwith zipfile.ZipFile(sys.argv[1],"w") as z:\n z.writestr("sample.in","7\\n")\n z.writestr("sample.out","7\\n")', archive]);
       try {
+        await t.test('archive work directory has the free space ZIP extraction requires', () => {
+          // safe-zip refuses to extract unless 2 GiB stay free (ZIP_INSUFFICIENT_STORAGE).
+          const {bavail, bsize} = fs.statfsSync(archiveRoot);
+          assert(bavail * bsize > 2 * 1024 ** 3 + 1024 ** 2,
+            `${archiveRoot} has under 2 GiB free; set TMPDIR (or HYHOJ_AI_TEST_RESULTS) to a larger filesystem`);
+        });
         for (const stage of ['additional', 'hidden']) {
           for (const mode of ['success', 'cancel', 'UseAi', 'ImportProblem', 'CreateProblem', 'GenerateTestdata',
             'EditProblemData', 'object-ACL', 'lease', 'human-edit']) await t.test(`attachment ${stage} ${mode} at registration`, async () => {

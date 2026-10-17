@@ -100,7 +100,7 @@ Never set these in production services. They point tests at disposable resources
 
 | Variable | Purpose |
 | --- | --- |
-| `HYHOJ_AI_TEST_DB_CONFIG` | YAML file with `services.database` for the `ai-*.mariadb.test.cjs` tests, which use a real database and temporary tables. Point it at a disposable database. Without it, they're skipped. |
+| `HYHOJ_AI_TEST_DB_CONFIG` | YAML file with `services.database` for the `ai-*.mariadb.test.cjs` tests, which use a real database and temporary tables. Point it at a disposable database. Without it, they're skipped. Their ZIP cases need 2 GiB free in the temporary directory (`TMPDIR`). |
 | `LLMOJ_AI_BUDGET_TEST_DB_CONFIG` | YAML file with `services.database` for `ai-budget.mariadb.test.cjs`, which needs an empty disposable database |
 | `HYHOJ_AI_TEST_RESULTS` | Optional JSON results file for some database tests; its directory must exist |
 | `HYHOJ_TEST_CONFIG` | Backend YAML for the integration tests: the database name must start with `hyhoj_test_`, the host must be a loopback address, and Redis must be a dedicated non-zero database on loopback (not port 16379) |

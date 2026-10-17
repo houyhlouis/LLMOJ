@@ -19,6 +19,7 @@ const { AiService } = require("./ai.service.ts");
 const { qualityState, qualityReceipt } = require("./ai-quality.fixture.cjs");
 const { AiJobEntity } = require("./ai.entity.ts");
 const { UserEntity } = require("../user/user.entity.ts");
+const { TeamResourceEntity } = require("../team/team.entity.ts");
 const { ProblemService } = require("../problem/problem.service.ts");
 const { ProblemEntity } = require("../problem/problem.entity.ts");
 const { ProblemJudgeInfoEntity } = require("../problem/problem-judge-info.entity.ts");
@@ -47,6 +48,10 @@ test("AI final publication is atomic against cancel, lease loss and human edits 
     [ProblemTagMapEntity, "tags", { id: { ...integer, primary: true, generated: true }, problemId: integer, problemTagId: integer }],
     [LocalizedContentEntity, "content", { objectId: { ...integer, primary: true }, type: { ...text, primary: true },
       locale: { ...text, primary: true }, data: { type: "text" } }],
+    // ProblemService.userHasPermission consults team ACLs first; no row means an ordinary problem.
+    [TeamResourceEntity, "team_resource", { id: { ...integer, primary: true, generated: true }, teamId: integer,
+      kind: { type: String, length: 16 }, resourceId: integer, visibility: { type: String, length: 16, default: "private" },
+      invitedUserIds: json, inviteCode: { type: String, length: 36, nullable: true }, archived: { type: Boolean, default: false } }],
     [AiJobEntity, "job", { id: { ...text, primary: true }, ownerId: integer, problemId: integer, action: text,
       status: text, runToken: text, step: text, state: json, input: json, progress: integer, error: { type: "text", nullable: true } }]
   ];

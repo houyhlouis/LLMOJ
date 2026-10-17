@@ -53,7 +53,7 @@ node --test apps/judge/src/aiQuality.test.cjs
 
 Run that command from the repository root. CI runs both the backend mock suite and this judge suite, as documented in the bilingual development guides. Real sandbox acceptance requires a dedicated execution environment and verifies compilation, actual resource verdicts and checker behavior separately.
 
-The mock tests use synthetic keys. MariaDB tests are opt-in through their documented test configuration environment variables and create temporary tables; select a disposable test database.
+The mock tests use synthetic keys. MariaDB tests are opt-in through their documented test configuration environment variables and create temporary tables; select a disposable test database. The attachment cases of `ai-actions.mariadb.test.cjs` extract real ZIP archives in the system temporary directory (or the directory of `HYHOJ_AI_TEST_RESULTS`), and extraction keeps 2 GiB free, so set `TMPDIR` to a larger filesystem when `/tmp` is a small tmpfs.
 
 The `.mjs` integration suites additionally require an explicitly configured disposable backend, test fixture users and sandbox runner. `test/integration-client.mjs` requires all of:
 

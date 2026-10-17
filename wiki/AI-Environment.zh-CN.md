@@ -100,7 +100,7 @@ sudo systemctl is-active libreoj-backend.service
 
 | 变量 | 用途 |
 | --- | --- |
-| `HYHOJ_AI_TEST_DB_CONFIG` | 供 `ai-*.mariadb.test.cjs` 使用的、包含 `services.database` 的 YAML 文件；这些测试使用真实数据库和临时表。请指向可丢弃的数据库。不设置时跳过 |
+| `HYHOJ_AI_TEST_DB_CONFIG` | 供 `ai-*.mariadb.test.cjs` 使用的、包含 `services.database` 的 YAML 文件；这些测试使用真实数据库和临时表。请指向可丢弃的数据库。不设置时跳过。其中的 ZIP 用例要求临时目录（`TMPDIR`）至少有 2 GiB 可用空间 |
 | `LLMOJ_AI_BUDGET_TEST_DB_CONFIG` | 供 `ai-budget.mariadb.test.cjs` 使用的、包含 `services.database` 的 YAML 文件，需要一个空的可丢弃数据库 |
 | `HYHOJ_AI_TEST_RESULTS` | 部分数据库测试可选的 JSON 结果文件；其所在目录必须已存在 |
 | `HYHOJ_TEST_CONFIG` | 集成测试使用的后端 YAML：数据库名必须以 `hyhoj_test_` 开头，主机必须是本机回环地址，Redis 必须是本机上专用的非零数据库（不能是 16379 端口） |

@@ -39,6 +39,7 @@ const { AiService } = backendRequire("./ai.service.ts");
 const { qualityState, qualityReceipt } = require("./ai-quality.fixture.cjs");
 const { AiJobEntity } = backendRequire("./ai.entity.ts");
 const { UserEntity } = backendRequire("../user/user.entity.ts");
+const { TeamResourceEntity } = backendRequire("../team/team.entity.ts");
 const { ProblemService } = backendRequire("../problem/problem.service.ts");
 const { ProblemEntity } = backendRequire("../problem/problem.entity.ts");
 const { ProblemJudgeInfoEntity } = backendRequire("../problem/problem-judge-info.entity.ts");
@@ -161,6 +162,10 @@ test(
           data: { type: "text" }
         }
       ],
+      // ProblemService.userHasPermission consults team ACLs first; no row means an ordinary problem.
+      [TeamResourceEntity, "team_resource", {id: {...integer, primary: true, generated: true}, teamId: integer,
+        kind: {type: String, length: 16}, resourceId: integer, visibility: {type: String, length: 16, default: "private"},
+        invitedUserIds: json, inviteCode: {type: String, length: 36, nullable: true}, archived: {type: Boolean, default: false}}],
       [
         AiJobEntity,
         "job",
@@ -275,18 +280,18 @@ test(
       function pauseBeforeSave(f) {
         const entered = deferred(),
           released = deferred();
-        f.problems.connection = {
-          transaction: (isolation, callback) =>
-            db.transaction(isolation, async manager => {
-              const save = manager.save.bind(manager);
-              manager.save = async (...args) => {
-                entered.resolve();
-                await released.promise;
-                return save(...args);
-              };
-              return callback(manager);
-            })
-        };
+        // Only transactions are intercepted; other reads (such as team access) use the real connection.
+        f.problems.connection = Object.create(db);
+        f.problems.connection.transaction = (isolation, callback) =>
+          db.transaction(isolation, async manager => {
+            const save = manager.save.bind(manager);
+            manager.save = async (...args) => {
+              entered.resolve();
+              await released.promise;
+              return save(...args);
+            };
+            return callback(manager);
+          });
         return { entered, released };
       }
       for (const mode of ["UseAi", "GenerateTestdata", "EditProblemData", "object-ACL"])

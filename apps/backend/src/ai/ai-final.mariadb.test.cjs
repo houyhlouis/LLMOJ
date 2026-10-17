@@ -47,6 +47,7 @@ const { AiService } = backendRequire("./ai.service.ts");
 const { AiResponseCheckpointEntity } = backendRequire("./ai-usage.entity.ts");
 const { AiJobEntity } = backendRequire("./ai.entity.ts");
 const { UserEntity } = backendRequire("../user/user.entity.ts");
+const { TeamResourceEntity } = backendRequire("../team/team.entity.ts");
 const { ProblemService } = backendRequire("../problem/problem.service.ts");
 const { ProblemEntity } = backendRequire("../problem/problem.entity.ts");
 const { ProblemJudgeInfoEntity } = backendRequire("../problem/problem-judge-info.entity.ts");
@@ -179,6 +180,10 @@ test(
         filename: {...text, primary: true}, uuid: text}],
       [FileEntity, "file", {id: {...integer, primary: true, generated: true}, uuid: {...text, unique: true},
         size: integer, uploadTime: {type: Date}}],
+      // ProblemService.userHasPermission consults team ACLs first; no row means an ordinary problem.
+      [TeamResourceEntity, "team_resource", {id: {...integer, primary: true, generated: true}, teamId: integer,
+        kind: {type: String, length: 16}, resourceId: integer, visibility: {type: String, length: 16, default: "private"},
+        invitedUserIds: json, inviteCode: {type: String, length: 36, nullable: true}, archived: {type: Boolean, default: false}}],
       [
         AiJobEntity,
         "job",
