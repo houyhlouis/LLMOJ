@@ -5,7 +5,6 @@ exec python3 - "$@" <<'PY'
 import argparse
 import hashlib
 import io
-import json
 import os
 from pathlib import Path
 import re
@@ -44,8 +43,8 @@ ref = parsed.ref[0] if parsed.ref else 'main'
 if not re.fullmatch(r'[A-Za-z0-9._/-]{1,200}', ref) or '..' in ref:
     raise SystemExit(say('Invalid GitHub source reference', '无效的 GitHub 源码引用'))
 
-def fetch(url, maximum):
-    request = urllib.request.Request(url, headers={'User-Agent':'LLMOJ-upgrade-bootstrap'})
+def fetch(url, maximum, accept='application/vnd.github+json'):
+    request = urllib.request.Request(url, headers={'User-Agent':'LLMOJ-upgrade-bootstrap','Accept':accept})
     with urllib.request.urlopen(request, timeout=60) as response:
         if urllib.parse.urlsplit(response.url).hostname not in ('api.github.com','raw.githubusercontent.com','codeload.github.com'):
             raise SystemExit(say('Unexpected redirect while downloading the source', '下载源码时出现意外的重定向'))
@@ -55,7 +54,7 @@ def fetch(url, maximum):
     return data
 
 try:
-    sha = json.loads(fetch('https://api.github.com/repos/'+REPO+'/commits/'+urllib.parse.quote(ref,safe=''), 1024*1024))['sha']
+    sha = fetch('https://api.github.com/repos/'+REPO+'/commits/'+urllib.parse.quote(ref,safe=''), 1024*1024, 'application/vnd.github.sha').decode().strip()
     if not re.fullmatch(r'[0-9a-f]{40}', sha):
         raise SystemExit(say('Invalid source commit', '无效的源码提交'))
     # A plan is genuinely read-only: execute the same fixed-commit preflight from

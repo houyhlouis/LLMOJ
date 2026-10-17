@@ -329,8 +329,8 @@ class Host:
         self.run(['systemctl', action, unit], timeout=180)
 
 
-def fetch(url, maximum=256*1024*1024):
-    request = urllib.request.Request(url, headers={'User-Agent': 'LLMOJ-safe-upgrade', 'Accept': 'application/vnd.github+json'})
+def fetch(url, maximum=256*1024*1024, accept='application/vnd.github+json'):
+    request = urllib.request.Request(url, headers={'User-Agent': 'LLMOJ-safe-upgrade', 'Accept': accept})
     with urllib.request.urlopen(request, timeout=60) as response:
         if urllib.parse.urlsplit(response.url).hostname not in ('api.github.com', 'codeload.github.com', 'raw.githubusercontent.com'):
             fail('Unexpected source download redirect')
@@ -343,8 +343,7 @@ def fetch(url, maximum=256*1024*1024):
 def resolve_commit(ref):
     if not re.fullmatch(r'[A-Za-z0-9._/-]{1,200}', ref) or '..' in ref:
         fail('Invalid source reference')
-    value = json.loads(fetch(f'https://api.github.com/repos/{REPOSITORY}/commits/{urllib.parse.quote(ref, safe="")}', 1024*1024))
-    commit = value.get('sha', '')
+    commit = fetch(f'https://api.github.com/repos/{REPOSITORY}/commits/{urllib.parse.quote(ref, safe="")}', 1024*1024, 'application/vnd.github.sha').decode().strip()
     if not re.fullmatch(r'[0-9a-f]{40}', commit) or (re.fullmatch(r'[0-9a-f]{40}', ref) and commit != ref):
         fail('GitHub did not return an immutable commit')
     return commit
