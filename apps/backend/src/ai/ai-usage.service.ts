@@ -1,6 +1,6 @@
-import { createHash, randomUUID } from "crypto";
+import { randomUUID } from "crypto";
 
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 
 import { DataSource, Repository } from "typeorm";
@@ -8,6 +8,7 @@ import { DataSource, Repository } from "typeorm";
 import { AiResponseCheckpointEntity, AiUsageEntity } from "./ai-usage.entity";
 import { AiRuntimeContext, AiUsageRecord } from "./ai-runtime";
 import { AiError } from "./ai.types";
+import { AiAdmissionService, aiResponseHash } from "./ai-admission.service";
 
 import { UserEntity } from "../user/user.entity";
 
@@ -41,6 +42,8 @@ function normalize(row: Record<string, unknown>) {
 }
 @Injectable()
 export class AiUsageService {
+  @Inject(AiAdmissionService) private readonly admission?: AiAdmissionService;
+
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     @InjectRepository(AiUsageEntity) private readonly usage: Repository<AiUsageEntity>,
@@ -52,7 +55,7 @@ export class AiUsageService {
       ownerId,
       jobId,
       checkActive,
-      record: record => this.record(ownerId, jobId, record),
+      record: (record, reservationId) => this.record(ownerId, jobId, record, reservationId),
       ...(jobId
         ? {
             loadResponse: async requestHash => {
@@ -70,22 +73,24 @@ export class AiUsageService {
     };
   }
 
-  private async record(ownerId: number, jobId: string | undefined, record: AiUsageRecord) {
+  private async record(ownerId: number, jobId: string | undefined, record: AiUsageRecord, reservationId?: string) {
     const { responseId, ...metadata } = record;
-    const responseHash = responseId
-      ? createHash("sha256")
-          .update(`${jobId || "connection"}\n${record.host}\n${responseId}`)
-          .digest("hex")
-      : null;
+    delete metadata.pendingResponseId;
+    const responseHash = responseId ? aiResponseHash(jobId, record.host, responseId) : null;
     await this.db.transaction(async manager => {
       // Serializing one owner's metering also prevents counting a recovered response's tokens twice.
       await manager.findOne(UserEntity, { where: { id: ownerId }, lock: { mode: "pessimistic_write" } });
       const repository = manager.getRepository(AiUsageEntity);
+      // Whether the provider reported what this request used, so that its budget reservation can be released.
+      let confirmed =
+        metadata.usageReported &&
+        (metadata.target === "search" || (metadata.inputTokens != null && metadata.outputTokens != null));
       if (
         responseHash &&
         metadata.usageReported &&
         (await repository.findOneBy({ ownerId, responseHash, usageReported: true }))
       ) {
+        confirmed = true;
         metadata.inputTokens = null;
         metadata.outputTokens = null;
         metadata.cachedTokens = null;
@@ -95,6 +100,7 @@ export class AiUsageService {
         metadata.usageReported = true;
       }
       await repository.insert({ id: randomUUID(), ownerId, jobId: jobId || null, ...metadata, responseHash });
+      await this.admission?.settle(manager, ownerId, jobId, record, reservationId, confirmed, responseHash);
     });
   }
 

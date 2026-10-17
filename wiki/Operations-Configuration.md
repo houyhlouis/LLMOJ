@@ -1,119 +1,137 @@
-# Infrastructure and post-install operations
+# Operations
 
-English | [简体中文](Operations-Configuration.zh-CN.md) | [Configuration overview](Configuration.md)
+[简体中文](Operations-Configuration.zh-CN.md) | English | [Wiki home](Home.en.md) | [Configuration overview](Configuration.md)
 
-These tables cover infrastructure settings emitted by project templates/generators. Other third-party directives belong to their version-specific documentation. `<root>` is the installation directory, default `/opt/LLMOJ`. Back up and record original settings before editing; plan a maintenance window for database/storage migrations.
+This page lists the settings the installer writes for Nginx, Redis, MariaDB, MinIO and systemd, explains which settings must change together, and covers statistics and backups. `<root>` is the installation directory, `/opt/LLMOJ` by default. For settings not listed here, see the documentation of that program's version.
 
-## Nginx: config/nginx.conf
+Before changing anything, back up the file and note the original values. Plan a quiet period for database or storage changes.
 
-| Setting | Generated value and purpose |
+## Nginx: `config/nginx.conf`
+
+| Setting | Value written by the installer |
 | --- | --- |
-| `user`, `worker_processes`, `events.worker_connections` | `www-data`, `auto`, `1024`; Nginx workers/connections, independent of judge capacity |
-| `pid`, `access_log`, `error_log`, `log_format` | PID `<root>/data/nginx/nginx.pid`; logs `<root>/logs/nginx`; `private_request` uses `$uri` to omit secret-bearing query strings |
-| `include`, `default_type` | `/etc/nginx/mime.types` and `application/octet-stream` |
-| `client_max_body_size` | `128m` for file transfers through `/storage/`; `32m` for `/api/`, matching the backend's JSON request limit. An outer proxy or backend per-file limits can be lower |
-| `client_body_temp_path`, `proxy_temp_path` | `<root>/data/nginx/client_body` and `proxy`; keep writable by www-data |
-| `listen`, `server_name`, `root` | Installer-selected address/port, default `0.0.0.0:80`; `server_name _`; static root `<root>/public` |
-| `map $http_upgrade $connection_upgrade` | Use `upgrade` when Upgrade is present, otherwise `close`; WebSocket support |
-| `location /api/` | `proxy_pass http://127.0.0.1:2002`, HTTP/1.1; forwards Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Proto |
-| `location /api/socket`, `location /socket.io/` | Same backend with Upgrade/Connection; read/send timeouts `3600s`; judge `/api/socket` disables access logging and limits error logs to crit |
-| `location /storage/` | `proxy_pass http://127.0.0.1:19000/` removes prefix; Host restores signed `127.0.0.1:19000`; HTTP/1.1, empty Connection, request/response buffering off |
-| `location /`, `try_files` | `$uri $uri/ /index.html`; SPA deep-link fallback |
+| `user`, `worker_processes`, `events.worker_connections` | `www-data`, `auto`, `1024`. These are Nginx's own processes and have nothing to do with judging. |
+| `pid`, `access_log`, `error_log`, `log_format` | PID file `<root>/data/nginx/nginx.pid`, logs in `<root>/logs/nginx`. The `private_request` log format records paths without query strings, which may contain keys. |
+| `include`, `default_type` | `/etc/nginx/mime.types`, `application/octet-stream` |
+| `client_max_body_size` | `128m` for files sent through `/storage/`; `32m` for `/api/`, the backend's own limit. A proxy in front or a backend limit for a particular kind of file may be lower. |
+| `client_body_temp_path`, `proxy_temp_path` | `<root>/data/nginx/client_body` and `<root>/data/nginx/proxy`; `www-data` must be able to write to them |
+| `listen`, `server_name`, `root` | The address and port chosen at installation (`0.0.0.0:80` by default), `_`, and `<root>/public` |
+| `map $http_upgrade $connection_upgrade` | Lets WebSocket connections through |
+| `location /api/` | Forwards to the backend at `http://127.0.0.1:2002` with the Host, X-Real-IP, X-Forwarded-For and X-Forwarded-Proto headers |
+| `location /api/socket`, `location /socket.io/` | WebSocket connections to the backend, kept open up to an hour (`3600s`). The judge connection `/api/socket` isn't logged, and only critical errors are. |
+| `location /storage/` | Forwards to MinIO at `http://127.0.0.1:19000/`, setting the Host header MinIO's download signatures expect, with buffering turned off |
+| `location /` | Serves the frontend, falling back to `/index.html` so that links to any page work |
 
-## Redis: config/redis.conf
-
-| Setting | Generated value and purpose |
-| --- | --- |
-| `bind`, `port`, `protected-mode`, `requirepass` | `127.0.0.1`, `16379`, `yes`, generated password; match backend Redis URL |
-| `dir`, `appendonly`, `appendfsync`, `save` | `<root>/data/redis`; `yes`; `everysec`; snapshot rules `900 1` and `300 10` |
-| `maxmemory`, `maxmemory-policy` | `192mb`, `noeviction`; writes can fail when full; monitor sessions/queues and avoid evicting task data |
-| `logfile`, `daemonize` | Empty string, `no`; logs go to systemd |
-
-## MariaDB: config/mariadb.cnf
-
-| Setting | Generated value and purpose |
-| --- | --- |
-| `user`, `bind-address`, `port` | `mysql`, `127.0.0.1`, `13306` |
-| `datadir`, `socket`, `pid-file`, `log-error` | Data `<root>/data/mariadb`, containing mysql.sock/mysql.pid; log `<root>/logs/mariadb/error.log` |
-| `character-set-server`, `collation-server` | `utf8mb4`, `utf8mb4_unicode_ci`; changes do not convert existing tables automatically |
-| `innodb-buffer-pool-size`, `max-connections`, `skip-name-resolve` | `128M`, `60`, enabled; size against memory/connection load, distinct from backend pool settings |
-
-Initialization now runs as mysql in private staging and publishes only after system-table checks; the presence of `mysql/` alone is insufficient. See [installation troubleshooting](Installation.md#mariadb-initialization-failures-and-safe-retries) for AppArmor Err13, retained failed data and retries. Do not bypass checks by disabling AppArmor, adding DAC-bypass capabilities or deleting the database.
-
-## MinIO: config/minio.env and service unit
-
-| Setting | Generated value and purpose |
-| --- | --- |
-| `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` | Instance storage credentials in root:root 0600 minio.env; must match backend accessKey/secretKey |
-| `MINIO_BROWSER`, `MINIO_UPDATE`, `MINIO_CALLHOME_ENABLE` | All `off`; environment settings emitted by this project |
-| `--address`, `--console-address`, `server PATH` | `127.0.0.1:19000`, `127.0.0.1:19001`, `<root>/data/minio`; in systemd ExecStart |
-
-## systemd
-
-| Field | Generated behavior |
-| --- | --- |
-| `User`, `Group` | MariaDB mysql, Redis redis, backend/MinIO libreoj; Nginx workers drop privileges; judge permissions/delegation in judge guide |
-| `WorkingDirectory`, `ExecStart`, `Environment`, `EnvironmentFile` | Instance paths; generated backend working directory apps/backend; runtime environment in Environment guide; MinIO loads minio.env |
-| `After`, `Requires`, `PartOf`, `Wants`, `WantedBy` | Backend requires three storage services; Nginx requires backend; services PartOf/WantedBy libreoj.target; target Wants site services (judge in all mode) and is WantedBy multi-user.target |
-| `Restart`, `RestartSec`, `UMask`, `LimitCORE` | Web/storage services use `on-failure`, `3` seconds, `0077`, `0`; judge UMask is `0022` |
-| `StandardOutput`, `StandardError` | Both `journal`; do not print secrets into service logs |
-| `TimeoutStartSec` | MariaDB `120` seconds |
-| `Type`, `ExecReload`, `KillSignal` | Nginx `simple`, reload using instance-specific -p/-c, exit signal SIGQUIT |
-| `AllowedCPUs`, `UV_THREADPOOL_SIZE`, `TasksMax`, `Delegate`, `RequiresMountsFor` | Judge resource settings and workspace mounts must match; complete generated parameters in judge guide |
-
-Installed units live in `/etc/systemd/system`; `deploy/systemd` contains generated installation sources. Persistent environment/resource overrides can use service drop-ins such as `sudo systemctl edit libreoj-backend`; daemon-reload still requires a process restart. Check whether a drop-in overrides newly generated AllowedCPUs/thread-pool settings. Full unit/environment output may contain secrets; inspect only in a trusted terminal.
-
-The installer also writes `vm.overcommit_memory=1` to `/etc/sysctl.d/99-libreoj-redis.conf` for Redis, retaining an existing custom file, and installs required sandbox AppArmor rules. Docker package sources and `registry-mirrors` are covered in [Docker sources](Docker-Sources.md). Node/Go/pnpm versions and rootfs IDs are installer/build recipe choices, not backend.yaml options.
-
-## Settings that must change together
-
-| Goal | Related settings |
-| --- | --- |
-| Resize CPU/RAM/judge slots | judge.yaml slots/workspaces/affinity, thread pool, mounts, service AllowedCPUs; follow [resizing](Judge-Configuration.md) for verification and rollback |
-| Change site name/logo | Backend `preference.siteName`, `preference.misc.appLogo`; rebuild initial title/static assets via [frontend configuration](Frontend-Configuration.md) |
-| Change website port/listener | Nginx listen, browser URL, MinIO forUserUpload/forUserDownload/forJudge.urlEndpoint when the public port changes, local `downloadEndpointOverride` loopback port, remote judge.yaml serverUrl, firewall/outer proxy |
-| Change domain or enable HTTPS | All three MinIO urlEndpoint values become final `https://new-domain/storage/`; TLS proxy/trusted forwarding, remote judge.yaml serverUrl, allowed mail-link origins; see HTTPS |
-| Change database/Redis/storage | Back up/migrate data first; match backend endpoints and server credentials/listeners; URI-encode Redis URL passwords; match MinIO signed Host/prefix; editing secrets.json alone is insufficient |
-| Enable mail/email verification | Set `services.mail.address` and a real `transport`; verify delivery before enabling `preference.security.requireEmailVerification`; default jsonTransport does not send mail |
-| Increase upload sizes | Nginx `client_max_body_size`, outer proxy, matching backend `resourceLimit` entries, free disk, and browser type limits |
-| Increase service memory | Budget V8 `NODE_OPTIONS`, Redis maxmemory, MariaDB buffer pool, judge processes, and tmpfs separately; slot count is only one part |
-
-### Validate Nginx changes
-
-Substitute the actual instance paths. If validation fails, do not reload; restore the backup and test again.
+To check and apply a change (adjust the paths for your installation):
 
 ```bash
 sudo /usr/sbin/nginx -t -p /opt/LLMOJ/ -c /opt/LLMOJ/config/nginx.conf
-# Run only after the preceding check succeeds.
+# only if the check succeeded:
 sudo systemctl reload libreoj-nginx
 ```
 
-Restart `libreoj-backend` for backend YAML changes. Restart database/Redis/MinIO in a maintenance window when their configuration changes. Verify login, a normal submission, a small upload/download, remote judge connectivity, and basic AI worker execution; a home-page HTTP 200 alone is insufficient. For an outer TLS proxy, preserve WebSocket and signed storage behavior as described in [HTTPS](HTTPS.md).
+If the check fails, don't reload: restore your backup and check again.
+
+## Redis: `config/redis.conf`
+
+| Setting | Value written by the installer |
+| --- | --- |
+| `bind`, `port`, `protected-mode`, `requirepass` | `127.0.0.1`, `16379`, `yes`, and a random password, which must match the backend's Redis address |
+| `dir`, `appendonly`, `appendfsync`, `save` | `<root>/data/redis`, `yes`, `everysec`, and snapshots after `900 1` and `300 10` |
+| `maxmemory`, `maxmemory-policy` | `192mb`, `noeviction`: when Redis is full, writes fail instead of deleting data. Keep an eye on its memory; don't switch to a policy that evicts keys, as it would drop sessions and queued work. |
+| `logfile`, `daemonize` | Empty and `no`: logs go to systemd |
+
+## MariaDB: `config/mariadb.cnf`
+
+| Setting | Value written by the installer |
+| --- | --- |
+| `user`, `bind-address`, `port` | `mysql`, `127.0.0.1`, `13306` |
+| `datadir`, `socket`, `pid-file`, `log-error` | Data in `<root>/data/mariadb` (with `mysql.sock` and `mysql.pid`), log in `<root>/logs/mariadb/error.log` |
+| `character-set-server`, `collation-server` | `utf8mb4`, `utf8mb4_unicode_ci`. Changing them doesn't convert existing tables. |
+| `innodb-buffer-pool-size`, `max-connections`, `skip-name-resolve` | `128M`, `60`, on. Size them for your memory and load; the backend's own connection pool is configured separately. |
+
+If MariaDB fails to initialize during installation, see [Installation](Installation.md#mariadb-initialization-failures-and-safe-retries). Don't work round it by turning off AppArmor or deleting the database.
+
+## MinIO: `config/minio.env` and its service
+
+| Setting | Value written by the installer |
+| --- | --- |
+| `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` | Storage credentials, in `minio.env`, which only root can read. They must match `accessKey` and `secretKey` in `backend.yaml`. |
+| `MINIO_BROWSER`, `MINIO_UPDATE`, `MINIO_CALLHOME_ENABLE` | All `off` |
+| `--address`, `--console-address`, data directory | `127.0.0.1:19000`, `127.0.0.1:19001` and `<root>/data/minio`, given in the service's `ExecStart` |
+
+## systemd services
+
+| Setting | What the installer writes |
+| --- | --- |
+| `User`, `Group` | MariaDB runs as `mysql`, Redis as `redis`, the backend and MinIO as `libreoj`; Nginx's workers run as `www-data`. The judge's users are described in [Judge configuration](Judge-Configuration.md). |
+| `WorkingDirectory`, `ExecStart`, `Environment`, `EnvironmentFile` | Paths in the installation directory; the backend runs in `apps/backend`; MinIO reads `minio.env`. Environment variables are listed in [Environment variables](Environment.md). |
+| `After`, `Requires`, `PartOf`, `Wants`, `WantedBy` | The backend needs MariaDB, Redis and MinIO; Nginx needs the backend. All services are part of `libreoj.target`, which starts at boot. |
+| `Restart`, `RestartSec`, `UMask`, `LimitCORE` | Web and storage services restart 3 seconds after a failure, with umask `0077` and no core dumps; the judge uses umask `0022`. |
+| `StandardOutput`, `StandardError` | `journal` |
+| `TimeoutStartSec` | MariaDB: 120 seconds |
+| `Type`, `ExecReload`, `KillSignal` | Nginx: `simple`, reloads with its own configuration, stops on `SIGQUIT` |
+| `AllowedCPUs`, `UV_THREADPOOL_SIZE`, `TasksMax`, `Delegate`, `RequiresMountsFor` | The judge's CPU, thread and mount settings, which must match `judge.yaml`; see [Judge configuration](Judge-Configuration.md) |
+
+The services in use are in `/etc/systemd/system`; `deploy/systemd` holds the templates they're generated from. To change an environment variable or a resource limit permanently, add a drop-in, for example with `sudo systemctl edit libreoj-backend`, then run `sudo systemctl daemon-reload` and restart the service. Check that a drop-in doesn't override settings the installer or the resize command writes, such as `AllowedCPUs`. The full unit and its environment may contain secrets, so only look at them in a trusted terminal.
+
+The installer also sets `vm.overcommit_memory=1` for Redis in `/etc/sysctl.d/99-libreoj-redis.conf` (unless that file already exists) and installs the AppArmor rules the judge's sandbox needs. Docker sources are described in [Docker sources](Docker-Sources.md). The versions of Node.js, Go and pnpm and the sandbox image are part of each release, not settings.
+
+## Settings that change together
+
+| To change | Also change |
+| --- | --- |
+| CPUs, memory or judge slots | Use the [resize command](Judge-Configuration.md), which updates `judge.yaml`, the judge service and its checks together. |
+| Site name or logo | `preference.siteName` and `preference.misc.appLogo` in `backend.yaml`, then [rebuild the frontend](Frontend-Configuration.md) for the name shown while pages load. |
+| The site's port or listening address | `listen` in `nginx.conf`; the address people use; if the public port changes, the MinIO addresses `forUserUpload`, `forUserDownload` and `forJudge.urlEndpoint`; the port in a local `downloadEndpointOverride`; `serverUrl` in each remote judge's `judge.yaml`; the firewall and any proxy in front. |
+| The domain, or HTTP to HTTPS | All three MinIO `urlEndpoint` values become `https://<new domain>/storage/`; the HTTPS proxy and its forwarded headers; `serverUrl` on remote judges; the addresses allowed in emailed links. See [HTTPS](HTTPS.md). |
+| Database, Redis or file storage | Back up and move the data first, then make the backend's connection settings match the servers' addresses and passwords. Percent-encode special characters in a password in the Redis URL. Editing `secrets.json` alone changes nothing. |
+| Turning on email and email verification | Set `services.mail.address` and a real `transport` and check that mail arrives before turning on `preference.security.requireEmailVerification`. The default `jsonTransport` doesn't send anything. |
+| Larger uploads | `client_max_body_size` in Nginx and any proxy in front, the matching `resourceLimit` in `backend.yaml`, and free disk space |
+| More memory for services | Plan Node.js (`NODE_OPTIONS`), Redis `maxmemory`, the MariaDB buffer pool, judging and temporary file systems separately; judge slots are only part of it. |
+
+After a change, restart what it affects: `libreoj-backend` for `backend.yaml`, and MariaDB, Redis or MinIO at a quiet time for theirs. Then check more than that the home page loads: sign in, make a submission, upload and download a small file, check that remote judges reconnect, and run a small AI job.
 
 ## Submission and accepted counts
 
-Each problem's submission and accepted-submission counts and each user's submission and accepted-problem counts follow the non-contest submissions exactly. The change of the counts is recorded in the same transaction as the submission and applied right after it; if the backend stops in between, another backend process, or the restarted one, applies it within about a minute.
+The submission and accepted counts of each problem, and the submission and accepted-problem counts of each user, always match the non-contest submissions. Each change is recorded together with the submission and applied straight after it; if the backend stops in between, another backend process, or the same one after restarting, applies it within about a minute.
 
-To check the counts against the submissions, for example after restoring a backup or an older version:
+To check the counts against the submissions, for example after restoring a backup or going back to an older version:
 
 ```bash
 sudo bash /opt/LLMOJ/deploy/rebuild-statistics.sh
 ```
 
-It prints one JSON line: for `problems` and `users`, how many rows differ and up to 20 examples with their `stored` and `counted` values. To correct them:
+It prints one line of JSON: for `problems` and `users`, how many rows differ, with up to 20 examples showing the `stored` and `counted` values. To correct them:
 
 ```bash
 sudo bash /opt/LLMOJ/deploy/rebuild-statistics.sh --apply
 ```
 
-Both are safe while the site is running: each row is recounted while locked, taking changes that are still being applied into account. Use `--prefix` for another installation directory.
+Both are safe while the site is running. Use `--prefix` for another installation directory.
 
-## Secrets, installation state, and backups
+## Secrets and installation records
 
-`config/secrets.json` fields `database`, `redis`, `minioAccess`, `minioSecret`, `session`, `maintenance`, `judge`, and `instanceId` are generator records, not live-update controls. Rotation requires matching real service credentials, backend.yaml, judge records, and clients. Do not delete the file and rerun installation. `config/admin-credentials.json` records initial administrator credentials, verified before terminal display; editing it does not change the account password. `config/install-state.json` records initial inputs/phases, not later capacity changes.
+- `config/secrets.json` records the passwords and keys generated at installation (`database`, `redis`, `minioAccess`, `minioSecret`, `session`, `maintenance`, `judge`, `instanceId`). Editing it doesn't change them anywhere: to change one, change it in the service that uses it, in `backend.yaml` and on the judges. Never delete the file and reinstall.
+- `config/admin-credentials.json` records the first administrator's password; changing the file doesn't change the account.
+- `config/install-state.json` records the original installation options and progress, not later changes such as resizing.
+- The AI state directory holds the AI master key and `two-factor.key`. They decrypt users' AI keys (`ai_configuration.encrypted`) and authenticator secrets (`user_two_factor`) in the database, so a database backup is only usable with the matching keys. To move the directory, see [AI environment](AI-Environment.md).
 
-The AI state directory holds the master key and `two-factor.key`; encrypted user API settings live in MariaDB `ai_configuration.encrypted`, and encrypted authenticator secrets in `user_two_factor`. Back up and restore the database with its matching key, and move the key when changing the state directory, as described in [AI environment](AI-Environment.md). Do not recursively chown the instance: rootfs and judge workspaces have specific UID/mount requirements.
+Don't change the owner of the whole installation directory recursively: the sandbox image and judge directories need specific owners and mounts.
 
-`deploy/backup.sh` defaults to `/opt/LLMOJ`; `--prefix PATH` overrides `HYHOJ_ROOT`. Specify the actual path for an existing or custom installation. It refuses to run during an installation, upgrade or judge resize (they share a maintenance lock), stops the services installed for this role (a web-only installation has no judge service), archives `config`, `data`, and `deploy`, excludes `data/judge`, `data/tmp`, `data/nginx`, and `data/ai-generated`, then on exit, including after a failure, starts only the target and services that were running before; a stopped instance stays stopped. It does not include the full rootfs, runtime binaries, or `/etc/systemd/system` drop-ins; save those separately or ensure they can be rebuilt at the same version. Unpublished results in `data/ai-generated` are also excluded. It is not a complete backup of all runtime files or remote judges. Preserve any additional required data and test restoration.
+## Backups
 
-Sources: [deploy/configure-local.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py), [config/nginx.conf.example](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/config/nginx.conf.example), [deploy/configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-judge.py), [deploy/backup.sh](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/backup.sh).
+```bash
+sudo bash /opt/LLMOJ/deploy/backup.sh
+```
+
+It backs up `/opt/LLMOJ`, or the directory given with `--prefix` (or `HYHOJ_ROOT`). It:
+
+1. refuses to run while an installation, upgrade or judge resize is in progress;
+2. stops the site's services, so the site is down while it runs;
+3. writes `config`, `data` and `deploy` to `backups/libreoj-<UTC time>.tar.gz` with a `.sha256` checksum, leaving out `data/judge`, `data/tmp`, `data/nginx` and `data/ai-generated`;
+4. starts again whatever was running before, even if the backup failed; a site that was stopped stays stopped.
+
+The backup doesn't include the sandbox image, the installed runtimes, systemd drop-ins in `/etc/systemd/system`, unpublished AI results in `data/ai-generated` or remote judges. Keep copies of anything else you need, store backups on another machine, and practise restoring one.
+
+Sources: [configure-local.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-local.py), [nginx.conf.example](https://github.com/houyhlouis/LLMOJ/blob/main/config/nginx.conf.example), [configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-judge.py), [backup.sh](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/backup.sh).

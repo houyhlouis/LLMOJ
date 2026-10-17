@@ -2,37 +2,60 @@
 
 简体中文 | [English](Home.en.md) | [项目仓库](https://github.com/houyhlouis/LLMOJ)
 
-LLMOJ 是基于 LibreOJ 的 AI 辅助在线评测平台。从 [配置总览](Configuration.zh-CN.md) 查找配置项，首次部署从安装教程开始。CPU 核心数或内存调整后，请按 [评测配置与扩缩容](Judge-Configuration.zh-CN.md) 同步更新执行槽、CPU 绑定和 systemd 单元。
+LLMOJ 是基于 LibreOJ 的在线评测系统，提供 AI 辅助出题功能。初次部署请从[安装教程](Installation.zh-CN.md)开始；查找某个配置项请看[配置总览](Configuration.zh-CN.md)。
 
-用户列表从网站首页“排名”面板右上角的“查看全部”按钮进入（`/u`），顶部导航栏不再提供用户入口。该按钮仅对具有 `ViewUsers` 权限的用户显示。
+## 安装与维护
 
-| 场景 | 页面 |
+| 页面 | 内容 |
 | --- | --- |
-| 个人主页的私人团队、编号加入、审核、分组与资源 | [团队](Teams.zh-CN.md) |
-| 题目页内题解、我的讨论及旧 AI 题解分类 | [题解](Solutions.zh-CN.md) |
-| 提交列表悬浮详情、实时结果、权限与原页面入口 | [提交预览](Submissions.zh-CN.md) |
-| 作弊记录归零、证据保留和管理员重评恢复 | [Fake 评测](Submission-Moderation.zh-CN.md) |
-| NOI / OI、IOI、ICPC 与严格 IOI 的计分和反馈 | [比赛赛制](Contest-Rules.zh-CN.md) |
-| 提交详情 Hack、题目 STD 编辑、结果列表与筛选 | [Hack](Hacks.zh-CN.md) |
-| NOI 比赛可选 Self Eval、make/std 编辑、正式 SPJ 与全场额度 | [自测](Self-Evaluation.zh-CN.md) |
-| 社区功能、比赛和评测任务扩展的迁移与升级兼容 | [社区功能升级](Community-Upgrade.zh-CN.md) |
-| 网页注册设置、委派审核、待审核申请限制 | [注册审核](Registration-Approval.zh-CN.md) |
-| 身份验证器验证码、通行密钥、恢复码与敏感操作确认 | [两步验证](Two-Factor-Sign-In.zh-CN.md) |
-| 保留配置与数据升级、兼容检查和回滚 | [一键升级](Upgrade.zh-CN.md) |
-| 安装入口、全部参数和安装重试 | [Installation](Installation.zh-CN.md) |
-| 后端 YAML：账号、安全、数据库、邮件、存储、比赛和显示偏好 | [Backend-Configuration](Backend-Configuration.zh-CN.md) |
-| 评测 YAML、CPU／内存扩缩容、服务单元、验证和回滚 | [Judge-Configuration](Judge-Configuration.zh-CN.md) |
-| 用户 AI 模型、搜索服务、权限和任务设置 | [AI](AI.zh-CN.md) |
-| AI 目录、沙盒通信、密钥持久化和环境变量 | [AI-Environment](AI-Environment.zh-CN.md) |
-| 全部运行／安装／构建环境变量与维护工具参数 | [Environment](Environment.zh-CN.md) |
-| 本地前端构建、可选 CDN/bootstrap 配置 | [Frontend-Configuration](Frontend-Configuration.zh-CN.md) |
-| Nginx、MariaDB、Redis、MinIO、systemd 与安装后变更 | [Operations-Configuration](Operations-Configuration.zh-CN.md) |
-| 分布式流程图与网页／评测节点职责 | [Distributed-Judging](Distributed-Judging.zh-CN.md) |
-| 独立评测机配置与连接检查 | [Remote-Judge](Remote-Judge.zh-CN.md) |
-| Docker 软件包与镜像源 | [Docker-Sources](Docker-Sources.zh-CN.md) |
-| 域名、TLS 和外部反向代理 | [HTTPS](HTTPS.zh-CN.md) |
-| GitHub Desktop 更新文档与发布 Wiki | [Publishing](Publishing.zh-CN.md) |
+| [安装教程](Installation.zh-CN.md) | 安装脚本、全部参数、安装失败后重试 |
+| [升级](Upgrade.zh-CN.md) | 保留配置和数据升级；兼容范围与回滚 |
+| [功能升级](Community-Upgrade.zh-CN.md) | LLMOJ 各项功能的数据库修改，以及在自定义安装上应用它们 |
+| [HTTPS](HTTPS.zh-CN.md) | 域名、TLS 证书和外部反向代理 |
+| [Docker 源](Docker-Sources.zh-CN.md) | Docker 软件包源和镜像加速源 |
+| [运维配置](Operations-Configuration.zh-CN.md) | 安装后的 Nginx、MariaDB、Redis、MinIO 与 systemd；备份与计数修正 |
 
-默认完整安装保留网页、存储和本机评测，可额外连接远程评测机。`--role web` 不构建本机 rootfs；目前远程提交评测不能替代 AI 验证／数据生成所需的本机 worker。
+## 使用
 
-注册审核与升级工具基于 `20dec6f86213e886e79859187b9ef599bd33ec25` 扩展；新增文件须随对应版本发布。Ubuntu 24.04 amd64 已通过实际部署与功能验证；各次修订的验证范围以测试报告为准。项目主体采用 MIT；各上游组件保留各自许可。
+| 页面 | 内容 |
+| --- | --- |
+| [比赛赛制](Contest-Rules.zh-CN.md) | NOI / OI、IOI、ICPC 与严格 IOI 的计分和反馈 |
+| [私人团队](Teams.zh-CN.md) | 通过编号加入、审核、分组与共享资源 |
+| [题解](Solutions.zh-CN.md) | 题目页内的题解、我的讨论与 AI 题解 |
+| [提交记录](Submissions.zh-CN.md) | 提交预览、测试数据版本与此前的评测结果 |
+| [Hack](Hacks.zh-CN.md) | 发起 Hack、题目 STD 与 Hack 记录 |
+| [自测](Self-Evaluation.zh-CN.md) | NOI / OI 比赛中的隐藏预测试与额度 |
+| [Fake 处罚](Submission-Moderation.zh-CN.md) | 作废作弊提交并保留证据 |
+| [注册审核](Registration-Approval.zh-CN.md) | 注册设置与委派审核 |
+| [两步验证](Two-Factor-Sign-In.zh-CN.md) | 验证器应用、通行密钥、恢复码与敏感操作确认 |
+
+用户列表（`/u`）从网站首页“排名”面板的“查看全部”进入，需要 `ViewUsers` 权限。
+
+## 评测
+
+| 页面 | 内容 |
+| --- | --- |
+| [分布式评测](Distributed-Judging.zh-CN.md) | 架构、评测队列、排空与吊销评测机 |
+| [远程评测机](Remote-Judge.zh-CN.md) | 部署独立的评测机并检查 |
+| [评测机配置](Judge-Configuration.zh-CN.md) | 评测设置、沙箱与自检、容量与扩缩容 |
+
+## AI
+
+| 页面 | 内容 |
+| --- | --- |
+| [AI](AI.zh-CN.md) | 用户自己的模型和搜索服务、权限、AI 任务，以及站点的 AI 暂停和限制 |
+| [AI 环境](AI-Environment.zh-CN.md) | AI 目录、本机沙箱连接、密钥与环境变量 |
+
+## 参考
+
+| 页面 | 内容 |
+| --- | --- |
+| [配置总览](Configuration.zh-CN.md) | 各配置项所在的位置 |
+| [后端配置](Backend-Configuration.zh-CN.md) | 后端设置：账号、安全、数据库、邮件、存储、比赛和显示 |
+| [前端配置](Frontend-Configuration.zh-CN.md) | 本地构建前端；可选的 CDN 设置 |
+| [环境变量](Environment.zh-CN.md) | 运行、安装和构建用的环境变量；维护脚本 |
+| [发布](Publishing.zh-CN.md) | 用 GitHub Desktop 应用更新、发布本 Wiki 和创建版本 |
+
+完整安装（`--role all`）包含网站、存储和本机评测，也可以再接入远程评测机。仅网页安装（`--role web`）不构建本机评测环境，提交由远程评测机评测；但 AI 验证标程和生成测试数据需要完整安装的本机环境。
+
+LLMOJ 在 Ubuntu 24.04 amd64 上经过测试。本项目代码采用 MIT 许可，上游组件保留各自的许可。

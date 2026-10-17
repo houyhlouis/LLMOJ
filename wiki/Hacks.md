@@ -2,50 +2,50 @@
 
 [简体中文](Hacks.zh-CN.md) | English | [Wiki home](Home.en.md)
 
-**Hack** follows **Submissions** in navigation. The **View all** button in the home page's **Top Users** panel opens Members. It displays results only, using the submission list's filter, table and pagination layout. An empty result keeps the empty table. Columns include status, target submission ID, problem, submitter, hacker, runtime, memory and hack time. Filter by problem ID, hacker username, target submission ID or status. **My hacks** filters the current account. Contests also have a hack results tab.
+A **Hack** challenges a submission with an input of your own. The judge runs the problem's trusted solution (the STD) to get the correct answer and checks the submission against it. If the submission fails, the hack succeeds and the submission's score is voided.
 
-The **Manage problem STD** editor places **Back** and **Submit** beside the page heading, matching the other problem editing pages.
+## Hack records
 
-Click a Hack's **status** or **hack time** to open its original detail URL in the centered fixed-size mini browser described in [Submission previews](Submissions.md). Its one Hack testcase stays expanded, including the permitted input, verdict, runtime, memory and authorized rejudge controls. The detail status uses the same colored text as the list, without a filled label. Click a **target submission ID** to load the original ordinary or contest submission instead. The list keeps its current filters, contest, page and scroll position. Only one preview opens at a time.
+**Hack** in the top navigation lists hack results, with the same filters, table and pagination as **Submissions**: filter by problem ID, hacker, target submission ID or status, or click **My hacks**. Each record shows its status, target submission, problem, submitter, hacker, runtime, memory and time. When nothing matches, the page says **No hacks** (or **No matching hacks** with filters). Contests have their own **Hacks** tab.
 
-Use **×**, **Escape**, or a click outside the preview to close it; the original page scrolls inside a window whose size stays fixed. Click the heading's **#ID** to open its normal full detail URL. Modified clicks, middle-click and copied links keep normal browser behavior. The mini browser loads the complete original page while hiding the global top navigation. Running Hack records keep their original updates, which stop when the frame is removed; Hack and contest access permissions still apply.
+Clicking a record's **status** or **time** opens its detail in a preview window, and clicking the **target submission** opens that submission; see [Submission previews](Submissions.md). The list keeps its filters, page and scroll position.
 
-## Configure the trusted STD
+## Set up the trusted STD
 
-A problem manager opens **STD / Hack reference** from the traditional problem's management menu, at `/p/id/<problemId>/hack-reference`. Enter the trusted STD in the code editor, choose its language and compilation options, and save. The STD generates the correct answer for hack input; the checker / SPJ and resource limits use the problem's formal judging configuration.
+Hacks need a trusted solution for the problem. A problem manager clicks **Reference code / STD** in the sidebar of a traditional problem's page (`/p/id/<problemId>/hack-reference`), enters the STD in the code editor, chooses its language and compiler options, and saves. The STD produces the correct answer for each hack input; the checker and the time and memory limits are the problem's own.
 
-The STD uses standard input/output by default, independently of the target's file I/O. If its code reads and writes files, enable **STD uses file input/output** and enter the exact input and output filenames. The names must be distinct, contain letters, numbers, spaces, underscores, hyphens or dots, and fit within 255 UTF-8 bytes; paths, names starting with `..`, `.` and the reserved `hack-stderr` are rejected. The target keeps the ordinary problem's file I/O or the contest filenames recorded when it was submitted.
+The STD reads standard input and writes standard output, whatever file I/O the problem uses. If it reads and writes files instead, turn on **STD uses file input/output** and enter the two file names. They must differ, use only letters, digits, spaces, underscores, hyphens and dots, and be at most 255 bytes; paths, names starting with `..`, `.` and `hack-stderr` aren't allowed. The hacked submission keeps the file I/O it was judged with.
 
-Alternatively, open a finished Accepted submission for this problem whose source you may view, click **Use as problem STD**, and confirm. This copies its source, language, compilation options and applicable file I/O (recorded contest filenames for contest submissions; formal problem settings for ordinary submissions) and retains the source submission ID as manager-only provenance. Hackers never enter a reference submission ID. The source submission cannot itself be hacked. Later rejudging or changing its record does not change the saved STD copy.
+You can also copy an Accepted submission's code: open a finished Accepted submission of the problem whose code you can see, click **Use as problem STD** and confirm. Its code, language, compiler options and file I/O are copied, and its ID is shown to managers as the source. That submission can't be hacked itself, and later changes to it don't change the saved STD.
 
-The manager page automatically loads an available immutable formal-data validator, or the test-data file `validator.cpp`. When none is available, expand **Input validator** and enter its source in the code editor. A validator reads standard input and exits with 0 only for valid input; invalid input must produce a nonzero exit code. C++ validators may use the bundled testlib header. Each STD or validator source is limited to 1 MiB.
+Hack inputs are checked by a validator before they run. The page uses the problem's test data validator when there is one (including a `validator.cpp` among the test data); otherwise, expand **Input validator** and enter one. A validator reads the input from standard input and exits with 0 if it's valid, or nonzero if not; C++ validators can use the bundled testlib. The STD and the validator are each limited to 1 MiB.
 
-Only managers with the applicable problem and Hack configuration permissions can change this configuration. An explicit `ManageHack` denial overrides the problem-management fallback. Older reference-submission configurations remain readable; saving the STD converts them to independent source copies. Existing saved references without separate file I/O retain their source submission's applicable I/O, or the formal problem settings when no source remains. Already queued legacy tasks retain the I/O in their original judging snapshot. New tasks snapshot STD and target I/O separately; changing the trusted STD or its I/O cancels incompatible tasks.
+Only users who can manage the problem and its Hacks can change these settings; an explicit `ManageHack` denial takes precedence over problem management. Changing the STD or its file I/O cancels queued hacks that no longer match it.
 
-## Create a hack
+## Hack a submission
 
-The **Hack button exists only on a concrete submission detail page**, not in the submissions list or hack results pages. Both ordinary and contest submissions for traditional code problems are supported.
+Hacks are started only from a submission's detail page, for ordinary and contest submissions of traditional problems.
 
-1. Open the target submission and click **Hack**.
-2. Upload a UTF-8 input file or paste one complete input, at most 1 MiB.
-3. Submit, then follow the link to its result record.
+1. Open the submission and click **Hack**.
+2. Upload a UTF-8 input file or paste the input, at most 1 MiB.
+3. Click **Submit hack**, then open the new record to see the result.
 
-The dialog only requests input. Managers configure the trusted STD and validator in advance. The target must be finished, runnable, accessible and not canceled, Fake or Hacked. Applicable problem, team and contest permissions still apply.
+The submission must be finished, must have compiled and run, and must not be Canceled, Fake or already Hacked; you also need access to its problem, team and contest. Each account can have at most 3 hacks in progress and start at most 30 per hour.
 
-The judge validates the input, runs the STD to obtain the expected answer, and evaluates the target with the formal checker / SPJ. Invalid input, STD/configuration failures and system errors are distinct from an unsuccessful hack. Only a valid counterexample produces **Success**. Each account may have at most three active hacks and create at most thirty per hour.
+The judge first validates the input, runs the STD for the correct answer, then judges the submission with the problem's checker. Only a valid input that makes the submission fail is a **Success**; invalid input, a problem with the STD or its configuration, and system errors are reported separately.
 
-The detail page displays **Testcase #1** in the submission judging style, permanently expanded. It shows the target's actual testcase verdict and score when recorded, plus runtime, memory, input and a safe judging message; the filename button downloads the complete input. It does not include the target's original testcases or private STD output/checker diagnostics. Invalid input and preparation failures show **Not run** when the target never executed. Older records without a stored target verdict retain the Hack result and say **Target verdict not recorded**, without guessing a verdict. Contest privacy rules still apply to the input and message.
+The record's detail shows a single **Testcase #1**, like a submission's judging details: the submission's verdict and score on your input, runtime, memory, the input (download it with the file name button) and the judge's message. It doesn't show the submission's other testcases, the STD's output or the checker's internal messages. When the submission never ran (for example, the input was invalid), it shows **Not run**. Contest rules about hidden information still apply.
 
 ## Successful hacks
 
-Success preserves the target ID, source and original judging evidence, changes its effective status to `Hacked`, and assigns zero effective score. Problem statistics and contest standings update. Repeated result callbacks cannot apply the same hack twice.
+The hacked submission keeps its ID, code and original judging details, but its status becomes `Hacked` and its score 0; problem statistics and contest standings are updated.
 
-A successful hack remains historical and cannot be undone by rejudging the hack record. Restoring its target requires submission rejudge and applicable Hack management authorization, followed by rejudging that original submission. Managers can retry unsuccessful or error records.
+A successful hack stays on record; rejudging the hack doesn't undo it. To restore the submission, a user who can rejudge submissions and manage Hacks rejudges it. Unsuccessful hacks and errors can be retried by managers.
 
 ## Contests and permissions
 
-Hack is disabled by default for contests. Managers can enable it and configure the opening and closing times. The default opening time is the contest end; NOI/OI and Strict IOI participants cannot hack until the contest ends, protecting hidden results. Enabling Hack does not grant access to opponents' source code.
+Hacks are off by default in contests. Contest managers can turn them on and set when hacking opens and closes; by default it opens when the contest ends. In NOI / OI and Strict IOI contests, contestants can hack only after the contest, so that hidden results stay hidden. Turning on Hacks doesn't let anyone see other contestants' code.
 
-Permissions include **View hack records**, **Create hacks**, and **Manage hacks, references and validators**. Private team resources retain independent membership and resource access checks. Input and messages obey contest privacy rules.
+The permissions are **View hack records**, **Create hacks**, and **Manage all hacks, references, and validators**. Team resources still need team membership and access.
 
-[Self-evaluation](Self-Evaluation.md) is an optional NOI/OI contest pretest feature and has no ordinary submission-page entry. See [Community upgrade](Community-Upgrade.md) for database and judge compatibility checks.
+[Self Eval](Self-Evaluation.md) is a separate pretest feature of NOI / OI contests. For database and judge compatibility when upgrading, see [Feature upgrades](Community-Upgrade.md).

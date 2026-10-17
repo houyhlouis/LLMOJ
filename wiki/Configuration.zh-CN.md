@@ -1,50 +1,50 @@
-# 配置总览与生效规则
+# 配置总览
 
-[English](Configuration.md) | 简体中文 | [Wiki 首页](Home.md)
+简体中文 | [English](Configuration.md) | [Wiki 首页](Home.md)
 
-本参考按 `43a88bdd62fbf200889b36932fa921439a293190` 的安装器、配置 schema、示例、实际读取位置和生成器核对。原有字段范围包括项目提供的安装参数、后端／评测 YAML、用户 AI 设置、环境变量、前端 bootstrap 设置，以及项目生成的基础服务参数；本版另补充网站管理的数据库注册设置。题目、比赛、题单等业务内容的逐个表单字段，以及第三方软件允许的全部扩展指令，不属于服务器配置清单；开放配置字典会明确标注并链接来源。
+本页说明各类设置保存在哪里，以及修改后如何生效。文中路径以默认安装目录 `/opt/LLMOJ` 为例；如果安装时用 `--prefix` 指定了其他目录，请把所有路径换成你的目录。
 
-## 从哪里修改
+## 设置在哪里
 
-| 配置入口 | 说明 |
+| 页面 | 内容 |
 | --- | --- |
-| [Installation](Installation.zh-CN.md) | 安装入口、全部参数和安装重试 |
-| [Backend-Configuration](Backend-Configuration.zh-CN.md) | 后端 YAML：账号、安全、数据库、邮件、存储、比赛和显示偏好 |
-| [Registration-Approval](Registration-Approval.zh-CN.md) | 网站管理中的注册方式、YAML 回退与委派审核 |
-| [Two-Factor-Sign-In](Two-Factor-Sign-In.zh-CN.md) | 用户自行开启的身份验证器验证码与通行密钥、恢复方式及 `two-factor.key` 文件；无 YAML 设置 |
-| [Judge-Configuration](Judge-Configuration.zh-CN.md) | 评测 YAML、CPU／内存扩缩容、服务单元、验证和回滚 |
-| [AI](AI.zh-CN.md) | 用户 AI 模型、搜索服务、权限和任务设置 |
-| [AI-Environment](AI-Environment.zh-CN.md) | AI 目录、沙盒通信、密钥持久化和环境变量 |
-| [Environment](Environment.zh-CN.md) | 全部运行／安装／构建环境变量与维护工具参数 |
-| [Frontend-Configuration](Frontend-Configuration.zh-CN.md) | 本地前端构建、可选 CDN/bootstrap 配置 |
-| [Operations-Configuration](Operations-Configuration.zh-CN.md) | Nginx、MariaDB、Redis、MinIO、systemd 与安装后变更 |
+| [安装](Installation.zh-CN.md) | 安装器及其参数 |
+| [后端配置](Backend-Configuration.zh-CN.md) | `config/backend.yaml`：账号、安全、数据库、邮件、存储、比赛和显示 |
+| [注册审核](Registration-Approval.zh-CN.md) | 在 **网站管理** 中设置的注册模式、它在 `backend.yaml` 中的默认值，以及审核者 |
+| [两步验证](Two-Factor-Sign-In.zh-CN.md) | 用户自行设置的身份验证器和通行密钥，以及 `two-factor.key` 文件 |
+| [评测配置](Judge-Configuration.zh-CN.md) | `config/judge.yaml`、随 CPU 增减扩缩容、服务和检查 |
+| [AI](AI.zh-CN.md) | 每位用户在网站中设置的 AI 模型、联网搜索、权限和任务 |
+| [AI 环境](AI-Environment.zh-CN.md) | 服务器上的 AI 目录、密钥和环境变量 |
+| [环境变量](Environment.zh-CN.md) | 运行、安装和构建所用的环境变量，以及维护脚本的参数 |
+| [前端配置](Frontend-Configuration.zh-CN.md) | 构建前端和可选的 CDN 设置 |
+| [安装后运维](Operations-Configuration.zh-CN.md) | Nginx、MariaDB、Redis、MinIO、systemd 以及安装后的修改 |
 
-## 四种值不能混用
+## 默认值、示例值与实际值
 
-- **程序默认值**：代码实际在缺省时采用的值。后端和评测 YAML 通常没有自动补全；不能删掉字段后期待套用示例。
-- **示例值**：仓库的 `*.example` 或上游 bootstrap 演示配置，可能是其他站点地址。
-- **安装器生成值**：首次安装按目录、端口、CPU 和内存生成，优先于示例。后续一般保留已有配置。
-- **当前生效值**：服务器实际配置文件、systemd 主单元和 drop-in 的合并结果；网站管理中的注册方式由数据库覆盖 YAML 默认值；AI 设置还按用户分别存储。
+- **内置默认值**是设置缺失时代码使用的值。`backend.yaml` 和 `judge.yaml` 中的大多数设置没有内置默认值，所以删掉一行并不会恢复示例中的值。
+- **示例**（仓库中的 `*.example` 文件）可能包含适用于其他站点的值。
+- **安装器生成的值**在首次安装时根据目录、端口、CPU 和内存计算。再次运行安装器会保留已有文件。
+- **实际生效的值**来自你的配置文件，加上 systemd 服务单元及其附加配置（drop-in）。在 **网站管理** 中保存的注册模式优先于 `backend.yaml`；AI 设置按用户分别保存。
 
-文中默认目录为 `/opt/LLMOJ`。自定义 `--prefix` 时必须把所有路径替换成自己的实例目录，不能只改一个环境变量来移动实例。
+## 修改后如何生效
 
-## 修改与生效
-
-| 修改对象 | 生效方式 |
+| 修改内容 | 操作 |
 | --- | --- |
-| `config/backend.yaml` | 校验完整 YAML 后重启 `libreoj-backend`；浏览器刷新以重新读取公共偏好；注册模式仍以已保存的网页覆盖为优先 |
-| 网站管理的注册方式 | 管理员在网页保存或恢复服务器配置，即时生效；不需重启，不改 YAML，见 [注册审核](Registration-Approval.zh-CN.md) |
-| `config/judge.yaml` | 停止接收／等待在途评测结束，按评测指南维护；槽数、CPU、目录变更还须重新生成、安装 systemd 单元 |
-| systemd `Environment`／资源限制／drop-in | `systemctl daemon-reload` 后重启对应服务；只 reload 不会重启进程 |
-| `config/nginx.conf` | `nginx -t` 通过后 reload；域名和存储签名地址必须同步 |
-| MariaDB／Redis／MinIO 配置 | 维护窗口内重启对应服务，并验证后端连接与持久化 |
-| 前端构建配置或静态资源 | 重新构建／发布到 Nginx 实际目录，再刷新浏览器；不是只重启后端 |
-| AI 模型和搜索设置、用户权限 | 在页面保存；运行中的任务还受权限重新检查，详见 AI 页面 |
+| `config/backend.yaml` | 确认 YAML 有效后重启 `libreoj-backend`，并刷新浏览器。**网站管理** 中保存的注册模式仍然优先 |
+| **网站管理** 中的注册模式 | 无需操作，保存后立即生效。见[注册审核](Registration-Approval.zh-CN.md) |
+| `config/judge.yaml` | 按[评测配置](Judge-Configuration.zh-CN.md)操作：先等正在进行的评测完成。修改评测槽、CPU 或目录时还需要更新 systemd 服务单元 |
+| systemd 环境变量、资源限制或 drop-in | 执行 `systemctl daemon-reload`，然后重启服务。只执行 `daemon-reload` 不会重启任何服务 |
+| `config/nginx.conf` | 用 `nginx -t` 检查后重载 Nginx。域名和存储下载地址要保持一致 |
+| MariaDB、Redis 或 MinIO | 在空闲时重启服务，并确认后端仍能正常使用 |
+| 前端构建设置或静态文件 | 重新构建，把结果复制到 Nginx 提供的目录，然后刷新浏览器 |
+| AI 模型、搜索和权限 | 在网站中保存。运行中的任务会再次检查权限，见 [AI](AI.zh-CN.md) |
 
-安装参数是首次安装输入。已完成安装后重新运行 `--judge-slots`、`--port` 或 `--public-url` 不是配置变更接口；安装状态可能拒绝不一致值，而且生成器保留已有 YAML。不要删除安装状态、`secrets.json`、AI 主密钥或数据来绕过这一行为。
+安装器的参数只用于首次安装。用不同的 `--judge-slots`、`--port` 或 `--public-url` 再次运行安装器不会修改站点配置：安装器可能拒绝新值，并且会保留已有的 YAML 文件。不要通过删除安装状态、`secrets.json`、AI 主密钥或数据来绕过。
 
-## 常见变更
+## 常见修改
 
-增加 CPU／内存或减少资源：按 [评测扩缩容](Judge-Configuration.zh-CN.md) 操作。修改站名、端口、域名、邮件、上传上限或服务内存：见 [安装后运维](Operations-Configuration.zh-CN.md)。更换 AI 模型或 Tavily/MCP：见 [AI](AI.zh-CN.md)。
+- 增加或减少 CPU、内存：[评测扩缩容](Judge-Configuration.zh-CN.md)。
+- 站点名称、端口、域名、邮件、上传限制或服务内存：[安装后运维](Operations-Configuration.zh-CN.md)。
+- AI 模型、Tavily 或 MCP：[AI](AI.zh-CN.md)。
 
-备份应同时包含数据库、对象存储、配置和 AI 密钥状态；仅备份源码不能恢复站点。配置文件中的密钥不应放进 Wiki 或 GitHub。新版本若新增配置字段，需要重新对照 schema 与环境变量读取点更新本参考。
+请同时备份数据库、文件存储、配置和 AI 密钥：只有源码无法恢复站点。不要把真实的密码或密钥放进 Wiki 或 GitHub。

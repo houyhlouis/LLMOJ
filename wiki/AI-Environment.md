@@ -1,56 +1,57 @@
-# AI runtime environment and fixed limits
+# AI environment and fixed limits
 
-English | [简体中文](AI-Environment.zh-CN.md) | [Account AI configuration](AI.md) | [All environment variables](Environment.md) | [Judge configuration](Judge-Configuration.md)
+[简体中文](AI-Environment.zh-CN.md) | English | [Wiki home](Home.en.md) | [AI](AI.md) | [Environment variables](Environment.md) | [Judge configuration](Judge-Configuration.md)
 
-This page follows the configuration and execution code in the repository. These runtime variables control directories and communication between the backend and its local AI runner. Provider keys, base URLs, models, output budgets and per-user concurrency belong to the encrypted account configuration at `/ai/configuration`. No AI provider environment variable such as `OPENAI_API_KEY` replaces that configuration page.
+This page is for server administrators: the directories, keys and socket the AI features use, and their fixed limits. Each user's provider, key, model, output limit and number of jobs are set on the **AI API Configuration** page (see [AI](AI.md)); no environment variable such as `OPENAI_API_KEY` replaces it. The site-wide pause and budgets are set in **Site management** (see [AI](AI.md#site-limits)).
 
-## Complete production runtime list
+## Environment variables
 
-Fallbacks below apply when the program receives no value or an empty string. The installer writes the selected installation root into systemd `Environment=` entries. For a custom installation root, use the generated service configuration rather than copying `/opt/LLMOJ` literally.
+The installer sets these in the services' systemd units, using your installation directory; the defaults below apply only when a variable is missing or empty.
 
-| Variable | Reader | Source fallback | Purpose and required alignment |
+| Variable | Read by | Default | Purpose |
 | --- | --- | --- | --- |
-| `HYHOJ_AI_STATE_DIR` | backend | `/opt/LLMOJ/data/ai` | Encryption state directory containing `master.key`; read during backend initialization. Do not remove or regenerate the key while retaining the database's encrypted account configurations. |
-| `HYHOJ_AI_GENERATED_DIR` | backend | `/opt/LLMOJ/data/ai-generated` | Reads, validates and publishes runner output; must match the local judge YAML `aiGeneratedDirectory`. The judge does not read this environment variable. |
-| `HYHOJ_AI_SAMPLE_INPUTS_DIR` | backend and judge | `/opt/LLMOJ/data/ai-sample-inputs` | Private samples, input snapshots and controlled helper-file staging; the runner reads bounded files there. Both processes must use the same directory. The judge reads it once when loading its module. |
-| `HYHOJ_AI_RUNNER_SOCKET` | backend | `/opt/LLMOJ/data/judge/ai-runner.sock` | Local AI runner UNIX socket; must match judge YAML `aiRunnerSocket`. The judge does not read this environment variable, and this is not a remote TCP runner address. |
-| `HYHOJ_ARCHIVE_WORK_DIRECTORY` | backend | `/opt/LLMOJ/data/backend-archives` | Shared archive workspace. AI ZIP processing creates an `ai-attachment-*` temporary directory here before size, path and content validation. Other archive operations also use it. |
+| `HYHOJ_AI_STATE_DIR` | backend | `/opt/LLMOJ/data/ai` | Holds `master.key` (and `two-factor.key`). Never delete or replace the key while the database holds configurations encrypted with it. |
+| `HYHOJ_AI_GENERATED_DIR` | backend | `/opt/LLMOJ/data/ai-generated` | Where the backend reads the AI worker's results. Must match `aiGeneratedDirectory` in the local `judge.yaml`. |
+| `HYHOJ_AI_SAMPLE_INPUTS_DIR` | backend and judge | `/opt/LLMOJ/data/ai-sample-inputs` | Private samples and input files handed to the AI worker. Both services must use the same directory. |
+| `HYHOJ_AI_RUNNER_SOCKET` | backend | `/opt/LLMOJ/data/judge/ai-runner.sock` | The local AI worker's socket. Must match `aiRunnerSocket` in the local `judge.yaml`. |
+| `HYHOJ_ARCHIVE_WORK_DIRECTORY` | backend | `/opt/LLMOJ/data/backend-archives` | Temporary space for archives, including AI ZIP attachments while they're checked |
+| `HYHOJ_AI_PRIVATE_HOSTS` | backend | none | Private or local provider hosts every user may use, separated by commas or spaces, each with an optional port, for example `llm.lan, 10.0.0.5:8000, [fd00::5]:8080`. Without it, private, loopback and link-local addresses are limited to site administrators' own configurations. Public addresses need no listing. |
 
-These values are filesystem paths, not URLs. Use absolute paths and preserve traversal permissions on parent directories. Setting a variable neither moves existing data nor updates another process's YAML. `HYHOJ_ROOT` is input to installer/configuration scripts; it does not dynamically replace these backend fallback paths at runtime.
+These are absolute file system paths, not URLs. Setting one doesn't move existing data or change the other service's configuration, and `HYHOJ_ROOT` doesn't change them at runtime.
 
-The backend makes model requests; the local judge runs generators, reference solutions and checkers within its restricted environment. Remote submission judging uses a separate path from this UNIX socket workflow. `--role all` configures the local runner, `--role web` alone provides no runner, and the remote judge generator uses `OJ_JUDGE_REMOTE=1` and disables its AI socket/output directory when creating judge YAML (installer `--role` accepts only `all` and `web`). See [distributed judging](Distributed-Judging.md).
+Model and search requests are made by the backend; the local judge compiles and runs generated programs. Only the `all` role has the local AI worker: remote judges have it turned off, and a `web` site has none. See [Distributed judging](Distributed-Judging.md).
 
-## Directory, key and socket permissions
+## Directories, keys and the socket
 
-Standard installation expects the following, with `libreoj` as the backend service user/group:
+With `libreoj` as the backend's user and group, an installation has:
 
-| Path or object | Ownership / mode | Meaning |
+| Path | Owner and mode | Notes |
 | --- | --- | --- |
-| `data/ai` | `libreoj:libreoj`, `0700` | Backend encryption state directory; initialization checks ownership and tightens its permissions. |
-| `data/ai/master.key` | Backend service user, `0600` | A regular 32-byte file with one hard link; symbolic links are rejected. Startup fails if encrypted configurations already exist but the key is missing. |
-| `data/ai/two-factor.key` | Backend service user, `0600` | Same file rules. Encrypts authenticator secrets of [two-factor sign-in](Two-Factor-Sign-In.md); created on first use. Keep it with the database: if users have authenticator apps set up, a missing key is never replaced and their authenticator codes stop working. |
-| `data/ai-generated` | `root:libreoj`, `0750` | Runner creates and verifies a non-symlink directory. Root writes results and the backend group reads them. Do not make it writable by arbitrary users. |
-| `data/ai-sample-inputs` | `libreoj:libreoj`, `0700` | Backend writes files; the privileged runner reads them after checking paths, ownership, size and other bounds. |
-| `data/judge/ai-runner.sock` | `root:libreoj`, `0660` | Runner assigns the positive numeric YAML `aiRunnerGid`; not an open network endpoint. |
-| AI temporary subdirectories in `backend-archives` | Backend service user, `0700` | Staged uploads; temporary directories are removed after the operation. The workspace also serves other archive operations. |
+| `data/ai` | `libreoj:libreoj`, `0700` | The backend checks the owner and tightens the mode when it starts. |
+| `data/ai/master.key` | backend's user, `0600` | A regular 32-byte file with a single link; symbolic links are refused. If encrypted configurations exist but the key is missing, the backend won't start. |
+| `data/ai/two-factor.key` | backend's user, `0600` | The same rules. Encrypts authenticator secrets of [two-factor sign-in](Two-Factor-Sign-In.md); created when first needed. If users have authenticator apps set up, a missing key is never replaced and their codes stop working. |
+| `data/ai-generated` | `root:libreoj`, `0750` | Written by the AI worker (root) and read by the backend. Must be a real directory, not a link. |
+| `data/ai-sample-inputs` | `libreoj:libreoj`, `0700` | Written by the backend; the worker checks paths, owners and sizes before reading. |
+| `data/judge/ai-runner.sock` | `root:libreoj`, `0660` | Its group is `aiRunnerGid` from `judge.yaml`. It's a local socket, not a network port. |
+| AI folders under `backend-archives` | backend's user, `0700` | Temporary; removed when the operation ends. |
 
-Do not solve access failures with `0777` or accidentally change a copied `master.key` to root ownership. Key migration must preserve the matching database, exact bytes, service-user ownership and permissions. Keep backups separately secured; see [AI key backup](AI.md#execution-and-encrypted-configuration).
+Don't fix access problems with `0777`, and don't let a copied `master.key` end up owned by root. When moving a key, keep it with its database, byte for byte, with the same owner and mode, and keep its backups secure. See [AI](AI.md#where-ai-runs-and-where-keys-are-kept).
 
-### Applying changes
+### Changing a directory
 
-1. Let running jobs finish and back up the existing configuration. Stop affected processes during directory migration so jobs cannot mix old and new paths.
-2. Change service environment settings. For output directory/socket changes, update judge YAML too. For sample-directory changes, update `HYHOJ_AI_SAMPLE_INPUTS_DIR` in both services. Create destination directories with correct owners/modes before migrating required data.
-3. Reload systemd configuration and restart affected services. An `export` in your shell or `daemon-reload` alone does not change an existing process's environment.
-4. Check service health, error types and directory/socket metadata. Do not publish key contents, full configurations, sessions or signed upload URLs in logs/reports. Verify ordinary judging and a small task before increasing load.
+1. Let running AI jobs finish, back up the configuration, and stop the services involved, so that no job uses both the old and the new path.
+2. Change the services' environment. For the results directory or the socket, change `judge.yaml` too; for the sample directory, change both services. Create the new directory with the right owner and mode, and move the data it needs.
+3. Run `systemctl daemon-reload` and restart the services. Setting the variable in your shell, or `daemon-reload` alone, doesn't change running services.
+4. Check that the services are healthy and the directories and socket look right, then try ordinary judging and a small AI job. Never paste keys, configurations, sessions or signed upload links into logs or reports.
 
-For example, to move only the backend archive workspace to a prepared `/srv/libreoj/backend-archives`, use `sudo systemctl edit libreoj-backend.service` and add:
+For example, to move only the archive workspace to a prepared `/srv/libreoj/backend-archives`, run `sudo systemctl edit libreoj-backend.service` and add:
 
 ```ini
 [Service]
 Environment=HYHOJ_ARCHIVE_WORK_DIRECTORY=/srv/libreoj/backend-archives
 ```
 
-After ensuring the service user can access that directory and its parents:
+Once the backend's user can reach that directory and its parents:
 
 ```sh
 sudo systemctl daemon-reload
@@ -58,67 +59,60 @@ sudo systemctl restart libreoj-backend.service
 sudo systemctl is-active libreoj-backend.service
 ```
 
-This example relocates shared temporary archive storage; it is not a migration script for all AI data. The configuration generators rewrite their managed main systemd units. Existing private YAML is retained and checked for consistency, not replaced with new values automatically. Update YAML explicitly during migration and review custom settings after upgrades, because direct edits to main units can be overwritten. For CPU or execution-slot changes, use [judge configuration](Judge-Configuration.md); AI task concurrency does not configure CPUs.
+Use a drop-in like this rather than editing the main unit files, which the configuration scripts rewrite. To change CPUs or judge slots, use [Judge configuration](Judge-Configuration.md); AI settings don't configure CPUs.
 
-## Common configuration misconceptions
+## Common mix-ups
 
-| Name | Current behavior |
+| Name | What it is |
 | --- | --- |
-| `HYHOJ_AI_PRIVATE_HOSTS` | Private or local provider hosts that every user may use, separated by commas or spaces, each with an optional port: `llm.lan, 10.0.0.5:8000, [fd00::5]:8080`. Set it on `libreoj-backend.service` (for example with a systemd drop-in). Without a listing, private-network, loopback and link-local destinations are limited to site administrators' own configurations. Public HTTP/HTTPS destinations need no listing. Every resolved address is checked and pinned to the connection; redirects are refused. |
-| `autoOnSave` | Account API compatibility field, not an environment variable. Saving and reading force `false`; legacy `automatic: true` requests are skipped. |
-| `llm.maxTokens` / `maxConcurrentJobs` | Account settings, not `NODE_OPTIONS` or judge slots. They control output budget and running AI jobs per user respectively. |
-| `aiRunnerSocket` / `aiGeneratedDirectory` / `aiRunnerGid` | Judge YAML fields, not environment variables; see [judge configuration](Judge-Configuration.md). |
-| `LIBREOJ_CONFIG_FILE` / `LIBREOJ_JUDGE_CONFIG_FILE` | General configuration-file selectors; see [all environment variables](Environment.md). `NODE_ENV`, `NODE_OPTIONS`, `PATH`, `TMPDIR` and `UV_THREADPOOL_SIZE` also affect processes rather than selecting provider features or AI credits. |
-| Browser read/upload timeouts | Frontend source constants with no supported environment override. Setting similarly named variables has no effect. |
+| `llm.maxTokens`, `maxConcurrentJobs` | Each user's settings on the AI configuration page: the output limit of one request, and how many of their jobs run at once. Not `NODE_OPTIONS`, and not judge slots. |
+| Pause, budgets, AI requests at the same time | Site-wide settings in **Site management**, stored in the database; see [AI](AI.md#site-limits). Not environment variables. |
+| `aiRunnerSocket`, `aiGeneratedDirectory`, `aiRunnerGid` | Settings in `judge.yaml`; see [Judge configuration](Judge-Configuration.md). |
+| `autoOnSave` | Kept for compatibility and always `false`; requests with `automatic: true` are ignored. |
+| Browser read and upload time limits | Fixed in the frontend; no variable changes them. |
 
-## Fixed limits, not configurable environment variables
+## Fixed limits
 
-These explain timeout and throughput boundaries. Do not put source constants into systemd expecting to override them. Values below apply to this revision only.
+These are fixed in the code; setting variables with similar names has no effect.
 
-| Stage | Current behavior |
+| Stage | Limit |
 | --- | --- |
-| Browser file reads | `readBrowserFile` defaults to 60 seconds. Read/permission errors are visible and do not continue to upload. |
-| Import preparation and start | `prepareAttachment` and `ai/start` each use 30 seconds. ZIP upload uses 120 seconds and one attempt. Cancel/navigation stops unfinished asynchronous work before submission; cancel already accepted jobs from the job list. |
-| Generic file uploads | The shared helper still defaults to timeout 0 (no timeout); AI explicitly overrides it. The 120-second AI limit does not apply to every large-file upload on the site. |
-| Model / model discovery | A generation request allows up to 30 minutes; model-list requests use 30 seconds. Provider limits and network failures still apply. |
-| Search / MCP | 60 seconds per request. MCP initialization, listing and invocation are separate requests, so this is not a 60-second cap on the whole workflow. |
-| Responses recovery | Default polling interval 2 seconds, transient-error backoff up to 10 seconds; each poll 30 seconds, temporary recovery window 120 seconds, overall deadline 30 minutes from checkpoint creation. |
-| Scheduling | At most 8 running jobs globally, 100 queued plus running per user. Per-user running limit defaults to 3 and accepts 1–8. One job per problem. Local runner admission is 8, generation queue concurrency is 3, and actual judge slots are shared. |
-| Runner socket | Requests at most 16 MiB; backend unprocessed response buffer at most 1048576 characters. At most 32 connections, with a 30-second idle timeout before the first request. |
-| Runner output and disk | Ordinary output file at most 16 MiB, sample input file at most 256 MiB, aggregate output at most 8 GiB. Generation reserves 2 GiB of free disk space. |
-| Traditional quality checks | At least 64 small inputs by default, covering every subtask. The runner accepts 64–1000 small inputs, 1–3 alternative correct solutions and 1–4 challenge programs, including an incorrect implementation. The backend currently generates one alternative and allows 16 additional counterexample attempts; the runner protocol caps attempts at 32. No environment override is supported. |
-| Auxiliary program resources | Each small-input generator and exact-oracle execution allows up to 5 seconds and 512 MiB. Alternatives and challenges use the problem's actual time/memory limits. Validation shares judge execution slots with ordinary submissions. |
-| Runner wait budget | The backend budget includes full cases, samples, differential inputs, alternative/challenge executions and extra counterexample search, still capped at 4 hours. This is neither the model request timeout nor permission for one generated program to run for 4 hours. |
-| Temporary generated results | 24-hour retention; hourly cleanup checks ownership, inactivity and other conditions. Published problem data has separate persistent storage. |
-| Generator repair | A clear compilation failure in AI-generated `make.cpp` permits one automatic repair, with a persisted budget; user-provided judging programs are not retried indefinitely. |
+| Reading a file in the browser | 60 seconds. A read or permission error is shown, and nothing is uploaded. |
+| Starting an import | 30 seconds each for preparing the attachment and starting the job; 120 seconds and one attempt for the ZIP upload. These limits apply only to AI uploads. |
+| Model requests | Up to 30 minutes for a generation; 30 seconds for a model list |
+| Search and MCP | 60 seconds per request (MCP's initialization, listing and call are separate requests) |
+| Connection recovery | Polls every 2 seconds, backing off to 10 seconds after errors; 30 seconds per poll; gives up after 120 seconds without a connection, or 30 minutes after the request started |
+| Jobs | 8 running on the site; 100 running or queued per user; 1 to 8 running per user (3 by default); one per problem. The local worker accepts 8 requests and runs 3 pipelines at once, sharing judge slots. |
+| Worker socket | Requests up to 16 MiB; the backend buffers up to 1048576 characters of an answer; 32 connections, closed after 30 seconds without a request |
+| Worker output and disk | 16 MiB per output file, 256 MiB per sample input, 8 GiB in total; generation needs 2 GiB of free disk |
+| Test data checks | At least 64 small inputs (the worker accepts 64 to 1000), one second solution (the worker accepts 1 to 3), 1 to 4 challenge programs, and up to 16 extra counterexamples (the worker accepts 32) |
+| Auxiliary programs | 5 seconds and 512 MiB for each run of the small-input generator and the oracle; second solutions and challenges use the problem's own limits |
+| Waiting for the worker | Scales with the number of cases and checks, up to 4 hours in total. Not a limit on how long a generated program may run. |
+| Temporary results | Kept for 24 hours; cleaned up hourly. Published problem data is stored separately. |
+| Budget holds | Kept 48 hours, then deleted; they count only within the last 24 hours |
+| `make.cpp` repair | One automatic repair after a compile error |
 
-Browser reads also depend on OS policy. Snap Firefox was observed rejecting root-owned test files while byte-identical copies owned by the desktop user were readable. Use copies the desktop user can access, without disabling AppArmor or the browser sandbox. The fix makes errors and cancellation explicit; it cannot grant additional system permissions.
+Browser reads also depend on the operating system: Firefox installed as a Snap couldn't read test files owned by root, while copies owned by the desktop user worked. Use such copies; don't turn off AppArmor or the browser's sandbox.
 
 ## Test-only variables
 
-Do not add these to production units. They select isolated resources for explicitly invoked repository tests, not product features. Tests can write databases, create problems/jobs and replace their dedicated fixture account's configuration; use a disposable environment. No such tests were run for this documentation update.
+Never set these in production services. They point tests at disposable resources, and the tests write to databases, create problems and jobs, and replace their fixture account's configuration.
 
-| Variable | Default / purpose | Scope and constraints |
-| --- | --- | --- |
-| `HYHOJ_AI_TEST_DB_CONFIG` | Relevant MariaDB suites skip when unset; otherwise a YAML path containing `services.database` | `ai-*.mariadb.test.cjs`, using a real database and temporary tables. Not every CJS suite enforces a `hyhoj_test_*` name: select a disposable database yourself rather than assuming the MJS guards below apply. |
-| `HYHOJ_AI_TEST_RESULTS` | Optional JSON result path | Some MariaDB CJS suites write results; some temporary directories also use its parent. That parent must exist and be writable. |
-| `HYHOJ_TEST_CONFIG` | Required backend YAML path for MJS integration tests | Shared `integration-client.mjs`: database must be named `hyhoj_test_*` with a numeric loopback host. Redis requires an explicit URL, numeric loopback host and dedicated nonzero database; port 16379 is rejected. |
-| `HYHOJ_TEST_STATE` | Required JSON state path for MJS integration tests | Contains dedicated fixture `users` and `tokens`. Keep this session-bearing file private and out of public evidence. |
-| `HYHOJ_TEST_BASE` | Required API origin for MJS integration tests | Numeric loopback HTTP/HTTPS only, without credentials, query, fragment or subpath. Ports 2002 and 29533 are rejected; use a dedicated test API. |
-| `HYHOJ_AI_FIXTURE_USER` | `ai_fixture` | MJS mock-provider account. Rejects `admin`; user/token must already exist in test state. Refuses to replace existing real-provider configuration; only the fixed `127.0.0.1:2230` mock endpoint passes the check. |
-| `HYHOJ_TEST_SPJ` | Only literal `1` enables it; off by default | SPJ path in `ai-integration.test.mjs`. |
-| `HYHOJ_TEST_INVALID_INPUT` | Only literal `1` enables it; off by default | Invalid-input path in the same integration test. |
-| `HYHOJ_TEST_EVIDENCE_DIR` | Optional screenshot directory | `ai-browser.test.mjs` saves browser evidence there; no such screenshots are saved when unset. |
-| `BACKEND_ROOT` | Backend directory containing the current test | Locates backend dependencies in `ai-network-policy.test.cjs`; does not relocate a production installation. |
-| `LAN_HOST` | Prefer a local private IPv4, then another non-loopback IPv4 | The same network-policy test selects a bound local interface. Other hosts are rejected; relevant tests skip if no interface is available. |
+| Variable | Purpose |
+| --- | --- |
+| `HYHOJ_AI_TEST_DB_CONFIG` | YAML file with `services.database` for the `ai-*.mariadb.test.cjs` tests, which use a real database and temporary tables. Point it at a disposable database. Without it, they're skipped. |
+| `LLMOJ_AI_BUDGET_TEST_DB_CONFIG` | YAML file with `services.database` for `ai-budget.mariadb.test.cjs`, which needs an empty disposable database |
+| `HYHOJ_AI_TEST_RESULTS` | Optional JSON results file for some database tests; its directory must exist |
+| `HYHOJ_TEST_CONFIG` | Backend YAML for the integration tests: the database name must start with `hyhoj_test_`, the host must be a loopback address, and Redis must be a dedicated non-zero database on loopback (not port 16379) |
+| `HYHOJ_TEST_STATE` | JSON file with the integration tests' fixture `users` and `tokens`; keep it private |
+| `HYHOJ_TEST_BASE` | The test API's address: loopback HTTP or HTTPS only, without credentials, query or path; ports 2002 and 29533 are refused |
+| `HYHOJ_AI_FIXTURE_USER` | The account the mock-provider tests use (`ai_fixture` by default, never `admin`); its configuration is replaced only if it points at the mock at `127.0.0.1:2230` |
+| `HYHOJ_TEST_SPJ`, `HYHOJ_TEST_INVALID_INPUT` | `1` turns on the special-judge and invalid-input cases of `ai-integration.test.mjs` |
+| `HYHOJ_TEST_EVIDENCE_DIR` | Where `ai-browser.test.mjs` saves screenshots; none are saved without it |
+| `BACKEND_ROOT`, `LAN_HOST` | Used by `ai-network-policy.test.cjs` to find the backend's dependencies and pick a local network interface |
 
-Tests also temporarily override production variables to point at isolated directories; that does not make those variables test-only. Mock providers validate protocols/failure branches, not external service quality. Real database, sandbox and browser tests each prove their own covered layer. See [verification scope](AI.md#validation-scope) for historical real DeepSeek/Tavily workflows and this documentation update's limits.
+Mock providers test protocols and error handling, not the quality of a real service. More test variables are listed in the [development guide](../README-DEVELOPMENT.md#database-tests).
 
-## Source references
+## Sources
 
-- [Backend AI paths/socket and scheduling](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.service.ts), [encryption file constraints](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-crypto.ts)
-- [AI runner](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiRunner.ts), [backend units](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py), [judge configuration/units](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-judge.py), [directory permissions](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/install-support.py)
-- [File reads](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/utils/readBrowserFile.ts), [AI upload calls](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/pages/ai/api.ts), [import cancellation/start](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/pages/ai/AiImportPage.tsx), [shared uploader](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/utils/callApiWithFileUpload.ts)
-- [Provider timeouts/protocols](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-provider.ts), [Responses recovery](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-responses.ts)
-- [MJS test isolation](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/test/integration-client.mjs), [fixture account guards](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-fixture-utils.mjs), [network-test variables](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-network-policy.test.cjs)
-- [Quality parameters and acceptance checks](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-testdata-quality.ts), [runner quality limits](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiQuality.ts)
+[ai.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.service.ts), [ai-crypto.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-crypto.ts), [ai-admission.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-admission.service.ts), [aiRunner.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiRunner.ts), [configure-local.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-local.py), [configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-judge.py), [install-support.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/install-support.py), [readBrowserFile.ts](https://github.com/houyhlouis/LLMOJ/blob/main/packages/frontend/src/utils/readBrowserFile.ts), [ai-provider.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-provider.ts), [ai-responses.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-responses.ts), [ai-testdata-quality.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-testdata-quality.ts), [aiQuality.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiQuality.ts).

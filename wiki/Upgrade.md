@@ -1,103 +1,96 @@
-# Upgrading while preserving configuration and data
+# Upgrading
 
 [简体中文](Upgrade.zh-CN.md) | English | [Wiki home](Home.en.md)
 
-This release includes private teams from personal profiles, embedded problem solutions, Fake moderation, submission-detail Hacks, optional NOI contest Self Eval and Strict IOI, with frozen schema and judge-runtime contracts. It validates changes on a restored database copy before maintenance cutover. See [Community upgrade](Community-Upgrade.md) for schema details, the standalone helper, verified AI classification and downgrade safeguards. Use the target complete source's entry point; older registration-only or first community-feature upgraders cannot install the combined release.
+The upgrader installs a newer version of LLMOJ on a server set up by the installer, keeping your configuration and data: accounts, problems, submissions, files, AI settings and keys, judge slots, CPU settings and your own service customizations. It doesn't run the installer again or recreate the administrator.
 
-New installations default to `/opt/LLMOJ`. Existing installations remain in their current directory; use `--prefix /opt/LibreOJ` for an existing instance there. Changing the default does not migrate files or services.
+It tests every database change on a copy of your database before touching the real one, and switches over only during a short maintenance window.
 
-The updater supports **completed official one-click `all` and `web` deployments**. It updates application code and public assets while preserving accounts, problems, submissions, objects, AI settings/encryption keys, judge slots, CPU affinity and existing service customizations. It does not rerun the installer or administrator bootstrap.
+## What it supports
 
-## Compatibility
+- Installations made by the installer, with the `all` or `web` role, using the default service layout and the local MariaDB, Redis and MinIO.
+- Changes to the site's code, the judge and the sandbox. On an `all` installation, a changed sandbox or judge is rebuilt and tested before switching over (see [the judge self-test](Judge-Configuration.md#sandbox-syscall-filter-and-self-test)).
+- The database changes made by LLMOJ's own features, each checked against its exact expected form. See [Feature upgrades](Community-Upgrade.md) for the list.
 
-This release supports official version-3 metadata, local MariaDB/Redis/MinIO, a single backend, Node 24.21.0 and pnpm 11.13.1. Runtime, lockfile, native code and rootfs recipes must remain compatible. Moving an install from the original judge code to the reviewed Hack/self-evaluation runtime follows a pinned file-specific contract with exact old and new hashes, and is automated only for the official `all` role (a `web` deployment requires separately coordinated remote judges and is refused for this transition). Other changes to judge source, the judge protocol and the sandbox are accepted: in an `all` installation the upgrader rebuilds the changed native sandbox and judge addons offline, runs the judge's native tests, type check and regression tests in the staging copy, and checks a changed sandbox with a real sandboxed run in the maintenance window before touching the database. When the judge or sandbox changes, it also compiles and runs a program in every language through the staged judge, and probes the syscall filter ([self-test](Judge-Configuration.md#sandbox-syscall-filter-and-self-test)). Judge protocol values may only be added; removing or changing a deployed value is refused. Dependencies, lockfiles, infrastructure and other shared packages remain frozen. Database changes are restricted to registration-review/application safeguards, twelve community tables, the nullable STD content addition to the first Hack table, the discussion category column/index, the two two-factor sign-in tables (`user_two_factor`, `user_passkey`), the two durable judge queue tables (`judge_job`, `judge_job_attempt`), the judge machine draining flag (`judge_client.draining`), reproducible judging (`problem_data_version`, `deferred_file_deletion`, `submission_result_history`, `statistics_outbox` and the nullable `submission.problemDataVersionId`), append-only Fake/Hacked, eight appended permissions, and two contest fields: non-destructive rule widening to `varchar(16)` and nullable `ruleOptions longtext` using `simple-json`. Only NOI / OI, IOI, ICPC and Strict IOI are supported. Self Eval is offered only in enabled NOI / OI contests, with manager-supplied make/std and the formal SPJ. Existing privilege and status enum values and order are checked; removal, renaming, reordering and unknown values are unsupported.
+It refuses:
+- installations managed with Git, custom layouts, custom database connections, `EnvironmentFile` overrides of the backend or judge, or custom AI directories;
+- database differences it doesn't recognize, and changes to dependencies, lockfiles or the Node.js and pnpm versions (24.21.0 and 11.13.1);
+- removing or changing values the judge protocol or the database already uses (new values may be added at the end).
 
-The known repository-link, package-description and bootstrap-title branding changes are treated as metadata-only for compatibility. Only the specified LibreOJ-to-LLMOJ values in identified files are allowed; package names, dependencies, scripts, API/CDN endpoints and all other settings remain subject to the existing checks. Source integrity still uses the original file bytes.
+These need a separate, planned migration. Don't get round a refusal by deleting data or reinstalling.
 
-Default service and AI/temporary-directory layouts are required. Backend/judge `EnvironmentFile` overrides or custom AI key/work paths are refused because their effective configuration cannot be verified by this release. Supported CPU, judge-slot and memory customizations are preserved.
+New installations go to `/opt/LLMOJ`; an installation in `/opt/LibreOJ` stays there, so pass `--prefix /opt/LibreOJ`.
 
-This is **not an arbitrary historical-version upgrader**. Git-managed deployments, unknown layouts, custom database connections, unknown schema differences or dependency/native changes require a separate migration procedure. Do not bypass a refusal by deleting data or rerunning installation.
+## Planning
 
-## One-step entry
-
-Ensure the new files have been published to GitHub first:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/upgrade.sh -o /tmp/llmoj-upgrade.sh && \
-  sudo bash /tmp/llmoj-upgrade.sh --prefix /opt/LLMOJ
-```
-
-Replace the prefix for a custom installation. The entry resolves `main` to a full commit before downloading its source. Use `--ref FULL_COMMIT_SHA` to select a reviewed revision; compatibility checks still apply.
-
-For a read-only plan:
+Download the upgrader and look at its plan first. `upgrade.sh` prints English and `upgrade.zh-CN.sh` Chinese; otherwise they're the same.
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/upgrade.sh -o /tmp/llmoj-upgrade.sh
 sudo bash /tmp/llmoj-upgrade.sh --prefix /opt/LLMOJ --plan
 ```
 
-A plan checks deployment/runtime and lists deferred checks. It does not build, create a database clone or stop services, so a successful plan is not a completed upgrade.
+The script turns `main` into a specific commit before downloading it; use `--ref FULL_COMMIT_SHA` to install a particular commit. The plan checks the installation and lists what will be checked later. It doesn't build anything, copy the database or stop services, so a successful plan isn't a finished upgrade.
 
-## Maintenance and preservation
+## Upgrading
 
-Pause new submissions/imports/AI tasks and drain queued/running jobs, including Hack, self-evaluation, fixed prediction preparation and remote judges. Interactive execution requires typing `UPGRADE`. The tool also checks active database jobs, but cannot coordinate remote nodes on your behalf.
+1. Choose a quiet time. Stop new submissions, imports and AI jobs, and wait until all queued and running work has finished, including hacks, Self Eval runs and pretest preparation, and work on remote judges. The upgrader checks the database for running work, but can't stop remote judges for you.
+2. Run the upgrader without `--plan`:
 
-It acquires the maintenance lock, validates effective service paths and available space, builds using independent dependency copies, and verifies asset hashes. It privately backs up configuration, AI master key and SQL, then restores SQL to a temporary database to audit and test schema and registration-application migrations. Before cutover it stops Nginx/judge/backend, takes a fresh dump and repeats schema checks. After switching files, it checks backend/local-judge health and restores the original service states, opening Nginx last.
+   ```bash
+   sudo bash /tmp/llmoj-upgrade.sh --prefix /opt/LLMOJ
+   ```
 
-Backups and private build logs remain in `<prefix>/backups/upgrade/<UTC-random>/`; the terminal prints the path. Backups may contain secrets and must not be uploaded to GitHub. They are retained for your own retention policy; business data and backups are not deleted. Legacy inactive empty accounts are converted to independent applications under the strict rules below.
+   It asks you to type `UPGRADE` to confirm that everything has finished. Without questions, use `--apply --drained` instead; `--drained` is your confirmation that work has stopped, and doesn't stop anything itself.
 
-A dedicated `/etc/systemd/system/libreoj-backend.service.d/90-libreoj-schema-sync.conf` sets `LIBREOJ_SCHEMA_SYNC=0` to disable automatic schema writes at backend startup. It is installed before the first community DDL statement and retained after a partial migration failure. The updater applies checked migrations explicitly. Unknown content using that filename is never overwritten. Other units/drop-ins, Nginx configuration, credentials and judge capacity remain unchanged.
+The upgrader then:
+1. takes the maintenance lock, which keeps backups and judge resizing out, and checks the services and free disk space;
+2. builds the new version with its own copy of the dependencies and checks the files;
+3. backs up the configuration, the AI master key and the database, loads the backup into a temporary database, and tests every schema and data change there;
+4. stops Nginx, the judge and the backend, makes a fresh database backup and checks it again;
+5. switches to the new files and applies the database changes;
+6. checks the backend and the local judge, then starts the services that were running before, Nginx last.
 
-Site management stores registration policy under an independent key in the existing `settings` table; it adds no table or column. Upgrading preserves both the website override and homepage content. Without an override, the YAML default continues to apply.
+Backups and build logs stay in `<prefix>/backups/upgrade/<UTC time>-<random>/`, and the upgrader prints the path. They contain secrets, so keep them private, and delete old ones yourself when you no longer need them; the upgrader never deletes data or backups.
 
-## Migrating the first approval release
+The upgrader installs `/etc/systemd/system/libreoj-backend.service.d/90-libreoj-schema-sync.conf`, which sets `LIBREOJ_SCHEMA_SYNC=0` so that the backend never changes the database structure by itself; the upgrader makes those changes explicitly. Your other drop-ins, the Nginx configuration, credentials and judge capacity are left alone.
 
-Pending/rejected applications now stay outside the site user table. Approval creates the account and assigns its site user ID. Before cutover the updater rehearses the migration on a database clone, then rechecks and applies it transactionally with application services stopped:
+Settings saved in the site, such as the [registration mode](Registration-Approval.md) and the homepage, are kept.
 
-- Existing active/approved accounts keep their IDs, passwords and business data.
-- Legacy inactive empty accounts matching the original defaults become applications with their password hashes, timestamps and review records preserved. Their empty account rows are removed; historical user IDs are not recycled.
-- Business content, privileges, custom profiles, unknown references, cross-database foreign keys or identity conflicts stop migration for manual review while preserving data. Normal rejection audit history remains available for tracing.
-- Old SQL is never automatically restored over current data. If deployment fails after data migration, older code may not understand applications; recovery conservatively leaves services stopped until the new deployment is repaired.
+## Upgrading from a local source tree
 
-Do not replace only frontend assets or delete old review tables to upgrade. See [Registration approval](Registration-Approval.md) for behavior and limits.
-
-## Automation and local sources
-
-After arranging a drained maintenance window:
-
-```bash
-sudo bash /tmp/llmoj-upgrade.sh --prefix /opt/LLMOJ --apply --drained
-```
-
-`--drained` declares operator readiness; it does not cancel jobs automatically.
-
-For a reviewed **complete source tree**, use its local entry:
+To upgrade from a complete copy of the source you've reviewed (not a ZIP of changed files), use its own upgrader:
 
 ```bash
 sudo bash /path/to/LLMOJ/deploy/upgrade.sh \
   --prefix /opt/LLMOJ --source /path/to/LLMOJ --plan
 ```
 
-Verify the reported `sourceSha256`, then supply both `--source` and `--source-sha256 FULL_64_HEX_DIGEST` for execution. `python3 /path/to/LLMOJ/deploy/upgrade.py --source /path/to/LLMOJ --source-digest` also computes the tree digest without writes. A hash detects changes but does not establish trust by itself. A ZIP containing only modified files is not a complete source tree.
+Check the `sourceSha256` it reports, then run it again with both `--source` and `--source-sha256 <the 64-digit digest>`. `python3 /path/to/LLMOJ/deploy/upgrade.py --source /path/to/LLMOJ --source-digest` prints the digest without changing anything. The digest shows the tree hasn't changed since you checked it; it doesn't make an unreviewed tree trustworthy.
 
-## Failure, retry and rollback
+## If the upgrade fails
 
-When teams, solution categories, Fake/Hacked records, Hack STD configuration/history, self-evaluation data, Strict IOI contests, saved feature options, new explicit permission grants/denials or accounts with [two-factor sign-in](Two-Factor-Sign-In.md) exist, a rollback target must support their access and behavior rules; otherwise rollback is refused. Repair the new release instead. After community schema additions, the guard disabling automatic schema writes is retained during rollback.
+- If building or testing on the database copy fails, the site keeps running the old version.
+- If switching over fails, the upgrader tries to restore the old files and services. If that also fails, the site stays stopped and the upgrader tells you where its backup is. Never assume the site is fine after an error message.
 
-Build/clone-validation failures keep the original running instance. Failures during cutover attempt code/service recovery. If automatic recovery fails, application services remain stopped and the private recovery location is reported. Do not assume success after a failure message.
+Fix the cause and run the upgrader again with the same options. Database changes that were already made aren't repeated. Don't delete configuration, keys or the database to retry.
 
-After diagnosing the cause, retry with the same options. Known schema and application migrations are repeatable; already migrated applications are not duplicated. Do not remove configuration, keys or databases to retry.
+## Rolling back
 
-For manual rollback, pause and drain again and use the printed backup from this instance:
+Stop new work and wait for it to finish again, then give the backup directory the upgrader printed:
 
 ```bash
 sudo bash /opt/LLMOJ/deploy/upgrade.sh --prefix /opt/LLMOJ \
   --rollback /opt/LLMOJ/backups/upgrade/ACTUAL_BACKUP --drained
 ```
 
-Rollback restores code and the updater's own guard state while preserving the database, objects and compatible review/application tables. It never imports an old dump over newer user data. This release conservatively refuses code rollback while legacy pending/rejected accounts or new pending/rejected applications exist, preventing an approval bypass; retain an approval-aware release and fix the problem instead. If unapproved accounts are detected only after stopping services, applications remain stopped until an approval-aware release is recovered. SQL backups are for separately planned disaster recovery.
+This restores the old code. It keeps the current database and files, and never loads an old database backup over newer data; database backups are for disaster recovery, which you plan separately.
 
-If this upgrade migrated legacy pending/rejected inactive empty accounts, ordinary code rollback using that backup is still refused even after all those applications are approved. This prevents older code from losing access to migrated applications and review history. Repair the new deployment; restoring an older release requires a separately reviewed data-recovery plan.
+The upgrader refuses to roll back to a version that can't handle data you now have, because that version would ignore its rules. This applies when the site has teams, solutions, Fake or Hacked submissions, hack reference programs or history, Self Eval data, Strict IOI contests, saved contest options, the new permissions granted or denied, accounts with [two-factor sign-in](Two-Factor-Sign-In.md), a saved registration mode, or registration applications. In those cases fix the new version instead. For example:
 
-If a website registration override is saved and the rollback target does not support Site management settings, the updater refuses the downgrade so older code cannot ignore the database policy. First choose **Restore server configuration** in the current version’s Site management page and verify the YAML fallback before arranging rollback. Existing restrictions for pending/rejected applications and migrated data still apply; restoring the fallback does not approve applications.
+- If a registration mode is saved in **Site management** and the old version doesn't have that page, first click **Restore server configuration** and check that the mode in `backend.yaml` is what you want.
+- While there are pending or rejected registration applications, an old version could let those people sign in without approval, so rollback is refused. If the upgrade moved old pending or rejected accounts into applications, rollback stays refused even after they're approved.
 
-Registration mode is preserved by upgrading. To enable approval, an administrator can select approval-based registration in Site management and save without a restart; see [Registration approval](Registration-Approval.md). A previous Nginx registration block must be adjusted manually.
+## Registration approval migration
+
+When upgrading from the first release with registration approval, the upgrader moves pending and rejected accounts into separate applications. It rehearses this on the database copy first and stops for manual review if any of these accounts has content, permissions, a custom profile or a conflicting username or email. See [Registration approval](Registration-Approval.md#upgrading). Don't upgrade by replacing only the frontend, and don't delete the old review tables.

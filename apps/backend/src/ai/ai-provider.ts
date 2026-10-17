@@ -9,7 +9,9 @@ import {
   AiRequestMetadata,
   currentAiRuntime,
   awaitAiActive,
-  aiCancellationError
+  aiCancellationError,
+  estimateTokens,
+  IMAGE_TOKEN_ESTIMATE
 } from "./ai-runtime";
 import { recoverableResponse, responsesRecoveryEnabled } from "./ai-responses";
 import { validateLlmConfiguration } from "./ai-validation";
@@ -387,13 +389,22 @@ export async function generateText(
     path = "chat/completions";
   }
   // High-effort generations can run beyond the old five-minute deadline. Search/model discovery keep their shorter limits.
+  const reserveTokens =
+    maxTokens + estimateTokens(system) + estimateTokens(prompt) + (image ? IMAGE_TOKEN_ESTIMATE : 0);
   const request = async (suffix: string, payload: unknown, operation: string) => {
     const result = await providerRequest(
       endpoint(config.baseUrl, path) + suffix,
       headers,
       payload,
       operation === "responses.poll" ? 30000 : 1800000,
-      { target: "llm", provider: config.type, host: new URL(config.baseUrl).hostname, model: config.model, operation }
+      {
+        target: "llm",
+        provider: config.type,
+        host: new URL(config.baseUrl).hostname,
+        model: config.model,
+        operation,
+        ...(operation === "generate" ? { reserveTokens } : {})
+      }
     );
     return result.data;
   };

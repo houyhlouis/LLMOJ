@@ -143,6 +143,14 @@ export const AiConfigurationPage = observer(function AiConfigurationPage() {
         </Header>
         {error && <Message negative>{error}</Message>}
         {adjustment && <Message info>{adjustment}</Message>}
+        {config?.sitePolicy?.paused && (
+          <Message warning>
+            {aiText(
+              "站点管理员已暂停 AI：现在不会发出任何 AI 请求，包括模型列表和连接测试。",
+              "AI is paused by the site administrator: no AI requests are made, including model lists and connection tests."
+            )}
+          </Message>
+        )}
         {message && (
           <Message positive={!pending} info={pending}>
             {message}

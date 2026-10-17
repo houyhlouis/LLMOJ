@@ -1,12 +1,66 @@
-# Source, release and GitHub Wiki publishing
+# Publishing source and the wiki
 
-English | [简体中文](Publishing.zh-CN.md)
+[简体中文](Publishing.zh-CN.md) | English | [Wiki home](Home.en.md)
 
-These steps are for the repository owner. Local packaging does not create repositories, push Git or publish releases. The project name is LLMOJ; the default README is Chinese, with English in `README.en.md`. The Wiki provides both languages.
+These steps are for the repository's maintainers. None of LLMOJ's packaging tools create repositories, push to Git or publish releases: you do that yourself.
 
-## 1. Make a clean source directory
+Commits to the repository don't change a running site. To install a new version on a server, use the [upgrader](Upgrade.md) after the change is on GitHub.
 
-Generate a source archive. Use a new filename if it exists; the tool refuses overwrites.
+## Applying an update with GitHub Desktop
+
+An update package of changed files is applied on top of a complete copy of the repository:
+
+1. Open your local copy of `houyhlouis/LLMOJ` in GitHub Desktop and fetch the latest changes first.
+2. Extract the package into the repository's root directory, keeping its paths (`apps`, `packages`, `deploy`, `wiki`, `.github` and so on). Files the package doesn't contain stay as they are.
+3. In **Changes**, check that only the expected files changed. Enter the summary, commit, and **Push origin**. Don't commit the ZIP itself, or any server configuration.
+4. Wait for the GitHub Actions checks to pass before upgrading a server.
+
+A package isn't a complete source tree and can't be installed on its own.
+
+## Publishing the GitHub wiki
+
+The `wiki/` directory in the repository can be read on GitHub as ordinary documentation. The **Wiki** tab is a separate repository, `https://github.com/houyhlouis/LLMOJ.wiki.git`, and committing to the main repository doesn't update it.
+
+The first time, enable the wiki in the repository's **Settings** and create a first page on GitHub; then clone it:
+
+```bash
+git clone https://github.com/houyhlouis/LLMOJ.wiki.git ~/llmoj-wiki
+```
+
+(In GitHub Desktop, use **File → Clone Repository → URL**. If Desktop refuses the wiki address, clone it with the command above and add it with **File → Add Local Repository**.)
+
+To publish, export the pages from the main repository into the wiki repository, check the changes and push:
+
+```bash
+cd /path/to/LLMOJ
+python3 deploy/export-wiki.py --repository houyhlouis/LLMOJ --output ~/llmoj-wiki
+cd ~/llmoj-wiki
+git diff
+git add -- '*.md'
+git commit -m "Update documentation"
+git push
+```
+
+The exporter only writes Markdown files: it doesn't run Git or use the network. It turns links between pages into wiki links and writes a bilingual sidebar, `_Sidebar.md`, with Chinese first. `Home` is the Chinese home page and `Home.en` the English one; `Home.zh-CN` is kept so that old links still work. Pages with the same names are replaced, so check `git diff` before pushing; pages that exist only in the wiki are kept.
+
+If an update package already contains exported wiki pages, copy the `.md` files from inside its export directory into the wiki repository's root, not into a `wiki/` subdirectory, and never over its `.git`.
+
+See GitHub's guides to [editing wikis locally](https://docs.github.com/en/communities/documenting-your-project-with-wikis/adding-or-editing-wiki-pages) and [cloning with GitHub Desktop](https://docs.github.com/en/desktop/adding-and-cloning-repositories/cloning-and-forking-repositories-from-github-desktop).
+
+## Tagging a release
+
+Before tagging, test both installers (`install.sh` and `install.zh-CN.sh`) on fresh Ubuntu servers: the `all` and `web` roles, a custom port, the default and custom Docker sources, the first administrator, and a remote judge. Then:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The version is an example. People installing a release should use the tag both in the download URL and in `--ref`.
+
+## Starting a new repository from a source archive
+
+To publish LLMOJ in a new repository from an installed copy, create a clean source archive first. It contains only the files Git tracks, without the old `.git`, `runtime`, `data`, logs, real configuration or keys. The tool refuses to overwrite an existing archive, so choose a new name if needed.
 
 ```bash
 cd /opt/LLMOJ
@@ -17,13 +71,9 @@ tar -xzf release/llmoj-source.tar.gz -C ~/llmoj-publish
 cd ~/llmoj-publish/LibreOJ
 ```
 
-The archive contains a `LibreOJ/` source directory. Do not copy the deployment's old `.git`, runtime, data, logs, real configuration or API keys.
+The archive contains a `LibreOJ/` directory. testlib and its license are included as ordinary files: commit them as they are, so that GitHub's download snapshots can be installed directly, rather than turning the directory back into a submodule link. `.gitmodules` still records where testlib comes from.
 
-testlib source and LICENSE are included as ordinary files. Keep them in the new repository so GitHub snapshots install directly; do not replace the directory with a gitlink alone. `.gitmodules` retains upstream provenance while the actual files are committed.
-
-## 2. Create and push a public repository
-
-Create an empty Public repository on GitHub, without auto-generated README/LICENSE. Keep the supplied MIT license, upstream copyright and third-party notices. Replace every `houyhlouis/LLMOJ` in both README languages and the Wiki installation commands with the real path.
+Create an empty **public** repository on GitHub, without a generated README or license (anonymous one-command installation needs a public repository). Replace `houyhlouis/LLMOJ` with your repository's path in both READMEs and in the wiki's commands, then push:
 
 ```bash
 git init -b main
@@ -34,59 +84,10 @@ git remote add origin https://github.com/houyhlouis/LLMOJ.git
 git push -u origin main
 ```
 
-Use your configured GitHub CLI, credential manager or personal token for HTTPS authentication. Do not embed tokens in remotes, scripts or docs. You can review privately first, but anonymous one-command installation requires a public repository.
+Sign in with the GitHub CLI, a credential manager or a personal access token; never put a token in a remote URL, script or document.
 
-Before tagging, test both language entry points on fresh Ubuntu servers: full/web roles, custom ports, official/custom Docker sources, admin initialization and independent judges.
+## Licenses
 
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
+LLMOJ's own source is MIT-licensed, and the original sandbox image recipe is released under the Unlicense. MinIO, the databases, compilers, fonts and other components keep their own licenses: publishing this repository doesn't relicense them, so keep every license and copyright notice.
 
-The version is an example. Pin both the downloaded script URL and `--ref` to the same release tag. Deployment and core functionality have been verified on Ubuntu 24.04 amd64. Validate your release and deployment layout before publishing; real multi-machine acceptance testing remains separate.
-
-## 3. Publish both Wiki languages
-
-Repository Markdown is readable as ordinary documentation; GitHub Wiki has its own repository. Enable Wiki in Settings and create its first Home page in the browser before cloning. See [GitHub's Wiki guide](https://docs.github.com/en/communities/documenting-your-project-with-wikis/adding-or-editing-wiki-pages).
-
-```bash
-cd ~/llmoj-publish/LibreOJ
-git clone https://github.com/houyhlouis/LLMOJ.wiki.git ~/llmoj-wiki
-python3 deploy/export-wiki.py --repository houyhlouis/LLMOJ --output ~/llmoj-wiki
-cd ~/llmoj-wiki
-git diff
-git add -- '*.md'
-git commit -m "Add bilingual deployment documentation"
-git push
-```
-
-The exporter only writes local Markdown; it does not run Git or access the network. It converts page links and generates a bilingual sidebar. `Home` is Chinese and `Home.en` is English. `Home.zh-CN` remains a compatibility entry. The Chinese sidebar section comes first. Existing matching pages are replaced, so inspect the diff before pushing. Use the same process for updates.
-
-## Updating existing documentation with GitHub Desktop
-
-A documentation-only update package does not require republishing the source release:
-
-1. Open the local `houyhlouis/LLMOJ` repository in GitHub Desktop and synchronize remote changes.
-2. Merge the package's `wiki/` contents into the same directory, retaining original pages absent from the package. Review Changes for the expected Markdown files, enter a summary, commit, and Push origin. Do not commit the ZIP, audit records, or private server configuration.
-3. This updates documentation under Code. The GitHub **Wiki tab** uses the separate `https://github.com/houyhlouis/LLMOJ.wiki.git` repository. Create its first page on GitHub, then use Desktop's File → Clone Repository → URL. If the special Wiki URL is rejected, clone using the command above and use File → Add Local Repository in Desktop.
-4. Run `export-wiki.py` from the source repository with `--output` pointing to the Wiki repository. Review, commit, and push that repository separately. If the update package includes exported pages, copy the `.md` files **inside** that export directory into the Wiki repository root, without an extra `wiki/` directory.
-
-The repositories have independent commits. Source pages retain relative `.md` links; exported Wiki pages use page URLs and include `_Sidebar.md`. Keep these sets separate. Export updates same-name pages within its scope; retain any additional manually maintained pages.
-
-References: [local Wiki editing](https://docs.github.com/en/communities/documenting-your-project-with-wikis/adding-or-editing-wiki-pages), [cloning with GitHub Desktop](https://docs.github.com/en/desktop/adding-and-cloning-repositories/cloning-and-forking-repositories-from-github-desktop).
-
-## 4. Distribution and licenses
-
-Main source is MIT; the original rootfs recipe is Unlicense. MinIO, databases, compilers, fonts and other components retain their own licenses. A source release does not relicense them; preserve licenses/notices.
-
-Rootfs is built on the installation server. Source archives exclude complete rootfs, NOI Linux images and runtime data. Distributing compiled binaries or rootfs as Release assets requires separate review of notices, applicable source obligations and redistribution terms.
-
-## Teams, solutions, moderation, Hack and self-evaluation delivery
-
-Overlay the changed-files archive onto a complete local main-repository root, preserving apps, packages, deploy, wiki and .github paths. It is not a standalone installation archive; sync the documented base revision first. Review GitHub Desktop’s Changes, enter the supplied English summary and commit manually.
-
-The Wiki is the separate LLMOJ.wiki.git repository. Overlay its exported pages and _Sidebar.md directly onto that repository root without nesting another wiki directory or replacing .git. deploy/export-wiki.py converts links to Wiki URLs; the main repository retains its source Markdown under wiki/. Commit and push the two repositories separately. A source commit does not publish the GitHub Wiki.
-
-The combined package includes the four contest formats, permissions, judge protocol/task handlers, schema contract, tests, and bilingual guides as well as the earlier team, solution, and Fake changes. Server deployment and GitHub publication are separate operations. Existing servers also need the build and migration in [Community upgrade](Community-Upgrade.md); a Windows commit does not update the running OJ.
-
-The corrected release also includes navigation and private access boundaries: teams from personal profiles with ID-based admission, embedded problem solutions, Hacks from submission details with a results-only list, and Self Eval only in enabled NOI / OI contests. Update the STD content field, backend restrictions, matching judge handlers and documentation together with the frontend.
+The sandbox image is built on each server during installation; the source contains no built image, NOI Linux image or site data. Before attaching built programs or a sandbox image to a release, check each component's notices, source-code obligations and redistribution terms.

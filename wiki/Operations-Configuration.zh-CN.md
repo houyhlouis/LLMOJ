@@ -1,119 +1,137 @@
-# 基础服务与安装后运维配置
+# 安装后运维
 
-[English](Operations-Configuration.md) | 简体中文 | [配置总览](Configuration.zh-CN.md)
+简体中文 | [English](Operations-Configuration.md) | [Wiki 首页](Home.md) | [配置总览](Configuration.zh-CN.md)
 
-本文列出项目模板／生成器写入的基础服务配置，第三方软件其他可选指令以其对应版本文档为准。表中 `<root>` 为安装目录，默认 `/opt/LLMOJ`。修改配置前先备份并记录原值；数据库或存储迁移须规划维护窗口。
+本页列出安装器为 Nginx、Redis、MariaDB、MinIO 和 systemd 写入的设置，说明哪些设置需要一起修改，并介绍统计数据和备份。`<root>` 表示安装目录，默认为 `/opt/LLMOJ`。本页没有列出的设置，请参阅对应软件版本的文档。
 
-## Nginx：config/nginx.conf
+修改之前，请先备份文件并记下原来的值。修改数据库或存储时请选在空闲时段。
 
-| 参数 | 生成值与作用 |
+## Nginx：`config/nginx.conf`
+
+| 设置 | 安装器写入的值 |
 | --- | --- |
-| `user`, `worker_processes`, `events.worker_connections` | `www-data`、`auto`、`1024`；Nginx 工作进程及连接，不等于评测并发 |
-| `pid`, `access_log`, `error_log`, `log_format` | PID 在 `<root>/data/nginx/nginx.pid`；日志在 `<root>/logs/nginx`；`private_request` 使用 `$uri`，不记录含密钥的查询串 |
-| `include`, `default_type` | `/etc/nginx/mime.types` 与 `application/octet-stream` |
-| `client_max_body_size` | 经 `/storage/` 传输文件为 `128m`；`/api/` 为 `32m`，与后端 JSON 请求上限一致。外层代理和后端单项上传限制还可能更小 |
-| `client_body_temp_path`, `proxy_temp_path` | `<root>/data/nginx/client_body` 和 `proxy`；保持 www-data 可写 |
-| `listen`, `server_name`, `root` | 安装参数生成监听地址／端口，默认 `0.0.0.0:80`；`server_name _`；静态目录 `<root>/public` |
-| `map $http_upgrade $connection_upgrade` | 有 Upgrade 时用 `upgrade`，空时 `close`；支持 WebSocket |
-| `location /api/` | `proxy_pass http://127.0.0.1:2002`，HTTP/1.1；Host、X-Real-IP、X-Forwarded-For、X-Forwarded-Proto 转发给后端 |
-| `location /api/socket`, `location /socket.io/` | 同一后端，额外 Upgrade／Connection；`proxy_read_timeout`、`proxy_send_timeout` 都为 `3600s`；评测 `/api/socket` 关闭 access_log，error_log 仅 crit |
-| `location /storage/` | `proxy_pass http://127.0.0.1:19000/` 去掉前缀；Host 必须恢复为签名用的 `127.0.0.1:19000`；HTTP/1.1、Connection 空、`proxy_request_buffering off`、`proxy_buffering off` |
-| `location /`, `try_files` | `$uri $uri/ /index.html`；页面深链接回退 |
+| `user`、`worker_processes`、`events.worker_connections` | `www-data`、`auto`、`1024`。这是 Nginx 自己的进程，与评测无关 |
+| `pid`、`access_log`、`error_log`、`log_format` | PID 文件 `<root>/data/nginx/nginx.pid`，日志在 `<root>/logs/nginx`。`private_request` 日志格式只记录不含查询参数的路径，因为查询参数中可能有密钥 |
+| `include`、`default_type` | `/etc/nginx/mime.types`、`application/octet-stream` |
+| `client_max_body_size` | 通过 `/storage/` 传输的文件为 `128m`；`/api/` 为 `32m`，即后端自身的限制。前面的代理或后端对某类文件的限制可能更小 |
+| `client_body_temp_path`、`proxy_temp_path` | `<root>/data/nginx/client_body` 和 `<root>/data/nginx/proxy`；`www-data` 必须能写入 |
+| `listen`、`server_name`、`root` | 安装时选择的地址和端口（默认 `0.0.0.0:80`）、`_`、`<root>/public` |
+| `map $http_upgrade $connection_upgrade` | 用于转发 WebSocket 连接 |
+| `location /api/` | 转发到后端 `http://127.0.0.1:2002`，并带上 Host、X-Real-IP、X-Forwarded-For 和 X-Forwarded-Proto 头 |
+| `location /api/socket`、`location /socket.io/` | 到后端的 WebSocket 连接，最长保持一小时（`3600s`）。评测机连接 `/api/socket` 不记录访问日志，错误日志也只记录严重错误 |
+| `location /storage/` | 转发到 MinIO `http://127.0.0.1:19000/`，并设置 MinIO 下载签名所需的 Host 头，关闭缓冲 |
+| `location /` | 提供前端页面，找不到文件时返回 `/index.html`，使任意页面链接都能打开 |
 
-## Redis：config/redis.conf
-
-| 参数 | 生成值与作用 |
-| --- | --- |
-| `bind`, `port`, `protected-mode`, `requirepass` | `127.0.0.1`、`16379`、`yes`、随机实例密码；与后端 Redis URL 同步 |
-| `dir`, `appendonly`, `appendfsync`, `save` | `<root>/data/redis`；`yes`；`everysec`；`900 1` 和 `300 10` 两条快照规则 |
-| `maxmemory`, `maxmemory-policy` | `192mb`、`noeviction`；用满后写入可失败，监控会话／队列，不能随意改成淘汰任务数据 |
-| `logfile`, `daemonize` | 空字符串、`no`；日志交给 systemd |
-
-## MariaDB：config/mariadb.cnf
-
-| 参数 | 生成值与作用 |
-| --- | --- |
-| `user`, `bind-address`, `port` | `mysql`、`127.0.0.1`、`13306` |
-| `datadir`, `socket`, `pid-file`, `log-error` | 数据目录 `<root>/data/mariadb`；其下 mysql.sock、mysql.pid；日志 `<root>/logs/mariadb/error.log` |
-| `character-set-server`, `collation-server` | `utf8mb4`、`utf8mb4_unicode_ci`；改默认不会自动转换现有表 |
-| `innodb-buffer-pool-size`, `max-connections`, `skip-name-resolve` | `128M`、`60`、启用；依据内存和连接负载规划，不等于后端连接池配置 |
-
-初始化现在以 mysql 身份在私有暂存目录进行，校验系统表后再发布；已有目录不会因存在 `mysql/` 就被判定为完整。AppArmor 的 Err13 机制、保留失败数据及重试边界见 [安装排错](Installation.zh-CN.md#mariadb-初始化失败与安全重试)。不要通过关闭 AppArmor、添加 DAC 绕过能力或删除数据库来跳过检查。
-
-## MinIO：config/minio.env 与服务单元
-
-| 参数 | 生成值与作用 |
-| --- | --- |
-| `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` | 实例存储凭据，写入 root:root 0600 的 minio.env；必须与后端 accessKey／secretKey 一致 |
-| `MINIO_BROWSER`, `MINIO_UPDATE`, `MINIO_CALLHOME_ENABLE` | 均为 `off`；项目生成的环境选项 |
-| `--address`, `--console-address`, `server PATH` | `127.0.0.1:19000`、`127.0.0.1:19001`、`<root>/data/minio`；在 systemd ExecStart 内 |
-
-## systemd
-
-| 字段 | 生成规则 |
-| --- | --- |
-| `User`, `Group` | MariaDB 用 mysql，Redis 用 redis，后端／MinIO 用 libreoj；Nginx 主进程启动后降权；评测服务权限和委派见评测页 |
-| `WorkingDirectory`, `ExecStart`, `Environment`, `EnvironmentFile` | 指向实例路径；生成器将后端工作目录设为 apps/backend；运行变量见环境页；MinIO 加载 minio.env |
-| `After`, `Requires`, `PartOf`, `Wants`, `WantedBy` | 后端依赖三个存储服务，Nginx 依赖后端；服务 PartOf／WantedBy libreoj.target；target Wants 站点服务（all 含 judge），WantedBy multi-user.target |
-| `Restart`, `RestartSec`, `UMask`, `LimitCORE` | 网页／存储服务 `on-failure`、`3` 秒、`0077`、`0`；评测 UMask 为 `0022` |
-| `StandardOutput`, `StandardError` | 均 `journal`；systemd 日志中仍不可随意打印密钥 |
-| `TimeoutStartSec` | MariaDB `120` 秒 |
-| `Type`, `ExecReload`, `KillSignal` | Nginx `simple`，执行带本实例 -p/-c 的 nginx -s reload，退出信号 SIGQUIT |
-| `AllowedCPUs`, `UV_THREADPOOL_SIZE`, `TasksMax`, `Delegate`, `RequiresMountsFor` | 评测资源配置及工作目录 mount 必须同步，完整生成参数见评测页 |
-
-安装后的实际单元在 `/etc/systemd/system`，`deploy/systemd` 是生成／安装源，两者不能混淆。长期自定义环境或资源上限可使用 `sudo systemctl edit libreoj-backend` 等服务 drop-in；运行 `daemon-reload` 后还需重启对应进程。检查 drop-in 是否覆盖了新生成的 AllowedCPUs／线程池，不要以为生成成功就已生效。读取完整单元或环境时可能包含秘密，仅在可信终端查看。
-
-安装器另为 Redis 写入 `/etc/sysctl.d/99-libreoj-redis.conf` 的 `vm.overcommit_memory=1`（保留已有同名自定义文件），并安装所需沙盒 AppArmor 规则。Docker 软件包源和 `registry-mirrors` 见 [Docker 源](Docker-Sources.zh-CN.md)。Node/Go/pnpm 版本、rootfs ID 是安装／构建配方选择，不是可通过 backend.yaml 修改的配置。
-
-## 常见修改的完整关联
-
-| 目标 | 一起检查的设置 |
-| --- | --- |
-| 增减 CPU／内存、评测槽数 | judge.yaml 的执行槽／工作目录／CPU、threadpool、mount、服务 AllowedCPUs；按 [专门流程](Judge-Configuration.zh-CN.md) 验证与回滚 |
-| 修改站名或 logo | 后端 `preference.siteName`、`preference.misc.appLogo`；初始标题与静态资源另按 [前端配置](Frontend-Configuration.zh-CN.md) 构建 |
-| 修改站点端口／监听 | nginx.conf 的 listen；浏览器访问 URL；有端口变化时的 MinIO `forUserUpload`／`forUserDownload`／`forJudge.urlEndpoint`；本机 `downloadEndpointOverride` 的回环端口；远程 judge.yaml 的 serverUrl；防火墙／外层代理 |
-| 更换域名、HTTP → HTTPS | 三组 MinIO urlEndpoint 改为最终 `https://新域名/storage/`；TLS 代理和可信转发头；外部 judge.yaml 的 serverUrl；允许的邮件链接来源；见 HTTPS 页 |
-| 更换数据库／Redis／对象存储 | 先迁移和备份数据，后端连接参数与服务端账号／监听同步；Redis URL 的密码做 URI 编码；MinIO 签名 endpoint 与代理 Host／前缀匹配；不要只改 secrets.json |
-| 启用邮件与邮箱验证 | `services.mail.address` 和真正的 `transport`；先验证收信，再启用 `preference.security.requireEmailVerification`；默认 jsonTransport 不投递邮件 |
-| 增大上传文件 | Nginx `client_max_body_size`、外层代理、后端 `resourceLimit` 对应单项限制及可用磁盘；同时核查浏览器上传类型限制 |
-| 提高服务内存 | 分别规划 V8 `NODE_OPTIONS`、Redis maxmemory、MariaDB buffer pool、评测任务与 tmpfs；不能把增加槽数当作唯一设置 |
-
-### 修改 Nginx 后验证
-
-以下示例只适用于默认目录，先按实际路径替换。配置检查失败不要 reload，恢复备份后重新检查。
+检查并应用修改（按你的安装调整路径）：
 
 ```bash
 sudo /usr/sbin/nginx -t -p /opt/LLMOJ/ -c /opt/LLMOJ/config/nginx.conf
-# Run only after the preceding check succeeds.
+# 仅在检查通过后执行：
 sudo systemctl reload libreoj-nginx
 ```
 
-后端 YAML 配置变更重启 `libreoj-backend`，数据库／Redis／MinIO 变更在维护窗口重启对应服务。验证首页及登录、普通提交、小文件上传／下载、远程评测连接、AI worker 的基础运行；不要只验证首页 HTTP 200。HTTPS 外层代理还需按 [HTTPS](HTTPS.zh-CN.md) 保持 WebSocket 和签名存储请求一致。
+如果检查失败，不要重载：恢复备份后重新检查。
+
+## Redis：`config/redis.conf`
+
+| 设置 | 安装器写入的值 |
+| --- | --- |
+| `bind`、`port`、`protected-mode`、`requirepass` | `127.0.0.1`、`16379`、`yes`，以及随机密码，必须与后端的 Redis 地址一致 |
+| `dir`、`appendonly`、`appendfsync`、`save` | `<root>/data/redis`、`yes`、`everysec`，以及 `900 1` 和 `300 10` 两条快照规则 |
+| `maxmemory`、`maxmemory-policy` | `192mb`、`noeviction`：Redis 满了之后写入会失败，而不是删除数据。请关注它的内存；不要改用会淘汰键的策略，否则会丢失登录会话和排队中的任务 |
+| `logfile`、`daemonize` | 空、`no`：日志交给 systemd |
+
+## MariaDB：`config/mariadb.cnf`
+
+| 设置 | 安装器写入的值 |
+| --- | --- |
+| `user`、`bind-address`、`port` | `mysql`、`127.0.0.1`、`13306` |
+| `datadir`、`socket`、`pid-file`、`log-error` | 数据在 `<root>/data/mariadb`（包括 `mysql.sock` 和 `mysql.pid`），日志在 `<root>/logs/mariadb/error.log` |
+| `character-set-server`、`collation-server` | `utf8mb4`、`utf8mb4_unicode_ci`。修改它们不会转换已有的表 |
+| `innodb-buffer-pool-size`、`max-connections`、`skip-name-resolve` | `128M`、`60`、开启。请根据内存和负载调整；后端自己的连接池另外配置 |
+
+如果安装时 MariaDB 初始化失败，见[安装](Installation.zh-CN.md#mariadb-初始化失败与安全重试)。不要通过关闭 AppArmor 或删除数据库来绕过。
+
+## MinIO：`config/minio.env` 及其服务
+
+| 设置 | 安装器写入的值 |
+| --- | --- |
+| `MINIO_ROOT_USER`、`MINIO_ROOT_PASSWORD` | 存储凭据，保存在只有 root 能读取的 `minio.env` 中，必须与 `backend.yaml` 中的 `accessKey` 和 `secretKey` 一致 |
+| `MINIO_BROWSER`、`MINIO_UPDATE`、`MINIO_CALLHOME_ENABLE` | 均为 `off` |
+| `--address`、`--console-address`、数据目录 | `127.0.0.1:19000`、`127.0.0.1:19001` 和 `<root>/data/minio`，写在服务的 `ExecStart` 中 |
+
+## systemd 服务
+
+| 设置 | 安装器写入的内容 |
+| --- | --- |
+| `User`、`Group` | MariaDB 以 `mysql` 运行，Redis 以 `redis` 运行，后端和 MinIO 以 `libreoj` 运行；Nginx 的工作进程以 `www-data` 运行。评测机使用的用户见[评测配置](Judge-Configuration.zh-CN.md) |
+| `WorkingDirectory`、`ExecStart`、`Environment`、`EnvironmentFile` | 安装目录中的路径；后端在 `apps/backend` 中运行；MinIO 读取 `minio.env`。环境变量见[环境变量](Environment.zh-CN.md) |
+| `After`、`Requires`、`PartOf`、`Wants`、`WantedBy` | 后端依赖 MariaDB、Redis 和 MinIO；Nginx 依赖后端。所有服务都属于开机启动的 `libreoj.target` |
+| `Restart`、`RestartSec`、`UMask`、`LimitCORE` | 网页和存储服务失败 3 秒后重启，umask 为 `0077`，不生成 core 文件；评测机的 umask 为 `0022` |
+| `StandardOutput`、`StandardError` | `journal` |
+| `TimeoutStartSec` | MariaDB：120 秒 |
+| `Type`、`ExecReload`、`KillSignal` | Nginx：`simple`，使用自己的配置重载，以 `SIGQUIT` 停止 |
+| `AllowedCPUs`、`UV_THREADPOOL_SIZE`、`TasksMax`、`Delegate`、`RequiresMountsFor` | 评测机的 CPU、线程和挂载设置，必须与 `judge.yaml` 一致，见[评测配置](Judge-Configuration.zh-CN.md) |
+
+正在使用的服务单元在 `/etc/systemd/system`；`deploy/systemd` 中是生成它们的模板。要长期修改环境变量或资源限制，请添加 drop-in，例如 `sudo systemctl edit libreoj-backend`，然后执行 `sudo systemctl daemon-reload` 并重启服务。请检查 drop-in 没有覆盖安装器或扩缩容命令写入的设置，例如 `AllowedCPUs`。完整的服务单元及其环境变量可能包含密钥，只在可信的终端中查看。
+
+安装器还会为 Redis 在 `/etc/sysctl.d/99-libreoj-redis.conf` 中设置 `vm.overcommit_memory=1`（该文件已存在时不覆盖），并安装评测沙箱所需的 AppArmor 规则。Docker 下载源见 [Docker 源](Docker-Sources.zh-CN.md)。Node.js、Go、pnpm 的版本和沙箱镜像属于每个发行版本，不是可修改的设置。
+
+## 需要一起修改的设置
+
+| 修改 | 同时修改 |
+| --- | --- |
+| CPU、内存或评测槽数量 | 使用[扩缩容命令](Judge-Configuration.zh-CN.md)，它会一起更新 `judge.yaml`、评测服务及其检查 |
+| 站点名称或标志 | `backend.yaml` 中的 `preference.siteName` 和 `preference.misc.appLogo`，然后[重新构建前端](Frontend-Configuration.zh-CN.md)以更新页面加载时显示的名称 |
+| 站点端口或监听地址 | `nginx.conf` 中的 `listen`；用户访问的地址；公开端口变化时，MinIO 地址 `forUserUpload`、`forUserDownload` 和 `forJudge.urlEndpoint`；本机 `downloadEndpointOverride` 中的端口；各远程评测机 `judge.yaml` 中的 `serverUrl`；防火墙和前面的代理 |
+| 域名，或从 HTTP 改为 HTTPS | 三个 MinIO `urlEndpoint` 都改为 `https://<新域名>/storage/`；HTTPS 代理及其转发头；远程评测机的 `serverUrl`；邮件链接允许的地址。见 [HTTPS](HTTPS.zh-CN.md) |
+| 数据库、Redis 或文件存储 | 先备份并迁移数据，再让后端的连接设置与服务器的地址和密码一致。Redis 地址中密码的特殊字符需要百分号编码。只修改 `secrets.json` 不会有任何效果 |
+| 开启邮件和邮箱验证 | 设置 `services.mail.address` 和真实的 `transport`，确认能收到邮件后再开启 `preference.security.requireEmailVerification`。默认的 `jsonTransport` 不会发送邮件 |
+| 允许更大的上传 | Nginx 及前面代理的 `client_max_body_size`、`backend.yaml` 中对应的 `resourceLimit`，以及可用磁盘空间 |
+| 为服务分配更多内存 | 分别规划 Node.js（`NODE_OPTIONS`）、Redis `maxmemory`、MariaDB 缓冲池、评测和临时文件系统；评测槽只是其中一部分 |
+
+修改后重启受影响的服务：`backend.yaml` 重启 `libreoj-backend`；MariaDB、Redis 或 MinIO 的配置在空闲时重启对应服务。然后不要只检查首页能否打开：请登录、提交一次代码、上传并下载一个小文件、确认远程评测机重新连接，并运行一个小的 AI 任务。
 
 ## 提交数与通过数
 
-每道题目的提交数和通过提交数、每个用户的提交数和通过题目数，与非比赛提交严格一致。计数的变化与提交在同一事务中记录，并在其后立即应用；如果后端在两者之间停止，其他后端进程或重启后的后端会在大约一分钟内应用。
+每道题目的提交数和通过数，以及每个用户的提交数和通过题数，始终与非比赛提交一致。每次变化都与提交一起记录，并在提交后立即应用；如果后端在这之间停止，其他后端进程或重启后的后端会在大约一分钟内应用。
 
-需要核对计数与提交是否一致时（例如恢复备份或旧版本之后）：
+需要核对计数与提交是否一致时（例如恢复备份或退回旧版本之后）：
 
 ```bash
 sudo bash /opt/LLMOJ/deploy/rebuild-statistics.sh
 ```
 
-它输出一行 JSON：分别给出 `problems` 与 `users` 中不一致的行数，以及最多 20 个示例的 `stored`（存储值）和 `counted`（统计值）。修正：
+它输出一行 JSON：分别给出 `problems` 和 `users` 中不一致的行数，以及最多 20 个示例的 `stored`（存储值）和 `counted`（统计值）。修正：
 
 ```bash
 sudo bash /opt/LLMOJ/deploy/rebuild-statistics.sh --apply
 ```
 
-两者都可以在站点运行时执行：每一行在加锁后重新统计，并考虑正在应用中的变化。其他安装目录请使用 `--prefix`。
+两者都可以在站点运行时执行。其他安装目录请使用 `--prefix`。
 
-## 机密文件、安装状态与备份
+## 密钥与安装记录
 
-`config/secrets.json` 的 `database`、`redis`、`minioAccess`、`minioSecret`、`session`、`maintenance`、`judge`、`instanceId` 是生成器的实例记录，不会热更新正在运行的服务。轮换应逐项同步真实数据库／服务端配置、backend.yaml、judge 节点记录和客户端，不能删除整个文件后重跑。`config/admin-credentials.json` 记录初始管理员凭据，安装器会核验后在终端显示；它不是修改管理员密码的入口。`config/install-state.json` 记录初次安装参数和阶段，不是后续扩容控制面板。
+- `config/secrets.json` 记录安装时生成的密码和密钥（`database`、`redis`、`minioAccess`、`minioSecret`、`session`、`maintenance`、`judge`、`instanceId`）。修改这个文件不会改变任何地方的密码：要修改某一项，请在使用它的服务、`backend.yaml` 和评测机上分别修改。不要删除这个文件后重新安装。
+- `config/admin-credentials.json` 记录第一个管理员的密码；修改这个文件不会改变账号密码。
+- `config/install-state.json` 记录最初的安装参数和进度，不记录扩缩容等之后的修改。
+- AI 状态目录中保存 AI 主密钥和 `two-factor.key`。它们用于解密数据库中用户的 AI 密钥（`ai_configuration.encrypted`）和身份验证器密钥（`user_two_factor`），因此数据库备份必须配合对应的密钥才能使用。移动该目录请见 [AI 环境](AI-Environment.zh-CN.md)。
 
-AI 状态目录保存主密钥和 `two-factor.key`，用户 API 配置密文保存于 MariaDB 的 `ai_configuration.encrypted`，身份验证器密钥密文保存于 `user_two_factor`；数据库与主密钥的备份、恢复必须配套，修改目录路径还需迁移对应主密钥，见 [AI 环境](AI-Environment.zh-CN.md)。不要递归 chown 整个实例来修复权限，rootfs 和评测工作区有特定 UID／挂载权限要求。
+不要递归修改整个安装目录的所有者：沙箱镜像和评测目录需要特定的所有者和挂载。
 
-`deploy/backup.sh` 默认目录为 `/opt/LLMOJ`，可用 `HYHOJ_ROOT` 或优先级更高的 `--prefix PATH` 指定旧安装／自定义实例的实际路径；安装、升级或调整评测实例期间拒绝运行（共用维护锁）；只停止当前角色已安装的服务（仅网页部署没有评测服务），备份 `config`、`data`、`deploy`，排除 `data/judge`、`data/tmp`、`data/nginx`、`data/ai-generated`；退出时（包括失败时）只启动原本运行的 target 和服务，原本停止的实例保持停止。它不包含完整 rootfs、运行时二进制和 `/etc/systemd/system` drop-in；这些需另存或能够按同一版本重建。`data/ai-generated` 中未发布的生成结果也不会进入该备份。它仍不是完整运行环境或远程评测节点的备份；保存额外数据后进行恢复演练。
+## 备份
 
-来源：[deploy/configure-local.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-local.py), [config/nginx.conf.example](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/config/nginx.conf.example), [deploy/configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/configure-judge.py), [deploy/backup.sh](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/backup.sh).
+```bash
+sudo bash /opt/LLMOJ/deploy/backup.sh
+```
+
+它备份 `/opt/LLMOJ`，或用 `--prefix`（或 `HYHOJ_ROOT`）指定的目录。它会：
+
+1. 在安装、升级或评测扩缩容进行时拒绝运行；
+2. 停止站点服务，因此备份期间网站不可用；
+3. 把 `config`、`data` 和 `deploy` 写入 `backups/libreoj-<UTC 时间>.tar.gz`，并生成 `.sha256` 校验文件；不包括 `data/judge`、`data/tmp`、`data/nginx` 和 `data/ai-generated`；
+4. 重新启动之前在运行的服务，即使备份失败也是如此；之前已停止的站点保持停止。
+
+备份不包括沙箱镜像、已安装的运行环境、`/etc/systemd/system` 中的 drop-in、`data/ai-generated` 中未发布的 AI 结果，也不包括远程评测机。请另外保存你需要的其他内容，把备份存放到其他机器上，并实际演练恢复。
+
+来源：[configure-local.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-local.py)、[nginx.conf.example](https://github.com/houyhlouis/LLMOJ/blob/main/config/nginx.conf.example)、[configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-judge.py)、[backup.sh](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/backup.sh)。

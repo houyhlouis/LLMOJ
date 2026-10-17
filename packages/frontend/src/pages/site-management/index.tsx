@@ -13,6 +13,7 @@ import {
   RegistrationMode,
   SiteSettings
 } from "./api";
+import AiPolicySection from "./AiPolicySection";
 import style from "./SiteManagementPage.module.less";
 
 export const SiteManagementPage = observer(() => {
@@ -132,6 +133,7 @@ export const SiteManagementPage = observer(() => {
       ) : (
         <div className={style.content}>
           <p>{_(".introduction")}</p>
+          <Header as="h2">{_(".registration_title")}</Header>
           {error && <Message negative role="alert" content={error} />}
           {message && <Message positive role="status" content={message} />}
           {loading && <Loader active inline="centered" content={_(".loading")} />}
@@ -200,6 +202,7 @@ export const SiteManagementPage = observer(() => {
               setReload(value => value + 1);
             }}
           />
+          <AiPolicySection />
         </div>
       )}
     </>

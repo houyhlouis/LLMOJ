@@ -1,6 +1,7 @@
 return {
   title: "网站管理",
-  introduction: "管理新用户的注册方式。仅站点管理员可以修改；不会改变已有账户或已有申请的审核结果。",
+  introduction: "全站设置。仅站点管理员可以修改，修改后立即生效。",
+  registration_title: "注册",
   permission_denied: "仅站点管理员可以管理网站设置。",
   registration_mode: "注册模式",
   modes: { open: "自由注册", approval: "管理员审核", closed: "关闭注册" },
@@ -24,5 +25,29 @@ return {
   loading: "正在加载网站设置…",
   request_failed: "请求未完成，请重试。",
   invalid_response: "服务器返回了无法识别的设置，请重新加载后重试。",
-  save_unconfirmed: "未能确认保存结果：{error} 请重新加载设置核对，当前选择暂未清除。"
+  save_unconfirmed: "未能确认保存结果：{error} 请重新加载设置核对，当前选择暂未清除。",
+  ai: {
+    title: "AI",
+    introduction:
+      "对 AI 服务商请求的限制。限制作用于请求所使用的 AI 配置所属的账号，无论请求来自任务还是 AI 配置页面。",
+    paused: "暂停 AI",
+    paused_notes:
+      "暂停期间不会发出任何新的 AI 请求。正在进行的请求会完成；排队中和运行中的任务会等待，恢复后从中断处继续。",
+    fields: {
+      userDailyTokens: "每个账号 24 小时内的 token 数",
+      userDailyRequests: "每个账号 24 小时内的模型和搜索请求数",
+      jobRequests: "每个任务的模型和搜索请求数",
+      concurrentRequests: "同时进行的 AI 请求数"
+    },
+    notes: {
+      userDailyTokens:
+        "服务商报告的输入和输出 token，按任意 24 小时计算。在服务商报告实际用量之前，每个请求按其最大可能用量（输出上限加上输入的估计值）计算；服务商未报告用量的请求一直按该最大值计算。0 表示不限制。",
+      userDailyRequests:
+        "模型生成和联网搜索（包括连通性测试）的次数，按任意 24 小时计算。模型列表和进度查询不计入。0 表示不限制。",
+      jobRequests: "一个任务所有尝试（包括重试）的总数。0 表示不限制。",
+      concurrentRequests: "全站（每个后端进程）的数量。任务会等待空位；没有空位时，模型列表和连接测试会被拒绝。"
+    },
+    invalid: "请输入允许范围内的整数。",
+    saved: "AI 设置已保存并生效。"
+  }
 };

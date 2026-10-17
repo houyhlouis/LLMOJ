@@ -167,6 +167,26 @@ const errors: Record<string, [string, string]> = {
     "内网或本机 API 地址仅限站点管理员使用；其他用户需要服务器管理员将主机加入 HYHOJ_AI_PRIVATE_HOSTS。",
     "Private or local API hosts are limited to site administrators unless the server administrator lists the host in HYHOJ_AI_PRIVATE_HOSTS."
   ],
+  AI_PAUSED: [
+    "站点管理员已暂停 AI：排队中的任务会在恢复后继续。",
+    "AI is paused by the site administrator. Queued jobs continue when it's resumed."
+  ],
+  AI_BUSY: [
+    "站点的 AI 请求数已满，请稍后重试。",
+    "The site is already running as many AI requests as it allows. Try again shortly."
+  ],
+  AI_BUDGET_EXCEEDED: [
+    "你在最近 24 小时内的 AI 用量已达到站点上限。任务已保存进度，额度恢复后可以重试。",
+    "You've reached the site's AI limit for the last 24 hours. The job kept its progress; retry once the limit allows."
+  ],
+  AI_REQUEST_EXCEEDS_BUDGET: [
+    "单次请求可能使用的 token 超过了站点的 24 小时上限，请调低输出 token 上限。",
+    "One request could use more tokens than the site's 24-hour limit. Lower the maximum output tokens."
+  ],
+  AI_JOB_REQUEST_LIMIT: [
+    "此任务的模型和搜索请求已达到站点允许的数量。",
+    "This job has made as many model and search requests as the site allows."
+  ],
   AI_DIAGNOSTICS_BUSY: [
     "模型列表或连接测试请求过多，请等待当前请求完成后重试。",
     "Too many model-list or connection-test requests are running. Wait for them to finish and retry."
@@ -177,8 +197,8 @@ const errors: Record<string, [string, string]> = {
     "Base URL must be valid and contain no credentials or query parameters."
   ],
   TOO_MANY_ACTIVE_JOBS: [
-    "最多同时保留三个执行中或排队的 AI 任务。",
-    "You may have at most three active or queued AI jobs."
+    "你已有 100 个运行中或排队的 AI 任务，请等待部分任务完成。",
+    "You already have 100 AI jobs running or queued. Wait for some to finish."
   ],
   PROBLEM_AI_BUSY: ["此题已有 AI 任务正在执行。", "An AI job is already running for this problem."],
   SANDBOX_UNAVAILABLE: ["评测沙箱暂不可用，请稍后重试。", "The judging sandbox is unavailable. Please retry."],

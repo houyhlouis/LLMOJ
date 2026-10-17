@@ -1,90 +1,67 @@
-# Frontend and bootstrap configuration
+# Frontend configuration
 
-English | [简体中文](Frontend-Configuration.zh-CN.md) | [Configuration overview](Configuration.md)
+[简体中文](Frontend-Configuration.zh-CN.md) | English | [Wiki home](Home.en.md) | [Configuration overview](Configuration.md)
 
-## Local frontend used by one-click installation
+## The frontend built by the installer
 
-One-click installation uses `deploy/build-frontend-offline.mjs` to stage dependencies, build, and publish to `<root>/public`. “Offline” means locally served runtime assets; initial preparation of missing dependencies/emoji may still require network access.
+The installer builds the frontend with `deploy/build-frontend-offline.mjs` and publishes it to `<installation directory>/public`. "Offline" means the pages load everything from your own server; the build itself may still download missing dependencies and emoji.
 
-Inputs are `OJ_SITE_NAME` (LLMOJ), `HYHOJ_PUBLIC_DIR` (`<root>/public`), optional `HYHOJ_QUOTE_FILE` (quotation JSON), and `PNPM_BINARY` (pnpm, used with `--build`). `--assets-only` stages assets and exits; `--build` builds and publishes; no flag publishes an existing `dist`. Passing both flags does not perform a full build because assets-only exits early. The build sets `NODE_OPTIONS=--max-old-space-size=2300`.
+The script reads these environment variables:
 
-The following substitutions are currently fixed in the script, not additional environment variables:
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `OJ_SITE_NAME` | Site name shown before the backend's settings load | `LLMOJ` |
+| `HYHOJ_PUBLIC_DIR` | Where to publish the pages. Nginx isn't changed to match. | `<installation directory>/public` |
+| `HYHOJ_QUOTE_FILE` | Optional JSON file of quotations | none |
+| `PNPM_BINARY` | The pnpm program used by `--build` | `pnpm` |
 
-| Placeholder | Local value |
-| --- | --- |
-| `__public_path__` | `/frontend` |
-| `__default_title__` | `OJ_SITE_NAME / LLMOJ` |
-| `__api_endpoint__` | `"" → /` |
-| `__favicon__` | `""` |
-| `__applogo__` | `null` |
-| `__gravatar__` | `https://gravatar.com` |
-| `__ghavatar__` | `https://github.com` |
-| `__cdnjs__` | `/cdnjs` |
+And these options:
 
-Changing the name usually requires both backend `preference.siteName` and `OJ_SITE_NAME` during rebuilding. `preference.misc.appLogo` affects the logo after public configuration loads; the favicon and initial bootstrap assets belong to frontend publication. `HYHOJ_PUBLIC_DIR` does not update Nginx `root`. Publication rewrites output assets and `index.html`, and generates `sw.js` to unregister the old service worker and clear caches; generated output is not a permanent source-edit location.
+- `--build`: build the frontend, then publish it.
+- `--assets-only`: only prepare the local assets, then stop (even if `--build` is also given).
+- no option: publish an existing build from `dist`.
 
-With complete source and dependencies, the following example can run in a maintenance/build tree. It writes static files: back up the output first and substitute actual paths/name. Use the installer-compatible Node/pnpm and ownership, then verify the home page, asset loading, login, uploads, and browser caches.
+Pages built this way load their scripts from `/frontend`, call the API on the same site, and load libraries from `/cdnjs` on the same site. These values are fixed in the script.
+
+Publishing rewrites the output files and `index.html`, and adds a `sw.js` that removes any old service worker and clears its caches. Don't edit the published files by hand; your changes would be lost on the next build.
+
+To rebuild by hand, for example after changing the site name, run this in the installation directory with the installer's Node.js and pnpm. Back up `public` first, and afterwards check the home page, sign-in and uploads in a browser:
 
 ```bash
 cd /opt/LLMOJ
-sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin   OJ_SITE_NAME="AI Practice"   /opt/LLMOJ/runtime/node/bin/node deploy/build-frontend-offline.mjs --build
+sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  OJ_SITE_NAME="AI Practice" /opt/LLMOJ/runtime/node/bin/node deploy/build-frontend-offline.mjs --build
 ```
 
-## Project links and display names
+## Site name, logo and footer
 
-The footer dynamically displays “site name Powered by LLMOJ”, using backend `preference.siteName`. Both LLMOJ and the GitHub icon link to [houyhlouis/LLMOJ](https://github.com/houyhlouis/LLMOJ). Custom `preference.copyrightNotice` appears on a separate line; blank text and the exact defaults `LLMOJ` / `LibreOJ Open Source Project` do not add a duplicate line. Configuration is not rewritten. Initial titles and loading-error messages default to LLMOJ. Custom homepage content, original copyright, licenses and upstream attribution remain intact.
+- **Site name:** set `preference.siteName` in [`backend.yaml`](Backend-Configuration.md), and use the same name as `OJ_SITE_NAME` when you rebuild. The first is shown once the page has loaded; the second while it loads.
+- **Logo:** `preference.misc.appLogo` sets the logo shown once the page has loaded. The browser tab icon is part of the frontend build.
+- **Footer:** shows "*site name* Powered by LLMOJ", where LLMOJ and the GitHub icon link to [houyhlouis/LLMOJ](https://github.com/houyhlouis/LLMOJ). A custom `preference.copyrightNotice` appears on its own line below; an empty notice, or the old defaults `LLMOJ` and `LibreOJ Open Source Project`, adds nothing.
 
-The administrator user menu includes **Site management** (`/site-management`), showing the effective registration mode, server default and whether an override is active. Saving or restoring the server configuration takes effect immediately. Ordinary users and accounts granted only review or homepage-editing permissions cannot use this management feature. Refresh an already-open registration page to display the current mode; see [Registration approval](Registration-Approval.md).
+Your homepage content and the original copyright, license and attribution notices are kept.
 
-Without a URL argument, `packages/frontend/scripts/generate-api.js` reads local Swagger at `http://127.0.0.1:2002/docs-json`. Pass the full Swagger URL for a different backend. This development API endpoint serves a different purpose from the project repository link.
+**Site management** in the administrator's user menu sets the registration mode; see [Registration approval](Registration-Approval.md).
 
-## Optional upstream CDN/bootstrap path
+## Submission and hack preview windows
 
-`packages/bootstrap-config/settings.json` belongs to a separate bootstrap deployment system and is not read by local one-click installation. Its display title is LLMOJ; its API and asset examples still reference the upstream publishing services: replace them before independent deployment or requests/assets will point to someone else's site. This legacy path received a structural documentation review, not a deployment acceptance test.
+Clicking an entry in the submission or hack list opens a preview window, 1100 × 720 pixels or the size of the screen if that's smaller. The window shows the usual details page with `embed=1` added to its address, which hides the site's navigation bar. Links inside the window stay in it; lists opened inside it open no further windows. The **#ID** link and ordinary links open the full page. Sign-in, code visibility, contest feedback and every action are checked exactly as on the full page. See [Submissions](Submissions.md) and [Hacks](Hacks.md).
 
-`env` is a JSON dictionary, **not process environment**. The builder expands `${name}` references in order, allowing later values to refer to earlier keys. All 15 current example keys are listed below; custom string keys can be added for substitutions.
+## Generating API types for development
 
-| Key | Example (not local default) | Purpose |
-| --- | --- | --- |
-| `env.title` | `LLMOJ` | Initial page title |
-| `env.cdnRoot` | `https://static.cdn.menci.xyz/libreoj-frontend` | Frontend asset base |
-| `env.apiEndpoint` | `https://api.loj.ac` | Default-region backend address |
-| `env.apiEndpointCN` | `https://api.loj.ac` | CN-region backend address |
-| `env.bootstrapCdnRoot` | `bootstrap.loj.ac.cn` | Production bootstrap domain |
-| `env.bootstrapCdnRootStaging` | `bootstrap-staging.loj.ac.cn` | Staging bootstrap domain |
-| `env.assets` | `https://static.cdn.menci.xyz/libreoj-assets` | Common favicon/logo asset prefix |
-| `env.favicon` | `${assets}/favicon.ico` | Favicon URL |
-| `env.appLogo` | `${assets}/logo-website.min.svg` | Site logo URL |
-| `env.gravatar` | `https://gravatar.com` | Default Gravatar service |
-| `env.gravatarCN` | `https://cravatar.cn` | CN Gravatar service |
-| `env.ghAvatar` | `https://github.com` | Default GitHub avatar service |
-| `env.ghAvatarCN` | `https://cdn.menci.xyz/gh-avatar` | CN GitHub avatar service |
-| `env.cdnjs` | `https://cdnjs.cloudflare.com/ajax/libs` | Default dependency CDN |
-| `env.cdnjsCN` | `https://cdnjs.baoshuo.ren/ajax/libs` | CN dependency CDN |
+`packages/frontend/scripts/generate-api.js` reads the API description from a backend running at `http://127.0.0.1:2002/docs-json`. To use another backend, pass the full address of its `docs-json` as an argument.
 
-A `substitution` value can be a string shared by all regions or a region-to-string mapping. Empty key `""` is the fallback; `CN` is the current China-region example, with other codes extensible. Every current placeholder and mapping follows:
+## The bootstrap CDN build (not used by the installer)
 
-| Key | Value |
-| --- | --- |
-| `substitution.__api_endpoint__` | `{"CN": "${apiEndpointCN}", "": "${apiEndpoint}"}` |
-| `substitution.__default_title__` | `"${title}"` |
-| `substitution.__public_path__` | `{"": "${cdnRoot}"}` |
-| `substitution.__favicon__` | `{"": "${favicon}"}` |
-| `substitution.__applogo__` | `{"": "${appLogo}"}` |
-| `substitution.__gravatar__` | `{"CN": "${gravatarCN}", "": "${gravatar}"}` |
-| `substitution.__ghavatar__` | `{"CN": "${ghAvatarCN}", "": "${ghAvatar}"}` |
-| `substitution.__cdnjs__` | `{"CN": "${cdnjsCN}", "": "${cdnjs}"}` |
-| `substitution.__bootstrap_cdn_root__` | `{"": "${bootstrapCdnRoot}"}` |
-| `substitution.__bootstrap_cdn_root_staging__` | `{"": "${bootstrapCdnRootStaging}"}` |
+`packages/bootstrap-config/settings.json` belongs to a separate way of publishing the frontend through a CDN, inherited from upstream LibreOJ. The installer doesn't use it, and it hasn't been tested as part of LLMOJ. Its example addresses point to the upstream project's servers: replace all of them before using it, or your site will load from someone else's.
 
-Rebuild bootstrap-config and the relevant bootstrap application, then deploy HTML/service-worker/static assets. Generated `config.json` fields `responseDataForRegion`, `body`, `contentType`, `cacheControl`, `serviceWorker`, and `buildInfo` are build outputs, not additional manual settings. This build path reads Git commit metadata; a source archive is not equivalent to a full Git worktree.
+The file has two sections:
 
-The Cloudflare variant requires `CLOUDFLARE_WORKER_NAME` and `CLOUDFLARE_ACCOUNT_ID` to generate `wrangler.toml`. The OSS variant requires `ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, `ALIYUN_OSS_BUCKET`, and `ALIYUN_OSS_ENDPOINT` and publishes CN-region pages. Neither is part of one-click deployment. Keep credentials out of settings.json and the Wiki; see [Environment](Environment.md).
+- `env`: named values (not environment variables). A value can refer to an earlier one as `${name}`. The example defines `title`, `cdnRoot`, `apiEndpoint`, `apiEndpointCN`, `bootstrapCdnRoot`, `bootstrapCdnRootStaging`, `assets`, `favicon`, `appLogo`, `gravatar`, `gravatarCN`, `ghAvatar`, `ghAvatarCN`, `cdnjs` and `cdnjsCN`; you can add your own.
+- `substitution`: what replaces each placeholder in the pages (`__api_endpoint__`, `__default_title__`, `__public_path__`, `__favicon__`, `__applogo__`, `__gravatar__`, `__ghavatar__`, `__cdnjs__`, `__bootstrap_cdn_root__`, `__bootstrap_cdn_root_staging__`). A value is either one string, or a map from region to string, where `""` is the fallback and `CN` is the China region, for example `{"CN": "${apiEndpointCN}", "": "${apiEndpoint}"}`.
 
-Sources: [deploy/build-frontend-offline.mjs](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/build-frontend-offline.mjs), [packages/bootstrap-config/settings.json](https://github.com/houyhlouis/LLMOJ/blob/main/packages/bootstrap-config/settings.json), [packages/bootstrap-config/src/build.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/bootstrap-config/src/build.ts), [apps/bootstrap-cloudflare/config.mjs](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/bootstrap-cloudflare/config.mjs), [apps/bootstrap-static/deploy-oss.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/bootstrap-static/deploy-oss.ts).
+After a change, rebuild bootstrap-config and the bootstrap app and deploy the result. The other fields in the generated `config.json` are produced by the build. The build reads Git commit information, so it needs a Git checkout rather than a source archive.
 
-## Fixed detail preview windows
+The Cloudflare variant needs `CLOUDFLARE_WORKER_NAME` and `CLOUDFLARE_ACCOUNT_ID`; the Aliyun OSS variant, which publishes the China-region pages, needs `ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, `ALIYUN_OSS_BUCKET` and `ALIYUN_OSS_ENDPOINT`. See [Environment variables](Environment.md). Never put these credentials in `settings.json` or the wiki.
 
-Submission and Hack lists use a fixed 1100 × 720 pixel window, bounded by the available screen. The window loads the original same-origin detail route in an iframe with `embed=1`; this flag hides the site navigation and its reserved spacing only within the embedded page. Normal detail links and the window’s **#ID** link keep the complete page. Authentication, code visibility, contest feedback and all actions use the original protected routes. See [Submissions](Submissions.md) and [Hacks](Hacks.md).
-
-The mode is captured when the frame starts, so ordinary links keep the embedded layout during client-side navigation. Lists reached inside the frame use normal links rather than nesting more preview windows. No additional backend permission or configuration switch is required.
+Sources: [build-frontend-offline.mjs](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/build-frontend-offline.mjs), [settings.json](https://github.com/houyhlouis/LLMOJ/blob/main/packages/bootstrap-config/settings.json), [build.ts](https://github.com/houyhlouis/LLMOJ/blob/main/packages/bootstrap-config/src/build.ts), [bootstrap-cloudflare/config.mjs](https://github.com/houyhlouis/LLMOJ/blob/main/apps/bootstrap-cloudflare/config.mjs), [bootstrap-static/deploy-oss.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/bootstrap-static/deploy-oss.ts).

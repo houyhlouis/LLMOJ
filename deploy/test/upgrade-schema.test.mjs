@@ -118,3 +118,17 @@ test('reproducible judging tables and the submission data version column are add
       /Unsupported existing submission data version/);
   assert.equal(DATA_VERSION_SQL.length, 7);
 });
+
+test('the AI budget reservation table is added exactly once', async () => {
+  const { validateAiBudgetSchema, AI_BUDGET_SQL, AI_RESERVATION_CREATE_SQL } = await import('../ai-budget-schema.mjs');
+  assert.deepEqual(validateQueries([...AI_BUDGET_SQL]), [...AI_BUDGET_SQL]);
+  assert.throws(() => validateQueries([AI_RESERVATION_CREATE_SQL.replace('`tokens` bigint', '`tokens` int')]));
+  assert.throws(() => validateQueries([AI_RESERVATION_CREATE_SQL.replace('`settledAt` datetime NULL', '`settledAt` datetime NOT NULL')]));
+  const fixture = present => ({ query: async () => [{ count: present ? 1 : 0 }] });
+  await validateAiBudgetSchema(fixture(false), [...AI_BUDGET_SQL]);
+  await validateAiBudgetSchema(fixture(true), []);
+  await assert.rejects(() => validateAiBudgetSchema(fixture(false), []), /AI budget table/);
+  await assert.rejects(() => validateAiBudgetSchema(fixture(true), [...AI_BUDGET_SQL]), /AI budget table/);
+  await assert.rejects(() => validateAiBudgetSchema(fixture(false), [...AI_BUDGET_SQL, ...AI_BUDGET_SQL]), /AI budget table/);
+  assert.equal(AI_BUDGET_SQL.length, 1);
+});

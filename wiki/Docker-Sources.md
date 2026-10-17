@@ -1,12 +1,17 @@
 # Docker sources
 
-English | [简体中文](Docker-Sources.zh-CN.md)
+[简体中文](Docker-Sources.zh-CN.md) | English | [Wiki home](Home.en.md)
 
-Two settings serve different downloads: the **package repository** installs Docker Engine/buildx; a **Docker Hub registry mirror** supplies container base images used to build rootfs. Defaults use Docker's official package source and leave the host's Docker image-source configuration unchanged. On a new host, that means official Docker Hub.
+The installer uses Docker for two different downloads, and you can choose a source for each:
 
-## Interactive or command-line selection
+- the **package repository** that Docker Engine and buildx are installed from;
+- a **Docker Hub mirror** for the base images used to build the judge's sandbox file system (the rootfs).
 
-Complete-mode terminal installation asks for both settings. Press Enter to keep defaults. In non-interactive mode:
+By default Docker's official package repository is used, and the server's existing Docker Hub settings are left alone, which on a new server means the official Docker Hub.
+
+## Choosing sources
+
+A full installation in a terminal asks for both; press Enter to keep the defaults. Without prompts, pass them as options:
 
 ```bash
 sudo bash /tmp/llmoj-install.sh --repository houyhlouis/LLMOJ \
@@ -14,36 +19,36 @@ sudo bash /tmp/llmoj-install.sh --repository houyhlouis/LLMOJ \
   --docker-mirrors https://YOUR_DOCKER_HUB_MIRROR
 ```
 
-Use only HTTPS URLs without credentials/query strings. Multiple Hub mirrors use commas. Example URLs above are placeholders, not operating public mirrors.
+The addresses above are placeholders, not real mirrors. Use HTTPS addresses without user names, passwords or query strings, and separate several Docker Hub mirrors with commas.
 
-| Option | Expected URL |
+| Option | Address to give |
 | --- | --- |
-| `--docker-source` | Base such as `https://download.docker.com`; installer adds `/linux/ubuntu` |
-| `--docker-mirrors` | Docker Hub pull-through endpoint, such as `https://mirror.example.com` |
+| `--docker-source` | The repository's base address, such as `https://download.docker.com`. The installer adds `/linux/ubuntu` itself, so don't include it. |
+| `--docker-mirrors` | A Docker Hub pull-through mirror, such as `https://mirror.example.com` |
 
-Do not append `/linux/ubuntu` to the package-source option. The custom repository must carry Docker's signed Ubuntu packages for your version. The GPG key is still downloaded from `https://download.docker.com/linux/ubuntu/gpg`, preserving the official trust key. Existing Docker is not replaced by this option. See [Docker's Ubuntu repository instructions](https://docs.docker.com/engine/install/ubuntu/).
+The package repository must provide Docker's signed packages for your Ubuntu version. The signing key is still downloaded from `https://download.docker.com/linux/ubuntu/gpg`, so packages are checked against Docker's official key. If Docker is already installed, it isn't replaced. See [Docker's Ubuntu installation guide](https://docs.docker.com/engine/install/ubuntu/).
 
-## Configuration behavior
+## What the installer changes
 
-When rootfs must be built and custom mirrors are selected, the installer merges `registry-mirrors` into `/etc/docker/daemon.json`, preserves unrelated settings, validates the candidate with `dockerd --validate`, backs up the previous file as `daemon.json.llmoj-backup-<UTC timestamp>`, and applies the change atomically. Invalid JSON/configuration stops before replacement. A changed configuration restarts Docker and may interrupt existing containers.
+When it has to build the rootfs and you chose Docker Hub mirrors, the installer adds them as `registry-mirrors` to `/etc/docker/daemon.json`, keeping your other settings. It checks the new file with `dockerd --validate`, saves the old one as `daemon.json.llmoj-backup-<UTC time>` and replaces it in one step; if the result is invalid, the old file is kept. Docker is then restarted, which may interrupt containers that are running.
 
-Blank mirror input leaves `daemon.json` unchanged. Web-only installation and reuse of an existing rootfs skip Docker setup. Selecting a different mirror/source on a retry conflicts with recorded installation options; reuse the original options, or perform an explicit configuration migration after installation.
+Leaving the mirror empty leaves `daemon.json` unchanged. A web-only installation, or one that reuses an existing rootfs, doesn't touch Docker. If you run the installer again, give the same sources as the first time; to change them after installing, change the Docker configuration yourself.
 
-Rootfs builds use the local Docker default builder so daemon mirror settings apply. The original rootfs recipe and pinned base-image digest are retained. Mirrors do not accelerate Ubuntu snapshots, GitHub, npm or language downloads; configure those separately if needed. Docker Hub pull-through mirrors also do not mirror arbitrary third-party registries. See [Docker's mirror documentation](https://docs.docker.com/docker-hub/image-library/mirror/).
+The rootfs is built with Docker's default builder, so that the mirror settings apply; the build recipe and its pinned base image are unchanged. The mirrors only speed up Docker Hub images: Ubuntu packages, GitHub, npm and language toolchain downloads don't go through them, nor do other image registries. See [Docker's mirror documentation](https://docs.docker.com/docker-hub/image-library/mirror/).
 
-## Independent judges
+## Separate judge servers
 
-For manual [judge setup](Remote-Judge.md), install Docker from a repository suited to your server and then, if desired, configure the mirrors with the same helper:
+When [setting up a judge server by hand](Remote-Judge.md), install Docker from a repository that suits the server, then set the Docker Hub mirrors, if you want them, with the installer's helper:
 
 ```bash
 sudo python3 deploy/docker-support.py --mirrors https://YOUR_DOCKER_HUB_MIRROR --configure
 ```
 
-It prints `changed` or `unchanged`. If changed, restart Docker before building; if unchanged, start it if needed. Then use the default builder:
+It prints `changed` or `unchanged`. If it printed `changed`, restart Docker; otherwise just make sure Docker is running. Then build with the default builder:
 
 ```bash
-sudo systemctl restart docker  # Only when mirror configuration changed.
+sudo systemctl restart docker  # only if the helper printed "changed"
 sudo env BUILDX_BUILDER=default bash deploy/sandbox/build.sh build
 ```
 
-Keep the previous Docker backup when planning rollback. This helper never prints private host configuration.
+Keep the backup of `daemon.json` in case you want to undo the change. The helper never prints the contents of the server's configuration.

@@ -36,6 +36,8 @@ class FakeHost:
         self.pending_applications = 0
         self.registration_override = None
         self.registration_policy_corrupt = False
+        self.ai_policy_limited = False
+        self.queries = []
         self.fail_start = None
     def prop(self, unit, name):
         if (unit,name) in self.override:
@@ -72,6 +74,7 @@ class FakeHost:
                 assert query.is_file()
                 query=b''
             query=query.decode()
+            self.queries.append(query)
             if 'SELECT IS_USED_LOCK' in query: output=str(int(self.worker_locked)).encode()
             elif 'DATA_LENGTH+INDEX_LENGTH' in query: output=b'1024'
             elif "TABLE_TYPE <> 'BASE TABLE'" in query: output=b''
@@ -80,6 +83,7 @@ class FakeHost:
             elif 'FROM `registration_review`' in query: output=str(self.pending_accounts).encode()
             elif 'FROM `registration_application`' in query: output=str(self.pending_applications).encode()
             elif "FROM `settings`" in query and "'registration-policy'" in query: output=str(int(self.registration_override is not None or self.registration_policy_corrupt)).encode()
+            elif "FROM `settings`" in query and "'ai-policy'" in query: output=str(int(self.ai_policy_limited)).encode()
             elif 'FROM `submission`' in query or 'FROM `ai_job`' in query: output=str(self.queued).encode()
             elif query.startswith('SELECT COUNT'): output=b'0'
         elif args[0]=='mariadb-dump': kwargs['output'].write(b'-- synthetic logical SQL backup\n'+b'x'*200)
@@ -309,7 +313,7 @@ class UpgradeTests(unittest.TestCase):
         self.up.stage=self.source
         response=subprocess.CompletedProcess([],1,b'',b'UPGRADE_COMPATIBILITY: LEGACY_BUSINESS_REFERENCES\n')
         with patch.object(self.host,'run',return_value=response):
-            with self.assertRaisesRegex(u.UpgradeError,'LEGACY_BUSINESS_REFERENCES.*business data'):
+            with self.assertRaisesRegex(u.UpgradeError,'LEGACY_BUSINESS_REFERENCES.*content, privileges or links'):
                 u.Upgrade.schema(self.up,'libreoj')
         response=subprocess.CompletedProcess([],1,b'',b'SQL secret-should-not-leak password=value')
         with patch.object(self.host,'run',return_value=response):
@@ -391,6 +395,30 @@ class UpgradeTests(unittest.TestCase):
         with self.assertRaisesRegex(u.UpgradeError, 'saved website registration policy'):
             self.up.rollback(manual=True)
         self.assertFalse(any(c[0]=='service' for c in self.host.calls[before:]))
+    def test_rollback_to_backend_without_ai_policy_refuses_a_saved_pause_or_budget(self):
+        self.prepare(); self.up.activate(); self.host.ai_policy_limited=True
+        before=len(self.host.calls)
+        with self.assertRaisesRegex(u.UpgradeError, 'AI pause and budgets'):
+            self.up.rollback(manual=True)
+        self.assertFalse(any(c[0]=='service' for c in self.host.calls[before:]))
+        self.assertEqual((self.root/'apps/backend/dist/main.js').read_text(), 'new backend')
+        self.host.ai_policy_limited=False
+        self.up.rollback(manual=True)
+        self.assertEqual(self.up.manifest['status'], 'rolled-back')
+    def test_rollback_to_ai_policy_aware_backend_keeps_the_policy(self):
+        previous_service=self.root/'apps/backend/dist/settings/ai-policy.service.js'
+        previous_service.parent.mkdir(parents=True)
+        previous_service.write_text('old policy-aware backend')
+        self.prepare(); self.up.activate(); self.host.ai_policy_limited=True
+        self.up.rollback(manual=True)
+        self.assertEqual(self.up.manifest['status'], 'rolled-back')
+    def test_ai_policy_rollback_query_counts_only_a_pause_or_budget(self):
+        self.prepare(); self.up.activate()
+        self.up.rollback(manual=True)
+        query=next(c for c in self.host.queries if "'ai-policy'" in c)
+        for clause in ("JSON_TYPE(`value`)", "'$.paused'", "'$.userDailyTokens'", "'$.userDailyRequests'"):
+            self.assertIn(clause, query)
+        self.assertNotIn('jobRequests', query)
     def test_rollback_to_policy_aware_backend_retains_override(self):
         previous_service=self.root/'apps/backend/dist/settings/registration-settings.service.js'
         previous_service.parent.mkdir(parents=True)
@@ -473,6 +501,15 @@ class UpgradeTests(unittest.TestCase):
         for args in (['--ref','abc','--ref=def'],['--typo'],['--source=/tmp/no']):
             with patch.object(sys,'argv',['bootstrap',*args]),contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit): exec(prefix,{})
+    def test_entry_scripts_differ_only_in_language(self):
+        english=(MODULE.parents[1]/'upgrade.sh').read_text()
+        chinese=(MODULE.parents[1]/'upgrade.zh-CN.sh').read_text()
+        self.assertIn("LANGUAGE = 'en'\n", english)
+        self.assertEqual(chinese, english.replace("LANGUAGE = 'en'\n", "LANGUAGE = 'zh-CN'\n"))
+        # The upgrader prints in the entry script's language
+        for language, expected in (('en', 'Upgrade not completed: '), ('zh-CN', '升级未完成：')):
+            with patch.dict(os.environ, {'LLMOJ_LANG': language}):
+                self.assertEqual(u.say('Upgrade not completed: ', '升级未完成：'), expected)
     def test_modified_guard_not_overwritten(self):
         self.up.guard.parent.mkdir(); self.up.guard.write_text('custom secret setting')
         with self.assertRaises(u.UpgradeError): self.up.preflight()

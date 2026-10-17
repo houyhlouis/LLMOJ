@@ -1,115 +1,174 @@
-# 开发与构建
+# 开发说明
 
 [English](README-DEVELOPMENT.md) | 简体中文
 
-项目基于 LibreOJ，主体采用 MIT；各组件原声明必须保留。项目介绍见 [README](README.md)，部署见 [Wiki](wiki/Home.zh-CN.md)。
+LLMOJ 基于 [LibreOJ](https://github.com/libreoj/libreoj)，采用 MIT 许可证；请保留所有组件的声明。功能介绍和安装方法见 [README](README.md) 和 [Wiki](wiki/Home.md)。
 
 ## 工具链
 
-- Node.js 至少 22.13；一键安装固定使用 24.21.0。
-- 使用 `package.json` 指定的 pnpm 11.13.1。
-- Linux amd64、CMake、C++ 编译器、libfmt；实际沙盒执行还需 namespaces 与 cgroup v2。
+- Node.js 22.13 或更高版本（安装时使用 24.21.0），以及 `package.json` 中指定的 pnpm 11.13.1。
+- 评测机的原生代码需要：amd64 上的 Linux、CMake、C++ 编译器和 libfmt。
+- 在沙箱中实际运行程序还需要：命名空间和 cgroup v2。
+
+## 构建
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm build:artifacts
+pnpm build:artifacts            # 共用的协议和 bootstrap 包
 pnpm --filter simple-sandbox build
-pnpm build:native
+pnpm build:native               # 沙箱和评测机的原生扩展
 pnpm build
 pnpm check-types
 ```
 
-源码归档包含 testlib；仅在 Git 子模块内容缺失时执行 `git submodule update --init --recursive`。
+源码包中已包含 testlib。只有在缺少 `apps/judge/vendor/testlib/testlib.h` 时才需要运行 `git submodule update --init --recursive`。
 
-## 运行配置
+`pnpm check` 执行与 CI 第一步相同的内容：构建、类型检查、lint 和格式检查。
 
-`config/*.example` 是模板。实际配置、API Key、数据库、依赖、rootfs 和构建产物不进入源码仓库。安装器生成这些文件，默认站点监听 `0.0.0.0:80`；后端与存储仅监听本机。
+## 目录与配置
 
-`HYHOJ_*` 是二次开发早期采用的内部环境变量名，暂时保留以兼容已有功能代码；它们不控制站点展示名称。新部署默认目录为 `/opt/LLMOJ`，可用显式 prefix 保留已有实例目录；服务使用 `libreoj-*`，站名由 `--site-name` / `OJ_SITE_NAME` 设置。
+| 目录 | 内容 |
+| --- | --- |
+| `apps/backend` | NestJS 后端 |
+| `apps/judge` | 评测机 |
+| `packages/frontend` | React 前端 |
+| `packages/judge-protocol` | 后端与评测机共用的消息定义 |
+| `packages/simple-sandbox` | 原生沙箱 |
+| `deploy` | 安装器、升级器和维护脚本及其测试 |
+| `wiki` | 文档，发布到 GitHub Wiki（见[发布](wiki/Publishing.zh-CN.md)） |
 
-原版 rootfs 构建及验证见 [沙盒说明](deploy/sandbox/README.md)。Docker 用于构建，不参与每次提交的原生沙盒执行。
+`config/*.example` 是模板。真实配置、密码、数据、依赖、沙箱镜像和构建结果都不会进入仓库，由安装器生成。服务保留 `libreoj-*` 名称，`HYHOJ_*` 变量也为兼容而保留原名。站点显示名称来自 `--site-name`（`OJ_SITE_NAME`）。
 
-## 测试与打包
+评测沙箱镜像用 Docker 构建，提交的程序在原生 `simple-sandbox` 中运行。中英文安装器共用同一份代码，只有提示语言不同；有测试检查两个下载脚本除此之外完全相同。见 [Docker 源](wiki/Docker-Sources.zh-CN.md)。
+
+## 测试
+
+在仓库根目录用 `node --test` 或 `python3` 运行测试。CI（[.github/workflows/ci.yml](.github/workflows/ci.yml)）每次推送都会运行下面这些；提交前请运行你修改的部分。
 
 ```bash
+# 后端，按模块
 node --test --test-concurrency=1 apps/backend/src/ai/*.test.cjs
-python3 deploy/test/github-entry.test.py
+node apps/backend/src/access/access-permissions.test.cjs
+node --test --test-concurrency=1 apps/backend/src/discussion/*.test.cjs apps/backend/src/team/*.test.cjs \
+  apps/backend/src/hack/*.test.cjs apps/backend/src/self-eval/*.test.cjs apps/backend/src/contest/*.test.cjs \
+  apps/backend/src/judge/*.test.cjs apps/backend/src/auth/*.test.cjs apps/backend/src/auth/two-factor/*.test.cjs \
+  apps/backend/src/submission/*.test.cjs apps/backend/src/problem/*.test.cjs apps/backend/src/file/*.test.cjs \
+  apps/backend/src/database/database-providers.test.cjs
+
+# 评测机
+node --test apps/judge/src/aiQuality.test.cjs apps/judge/src/task/hack/hack.test.cjs \
+  apps/judge/src/task/self-eval/self-eval.test.cjs apps/judge/src/rpc.test.cjs \
+  apps/judge/src/executionScheduler.test.cjs apps/judge/src/selfTestConfig.test.cjs
+
+# 前端
+node --test packages/frontend/test/*.test.cjs
+
+# 数据库结构与迁移
+node --test deploy/test/upgrade-schema.test.mjs deploy/test/community-schema.test.mjs \
+  deploy/test/team-storage.test.mjs deploy/test/upgrade-registration.test.mjs
+node --test deploy/test/community-schema.mariadb.test.mjs deploy/test/initialize-schema.test.mjs
+node --test deploy/fake-migration.test.cjs
+
+# 安装器、升级器和 Wiki
+python3 deploy/test/install-flow.test.py
+python3 deploy/test/backup.test.py
+sudo python3 deploy/test/community-upgrade.test.py
+sudo python3 deploy/test/community-runtime-upgrade.test.py
+python3 deploy/test/wiki-export.test.py
+```
+
+其他部署测试需要 root、systemd 或真实的安装布局，因此不在 CI 中：
+
+```bash
+sudo python3 deploy/test/upgrade.test.py
 sudo python3 deploy/test/install-support.test.py
 sudo python3 deploy/test/install-network.test.py
-sudo python3 deploy/test/judge-config.test.py
+sudo python3 deploy/test/judge-config.test.py      # sudo 的 PATH 中需要有 node
+sudo python3 deploy/test/resize-judge.test.py
 sudo python3 deploy/test/admin-output.test.py
-python3 deploy/test/install-flow.test.py
 sudo python3 deploy/test/redis-host.test.py
 sudo python3 deploy/test/sandbox-staging.test.py
+python3 deploy/test/judge-capacity.test.py
+python3 deploy/test/judge-prompt.test.py
+python3 deploy/test/github-entry.test.py
+python3 deploy/test/docker-support.test.py
+node --test deploy/test/bootstrap-admin.test.mjs
+```
+
+这些测试使用临时目录和模拟的服务：它们不能代替在真实 Ubuntu 服务器上试装或试升级。
+
+### 数据库测试
+
+名为 `*.mariadb.test.*` 的测试（以及少数其他测试）使用真实的 MariaDB。除非对应的变量指向一个包含 `services.database` 的私有 YAML 文件（注册测试为 JSON 文件），否则会被跳过。被跳过的测试不能证明任何事情。
+
+**只能让它们使用可以丢弃的数据库**：它们会创建和删除表，有些还要求数据库为空。绝不能使用生产数据库、数据或登录会话。共用同一个数据库的测试请依次运行。
+
+| 变量 | 测试 |
+| --- | --- |
+| `HYHOJ_DISCUSSION_TEST_DB_CONFIG` | `discussion/discussion-{boundaries,visibility,solutions}.mariadb.test.cjs` |
+| `HYHOJ_PROBLEM_TEST_DB_CONFIG` | `problem/problem-mutations.mariadb.test.cjs` |
+| `HYHOJ_SUBMISSION_TEST_DB_CONFIG` | `submission/submission-delete.mariadb.test.cjs` |
+| `HYHOJ_COUNT_TEST_DB_CONFIG` | `group/group-discussion-counts.mariadb.test.cjs` |
+| `HYHOJ_COMMUNITY_SCHEMA_TEST_DB_CONFIG` | `deploy/test/community-schema.mariadb.test.mjs` |
+| `HYHOJ_AI_TEST_DB_CONFIG` | `ai/ai-*.mariadb.test.cjs`（见 [AI 测试说明](apps/backend/src/ai/README.md)） |
+| `LLMOJ_TEAM_TEST_DB_CONFIG` | `team/team-workflows.mariadb.test.cjs`（空数据库） |
+| `LLMOJ_TEAM_AUDIT_DB_CONFIG` | `team/team-permission-audit.mariadb.test.cjs`（空数据库） |
+| `LLMOJ_FAKE_TEST_DB_CONFIG` | `submission/submission-fake.mariadb.test.cjs`、`deploy/fake-migration.test.cjs` |
+| `LLMOJ_SELF_EVAL_TEST_DB_CONFIG` | `hack/hack-list.mariadb.test.cjs`、`self-eval/self-eval.mariadb.test.cjs` |
+| `LLMOJ_TWO_FACTOR_TEST_DB_CONFIG` | `auth/two-factor/two-factor.mariadb.test.cjs` |
+| `LLMOJ_JUDGE_QUEUE_TEST_DB_CONFIG` | `judge/judge-queue.test.cjs` |
+| `LLMOJ_DATA_VERSION_TEST_DB_CONFIG` | `submission/submission-data-version.mariadb.test.cjs` |
+| `LLMOJ_SCHEMA_TEST_DB_CONFIG` | `deploy/test/initialize-schema.test.mjs` |
+| `LLMOJ_REGISTRATION_TEST_DATABASE` | `auth/registration-review.mariadb.test.cjs`、`site-management/registration-settings.mariadb.test.cjs` |
+
+`apps/backend/src/` 下的路径做了缩写。`LLMOJ_REGISTRATION_TEST_DATABASE` 指向一个包含 `socketPath`、`database`、`username` 和可选 `password` 的 JSON 文件；socket 必须符合 `/tmp/llmoj-registration-*/data/mariadb/mysql.sock` 或 `/var/tmp/llmoj-registration-*/mariadb/mysql.sock`，数据库名必须以 `llmoj_registration_test` 或 `test_registration_v2` 开头。
+
+部分测试还可以把结果写入文件（`HYHOJ_DISCUSSION_TEST_EVIDENCE`、`HYHOJ_COUNT_TEST_RESULTS`、`HYHOJ_SUBMISSION_TEST_OUTPUT`、`HYHOJ_PROBLEM_TEST_REPORT`、`LLMOJ_TEAM_TEST_REPORT`、`HYHOJ_AI_TEST_RESULTS`，所在目录必须已存在），或与基准源文件比较（`HYHOJ_COUNT_TEST_SERVICE_BASELINE`、`HYHOJ_SUBMISSION_TEST_BASELINE`、`HYHOJ_PROBLEM_TEST_BASELINE`）。其他仅用于测试的变量：`TEST_JUDGE_GATEWAY_SOURCE` 和 `TEST_JUDGE_GATEWAY_RESULTS`（评测网关测试）、`HYHOJ_TEST_CHECKER_BINARY`（原生 checker 测试）、`HYHOJ_TEST_EVIDENCE_DIR`（AI 浏览器测试截图）、`LIBREOJ_ADMIN_TEST_SOCKET` 和 `LIBREOJ_TEST_NODE`（管理员脚本测试）、`LLMOJ_MARIADB_BINARY`（Fake 迁移测试使用的 `mariadb` 客户端），以及 `ENTRY_FIXTURE`、`TEST_DOCKER_FAILURE` 和 `TEST_DOCKER_EXPORT`（安装器测试的夹具）。
+
+在 CI 中，一个可丢弃的 MariaDB 服务运行在 3307 端口，`deploy/test/setup-community-ci.mjs` 为每组测试创建单独的数据库和受限账号，并把配置写在 `RUNNER_TEMP` 下。它拒绝在 CI 之外运行；在本地请自行创建可丢弃的数据库。
+
+### 升级迁移测试
+
+`deploy/test/upgrade-migration.integration.mjs` 在真实数据库上测试注册数据迁移。先构建后端，准备一个可丢弃的 MariaDB，以及注册申请功能出现之前的单库 SQL 导出文件，然后：
+
+```bash
+UPGRADE_TEST_ALLOW_DATABASE_CREATION=1 \
+UPGRADE_TEST_MARIADB_SOCKET=/var/tmp/llmoj-registration-test/mariadb/mysql.sock \
+UPGRADE_TEST_BASELINE_SQL=/path/to/dump.sql \
+node deploy/test/upgrade-migration.integration.mjs
+```
+
+socket 必须符合上面的格式；切换数据库或包含客户端命令的导出文件会被拒绝。它会创建并删除名为 `libreoj_upgrade_<16 位十六进制数>` 的数据库。没有设置这些变量时会输出 SKIP。
+
+### 评测机与沙箱
+
+```bash
+pnpm --filter @libreoj/judge test:native
+```
+
+运行沙箱自身的检查，以及针对已安装站点的评测机自检：
+
+```bash
+sudo systemd-run --wait --pipe --collect --property="Delegate=cpu memory pids" \
+  --property=DelegateSubgroup=supervisor --property=OOMPolicy=continue \
+  --working-directory="$PWD" "$(command -v node)" packages/simple-sandbox/demo/demo.js
+sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh
+```
+
+原生代码有修改时，CI 会运行原生测试和这个演示程序。
+
+### AI
+
+默认的 AI 测试使用模拟的模型、数据库和沙箱，不需要凭据或沙箱镜像。夹具检查会用本机的 C++ 编译器编译几个小程序。真实的编译、资源限制和协议执行需要可丢弃的后端和评测机。见 [AI 测试说明](apps/backend/src/ai/README.md)和[测试数据验证](wiki/AI.zh-CN.md#测试数据验证与覆盖)。
+
+### 在浏览器中检查
+
+修改页面后，请在桌面和手机宽度、中英文两种语言下检查，包括空列表、长内容和宽表格的横向滚动。
+
+## 源码包
+
+```bash
 python3 deploy/prepare-github.py --archive release/llmoj-source.tar.gz
 ```
 
-数据库及浏览器集成测试应使用一次性实例，具体约束见 [AI 说明](apps/backend/src/ai/README.md)。不要把生产数据库或会话作为测试 fixture。打包器仅检查并创建本地归档，不提交、推送或发布到 GitHub。
-
-## 测试数据校验回归
-
-在仓库根目录运行后端工作流及评测侧质量校验测试：
-
-```bash
-node --test --test-concurrency=1 apps/backend/src/ai/*.test.cjs
-node --test apps/judge/src/aiQuality.test.cjs
-```
-
-CI 会运行这两套测试，以及现有 Wiki 导出与导航检查。默认测试使用模拟模型服务、数据库或沙盒接口，不需要生产凭据和 rootfs；可选数据库测试未配置时会跳过。后端测试覆盖质量计划、旧任务恢复、独立生成请求和发布门槛；评测侧测试覆盖对拍、判题器、多种合法输出、慢算法判定和反例替换。 新增的集成夹具离线测试会用本机 C++ 编译器在临时目录中验证固定的合成程序；它不连接数据库或模型服务。
-
-真实编译、资源限制和协议执行需要另行配置隔离后端与评测环境，不能用上述 mock 结果替代。使用小规模可独立求解的样例、错误标程、存活候选、多解题和最坏情况构造检查端到端行为；慢算法应在小数据上正确、只在正式数据上因实际时间或内存限制被拦截。执行条件见 [AI 模块测试说明](apps/backend/src/ai/README.md)，生成流程及验证报告见 [使用说明](wiki/AI.zh-CN.md#测试数据验证与覆盖)。
-
-## 注册审核与升级回归
-
-在仓库根目录使用项目要求的 Node 版本：
-
-```bash
-node --test apps/backend/src/auth/registration-review.test.cjs
-node --test packages/frontend/test/registration-review.test.cjs
-sudo python3 deploy/test/upgrade.test.py
-node --test deploy/test/upgrade-schema.test.mjs deploy/test/upgrade-registration.test.mjs
-python3 deploy/test/wiki-export.test.py
-```
-
-真实 MariaDB 审核并发测试为 `apps/backend/src/auth/registration-review.mariadb.test.cjs`，仅在设置 `LLMOJ_REGISTRATION_TEST_DATABASE` 时启用。它读取私有 JSON 的 `socketPath`、`database`、`username`、可选 `password`；只允许专用 `/tmp/llmoj-registration-*/data/mariadb/mysql.sock` 或 `/var/tmp/llmoj-registration-*/mariadb/mysql.sock` 套接字，库名必须符合测试文件中的 `llmoj_registration_test*`／`test_registration_v2*` 白名单，使用随机表前缀并清理这些表。应先创建专用、可丢弃的 MariaDB 实例；不要提供生产连接。数据库测试未启用时会显示 skipped，不能算作通过数据库验收。
-
-升级器的 Python 测试使用临时目录和模拟服务控制，不能代替真实 Ubuntu/systemd 升级验收。正式运行范围、只读预检与回滚限制见 [升级说明](wiki/Upgrade.zh-CN.md)。
-
-本轮回归应特别检查：注册／拒绝前后正式用户表行数及用户 ID 序列保持不变；批准时四张账户表与审核日志原子提交；重复／并发审批只创建一个账户；待审与拒绝申请不能从用户搜索或个人主页访问。还应定向验证拒绝后批准、默认用户拒绝／授权审核者允许、权限撤销、禁止审核者进入权限管理，以及 `ViewSite` 被拒绝时不能审核。升级测试同时覆盖旧空账户和审计档案迁移、保留已通过账户、危险关联拒绝及重复执行。
-
-真实升级迁移测试为 `deploy/test/upgrade-migration.integration.mjs`。先构建后端，准备专用隔离 MariaDB 和仅含合成数据、尚未加入审核表／申请表的单库 SQL 备份，然后显式设置 `UPGRADE_TEST_ALLOW_DATABASE_CREATION=1`、`UPGRADE_TEST_MARIADB_SOCKET`、`UPGRADE_TEST_BASELINE_SQL`，执行 `node deploy/test/upgrade-migration.integration.mjs`。套接字真实路径也必须符合上述隔离目录白名单；不接受数据库切换、跨库限定或客户端命令的备份。测试创建并清理随机的 `libreoj_upgrade_<16位十六进制>` 数据库，涵盖密码／审计迁移、重复执行、危险关联拒绝、跨库级联引用和事务故障恢复，还验证旧权限枚举仅追加 `ManageRegistrationReviews`、已有权限值与序号保留，以及未知枚举值／顺序拒绝。未提供配置时只输出 SKIP，不能算作集成测试通过。禁止使用生产套接字或生产数据备份。
-
-## 私人团队、题解、Hack 与 NOI Self Eval 回归
-
-共享协议、评测处理器、后端和前端必须一起构建与检查。合并版赛制只有 NOI / OI、IOI、ICPC 和严格 IOI；Self Eval 仅在启用开关的 NOI / OI 比赛题目页提供。CI 新增讨论、进度、文件、比赛计分和严格社区迁移回归；相关文件见 apps/backend/src/team、src/discussion、src/submission、src/file 和 deploy/test/community-*。升级编排测试使用临时根目录和模拟服务。
-
-默认 CI 的 Code 任务会在 3307 端口启动可丢弃的 MariaDB 服务。`deploy/test/setup-community-ci.mjs` 创建独立测试库及各自仅有本库权限的账户，将私有配置写入 `RUNNER_TEMP`，启用团队、题解、Fake、题目／提交事务和迁移的真实数据库回归。数据库套件串行执行，任务结束后销毁服务。CI 还会创建根目录升级测试所需的 `libreoj` 组。该流程不会执行完整安装、真实 systemd 维护切换或原生判题。
-
-在仓库根目录执行以下构建和隔离编排检查：
-
-```bash
-pnpm --filter @libreoj/judge-protocol run build
-pnpm --filter @libreoj/judge run check-types
-node apps/judge/src/task/hack/hack.test.cjs
-node apps/judge/src/task/self-eval/self-eval.test.cjs
-node --test apps/backend/src/hack/hack-reference.test.cjs
-node --test apps/backend/src/self-eval/self-eval-noi.test.cjs apps/backend/src/self-eval/self-eval-list.test.cjs
-node --test apps/backend/src/contest/contest-rules.test.cjs
-pnpm --filter @libreoj/backend run build
-pnpm --filter @libreoj/frontend run check-types
-node --test deploy/test/community-schema.test.mjs
-sudo python3 deploy/test/community-upgrade.test.py
-sudo python3 deploy/test/community-runtime-upgrade.test.py
-node --test apps/backend/src/self-eval/self-eval.mariadb.test.cjs
-python3 deploy/test/wiki-export.test.py
-```
-
-本机开发仍须显式准备专用可丢弃库和低权限测试账户，不能提供生产连接。CI 配置脚本拒绝普通本机调用，不会自动创建本机测试环境。YAML/JSON 配置形状为 services.database；各套件通过 LLMOJ_TEAM_TEST_DB_CONFIG、LLMOJ_TEAM_AUDIT_DB_CONFIG、LLMOJ_FAKE_TEST_DB_CONFIG、HYHOJ_DISCUSSION_TEST_DB_CONFIG、HYHOJ_COMMUNITY_SCHEMA_TEST_DB_CONFIG、HYHOJ_PROBLEM_TEST_DB_CONFIG 或 HYHOJ_SUBMISSION_TEST_DB_CONFIG 显式启用。完整 metadata 测试要求其代码白名单内的空测试库，并在结束清理；Team workflows 也要求空库，不能和其它测试并行共用。未启用时的 skipped 不算数据库验收。
-
-重点检查团队列表始终仅含自己的成员身份或待审申请、未知用户不能按链接读取团队详情、免审核团队仍不在公共目录出现、申请人只能查看或撤回自己的申请，以及退团/归档后作者与公开标记不绕过私有边界、事务内撤权和锁顺序、截止时间及 Fake 计分、旧评测回调不能覆盖 Fake、源题数据复制隔离、上传实际大小与空间、分页、My Discussions 分类、迁移重跑和异常结构拒绝。完整升级脚本模拟与隔离数据库验证不等同于真实 Ubuntu/systemd 维护切换验收。
-
-Hack 列表及固定预测试自测的数据库回归通过 LLMOJ_SELF_EVAL_TEST_DB_CONFIG 指向专用可丢弃 YAML 配置；同一连接的套件必须串行执行。回归覆盖全场共享配额、并发计数、隐藏预测试、NOI-only 与赛前准备限制、非选手数据泄露、回调幂等与失败恢复；无配置的 skipped 不算验收。
-
-隔离浏览器检查应覆盖个人主页“我的团队”、编号加入与审核中的有限视图、题目页内题解及“我的讨论”。Hack 检查八列、筛选与 My hacks、空表样式、普通和比赛提交的详情入口、列表没有 Hack 按钮、STD 编辑器与已通过提交快捷设为 STD。Self Eval 检查仅 NOI 比赛出现开关和题目按钮、普通题与提交详情无入口、make/std 编辑器与正式 SPJ、AI 重生成正式数据并绑定同版源码、全场次数和结果隐私。桌面与手机都应核对居中、间距、横向滚动和代码编辑器宽度。
-
-新运行代码由 deploy/community-runtime-contract.json 固定旧、新哈希，升级器另外固定合同哈希。只有合同中逐项审查的协议／评测文件可以过渡，原生程序、依赖和 rootfs 保持兼容要求。十二张社区表、首版 Hack 表的可空 STD 内容字段追加、两个比赛字段和八个新权限由严格合同校验；使用前见 [社区功能升级](wiki/Community-Upgrade.zh-CN.md)。不能通过随意修改合同或重排旧枚举绕过拒绝。
+它只根据 Git 跟踪的文件生成本地文件，不会提交、推送或发布。见[发布](wiki/Publishing.zh-CN.md)。

@@ -1,13 +1,17 @@
-# Independent judge installation
+# Remote judges
 
-English | [简体中文](Remote-Judge.zh-CN.md)
+[简体中文](Remote-Judge.zh-CN.md) | English | [Wiki home](Home.en.md)
 
-This guide installs only judge, without web/database/Redis/MinIO services. Each judge has its own key and initiates the web-server connection. Use Ubuntu 24.04 / 26.04 amd64 (fresh 26.04 deployment remains unverified), systemd 254+, unified cgroup v2, at least 2 effective logical CPUs and 256 MiB effective RAM for one execution slot, and 30 GiB free disk. Building on the judge needs additional RAM; 8 GiB is recommended for compilation. Restricted namespace/mount/cgroup containers are unsupported.
+This guide sets up a judge on its own server, without the website, database, Redis or MinIO. The judge connects to the site itself, using its own key, so the site needs no open port on the judge.
 
-## 1. Download the same source version
+You need:
+- Ubuntu 24.04 or 26.04 (amd64), systemd 254 or later and cgroup v2. Ubuntu 26.04 hasn't been tested end to end yet. Containers that restrict namespaces, mounts or cgroups won't work.
+- At least 2 CPUs and 256 MiB of memory for one judge slot, and 30 GiB of free disk. Building on the judge needs more memory: 8 GiB is recommended.
+- A judge registered on the site, with its key (see [Distributed judging](Distributed-Judging.md)).
 
-Read `sourceCommit` in the web node's `config/install-complete.json`, or select the same release tag for both nodes. Replace the repository and version:
+## 1. Download the same version as the site
 
+The judge must run the same version as the site. Find it as `sourceCommit` in the site's `config/install-complete.json`, or use the same release tag on both. Then:
 
 ```bash
 sudo apt-get update
@@ -22,10 +26,9 @@ if [ ! -f apps/judge/vendor/testlib/testlib.h ]; then
 fi
 ```
 
-## 2. Install pinned Node/pnpm and build judge
+## 2. Install Node.js and pnpm, and build the judge
 
-Versions and checksum match the installer. Stop on a checksum failure; do not bypass validation.
-
+These are the versions and checksum the installer uses. If the checksum doesn't match, stop.
 
 ```bash
 OJ_NODE_STAGE=$(mktemp -d)
@@ -49,8 +52,7 @@ sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_module
   NODE_OPTIONS=--max-old-space-size=2300 pnpm install --frozen-lockfile --store-dir runtime/pnpm-store
 ```
 
-Continue building with the same tool path:
-
+Then build with the same tools:
 
 ```bash
 sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
@@ -63,12 +65,11 @@ sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_module
   '
 ```
 
-Workspace dependencies are installed. `build:artifacts` also builds shared frontend/bootstrap artifacts; it does not install or start a web service on this judge node.
+`build:artifacts` also builds files shared with the website; it doesn't install or start a website on the judge.
 
-## 3. Prepare the original rootfs
+## 3. Prepare the sandbox image
 
-Follow [Docker's Ubuntu guide](https://docs.docker.com/engine/install/ubuntu/) to install Engine and buildx. For custom sources, see [Docker-Sources](Docker-Sources.md). Then build:
-
+Install Docker Engine and buildx as described in [Docker's Ubuntu guide](https://docs.docker.com/engine/install/ubuntu/) (for other download sources, see [Docker sources](Docker-Sources.md)), then build the image:
 
 ```bash
 sudo docker info
@@ -77,22 +78,18 @@ sudo env BUILDX_BUILDER=default bash deploy/sandbox/build.sh build
 bash deploy/sandbox/build.sh plan
 ```
 
-Use the actual `ROOTFS_ID` and archive path printed by the plan/build. The following matches the installer's host profile: x32 is compiled but not executed; amd64/i386 and language checks still run.
-
+Install it with the `ROOTFS_ID` and archive path that the build printed. As in the installer, x32 programs are compiled but not run; the other checks still run.
 
 ```bash
 sudo env LIBREOJ_X32_SUPPORTED=0 unshare --net --mount --propagation private -- \
   bash deploy/sandbox/build.sh stage /opt/LLMOJ/runtime/sandbox-archives/rootfs-ACTUAL_ROOTFS_ID.tar.gz
 ```
 
-Alternatively, build the identical recipe on a trusted build machine and copy `rootfs-<ID>.tar.gz` plus its `.sha256` file to the judge for staging and language verification. This avoids Docker on the judge itself. Do not mix versions. Docker is for building; submissions execute in native `simple-sandbox`.
+Instead of installing Docker on the judge, you can build the same recipe on a trusted machine and copy `rootfs-<ID>.tar.gz` and its `.sha256` file to the judge, then install them as above. Don't mix versions. Docker is only used to build the image: submissions run in LLMOJ's own sandbox.
 
-## 4. Save the private key and generate config
+## 4. Save the key and write the configuration
 
-Register the node using [Distributed-Judging](Distributed-Judging.md). Put its key on a single line using an editor, keeping it out of command history:
-
-
-Create the key file below only on first setup; if `/root/judge-01.key` already exists, retain it instead of overwriting it.
+Save the judge's key on one line with an editor, so it doesn't end up in your shell history. If `/root/judge-01.key` already exists, keep it instead of creating it again.
 
 ```bash
 sudo install -m 0600 /dev/null /root/judge-01.key
@@ -105,14 +102,15 @@ sudo env HYHOJ_ROOT=/opt/LLMOJ NODE_BINARY=/opt/LLMOJ/runtime/node/bin/node \
   python3 deploy/configure-judge.py
 ```
 
-The server URL must be an origin without `/api`. The key file must be regular, root-owned and `0600`; its contents are not printed. Initial explicit slots must fit effective CPU/RAM capacity and the 511 libuv limit. Omitting `OJ_JUDGE_SLOTS` uses `min(effective CPUs-1, effective RAM MiB//256, 511)` for both default and maximum, with no extra memory reservation. One effective CPU or less than 256 MiB RAM gives zero capacity and is rejected. This variable does not resize existing YAML; use the maintained resize script. See [Judge configuration](Judge-Configuration.md) for every field, thread-pool sizing and existing-node resizing.
+- `OJ_JUDGE_SERVER` is the site's address, without `/api`.
+- The key file must be a regular file owned by root with mode `0600`; its contents are never printed.
+- `OJ_JUDGE_SLOTS` must fit the server's CPUs and memory. Leave it out for the automatic number (see [Judge configuration](Judge-Configuration.md#choosing-the-number-of-slots)). A server with one CPU or less than 256 MiB of memory can't judge.
 
-The generated `config/judge.yaml` is also root-only. Remote mode disables the local AI socket and creates `libreoj-judge.target`. Reruns retain config and reject a different server/key; rotate credentials explicitly after stopping the judge.
+The resulting `config/judge.yaml` is readable only by root. A remote judge has no local AI worker, and gets its own `libreoj-judge.target`. Running the script again keeps the configuration and refuses a different site or key; to change the key, stop the judge and change it deliberately. To change the number of slots later, use the [resize command](Judge-Configuration.md#changing-the-number-of-slots). [Judge configuration](Judge-Configuration.md) describes every setting.
 
-## 5. Register systemd and verify isolation
+## 5. Install the service and check the sandbox
 
-Install only judge units/workspace mounts, avoiding the web service templates:
-
+Install only the judge's service and its working directory mounts (not the website's services), check the sandbox, then start judging:
 
 ```bash
 sudo chmod -R a+rX apps packages node_modules runtime/node-v24.21.0-linux-x64 runtime/tooling runtime/pnpm-store
@@ -137,8 +135,8 @@ sudo systemctl status libreoj-judge.service
 sudo journalctl -u libreoj-judge.service -n 50 --no-pager
 ```
 
-The check compiles and runs a real program and verifies UID, read-only rootfs, network isolation, the syscall filter, tmpfs and cgroup limits. Afterwards, `sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh` checks every language ([self-test](Judge-Configuration.md#sandbox-syscall-filter-and-self-test)). Never recursively change rootfs ownership; it contains the sandbox UID.
+The check compiles and runs a real program and checks the sandbox user, the read-only file system, network isolation, the system call filter, tmpfs and cgroup limits. Afterwards, `sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh` checks every language (see [self-test](Judge-Configuration.md#sandbox-syscall-filter-and-self-test)). Never change the owner of the sandbox image's files recursively: it has its own sandbox user.
 
-Confirm the judge is online and submit programs on the web site. No inbound judge web port is required; allow outbound access to the web origin/download sources. Stop with `sudo systemctl stop libreoj-judge.target`; disable startup with `sudo systemctl disable libreoj-judge.target`.
+Finally, check on the site that the judge is online, and make a few submissions. The judge needs outgoing access to the site's address and its download addresses, and no incoming port.
 
-Generated configuration/units have isolated checks; full independent-machine installation and real multi-node scheduling still require on-site verification.
+To stop the judge: `sudo systemctl stop libreoj-judge.target`. To stop it starting at boot: `sudo systemctl disable libreoj-judge.target`.

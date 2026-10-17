@@ -2,23 +2,34 @@
 
 [简体中文](Contest-Rules.zh-CN.md) | English | [Wiki home](Home.en.md)
 
-LLMOJ supports the following four formats. **NOI / OI** is one format, stored as `noi`; existing contests retain their stored rule and scoring behavior.
+A contest uses one of four rules. **NOI / OI** is a single rule (stored as `noi`).
 
-| Format | Score | Feedback during the contest | Scoreboard |
+| Rule | Score | Feedback during the contest | Scoreboard |
 | --- | --- | --- | --- |
-| NOI / OI | Last submission for each problem | Compilation feedback only | Hidden until the end |
-| IOI | Highest score for each problem | Your complete judge feedback | Live |
-| ICPC / XCPC | Accepted problem count, then total time | Verdict; detailed test feedback is withheld | Live |
-| Strict IOI | Highest score for each subtask across valid submissions, combined per problem | Your complete judge feedback | Hidden until the end |
+| NOI / OI | Last submission to each problem | Compilation result only | Hidden until the end |
+| IOI | Best score on each problem | Your full judging results | Live |
+| ICPC / XCPC | Problems solved, then total time | Verdict only, without test details | Live |
+| Strict IOI | Best result on each subtask across all valid submissions, added up per problem | Your full judging results | Hidden until the end |
 
-ICPC adds 20 minutes for each wrong attempt before the first accepted submission. Compilation, file-format and system failures incur no attempt penalty. Attempts after the first accepted submission do not change that problem's result. Time calculations retain second precision.
+**ICPC:** each wrong attempt before a problem is accepted adds 20 minutes. Compile errors, file-format errors and system errors add nothing, and submissions after the first accepted one don't change the problem's result. Times are counted to the second.
 
-For score-based formats, each problem's score is multiplied by its configured weight. Existing NOI and IOI use the time of the scoring attempts as a tie-breaker. Strict IOI gives the same rank to equal totals. For example, scoring 40/40 and 0/60 on one submission and 0/40 and 60/60 on another gives 100 in Strict IOI, although neither individual submission scored 100.
+**Score-based rules** multiply each problem's score by its weight. NOI / OI and IOI break ties by the time of the submissions that scored; Strict IOI ranks equal totals equally. In Strict IOI, a contestant who scores 40/40 and 0/60 on the two subtasks in one submission, and 0/40 and 60/60 in another, gets 100 for the problem, though neither submission scored 100.
 
-Fake and successfully hacked submissions have an effective score of zero. Their preserved original subtask evidence cannot contribute to Strict IOI. Other independent valid submissions may still contribute under IOI or Strict IOI. A mass rejudge skips invalidated records; restoring one requires the corresponding explicit permission.
+**Fake and hacked submissions** score 0, and their original subtask results never count towards Strict IOI. Under IOI and Strict IOI, the contestant's other valid submissions still count. Rejudging many submissions at once skips them; restoring one needs explicit permission (see [Fake moderation](Submission-Moderation.md)).
 
-Contest owners and authorized managers choose the format in **Edit contest**. The format cannot be changed after submissions exist. Teams can create contests with these same four formats. Site contest, submission and scoreboard permissions still apply; team access never bypasses a site-wide deny. Hidden-scoreboard privileges can reveal a hidden board, but still require ordinary scoreboard access.
+## Choosing a rule
 
-Hack follows its contest switch and opening window. **Self Eval is optional only for NOI / OI contests**, is disabled by default, and appears on the contest problem page when enabled. Managers prepare a fixed hidden prediction set before the contest using `make.cpp` and `std.cpp`; judging reuses the problem's formal SPJ. Neither feature awards bonus points or changes the scoring formula, and Self Eval does not expose official scores or judge data. See [Hacks](Hacks.md) and [Self Eval](Self-Evaluation.md) for configuration and whole-contest quotas.
+Contest owners and managers choose the rule under **Edit contest**. It can't be changed once the contest has submissions. Team contests use the same four rules.
 
-The original scoring formats follow the [Luogu contest manual](https://help.luogu.com.cn/manual/luogu/contest). Strict IOI's per-subtask aggregation and hidden live scoreboard are based on the [Hydro contest implementation](https://github.com/hydro-dev/Hydro/blob/master/packages/hydrooj/src/model/contest.ts).
+The site's permissions for contests, submissions and scoreboards always apply, and team permissions never override a site-wide deny. The **View hidden scoreboards** permission shows a hidden scoreboard, but the user also needs ordinary scoreboard access.
+
+## Hacks and Self Eval
+
+- [Hacks](Hacks.md) are possible only when the contest allows them, and only in the time window it sets.
+- [Self Eval](Self-Evaluation.md) is an option of **NOI / OI contests only**, off by default. When it's on, contest problem pages show a **Self Eval** button that runs your code on hidden pretests prepared before the contest, judged with the problem's own checker.
+
+Neither gives bonus points or changes how scores are calculated, and Self Eval never reveals official scores or test data.
+
+## Sources
+
+The original scoring rules follow the [Luogu contest manual](https://help.luogu.com.cn/manual/luogu/contest). Strict IOI's per-subtask scoring and hidden scoreboard follow [Hydro's contest implementation](https://github.com/hydro-dev/Hydro/blob/master/packages/hydrooj/src/model/contest.ts).

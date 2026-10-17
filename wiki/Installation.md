@@ -1,91 +1,89 @@
 # Installation and ports
 
-English | [简体中文](Installation.zh-CN.md)
+[简体中文](Installation.zh-CN.md) | English | [Wiki home](Home.en.md)
 
-New installations default to `/opt/LLMOJ`. Existing installations remain in their current directory; use `--prefix /opt/LibreOJ` for an existing instance there. Changing the default does not migrate files or services.
+## Requirements
 
-## Target environments and acceptance scope
+- **Operating system:** Ubuntu 24.04 or 26.04, amd64, on an ordinary virtual machine or physical server. Restricted Docker or LXC containers aren't supported.
+- **System features:** systemd 254 or later, and cgroup v2 with the cpu, memory and pids controllers.
+- **Judging on the same server:** at least 2 CPUs and 256 MiB of memory available to LLMOJ. 8 GiB of memory makes the first build more comfortable.
+- **Disk space:** 30 GiB free for a full installation, 10 GiB for a web-only one.
+- **Network:** the first installation downloads from the Ubuntu repositories, GitHub, npm, Node.js and Go, and, for a full installation, Docker images and the judge's sandbox files.
 
-Preflight targets Ubuntu 24.04 / 26.04 amd64. Full deployment records are from 24.04; a fresh 26.04 installation has not passed acceptance yet. Use a normal VM or physical server, systemd 254+, and unified cgroup v2 with cpu/memory/pids controllers. Local judging requires at least 2 effective logical CPUs and 256 MiB effective RAM; its slot limit uses 256 MiB per slot with no extra memory reservation. Allow 30 GiB free disk for `all`, 10 GiB for `web`. Compilation is more comfortable with 8 GiB RAM. Restricted Docker/LXC containers are unsupported.
+Full installations have been tested on Ubuntu 24.04. Ubuntu 26.04 passes the installer's checks, but a complete fresh installation on it hasn't been tested yet.
 
-First installation needs access to Ubuntu repositories, GitHub, npm, Node and Go, plus Docker images and rootfs download sources in complete mode. The operating system and required kernel features must already be available.
+New installations go to `/opt/LLMOJ`. Installations made when the default was `/opt/LibreOJ` stay there; pass `--prefix /opt/LibreOJ` when running the installer for them.
 
-## Download and run
-
-Replace the public repository path:
+## Installing
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/install.sh -o /tmp/llmoj-install.sh
 sudo bash /tmp/llmoj-install.sh --repository houyhlouis/LLMOJ
 ```
 
-If necessary, install curl with `sudo apt-get update && sudo apt-get install -y curl ca-certificates`. The entry point resolves a commit, downloads that snapshot and records the repository/commit. It does not log in to GitHub or publish source. For private repositories, authenticate and download the source yourself, then run `sudo bash deploy/install.sh`.
+If curl is missing, install it first with `sudo apt-get update && sudo apt-get install -y curl ca-certificates`. For messages in Chinese, use `install.zh-CN.sh` instead.
 
-Interactive installation asks for role, listener, HTTP port, directory, site name and browser hostname/IP. Complete mode also asks for Docker sources and, when creating judge.yaml for the first time without --judge-slots, execution slots (default and maximum: `min(effective CPUs-1, effective RAM MiB//256, 511)`). Port 80 needs no browser suffix. Behind NAT, enter the actual public IP/domain rather than accepting a detected private interface address.
+The script downloads the chosen commit of the repository and records which repository and commit were installed. It doesn't sign in to GitHub. For a private repository, download the source yourself and run `sudo bash deploy/install.sh` in it.
+
+The installer asks for:
+
+- the role: a full site, or web only;
+- the listening address and HTTP port;
+- the installation directory and site name;
+- the address people will use in their browsers. Behind NAT or on a cloud server, enter the real public IP address or domain, since the detected address may be a private one;
+- for a full site, the [Docker sources](Docker-Sources.md) and, the first time, the number of [judge slots](#choosing-the-number-of-judge-slots).
 
 ## Options
 
-| Option | Default and constraints |
+| Option | Meaning |
 | --- | --- |
-| `--repository OWNER/REPO` | Required by download entry; public repository |
-| `--ref BRANCH_OR_TAG_OR_COMMIT` | Default `main`; branch, tag, or commit; download entry only |
-| `--prefix PATH` | Default `/opt/LLMOJ`; dedicated absolute path without spaces/special characters; one instance per host |
-| `--role all\|web` | Default `all`; full site or web-only; web has no local AI worker |
-| `--port NUMBER` | Default `80`; 1–65535, excluding internal ports 2002, 2020, 13306, 16379, 19000, 19001 |
-| `--listen ADDRESS` | Default `0.0.0.0`; only that address or `127.0.0.1` is accepted |
-| `--public-url ORIGIN` | Guessed from interface IP and port; HTTP(S) origin without path, query, fragment, or credentials; does not configure TLS |
-| `--site-name TEXT` | Default `LLMOJ`; 1–60 printable characters, not all whitespace |
-| `--judge-slots NUMBER` | Omitted/0 uses `min(effective CPUs-1, effective RAM MiB//256, 511)`; explicit positive counts must not exceed that maximum; zero capacity rejects local judging; all only |
-| `--docker-source URL` | Default `https://download.docker.com`; HTTPS package-source base, with `/linux/ubuntu` appended |
-| `--docker-mirrors URL[,URL]` | Default empty, retaining existing settings; comma-separated HTTPS mirrors; see Docker source validation rules |
-| `--yes` / `--non-interactive` | Aliases; use supplied/default values without prompts |
-| `--interactive` | Force interaction; requires a terminal; default prompts only for installation with a terminal |
-| `--check` | Check environment; download entry still fetches temporary source; no installation/service start |
-| `--plan` | Show plan; download entry still fetches temporary source; no installation/service start |
-| `--help` / `-h` | Show help for the current entry point without installing |
+| `--repository OWNER/REPO` | The public repository to install from (required by the download script) |
+| `--ref BRANCH_OR_TAG_OR_COMMIT` | What to install; `main` by default (download script only) |
+| `--prefix PATH` | Installation directory, `/opt/LLMOJ` by default: an absolute path without spaces or special characters. One installation per server. |
+| `--role all\|web` | `all` (default) for the full site, `web` for a site without judging or local AI workers |
+| `--port NUMBER` | HTTP port, `80` by default. 2002, 2020, 13306, 16379, 19000 and 19001 are used internally. |
+| `--listen ADDRESS` | `0.0.0.0` (default, every address) or `127.0.0.1` (only this server, for use behind a [proxy](HTTPS.md)) |
+| `--public-url ORIGIN` | The address people use, such as `https://oj.example.com`, without a path. Guessed from the server's IP address and port by default. It doesn't set up HTTPS by itself. |
+| `--site-name TEXT` | Site name, `LLMOJ` by default; 1 to 60 characters |
+| `--judge-slots NUMBER` | Number of judge slots (full site only); `0` or omitted means automatic |
+| `--docker-source URL` | Docker package repository, `https://download.docker.com` by default |
+| `--docker-mirrors URL[,URL]` | Docker Hub mirrors; none by default, which keeps the server's existing settings |
+| `--yes`, `--non-interactive` | Don't ask questions; use the options given and defaults for the rest |
+| `--interactive` | Ask questions even when they'd normally be skipped (needs a terminal) |
+| `--check` | Only check whether the server is suitable |
+| `--plan` | Only show what would be done |
+| `--help`, `-h` | Show help |
 
-The local `deploy/install.sh` does not accept `--repository` or `--ref`; these belong to the outer download entry.
+`--check` and `--plan` still download the source to a temporary directory, but install nothing. `--repository` and `--ref` belong to the download script, not to `deploy/install.sh`.
+
+For example:
 
 ```bash
 sudo bash /tmp/llmoj-install.sh --repository houyhlouis/LLMOJ \
   --yes --port 8080 --public-url http://oj.example.com:8080 --site-name LLMOJ
 ```
 
-Docker options apply when rootfs must be built. Package source changes do not replace an already installed Docker. Applying changed registry mirrors restarts Docker; other settings are preserved and the previous file is backed up. See [Docker sources](Docker-Sources.md).
+## Choosing the number of judge slots
 
-For Redis background saves, the installer applies `vm.overcommit_memory=1` and persists it in `/etc/sysctl.d/99-libreoj-redis.conf`; an existing custom file of that name is not overwritten. The single-node MinIO warning about host failure describes the absence of multi-node redundancy; keep independent backups.
+A judge slot runs one program at a time; more slots judge more submissions in parallel. The default, which is also the maximum, is:
 
-The installer does not change firewall/cloud security-group rules. Allow only the chosen website port. Database, Redis, MinIO, backend and metrics remain on loopback. Configure [HTTPS](HTTPS.md) for a public deployment.
+> the number of CPUs minus one, or the memory in MiB divided by 256, whichever is smaller (and at most 511)
 
-## How many judge instances?
+so one CPU stays free for the rest of the site and each slot gets 256 MiB. For example, with enough memory, 4, 8 and 16 CPUs give 3, 7 and 15 slots. A server with only one CPU or less than 256 MiB of memory can't judge: install it with `--role web` or give it more resources.
 
-“Judge instances” means execution slots, not OS threads or multiple OJ installations. All mode prompts only when first creating `judge.yaml` and `--judge-slots` was not explicitly supplied; web mode does not ask. The default and maximum are both `min(effective CPUs-1, effective RAM MiB//256, 511)`: keep one effective CPU outside judging and budget 256 MiB per slot, with no extra memory reservation. Enter or `0` keeps automatic-selection semantics; a positive number records an explicit choice within the maximum. One effective CPU or less than 256 MiB RAM gives zero capacity; installation immediately rejects local judging and recommends `--role web` or more resources. A retry with existing `judge.yaml` and no explicit slot argument preserves the configuration and historical `judgeSlots: 0` metadata without prompting or replacing a valid existing slot count. An installation originally using an explicit positive value still requires that original argument when retried.
+The installer asks only when it first creates `judge.yaml` and you didn't pass `--judge-slots`. Press Enter (or enter `0`) for the automatic value, or enter a smaller number. Running the installer again keeps the existing number. To change it later, after adding CPUs or memory for example, use the [resize command](Judge-Configuration.md); rerunning the installer with a different `--judge-slots` doesn't change an existing installation.
 
-With 4, 8 or 16 effective CPUs and sufficient RAM, defaults are 3, 7 and 15 slots. With at least 3 effective CPUs and 512 MiB RAM, the default and maximum are 2 slots. The old seven-slot cap is removed; effective CPUs, RAM and the 511-slot libuv ceiling still apply. More OS threads or AI concurrency do not create execution slots. See [judge configuration](Judge-Configuration.md) for budgets and the maintained resize command. `--plan` displays resources/workflow without certifying installability; `--check` and installation preflight reject unsuitable resource settings.
+## Firewall, HTTPS and other system changes
 
-## MariaDB initialization failures and safe retries
+The installer doesn't change the firewall or cloud security groups: allow the site's port yourself. The database, Redis, MinIO, the backend and its metrics listen only on the server itself; don't make them reachable from outside. The site uses plain HTTP until you set up [HTTPS](HTTPS.md).
 
-A datadir `Errcode: 13 Permission denied` can occur even when mysql owns the directory: AppArmor may reject root's `dac_read_search` / `dac_override` before it drops privileges. Repeated chmod/chown is not sufficient for that mechanism.
+For Redis, the installer sets `vm.overcommit_memory=1` and saves it in `/etc/sysctl.d/99-libreoj-redis.conf`, unless a file with that name already exists. MinIO may warn that the data becomes unavailable if the server fails: it runs on a single server, so keep separate [backups](Operations-Configuration.md).
 
-The new [initialize-mariadb.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/initialize-mariadb.py) switches to mysql before executing database programs. It initializes in private `data/mariadb-init/stage-*`, starts a temporary server with networking disabled, checks system tables and socket accounts, then publishes to an empty destination. A `data/mariadb/mysql/` directory alone no longer proves initialization succeeded. Failed staging data/logs are retained. Existing target contents are validated and preserved; incomplete or damaged databases stop the operation rather than being deleted, overwritten or assigned new credentials. Existing socket/PID files also prevent blindly starting another server. Existing-database validation starts the engine and may perform normal recovery and log updates; preservation is not byte-for-byte read-only access. This is an internal installation tool, not a command to run on a healthy live instance.
+## After installing
 
-The fix retains AppArmor confinement, adding only instance data/staging paths rather than DAC-bypass capabilities or disabling policy. This implementation belongs to the pending revision; confirm the update includes it. Read the indicated private diagnostic log, fix the cause and rerun with the original installer options. Do not delete the database, keys or installation state or edit metadata to bypass checks. Back up an incomplete existing database before administrator repair/restore.
+When installation succeeds, the terminal shows the `admin` user name, its random 32-character password and the path of the file that also holds them, `config/admin-credentials.json` (readable only by root). Keep this output private. If you run the installer again, it shows the password only if it still works.
 
-An isolated reproduction used Ubuntu 24.04 MariaDB 10.11.14 with a separately named profile from Ubuntu 26.04's MariaDB 11.8.6-5 package. Root-first startup with `--user=mysql` reproduced Err13 and both capability denials; starting directly as mysql created the system tables. The temporary profile only renamed the profile and allowed fixture paths, without adding capabilities. One nonfatal sys-device read denial remained. This validates the failure mechanism and identity-switch approach, not a complete fresh Ubuntu 26.04 deployment, every MariaDB version or all AppArmor behavior.
-
-The production initialization helper subsequently passed these checks, with separate scopes:
-
-| Environment | Actual result | Outside that result's scope |
-| --- | --- | --- |
-| Host Ubuntu 24.04 MariaDB 10.11.14, isolated temporary directories | Fresh initialization and existing-database retry passed system-table/socket SQL checks | No live OJ reinstall |
-| Official Ubuntu 26.04 container, OS 26.04.1 and MariaDB 11.8.6-5ubuntu0.1 | The same production helper passed fresh initialization and existing-database SQL revalidation | Container uses enforced `docker-default`, not the MariaDB-specific profile or a systemd VM |
-| Ubuntu 24.04 host with a separately named Ubuntu 26.04 MariaDB profile | Reproduced the AppArmor mechanism: root-first failed, mysql-first succeeded | Host MariaDB version, not a complete 26.04 environment |
-
-These checks complement one another. **A fresh full-site Ubuntu 26.04 VM installation and business acceptance run remain outstanding**; component results are not an all-compatibility guarantee.
-
-## Admin, services and retries
-
-At the end of a successful installation, the controlling terminal shows the full-permission `admin` username, its random 32-character password and the absolute credential-file path. This remains visible when build output is redirected; without a controlling terminal, it falls back to standard output. The server also retains `config/admin-credentials.json`, owned by root with mode `0600`. Retries verify the recorded password before displaying it. A changed password or missing record is never replaced or presented as a valid old password. Keep terminal output private.
+Manage the services with:
 
 ```bash
 sudo systemctl status libreoj.target
@@ -95,12 +93,18 @@ sudo systemctl disable libreoj.target
 sudo journalctl -u libreoj-backend -u libreoj-judge -u libreoj-nginx -n 100 --no-pager
 ```
 
-After a failed installation, fix the error and rerun with the original directory, role, site name, origin, listener, port, slots and Docker source options. Do not delete private config/state to bypass a mismatch. Completed installations are not automatically upgraded; back up the database and matching AI master key before planning a migration.
+To change settings later, see the [configuration overview](Configuration.md); services, ports, mail and storage are in [Operations](Operations-Configuration.md). To install a newer version, use the [upgrader](Upgrade.md), not the installer.
 
-## Post-install configuration
+## If installation fails
 
-Adding CPU cores or RAM does not automatically increase judge capacity. Use [Judge configuration and resizing](Judge-Configuration.md); changing installation metadata or rerunning `--judge-slots` is not a supported resize procedure. See [Configuration overview](Configuration.md) for the full inventory and [Operations](Operations-Configuration.md) for services, ports, mail, and storage.
+Fix the reported problem and run the installer again with the same options as the first time: directory, role, site name, address, listening address, port, judge slots and Docker sources. Don't delete configuration or installation state to get round a mismatch.
 
-## Validation scope
+## MariaDB initialization failures and safe retries
 
-Deployment and browser-based functional validation have been performed on Ubuntu 24.04 amd64, including accounts/permissions, problem management, four problem types, all 12 configured submission languages, judging/rejudging, contests, discussions, and problem sets. Subsequent AI business and multi-user permission tests used real DeepSeek/Tavily configurations; this does not establish equivalent behavior for other providers. Reported issues received fixes and targeted regression checks. A fresh installation of the fixed revision, Ubuntu 26.04, and real multi-machine deployment still require separate acceptance testing. This Wiki audit is not a new deployment or a complete business test run.
+If MariaDB fails to initialize with `Errcode: 13 Permission denied` on its data directory, even though the directory belongs to `mysql`, AppArmor is the likely cause: it stops root from reading the directory before MariaDB switches to the `mysql` user. Changing owners or permissions doesn't help.
+
+The installer avoids this by running the database programs as `mysql` from the start (see [initialize-mariadb.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/initialize-mariadb.py)). It keeps AppArmor on, and only allows the installation's own directories. It prepares the database in a private staging directory, checks it with a temporary server that has networking turned off, and only then moves it into place.
+
+An existing database is checked and kept: if it's incomplete or damaged, the installer stops rather than deleting it, overwriting it or giving it new passwords. Failed attempts keep their staging data and logs. Read the log the installer names, fix the cause and run the installer again with the same options. Don't delete the database, keys or installation state; back up an incomplete database before repairing or restoring it.
+
+This tool is part of installation; don't run it against a working site.

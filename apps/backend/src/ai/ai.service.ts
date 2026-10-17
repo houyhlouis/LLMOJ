@@ -45,6 +45,7 @@ import {
 import { AiResponseCheckpointEntity } from "./ai-usage.entity";
 
 import { AiUsageService } from "./ai-usage.service";
+import { AiAdmissionService } from "./ai-admission.service";
 
 import { withAiRuntime, aiWorkerLockName, currentAiRuntime, aiCancellationError } from "./ai-runtime";
 
@@ -70,6 +71,7 @@ import type { ProblemJudgeInfoInteraction } from "../problem-type/types/interact
 
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
+import { AiPolicy, AiPolicyService, DEFAULT_AI_POLICY } from "../settings/ai-policy.service";
 import { ProblemService, ProblemPermissionType } from "../problem/problem.service";
 import { ProblemEntity, ProblemType } from "../problem/problem.entity";
 import { ProblemContentSectionType } from "../problem/problem-content.interface";
@@ -130,6 +132,10 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
   @Inject(AiUsageService) private readonly usage: AiUsageService;
 
+  @Inject(AiAdmissionService) private readonly admission: AiAdmissionService;
+
+  @Inject(AiPolicyService) private readonly policies: AiPolicyService;
+
   private key: Buffer;
 
   private timer: ReturnType<typeof setInterval>;
@@ -176,6 +182,11 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   async requirePrivilege(user: UserEntity, privilege: UserPrivilegeType, manager?: EntityManager) {
     if (!user || !(await this.privileges.userHasPrivilege(user, privilege, manager)))
       throw new AiError("PERMISSION_DENIED");
+  }
+
+  /** Isolated harnesses construct the service without the site's AI policy. */
+  private async policy(): Promise<AiPolicy> {
+    return this.policies ? await this.policies.get() : { ...DEFAULT_AI_POLICY };
   }
 
   private async config(userId: number): Promise<AiConfiguration> {
@@ -358,7 +369,8 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       autoOnSave: false,
       maxConcurrentJobs: config.maxConcurrentJobs,
       parallelism: { min: 1, max: 8, globalMax: 8, maxQueuedJobs: 100 },
-      presets: providerPresets
+      presets: providerPresets,
+      sitePolicy: await this.userPolicy()
     };
   }
 
@@ -449,7 +461,25 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
   async usageReport(user: UserEntity, days?: number) {
     if (!user) throw new AiError("PERMISSION_DENIED");
-    return await this.usage.report(user.id, days);
+    const report = await this.usage.report(user.id, days);
+    const policy = await this.userPolicy();
+    const used = this.admission ? await this.admission.usage(user.id) : { tokens: 0, requests: 0, heldTokens: 0 };
+    return {
+      ...report,
+      budget: {
+        ...policy,
+        windowHours: 24,
+        usedTokens: used.tokens,
+        usedRequests: used.requests,
+        heldTokens: used.heldTokens
+      }
+    };
+  }
+
+  /** The limits that apply to every account; the number of simultaneous requests is the site's own concern. */
+  private async userPolicy() {
+    const { paused, userDailyTokens, userDailyRequests, jobRequests } = await this.policy();
+    return { paused, userDailyTokens, userDailyRequests, jobRequests };
   }
 
   private withRuntime<T>(
@@ -458,8 +488,8 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     work: () => Promise<T>,
     signal?: AbortSignal
   ): Promise<T> {
-    // Legacy isolated unit harnesses construct the service without its injected metering repository.
-    if (!this.usage && !signal) return work();
+    // Legacy isolated unit harnesses construct the service without its injected metering or admission.
+    if (!this.usage && !this.admission && !signal) return work();
     const context = this.usage
       ? this.usage.context(
           ownerId,
@@ -472,7 +502,13 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
         )
       : { ownerId, jobId: job?.id, record: async () => undefined };
     return withAiRuntime(
-      { ...context, signal, allowPrivateNetwork: async () => await this.isSiteAdministrator(ownerId) },
+      {
+        ...context,
+        signal,
+        allowPrivateNetwork: async () => await this.isSiteAdministrator(ownerId),
+        // Every provider request of this owner, from a job or from the configuration page, is admitted here.
+        ...(this.admission ? { admit: metadata => this.admission.admit(ownerId, job?.id, metadata, signal) } : {})
+      },
       work
     );
   }
@@ -531,7 +567,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       order: { createdAt: "DESC" },
       take: 50
     });
-    return { jobs: jobs.map(job => this.serialize(job)) };
+    return { jobs: jobs.map(job => this.serialize(job)), paused: (await this.policy()).paused };
   }
 
   async start(user: UserEntity, input: StartAiJobDto) {
@@ -850,6 +886,15 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       const cancelled =
         (error instanceof AiError && error.code === "JOB_CANCELLED") ||
         (await this.jobs.findOneBy({ id: job.id }))?.status === "cancelled";
+      if (!cancelled && error instanceof AiError && error.code === "AI_PAUSED") {
+        // The site paused AI: return the job to the queue. Its checkpoints let it resume where it stopped.
+        const requeued = await this.jobs.update(
+          { id: job.id, status: "running", runToken: job.runToken },
+          { status: "queued", runToken: null }
+        );
+        if (requeued.affected) await this.recordAiAudit(job.ownerId, "job.pause", job);
+        return;
+      }
       const failed = await this.jobs.update(
         { id: job.id, status: In(["running", "cancelled"]), runToken: job.runToken },
         // Artifact transactions/checkpoints are authoritative. A post-commit exception must not
@@ -879,7 +924,10 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       // The advisory lock spans all concurrent tasks; only its next holder reclaims abandoned jobs.
       await this.jobs.update({ status: "running" }, { status: "queued", runToken: null });
       while (!this.stopped || running.size) {
-        if (!this.stopped && running.size < 8) {
+        // eslint-disable-next-line no-await-in-loop -- Each step depends on prior results, cancellation checks, or retry state.
+        const { paused } = await this.policy();
+        if (paused && !running.size) break;
+        if (!this.stopped && !paused && running.size < 8) {
           // eslint-disable-next-line no-await-in-loop -- Each step depends on prior results, cancellation checks, or retry state.
           const lease = await lock.query("SELECT (IS_USED_LOCK(?) = CONNECTION_ID()) AS owned", [lockName]);
           if (Number(lease[0]?.owned) !== 1) throw new AiError("JOB_LEASE_LOST");

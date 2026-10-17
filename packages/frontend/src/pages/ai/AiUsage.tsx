@@ -23,8 +23,19 @@ interface UsageProvider extends UsageTotals {
   host: string;
   model: string;
 }
+interface UsageBudget {
+  paused: boolean;
+  userDailyTokens: number;
+  userDailyRequests: number;
+  jobRequests: number;
+  windowHours: number;
+  usedTokens: number;
+  usedRequests: number;
+  heldTokens: number;
+}
 interface UsageResponse {
   periodDays: number;
+  budget?: UsageBudget;
   totals: UsageTotals;
   byProvider: UsageProvider[];
   daily: Array<UsageTotals & { date: string }>;
@@ -90,6 +101,7 @@ export default observer(function AiUsage() {
         )}
       </p>
       {error && <Message negative>{error}</Message>}
+      {usage?.budget && <Budget budget={usage.budget} number={number} />}
       {usage && (
         <>
           <p className={style.usageSummary}>
@@ -188,3 +200,39 @@ export default observer(function AiUsage() {
     </>
   );
 });
+
+/** The site's limits and what this account has used of them; the configuration page shows a pause itself. */
+function Budget({ budget, number }: { budget: UsageBudget; number: (value: number) => string }) {
+  const lines = [];
+  if (budget.userDailyTokens)
+    lines.push(
+      aiText(
+        `Token：${number(budget.usedTokens)} / ${number(budget.userDailyTokens)}`,
+        `Tokens: ${number(budget.usedTokens)} of ${number(budget.userDailyTokens)}`
+      )
+    );
+  if (budget.userDailyRequests)
+    lines.push(
+      aiText(
+        `模型和搜索请求：${number(budget.usedRequests)} / ${number(budget.userDailyRequests)}`,
+        `Model and search requests: ${number(budget.usedRequests)} of ${number(budget.userDailyRequests)}`
+      )
+    );
+  if (!lines.length) return null;
+  return (
+    <Message info>
+      <Message.Header>{aiText("最近 24 小时的站点限额", "Site limits for the last 24 hours")}</Message.Header>
+      <Message.List items={lines} />
+      {budget.heldTokens > 0 && (
+        <p className={style.notes}>
+          {aiText(
+            `其中 ${number(budget.heldTokens)} 个 token 属于正在进行或服务商未报告用量的请求，按其最大可能用量计算。`,
+            `${number(
+              budget.heldTokens
+            )} of these tokens belong to requests that are running or whose usage the provider didn't report, counted at the most they could use.`
+          )}
+        </p>
+      )}
+    </Message>
+  );
+}

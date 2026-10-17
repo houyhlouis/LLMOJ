@@ -16,8 +16,34 @@ export interface AiRequestMetadata {
   host: string;
   model?: string;
   operation: string;
+  /** The most tokens a billable request can use: its output limit plus an upper estimate of its input. */
+  reserveTokens?: number;
 }
-export interface AiUsageRecord extends AiRequestMetadata {
+/** Model generations and searches; polls, model listings and MCP handshakes aren't billed by providers. */
+export function isBillableRequest(metadata: Pick<AiRequestMetadata, "target" | "operation">): boolean {
+  return metadata.target === "llm"
+    ? metadata.operation === "generate"
+    : ["search", "tools/call"].includes(metadata.operation);
+}
+/** An upper estimate of a prompt's tokens: English averages about four characters a token, CJK about one. */
+export function estimateTokens(text: string): number {
+  let ascii = 0;
+  let other = 0;
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+    if (code < 128) ascii++;
+    // A surrogate pair is one character.
+    else if (code < 0xdc00 || code > 0xdfff) other++;
+  }
+  return Math.ceil(ascii / 3) + other;
+}
+/** Generous for one image at the resolutions providers accept. */
+export const IMAGE_TOKEN_ESTIMATE = 4096;
+export interface AiAdmission {
+  reservationId?: string;
+  release(): void;
+}
+export interface AiUsageRecord extends Omit<AiRequestMetadata, "reserveTokens"> {
   success: boolean;
   errorCode: string | null;
   elapsedMs: number;
@@ -28,6 +54,8 @@ export interface AiUsageRecord extends AiRequestMetadata {
   searchCredits: number | null;
   usageReported: boolean;
   responseId?: string;
+  /** A background response still being generated; its usage arrives with the poll that completes it. */
+  pendingResponseId?: string;
 }
 export interface AiResponseCheckpoint {
   responseId: string;
@@ -39,7 +67,9 @@ export interface AiRuntimeContext {
   signal?: AbortSignal;
   /** Whether the owner may reach private and local provider addresses not listed in HYHOJ_AI_PRIVATE_HOSTS. */
   allowPrivateNetwork?: () => Promise<boolean>;
-  record: (record: AiUsageRecord) => Promise<void>;
+  /** Site pause, budgets and concurrency, checked before every provider request; see AiAdmissionService. */
+  admit?: (metadata: AiRequestMetadata) => Promise<AiAdmission>;
+  record: (record: AiUsageRecord, reservationId?: string) => Promise<void>;
   checkActive?: () => Promise<void>;
   loadResponse?: (requestHash: string) => Promise<AiResponseCheckpoint | null>;
   saveResponse?: (requestHash: string, value: AiResponseCheckpoint) => Promise<void>;
@@ -136,33 +166,43 @@ export async function meterProviderRequest<T extends { data: ProviderResponse }>
   const context = runtime.getStore();
   if (!context || !metadata) return await work();
   await context.checkActive?.();
-  const start = Date.now();
-  let result: T;
-  let failure: unknown;
+  const admission = await context.admit?.(metadata);
   try {
-    result = await work();
-  } catch (error) {
-    failure = error;
+    const request = { ...metadata };
+    delete request.reserveTokens;
+    const start = Date.now();
+    let result: T;
+    let failure: unknown;
+    try {
+      result = await work();
+    } catch (error) {
+      failure = error;
+    }
+    const errorCode = failure
+      ? failure instanceof AiError
+        ? failure.code
+        : "PROVIDER_NETWORK_ERROR"
+      : responseFailure(result?.data);
+    const response = result?.data;
+    const responseObject = typeof response?.id === "string" && response?.object === "response";
+    await context.record(
+      {
+        ...request,
+        model: (metadata.model || "").slice(0, 200),
+        success: !errorCode,
+        errorCode,
+        elapsedMs: Math.max(0, Date.now() - start),
+        ...extractUsage(response),
+        responseId:
+          responseObject && ["completed", "incomplete", "failed"].includes(response.status) ? response.id : undefined,
+        pendingResponseId:
+          responseObject && ["queued", "in_progress"].includes(response.status) ? response.id : undefined
+      },
+      admission?.reservationId
+    );
+    if (failure) throw failure;
+    return result;
+  } finally {
+    admission?.release();
   }
-  const errorCode = failure
-    ? failure instanceof AiError
-      ? failure.code
-      : "PROVIDER_NETWORK_ERROR"
-    : responseFailure(result?.data);
-  await context.record({
-    ...metadata,
-    model: (metadata.model || "").slice(0, 200),
-    success: !errorCode,
-    errorCode,
-    elapsedMs: Math.max(0, Date.now() - start),
-    ...extractUsage(result?.data),
-    responseId:
-      typeof result?.data?.id === "string" &&
-      result?.data?.object === "response" &&
-      ["completed", "incomplete", "failed"].includes(result?.data?.status)
-        ? result.data.id
-        : undefined
-  });
-  if (failure) throw failure;
-  return result;
 }

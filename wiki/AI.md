@@ -1,55 +1,61 @@
-# AI configuration, permissions and execution
+# AI
 
-English | [简体中文](AI.zh-CN.md) | [All configuration](Configuration.md) | [AI environment](AI-Environment.md)
+[简体中文](AI.zh-CN.md) | English | [Wiki home](Home.en.md) | [Configuration overview](Configuration.md) | [AI environment](AI-Environment.md)
 
-This page follows the configuration and execution code in the repository. AI configuration belongs to the signed-in account, not a shared site account. No model, public key or service credits are supplied. Configure providers at `/ai/configuration`, import at `/ai/import`, or use the AI panel on an existing problem's edit page.
+LLMOJ can use an AI model to import problems, translate and tag them, estimate difficulty, write solutions, find a problem's original source, and generate and check test data. Each user sets up AI with **their own** provider account and key: the site supplies no model, key or credits.
 
-Repository-maintained AI instructions and prompts use English throughout import/OCR, translation, source search and verification, tutorials, tags, difficulty, generation and repair. Generated content still follows the requested language: extraction preserves the original statement language, `zh_CN` remains Chinese and `en_US` remains English, including bilingual solutions. Original user/problem/search content is kept in its original language. JSON schemas, judging constraints and Chinese editor labels remain unchanged.
+- **AI API Configuration** (`/ai/configuration`): your provider, model, web search and usage.
+- **AI import** (`/ai/import`): create a problem from a statement.
+- The **AI** panel on a problem's edit page: run AI actions on an existing problem.
 
-## Configure through the UI
+The instructions LLMOJ sends to models are in English, but what the model writes follows the language asked for: imported statements keep their original language, `zh_CN` content is written in Chinese and `en_US` content in English. Your own text, problems and search results are sent as they are.
 
-1. Have an administrator grant the permissions below, then open AI API Configuration using your own account.
-2. Select a preset or enter the API format, Base URL, key and model ID. A preset fills only the format/URL and clears the model selection; it does not establish model capabilities.
-3. Fetch models saves the entire form before requesting the list. You may enter an ID manually if model discovery is unavailable. Save again after choosing the model.
-4. Configure Search / MCP if needed. Search can remain without a key, but its Base URL must still be valid.
-5. Save and test connection saves first, then makes a real request for the current tab: an `OK` model response or a search. This may consume provider credits. A failed test does not roll back saved settings or erase a saved key.
-6. Saving configuration does not start problem editing, tutorials or data generation. Explicitly start the required action from the import or problem page.
+## Setting up
 
-Base URLs must use HTTP/HTTPS and contain no username, password, query or fragment; length is 1–2000 characters. Model endpoints have paths appended, so do not include `/chat/completions`, `/responses`, `/messages` or `/models` in a model Base URL. MCP takes the full MCP endpoint path instead. Public hostnames and addresses are allowed for everyone. Private-network, loopback and link-local destinations are reachable from the server rather than from the user, so they are limited to site administrators' own configurations and to hosts the server administrator lists in `HYHOJ_AI_PRIVATE_HOSTS` (see [AI environment](AI-Environment.md)); other users get `PRIVATE_ENDPOINT_BLOCKED`. Every resolved address is checked, DNS results are pinned to each connection and HTTP redirects are not followed. Model listing and connection tests are limited to 2 concurrent requests per user and 8 for the site. Configure [HTTPS](HTTPS.md) before entering keys through a public OJ.
+1. Ask an administrator for the permissions you need (see [Permissions](#permissions-and-jobs)), then open **AI API Configuration**.
+2. Choose a **Provider preset**, or enter the **API format**, Base URL, key and model yourself. A preset fills in only the format and Base URL.
+3. **Fetch models** saves the form and loads the provider's model list; choose a model and save again. If the provider can't list models, type the model ID.
+4. If you want web search (used to find original sources), configure **Search / MCP**.
+5. **Save and test connection** saves, then makes a real request: a short model reply or a search. This may cost provider credits. A failed test doesn't undo the save.
 
-## All account configuration fields
+Saving doesn't start any AI work; start actions from the import page or a problem's AI panel.
 
-These are `saveConfiguration` fields, not environment variables. The UI submits both `llm` and `search`, and both are validated even when you edit only one tab.
+**Base URLs** must use HTTP or HTTPS, be 1 to 2000 characters and contain no user name, password, query or fragment. LLMOJ adds the path itself, so don't include `/chat/completions`, `/responses`, `/messages` or `/models`; for MCP, give the full endpoint.
 
-| Field | Initial value / omission behavior | Validation and meaning |
+**Private addresses.** Requests go out from the server, so private-network, loopback and link-local addresses would let users reach the server's own network. Only site administrators' own configurations, and hosts the server administrator lists in `HYHOJ_AI_PRIVATE_HOSTS` (see [AI environment](AI-Environment.md)), may use them; other users get `PRIVATE_ENDPOINT_BLOCKED`. Every resolved address is checked and pinned for the connection, and redirects aren't followed.
+
+Set up [HTTPS](HTTPS.md) before anyone enters keys on a public site.
+
+## Configuration fields
+
+These are the fields the configuration page saves. Both the model and the search settings are checked on every save, even if you changed only one.
+
+| Field | Default | Meaning |
 | --- | --- | --- |
-| `llm.type` | `chat` | `chat`, `responses` or `anthropic`; protocol mapping is below. |
-| `llm.baseUrl` | `https://api.openai.com/v1` | HTTP/HTTPS, 1–2000 characters, subject to the URL rules above. |
-| `llm.apiKey` | Unconfigured | Optional, 0–4096 characters. Empty/omitted preserves the old key only if the Base URL is **exactly the same string**. A changed URL without a replacement key clears the old key, including a trailing-slash-only change. Model requests require a nonempty key. |
-| `llm.model` | Empty | 0–200 characters. May be saved empty before fetching models; generation and connection tests require a model ID. |
-| `llm.reasoning` | Empty | Optional, 0–50 characters. Blank uses provider defaults; surrounding whitespace is trimmed before use. Protocol/host-specific mappings are below. |
-| `llm.maxTokens` | `16384` | Integer 512–1000000. This is an output budget, not context length; the model may support less. Saving for `api.deepseek.com` caps it at 393216 and reports the adjustment. |
-| `llm.responsesRecovery` | `auto` | `auto`, `off` or `background`; meaningful only for the `responses` format. |
-| `search.type` | `tavily` | `tavily` or `mcp`. |
-| `search.baseUrl` | `https://api.tavily.com` | Same URL/length restrictions. Tavily appends `/search`; MCP uses the full supplied endpoint. Switching the UI to MCP fills `https://mcp.tavily.com/mcp/`. |
-| `search.apiKey` | Unconfigured | Optional, 0–4096 characters; same retention/clearing rules as the model key. Both Tavily and MCP searches currently require a nonempty key. |
-| `search.tool` | Empty | Optional, 0–200 characters. MCP only: an explicit name must exactly match `tools/list`; empty selects the first name containing `search`, case-insensitively. |
-| `maxConcurrentJobs` | `3` | Per-user running job limit, integer 1–8. Omission preserves the old setting, then falls back to 3; invalid legacy values read back as 3. Does not change judge slots. |
-| `autoOnSave` | `false` | Legacy compatibility boolean still required by the DTO. Saves and responses force `false`, as does the UI; sending `true` does not restore automatic execution. |
-| `clearLlmKey` | Omitted / `false` | Boolean save control; `true` clears the model key even if a new key was supplied. Not a persisted configuration field. |
-| `clearSearchKey` | Omitted / `false` | Clears the search key. Delete saved key sets only the current tab's corresponding flag. |
+| `llm.type` | `chat` | API format: `chat`, `responses` or `anthropic` (see below) |
+| `llm.baseUrl` | `https://api.openai.com/v1` | Provider address |
+| `llm.apiKey` | none | Up to 4096 characters. Leaving it empty keeps the saved key only if the Base URL is exactly the same; any change to the URL, even a trailing slash, clears it. |
+| `llm.model` | empty | Model ID, up to 200 characters. Required to generate or test. |
+| `llm.reasoning` | empty | Reasoning effort or token budget, up to 50 characters; empty uses the provider's default (see below) |
+| `llm.maxTokens` | `16384` | **Maximum output tokens**, 512 to 1000000: the output limit, not the context length. For `api.deepseek.com` it's capped at 393216, and the page says so. |
+| `llm.responsesRecovery` | `auto` | **Connection recovery** for the `responses` format: `auto`, `off` or `background` |
+| `search.type` | `tavily` | `tavily` or `mcp` |
+| `search.baseUrl` | `https://api.tavily.com` | Tavily adds `/search`; MCP uses the address as given. Choosing MCP fills in `https://mcp.tavily.com/mcp/`. |
+| `search.apiKey` | none | Kept or cleared like the model key. Both Tavily and MCP need one. |
+| `search.tool` | empty | MCP only: the tool to call, exactly as `tools/list` names it. Empty uses the first tool whose name contains `search`. |
+| `maxConcurrentJobs` | `3` | **Maximum concurrent AI jobs** of yours that run at once, 1 to 8 |
 
-`llm.hasKey` and `search.hasKey` are read-only indicators, not key values. `presets` and `parallelism` are UI metadata, not save parameters. Keys are never returned to the inputs. `parallelism` reports `min=1`, `max=8`, `globalMax=8`, `maxQueuedJobs=100`; despite its name, the last limit counts the user's **queued plus running** jobs.
+Saved keys are never sent back to the browser; the page only shows whether one is saved. **Delete saved key** removes the key of the current tab.
 
-### Formats and provider presets
+### API formats and presets
 
-| `type` | Generation path / authentication | Output and reasoning mapping |
+| Format | Endpoint and authentication | Output limit and reasoning |
 | --- | --- | --- |
-| `chat` | `/chat/completions`; Bearer key | `api.openai.com` uses `max_completion_tokens`; other hosts use `max_tokens`. Generic compatible providers receive `reasoning_effort`. |
-| `responses` | `/responses`; Bearer key | Uses `max_output_tokens` and, if supplied, `reasoning.effort`. |
-| `anthropic` | `/messages`; `x-api-key`, `anthropic-version: 2023-06-01` | Uses `max_tokens`; thinking mapping is described below. |
+| `chat` | `/chat/completions`, Bearer key | `max_completion_tokens` on `api.openai.com`, `max_tokens` elsewhere; reasoning as `reasoning_effort` |
+| `responses` | `/responses`, Bearer key | `max_output_tokens`; reasoning as `reasoning.effort` |
+| `anthropic` | `/messages`, `x-api-key` and `anthropic-version: 2023-06-01` | `max_tokens`; thinking as described below |
 
-All formats discover models through `/models` below the Base URL. Anthropic discovery follows up to 20 pages, then deduplicates and sorts. These built-in presets do not mean every listed provider/model has passed a live acceptance test:
+Models are listed from `/models` under the Base URL (for Anthropic, up to 20 pages). The presets are:
 
 | Preset | Format | Base URL |
 | --- | --- | --- |
@@ -64,101 +70,110 @@ All formats discover models through `/models` below the Base URL. Anthropic disc
 | Alibaba Cloud | `chat` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
 | Moonshot | `chat` | `https://api.moonshot.cn/v1` |
 
-Reasoning is mapped by implementation; the selected model must still support the resulting parameters:
+A preset only fills in the format and address: it doesn't mean every model of that provider has been tested with LLMOJ.
 
-- Official DeepSeek host: accepts only `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. For `chat`, `none` disables `thinking`; other values enable it and set `reasoning_effort`. The 393216 output cap is also host-based, not automatically applied to proxies.
-- Anthropic: blank or `none` leaves thinking disabled. A digits-only budget must be at least 1024 and strictly below `maxTokens`; generation/connection testing validates it before sending `thinking.budget_tokens`. Other nonempty values send adaptive thinking and `output_config.effort`, without locally enumerating every model's supported values.
-- Alibaba `*dashscope.aliyuncs.com` with `chat`: `none` disables `enable_thinking`; other values enable it, and digits-only values also set `thinking_budget`.
-- OpenRouter with `chat`: `none` sends `reasoning.enabled=false`; other values send `reasoning.effort`.
-- Other `chat` hosts receive `reasoning_effort` directly. Compatibility with chat formatting does not establish support for reasoning parameters or image input.
+**Reasoning** is passed on as follows; your model must support what it receives.
+- **DeepSeek** (`api.deepseek.com`): `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` or `ultra`. `none` turns thinking off; anything else turns it on with that effort.
+- **Anthropic:** empty or `none` leaves thinking off. A number is a thinking budget in tokens: at least 1024 and less than the maximum output tokens. Any other value requests adaptive thinking with that effort.
+- **Alibaba Cloud** (`dashscope.aliyuncs.com`, `chat`): `none` turns thinking off; anything else turns it on, and a number also sets the thinking budget.
+- **OpenRouter** (`chat`): `none` turns reasoning off; anything else sets its effort.
+- **Other `chat` providers** receive `reasoning_effort` as given.
 
-### Responses recovery
+### Connection recovery
 
-`auto` enables background recovery only for `responses` on official `api.openai.com`. It stays off for other compatible hosts. `off` disables it explicitly. `background` opts another supporting endpoint into background Responses; the official DeepSeek host rejects this combination.
-
-Requests use `background: true` and `store: false`. Once available, response IDs are checkpointed per owner, job and request fingerprint so polling can continue. A lost acknowledgement of the initial creation request is not blindly retried with another POST. Changing the key, address or request changes its fingerprint; recovery of the previous request is not guaranteed. Polling/recovery limits are source constants documented under [AI environment and fixed limits](AI-Environment.md). This is not generic recovery for every OpenAI-compatible API.
+With **Connection recovery**, a `responses` request runs in the background at the provider (`background: true`, `store: false`), and LLMOJ saves the response ID and polls for the result. If the connection drops, the job can pick up the same response instead of paying for a new one; LLMOJ never resends the original request when only its reply was lost. `auto` uses this only with the official `api.openai.com`; `background` turns it on for another provider that supports it (not `api.deepseek.com`); `off` turns it off. Changing the key, address or request means a new request.
 
 ### Search and MCP
 
-Tavily requests up to five results with `advanced` search, without an aggregate answer, and records reported usage. MCP supports Streamable HTTP JSON/event-stream responses, using `initialize`, `notifications/initialized`, `tools/list` and `tools/call` with the server's session header. It is not a local stdio launcher and does not read a user's desktop MCP configuration.
+Tavily is asked for up to five results with `advanced` search. MCP servers are reached over Streamable HTTP (JSON or event streams) with `initialize`, `notifications/initialized`, `tools/list` and `tools/call`; local stdio MCP servers aren't supported. The query is passed as `query`, `search_query` or `q`, whichever the tool accepts, with `max_results=5` when it's accepted; tools that need other parameters may not work. For Tavily's hosted MCP, LLMOJ adds the key to the address itself: don't put keys in Base URLs.
 
-Tool arguments adapt only `query`, `search_query` or `q`, in that priority order; `max_results=5` is included when present in the schema. Arbitrary tools with additional required parameters are not guaranteed to work. The backend inserts Tavily hosted MCP's key query parameter itself; do not put keys in Base URLs. Without a search key, a standalone source action fails with `SEARCH_NOT_CONFIGURED`; a composite job skips discovery and records an unconfigured state while other steps may continue. An unverified source must not be described as an established original problem.
+Without a search key, the **source** action fails with `SEARCH_NOT_CONFIGURED`, and combined actions skip source discovery and carry on. A source that couldn't be verified is never presented as the original problem.
 
-## Permissions, jobs and when settings apply
+## Permissions and jobs
 
-| Operation | Permission / ownership boundary |
+| To | You need |
 | --- | --- |
-| Read/save AI configuration, list models, test connection | `ManageAiConfiguration`; own configuration only. |
-| Start or retry jobs | `UseAi`; existing problems also require problem `Modify` permission. |
-| Import a problem or prepare its ZIP attachment | `UseAi`, `ImportProblem`, `GenerateTestdata`, and permission to create problems. |
-| `testdata`, `all`, `import` | Also requires `GenerateTestdata`; data writes check the `EditProblemData` decision and problem permissions. |
-| List jobs/usage or cancel | Signed-in users can access only their own records/jobs. Administrator status does not expose another user's provider key. |
+| Change your AI configuration, list models, test the connection | `ManageAiConfiguration`, for your own configuration only |
+| Start or retry AI actions on a problem | `UseAi` and permission to modify the problem |
+| Generate test data (`testdata`, `all`) | also `GenerateTestdata`, and permission to edit the problem's data |
+| Import a problem, including its ZIP attachment | `UseAi`, `ImportProblem`, `GenerateTestdata` and permission to create problems |
+| See or cancel jobs and usage | Your own only. Administrators can't see other users' keys. |
 
-Global allow/deny rules and problem ACLs participate in authorization. Writes recheck current permissions, job state and the problem snapshot. Editing statements, samples or judge settings, or revoking permission while a job runs, can cause a conflict/permission failure instead of overwriting the user's changes.
+Permissions are checked again before anything is written. If someone edits the statement, samples or judge settings, or your permission is removed, while a job runs, the job stops with a conflict or permission error instead of overwriting the changes.
 
-- Saving persists immediately; models and connection tests load the latest configuration. A job loads configuration when execution begins and does not switch keys/models at every stage. Newly executed or retried jobs use the configuration current at that time.
-- The scheduler uses updated per-user limits when admitting later jobs: globally at most 8 running jobs, no simultaneous AI jobs for the same problem, and at most 100 queued-plus-running jobs per owner. Lowering the limit does not cancel jobs already running.
-- The local AI runner admits up to 8 jobs and runs a fixed 3 generation pipelines, sharing judge execution slots with ordinary submissions. Raising `maxConcurrentJobs` does not replace [judge CPU/slot configuration](Judge-Configuration.md).
-- Import runs statement recognition → source → translation → tags → difficulty → tutorial → test data. `all` omits problem creation; `metadata` runs only source, translation, tags and difficulty. Legacy `automatic: true` requests return skipped and do not restore automatic-on-save execution.
-- Requested test count defaults to 20 and accepts 5–1000. It can be increased, up to 1000, to represent equal case points for subtask scores exactly, with a notice. Imports support traditional, interactive and communication problems; output-only problems must be created manually. Communication mode can be detected or specified as `run-twice` or C++ `grader`.
-- The UI accepts statement files up to 10 MiB: Markdown/text and PNG/JPEG/WebP/GIF. Backend Markdown is capped at 500000 characters and image data URLs at 15000000 characters. ZIP maximum is 64 MiB; preparation also requires at least 22 bytes and validates owner-bound upload credentials, valid for admission for 24 hours. Accepted size does not establish valid content.
+- A job reads your configuration when it starts, and uses it throughout. Changes apply to jobs started (or retried) afterwards.
+- At most 8 jobs run on the site at once, and one per problem. Each user has up to **Maximum concurrent AI jobs** running and at most 100 running or queued. Lowering your limit doesn't stop jobs already running.
+- Generated programs are compiled and run by the local judge, which runs at most three AI pipelines at once and shares its judge slots with ordinary judging; see [Judge configuration](Judge-Configuration.md).
+- **Import** runs: statement recognition, source, translation, tags, difficulty, solution, test data. **All** does the same without creating the problem; **metadata** runs source, translation, tags and difficulty only.
+- You can ask for 5 to 1000 test cases (20 by default). The number may be raised, up to 1000, so that subtask scores divide evenly; the page says when this happens. Import supports traditional, interactive and communication problems (communication mode `run-twice` or C++ `grader`, detected or chosen); create answer-only problems by hand.
+- Import accepts statement files up to 10 MiB (Markdown or text, or PNG, JPEG, WebP or GIF images) and a ZIP attachment up to 64 MiB.
 
-## Test-data validation and coverage
+## Site limits
 
-Traditional problem generation runs the following checks before publishing data; sample validation is only one step:
+Site administrators can limit AI use in **Site management** (`/site-management`), under **AI**. Changes apply at once, to every account, and are recorded in the audit log.
 
-1. Analyze legal boundaries, degenerate structures and complexity counterexamples to build a coverage plan. The plan describes correct algorithms, an exact small-input oracle and 1–4 executable incorrect or inefficient implementations, including at least one incorrect implementation.
-2. Generate a small-input generator, an exact oracle and one independent efficient solution separately. These requests receive the statement, constraints and coverage plan, without the existing generator, reference solution or other implementation sources. Prefer direct methods such as exhaustive enumeration for the oracle; when no tiny inputs are legal, use an exact method feasible at the minimum legal size.
-3. Generate at least 64 legal small inputs by default, covering every subtask. More than 64 subtasks increases this count. An independent validator checks each input before the reference and alternative solutions are compared against the oracle.
-4. Cross-check every final test case with the independent solution. Multiple-answer and floating-point problems use the actual checker/SPJ, accepting different valid outputs without requiring literal equality to the reference.
-5. Compile and run the planned challenge programs to establish that every target fails on an exported final test case. Data is activated only after differential testing, correct-solution cross-checks and all target checks pass.
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| **Pause AI** | off | While AI is paused, no AI request starts: no model calls, searches, model lists or connection tests. Requests already running finish. Queued and running jobs wait, and continue where they stopped when AI is resumed. |
+| **Tokens per account in 24 hours** | 0 (no limit) | Input and output tokens the provider reports, over any 24 hours |
+| **Model and search requests per account in 24 hours** | 0 (no limit) | Model generations and web searches, over any 24 hours |
+| **Model and search requests per job** | 500 | Across all attempts of one job, including retries (0 for no limit) |
+| **AI requests at the same time** | 16 | For the whole site (per backend process). Jobs wait for a free place; model lists and connection tests are refused when none is free. |
 
-Challenge programs must also pass all official samples. An incorrect implementation must pass at least one small input in each applicable subtask; an inefficient implementation must pass every applicable small input. WA, RE, TLE or MLE on a final test case can establish an incorrect implementation's counterexample. An inefficient implementation counts only when actual time or memory limits produce TLE/MLE; WA/RE invalidates that probe. Compilation errors, checker `_fail` results and execution infrastructure failures do not establish a rejected target.
+The limits count against the account whose configuration, and so whose provider key, a request uses. Model lists, progress checks of background responses and MCP handshakes aren't counted as requests, though they stop when AI is paused and wait for a free place like everything else. Connection tests do count: they make a real model request or search.
 
-The generator prioritizes concrete legal constructions for these targets, rather than relying on large random inputs alone. For example, a shortest-path SPFA implementation is an inefficiency target only when the constraints allow a graph that actually times out; algorithm names alone never reject a program. Valid alternative algorithms are accepted through the actual judging rules.
+**How tokens are counted.** Before a model request is sent, it holds the most tokens it could use: its output limit plus a generous estimate of its input (about three English characters, or one Chinese character, per token, and 4096 per image). When the provider reports what the request used, the reported figure replaces the hold. If the provider reports nothing, or the request is interrupted, the hold keeps counting at that maximum. A request that the provider refused with an error status isn't counted. So a request is refused when what's already used plus what it might use would exceed the limit, and a single request whose output limit alone exceeds the limit is refused with a request to lower **Maximum output tokens**.
 
-If the initial final test cases miss a target, the backend makes at most 16 additional counterexample attempts. A useful counterexample replaces an ordinary case in the same subtask, preserving scenario indices 1/2 for minimum/maximum boundaries and all existing rejection witnesses. Case counts and subtask scores stay unchanged. If any target still passes after the search, generation fails without activating the unverified data.
+Under **Usage**, each user sees what they've used of the limits in the last 24 hours, including tokens still held.
 
-The task UI shows differential counts, independent-solution checks, target verdicts and exported case numbers. The API also includes `extraAttemptsUsed` in `result.testdataQuality` to record additional search attempts. `data.yaml` also stores `qualityPlan`, `qualityValidation`, `finalCaseIndices` and `verificationSources`, recording the coverage plan, results, final subtask/scenario indices and auxiliary source SHA-256 hashes. The `seed` field is a generator scenario index, not a reproducible random seed; the exported input itself is the counterexample evidence. Small-input generator, oracle, alternative-solution and challenge sources remain in private job state and are not publicly exported with problem data.
+When a limit stops a job, the job fails with a message saying which limit, and keeps its progress: retry it once the limit allows. Budgets aren't money: LLMOJ doesn't know providers' prices, and a provider may still charge for a request that was interrupted.
 
-Interactive and communication problems retain their protocol simulation and validation, with a `TESTDATA_QUALITY_PROTOCOL_UNSUPPORTED` warning indicating that this independent differential/adversarial gate is unavailable. Finite inputs and challenge programs cannot prove that every incorrect or inefficient implementation fails, or that the reference is absolutely correct. Generating independent programs and challenges adds model calls, cost and execution time; see [AI environment and fixed limits](AI-Environment.md).
+Pausing AI doesn't empty the queue: the [upgrader](Upgrade.md) still waits for queued AI jobs, so cancel them or let them finish before upgrading.
 
-## File reading, cancellation and generation failure
+## Test data validation and coverage
 
-File inputs stay mounted until reading finishes, then reset; ZIPs become browser-memory-backed file copies. Read failures are visible and do not proceed to upload. A previously reproduced Snap Firefox failure was caused by AppArmor denying root-owned fixture files. Use a copy owned by the desktop user in a directory that user can access. Do not disable the browser sandbox or broadly relax AppArmor to upload a file.
+For traditional problems, generated test data passes these checks before it's published:
 
-Only confirmed HTTP 2xx upload responses allow job creation. Cancel upload is available during preparation/upload. Leaving the page cancels pending reads/preparation/uploads and prevents them from later issuing a start request. Once the server has accepted a job, closing the page cannot revoke it; cancel it in My AI jobs. After a start timeout, inspect the job list before importing again. Cancellation cannot undo completed provider charges or already published stages.
+1. **Plan.** The model analyses the limits, degenerate cases and complexity, and plans the coverage: correct algorithms, an exact checker for small inputs (the "oracle"), and one to four plausible wrong or too-slow programs to defeat, at least one of them wrong.
+2. **Independent programs.** A small-input generator, the oracle and a second efficient solution are each written separately, from the statement, limits and plan only, without seeing the main generator or reference solution. The oracle prefers simple exhaustive methods; if no tiny inputs are legal, it uses an exact method that's feasible at the smallest legal size.
+3. **Differential testing.** At least 64 legal small inputs (more if there are more than 64 subtasks), covering every subtask, are checked by an independent validator; the reference and second solution must then agree with the oracle on all of them.
+4. **Cross-check.** Every final test case is checked with the second solution, using the real checker, so problems with several correct answers or floating-point output aren't compared literally.
+5. **Challenges.** The planned wrong and slow programs are compiled and run, and each must fail on one of the exported final test cases.
 
-Only the AI-generated `make.cpp` receives one automatic repair after a recognized compiler failure; the repair budget is persisted. There is no repair loop, and uploaded checker/interactor/manager/grader sources are not rewritten. A second failure, sample failure or data-validation failure remains a failure. Repair adds a model call. Tutorial source/scoring claims undergo factual checks that can block publication with a retryable message; this does not replace reviewing all algorithmic claims.
+Data is published only when all of these pass.
 
-## Execution and encrypted configuration
+A challenge program must pass every official sample. A wrong program must pass at least one small input in each subtask it targets, and a slow one every small input it applies to. A wrong program is defeated by a wrong answer, runtime error, time limit or memory limit on a final test case; a slow program only by exceeding the real time or memory limit (a wrong answer or crash disqualifies the probe). Compile errors, checker failures and infrastructure errors never count as defeating a program.
 
-The backend makes model/search requests; compilation, execution and data validation use a **same-machine** judge worker over a UNIX socket. Ordinary judging can use remote judges, but there is no remote AI runner protocol. `--role all` provides the local worker; `--role web` alone does not provide generated-program execution. Keep a local runner on the web node for full AI data generation, then add remote judges for ordinary submissions. See [AI environment](AI-Environment.md) for matching paths, socket and permissions.
+The generator builds specific legal inputs for each target rather than relying on large random ones. For example, SPFA on a shortest-path problem is a "slow" target only if the limits allow a graph that really makes it time out; programs are never rejected by algorithm name, and valid alternative algorithms are accepted by the real checker.
 
-The `ai_configuration` database table stores the whole configuration encrypted per `userId` with AES-256-GCM. The master key defaults to `data/ai/master.key`; the directory is `0700` and key `0600`. Both must be owned by the backend service user. The key must be a single-link regular 32-byte file; symlinks and invalid files are rejected. If encrypted configurations exist but the original key is missing, backend startup fails instead of silently replacing it.
+If a target survives the first final tests, up to 16 further counterexamples are tried. A useful one replaces an ordinary case in the same subtask; the minimum and maximum boundary cases and every existing counterexample are kept, and the number of cases and subtask scores don't change. If a target still survives, generation fails and the data isn't published.
 
-Back up the database together with its matching master key; another key cannot decrypt the saved configuration. Do not include databases, master keys, sessions or provider keys in source/report packages. Configuration responses contain only `hasKey`. Usage records store request metadata and provider-reported usage, without keys or prompt/response bodies. The default period is 30 days; the API accepts 1–366 days. Unreported token usage is not estimated, and failed/retried calls still count as requests.
+The job shows the differential counts, the second solution's checks, each target's verdict and the test cases that defeated it; `result.testdataQuality.extraAttemptsUsed` records extra attempts. `data.yaml` records the plan (`qualityPlan`), results (`qualityValidation`), final case indices (`finalCaseIndices`) and SHA-256 hashes of the auxiliary programs (`verificationSources`). `seed` is a scenario number, not a random seed: the exported input is the evidence. The auxiliary programs stay private to the job and aren't published with the data.
 
-## Validation scope
+Interactive and communication problems keep their protocol simulation and checks but can't use this independent testing; they get a `TESTDATA_QUALITY_PROTOCOL_UNSUPPORTED` warning. However many tests pass, they can't prove that every wrong or slow program fails, or that the reference solution is correct. All this takes more model calls, money and time; see [AI environment](AI-Environment.md).
 
-A prior real Ubuntu 24.04 amd64 deployment used real DeepSeek/Tavily and Firefox for selected configuration, search, image/text import, content/data generation, submission judging and multi-user permission paths. The upload changes also passed actual Firefox component regressions for unreadable files, upload HTTP errors/timeouts, cancellation and navigation; simulated servers controlled response timing. This does not certify every provider, MCP service, output-quality case or a remote AI worker deployment.
+## Uploads, cancelling and failures
 
-Later changes have also used isolated unit, simulated-provider, real-database or real-sandbox regressions. Each establishes only its tested scope. This Wiki update checks source configuration; it does not repeat a clean installation or a complete paid-provider acceptance test.
+- A job is created only after its files have uploaded successfully. **Cancel upload** stops a preparation or upload, and leaving the page cancels them. Once the server has accepted a job, closing the page doesn't stop it: cancel it in **My AI jobs**. If starting a job timed out, look at **My AI jobs** before importing again.
+- Cancelling can't undo what the provider has already charged or what the job has already published.
+- If the generated `make.cpp` doesn't compile, the model gets one chance to repair it. Uploaded checkers, interactors, managers and graders are never rewritten. A second failure, a sample failure or a failed data check fails the job.
+- Solutions are checked for claims about sources and scoring before they're published; this doesn't replace reviewing their algorithms yourself.
+- If a browser can't read a file (for example Firefox installed as a Snap reading files owned by root), copy the file into a folder your desktop user owns. Don't turn off the browser's sandbox.
 
-## Source references
+## Where AI runs and where keys are kept
 
-- [DTOs and request ranges](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai.dto.ts), [defaults and presets](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai.types.ts)
-- [Provider implementation](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-provider.ts), [budget validation](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-validation.ts), [Responses recovery](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-responses.ts)
-- [Permissions, scheduling and writes](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.service.ts), [key lifecycle](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-crypto.ts)
-- [Configuration UI](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/pages/ai/AiConfigurationPage.tsx), [import UI](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/pages/ai/AiImportPage.tsx)
-- [Coverage plans and acceptance checks](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-testdata-quality.ts), [differential and adversarial checks](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiQuality.ts), [runner execution and verdicts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiRunner.ts)
+Model and search requests are made by the backend. Compiling and running generated programs uses the judge on the **same server**, through a local socket; it can't use a remote judge. So AI data generation needs the `all` role; a `web` site can still use AI for editing, translation and search. See [Distributed judging](Distributed-Judging.md#ai).
 
-## Where solutions are saved
+AI configurations are stored in the `ai_configuration` table, each encrypted with AES-256-GCM using the site's master key, `data/ai/master.key` by default (directory mode `0700`, key `0600`, both owned by the backend's user). If saved configurations exist but the key is missing, the backend refuses to start rather than create a new one. **Back up the database and the master key together**: no other key can decrypt them. See [AI environment](AI-Environment.md).
 
-New AI solutions appear in the corresponding problem page's embedded Solutions tab and remain discussions in their author's My discussions. Migration verifies recorded job discussion IDs, problem and author; ordinary titles never trigger automatic classification. See [Solutions](Solutions.md).
+Usage records keep each request's provider, model, timing and reported usage, never keys, prompts or responses. **Usage** shows 1 to 366 days (30 by default); usage a provider didn't report isn't estimated there, and failed and retried requests count as calls.
 
-## Prepare Self Eval for an NOI contest
+## Solutions and Self Eval
 
-Publishing traditional official data also binds immutable versions of the make.cpp, std.cpp and input validator actually used by that generation, for later enabled NOI / OI contests. Other problem types and ordinary problem-bank pages do not offer Self Eval runs.
+AI-written solutions appear in the problem's **Solutions** tab and in their author's **My discussions**; see [Solutions](Solutions.md).
 
-Before the contest, managers can select Self Eval on its problem page, open Configure Self Eval and use **AI: generate official data and Self Eval programs**. This runs the existing AI `testdata` workflow and regenerates this problem’s official judging data. It requires the manager’s configured AI provider and applicable AI, generation and data-editing permissions. After completion, the interface loads matching make/std versions; select **Prepare pretest data** and reuse the formal checker/SPJ. Failed generation or preparation never opens an incomplete pretest set. See [Self Eval](Self-Evaluation.md) for manual make/std maintenance and whole-contest quotas.
+Publishing official data for a traditional problem also saves the make.cpp, std.cpp and input validator that produced it, for later NOI / OI contests with [Self Eval](Self-Evaluation.md). In **Configure Self Eval**, **AI: generate official data and Self Eval programs** runs the test data action and uses the manager's own AI configuration and permissions.
+
+## Sources
+
+[ai.dto.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.dto.ts), [ai.types.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.types.ts), [ai-provider.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-provider.ts), [ai-admission.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-admission.service.ts), [ai-responses.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-responses.ts), [ai.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.service.ts), [ai-crypto.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-crypto.ts), [ai-testdata-quality.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-testdata-quality.ts), [aiQuality.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiQuality.ts), [aiRunner.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiRunner.ts).

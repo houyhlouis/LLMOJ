@@ -2,58 +2,73 @@
 
 [简体中文](Teams.zh-CN.md) | English | [Wiki home](Home.en.md)
 
-Open your own profile and click **My teams** (`/teams`) to create a team or view your joined teams and pending applications. Teams do not appear in the top navigation, a public directory, or another user’s profile. Enter the numeric **Team ID** supplied by its owner, confirm the team name and join policy, and explicitly join or apply. Before admission, only that confirmation information and your own application are visible; descriptions, announcements, member lists and resources stay private. The interface uses the existing OJ theme, Markdown renderer, problem editor, discussions and contest pages.
+Teams are private. Open your own profile and click **My teams** (`/teams`) to create a team, or to see the teams you belong to and your pending applications. Teams don't appear in the top navigation, in a public list or on other users' profiles. To join one, enter the **Team ID** its owner gives you, check the team's name and how it admits members, then join or apply. Until you're a member you see only that and your own application, not the team's description, announcements, members or resources.
 
-## Membership and invitations
+## Joining and invitations
 
-The creator becomes the owner. A team has a name, description, announcement and an approval-free, approval-required or invitation-only join policy. Approval-free admission still requires the team ID or invitation; it never publishes the team. Applications include a message and can be approved or rejected by member managers. Pending applicants can see and withdraw only their own application. Knowing the ID does not allow browsing private content.
+Whoever creates a team becomes its owner. A team has a name, description, announcement and one of three ways to admit members:
 
-Member managers can issue shared or user-specific invitations with a usage limit and expiry, and deactivate them. `/team-invite/<token>` requires an explicit acceptance after sign-in; merely opening the link does not join the team. Blocked users cannot bypass the blacklist with an invitation.
-
-Members can leave. Owners must transfer ownership to an existing member before leaving. Removal or departure revokes access to private team content.
-
-## Groups and permissions
-
-The members page provides search, group/status filters, batch review and removal, notes, blacklisting and batch grouping. Team notes appear in assignment results and exports without changing site usernames.
-
-Only the owner or a user authorized by the site-wide **Manage all teams and private resources** permission assigns team management permissions:
-
-| Permission | Scope |
+| Admission | What happens |
 | --- | --- |
-| Settings | Name, description, announcement and join policy |
-| Members | Review, removal, notes, groups and invitations |
-| Problems | Create, copy, edit and manage problem data |
-| Contests | Create/edit contests and control visibility |
-| Assignments | Create/edit/archive lists and export scores |
-| Discussions | Moderate team discussions |
-| Files | Archive or restore team files |
+| Open | Any signed-in user who knows the team ID joins after confirming; the team stays private |
+| Approval | Applicants write a message, and a member manager approves or rejects it |
+| Invitation only | Applications aren't accepted; people join with a valid invitation |
 
-Member managers cannot promote themselves or transfer ownership. The site Permissions page separately controls **View teams**, **Create teams**, and **Manage all teams and private resources**. Viewing permits access to your own teams and joining by ID; it does not expose other teams. Viewing and creation are enabled by default; global management is privileged and disabled by default. Global management grants access to private team resources, while ordinary membership and team managers remain scoped to their own teams. Team permissions grant no site-wide administrator status and cannot bypass site bans on access, submissions, discussions or participation. Internal authorization groups are excluded from ordinary group-management endpoints.
+While an application is pending, the applicant can see or withdraw only their own application. Knowing a team's ID never shows its private content.
 
-Members may change their own group unless that option is locked. Managers can create, rename and archive groups, and assign members in batches.
+Member managers can create invitations for anyone or for specific users, with a usage limit and an expiry date, and can deactivate them. An invitation link (`/team-invite/<token>`) doesn't add you just by opening it: sign in and click **Accept invitation**. Blocked users can't rejoin with an invitation.
 
-## Resources
+Members can leave a team; the owner must first transfer ownership to another member. Removed or departed members lose access to the team's private content.
 
-Create a blank team problem or copy one that you have permission to edit. Copying preserves statements, locales, samples, judge settings, test data and attachments without changing the source problem. The existing problem and file editors remain available, and members submit through the usual problem page.
+## Members, groups and permissions
 
-Contests support NOI / OI, IOI, ICPC and Strict IOI. Internal contests require membership. Public contests follow site contest permissions. Invitation contests accept named users or a shared `/contest-invite/<token>` link; accepting a contest invitation does not join its team. Contest timing, scoring, submission, code and scoreboard restrictions still apply. [Hack](Hacks.md) follows the contest settings. [Self-evaluation](Self-Evaluation.md) is an optional feature of NOI / OI contests only and defaults to disabled.
+The members page has search, group and status filters, batch approval and removal, blocking, notes and batch group changes. Team notes appear in assignment results and exports; they don't change anyone's username.
 
-Team discussions reuse the existing discussion and reply system. Lists and direct links both enforce membership: a public flag, an old author identity or knowledge of a URL cannot expose private team content. [Solutions](Solutions.md) remain a category of discussion.
+The owner, or a user with the site-wide **Manage all teams and private resources** permission, grants these team permissions:
 
-Problems, contests, discussions and assignments can be archived and restored. Archived resources are hidden from ordinary members; authorized managers can restore them through **Show archived**. Archiving an entire team retains its content and can be reversed by its owner or an authorized global team manager.
+| Permission | Allows |
+| --- | --- |
+| Settings | Changing the name, description, announcement and admission |
+| Members | Reviewing applications, removing members, notes, groups and invitations |
+| Problems | Creating, copying and editing team problems and their data |
+| Contests | Creating and editing team contests and choosing who can enter |
+| Assignments | Creating, editing, archiving and exporting assignments |
+| Discussions | Moderating team discussions |
+| Files | Archiving and restoring team files |
+
+Member managers can't grant themselves permissions or transfer ownership.
+
+On the site's **Permissions** page, **View teams**, **Create teams** and **Manage all teams and private resources** are separate. Viewing lets users use their own teams and join by ID; it never shows other teams. Viewing and creating are allowed by default; managing all teams is off by default and gives access to every team's private resources. Team permissions apply only inside the team: they don't make anyone a site administrator or lift a site-wide ban on access, submitting, discussing or entering contests.
+
+Member managers can create, rename and archive groups and move members between them. Unless the group choice is locked, members can pick their own group.
+
+## Problems, contests and discussions
+
+In a team's **Problems**, create a blank problem, or copy one you can edit. A copy includes the statement in every language, samples, judge settings, test data and attachments; the original isn't changed. Team problems are edited with the usual problem and file editors, and members submit on the usual problem page.
+
+Team contests can use NOI / OI, IOI, ICPC or Strict IOI rules, and are internal, public or by invitation:
+- **Internal:** members only.
+- **Public:** follows the site's contest permissions.
+- **By invitation:** named users, or anyone with a shared `/contest-invite/<token>` link. Accepting a contest invitation gives access to that contest only, not to the team.
+
+The contest's own timing, scoring and rules about code, submissions and scoreboards still apply. [Hacks](Hacks.md) follow the contest's settings; [Self Eval](Self-Evaluation.md) is an option of NOI / OI contests and is off by default.
+
+Team discussions work like site discussions, and every list and link checks team membership: marking a discussion public, having written it in the past, or knowing its link doesn't reveal it to non-members. [Solutions](Solutions.md) are discussions too.
+
+Problems, contests, discussions and assignments can be archived and restored. Archived items are hidden from ordinary members; managers restore them through **Show archived**. A whole team can be archived with all its content, and its owner or a site-wide team manager can restore it.
 
 ## Study lists and assignments
 
-Build an ordered list with sections and per-problem notes. Leave the deadline empty for a study list, or specify a deadline for an assignment. Assign it to individual members, groups or the whole team. Results show each member's best score per problem and total, with CSV export.
+Build an ordered list of problems, with sections and a note for each problem. Without a deadline it's a study list; with one it's an assignment. Assign it to members, groups or the whole team. The results show each member's best score per problem and their total, and can be exported as CSV.
 
-Deadline-based assignments count ordinary submissions made at or before the deadline; contest submissions do not count. Fake and Hacked submissions earn zero and cannot contribute an accepted result. Access to assignment scores does not grant permission to read other members' code. Exports include team notes and escape spreadsheet-formula content.
+For an assignment, only ordinary submissions made by the deadline count; contest submissions don't. Fake and Hacked submissions score 0 and never count as accepted. Seeing assignment results doesn't let anyone read other members' code. Exports include team notes, and content that a spreadsheet could treat as a formula is escaped.
 
 ## Files
 
-Members can upload/download files; file managers can archive or restore them. Each team has **10 GiB total space**, with **no separate per-file size limit**. A file may use all remaining space. Archived files remain stored and continue to use quota.
+Members can upload and download team files; file managers can archive and restore them. Each team has **10 GiB in total and no limit per file**, so one file can use all the remaining space. Archived files are kept and still count toward the space.
 
-Large files upload automatically in 32 MiB chunks; the storage server combines them without loading the entire file into application memory. This keeps existing proxy and non-team upload limits unchanged. The server reserves space before uploading, checks permissions again for each chunk and completion, and verifies the actual stored bytes. Concurrent uploads and forged size declarations cannot exceed the total quota. Failed or cancelled uploads release their reservations; interrupted sessions expire after 24 hours, and unused chunks are cleaned up. Existing teams receive the same 10 GiB quota through the supported upgrade.
+Large files upload automatically in 32 MiB parts, which the storage server joins, so other upload limits stay unchanged. Space is reserved before an upload starts, permissions are checked again for each part and at the end, and the stored size is verified, so neither simultaneous uploads nor a false file size can exceed the space. A failed or canceled upload releases its reservation; an interrupted upload expires after 24 hours and its parts are cleaned up.
 
-Membership is checked before issuing a download URL; a previously issued URL may remain usable for up to 60 seconds after departure, but no new URL can be obtained.
+Downloads check membership each time. A download link already issued keeps working for up to 60 seconds after a member leaves, but they can't get a new one.
 
-These are local LLMOJ team workflows, without Luogu paid services, training benefits or external RemoteJudge integration. Existing deployments must follow [Community upgrade](Community-Upgrade.md).
+Installations from before teams existed need the database changes in [Feature upgrades](Community-Upgrade.md).

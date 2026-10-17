@@ -1,72 +1,104 @@
-# 评测端完整配置与 CPU 扩缩容
+# 评测配置与扩缩容
 
-[English](Judge-Configuration.md) | 简体中文
+简体中文 | [English](Judge-Configuration.md) | [Wiki 首页](Home.md)
 
-适用于安装器生成的 Ubuntu/systemd 部署，配置入口为 `/opt/LLMOJ/config/judge.yaml`（自定义 prefix 请替换）。本页覆盖当前评测端的所有 YAML 字段；后端下发限制、宿主环境变量和安装器生成值另行标明。
+本页介绍评测机配置文件 `/opt/LLMOJ/config/judge.yaml`（如果安装在其他目录，请换成你的目录）中的每项设置、评测槽数量的计算方法、沙箱、systemd 服务，以及如何修改已有安装的评测槽数量。
 
-未变更字段来源固定为 `43a88bdd62fbf200889b36932fa921439a293190`；修改后的容量生成器使用 `main` 链接，对应待提交修订：[config.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/config.ts), [config-example.yaml](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/config-example.yaml), [configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-judge.py), [executionCapacity.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/executionCapacity.ts), [taskQueue.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/taskQueue.ts), [aiRunner.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/judge/src/aiRunner.ts).
+## `judge.yaml` 中的设置
 
-## 读取规则与完整字段
+评测机读取 `LIBREOJ_JUDGE_CONFIG_FILE` 指定的文件，没有该文件就无法启动。大多数设置没有内置默认值：下面的示例值来自 [config-example.yaml](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/config-example.yaml)，安装器可能写入其他值。示例中的 `key` 和 `sandbox.rootfsId` 只是占位符，不能直接使用。
 
-`LIBREOJ_JUDGE_CONFIG_FILE` 必须指向配置文件；未设置即退出。配置类没有为必填字段提供默认值。下表的 example 来自示例 YAML，不能理解成省略字段后的默认值；安装器生成值可能不同。示例中的 key/rootfsId 是占位符，必须替换。optional 字段允许缺省或 null；`sandbox` 必须提供，`cpuAffinity` 对象可省略。应使用表中字段，不依赖未知字段被拒绝。
+### 连接与下载
 
-| 字段 | 类型/校验/示例值 | 用途、安装值与限制 |
+| 设置 | 示例 | 含义 |
 | --- | --- | --- |
-| `serverUrl` | string; example `http://api.libreoj.test/` | 后端 origin，不带 `/api`；自动连接 namespace `/judge`、路径 `/api/socket`。本机安装为 `http://127.0.0.1:2002`，远程使用站点 HTTPS origin。 |
-| `downloadEndpointOverride` | optional string/null; example `null` | 下载 URL 的 origin 替换；保留原路径与查询参数，覆盖值中的路径不会成为前缀。本机为 Nginx 回环 origin；远程默认不覆盖，必须能访问签名下载 URL。 |
-| `key` | base64 string, exactly 40 characters | 30 字节密钥的 Base64 表示；每台 judge 独立注册，不是用户密码。保留 root:root `0600`；不要放在命令参数、截图或公开日志。 |
-| `dataStore` | string path; example `/root/judge/data` | 已下载测试文件的磁盘缓存；安装为 `<root>/data/judge/testdata`，按 UUID 缓存。这里无自动总容量限制配置，应监测磁盘。 |
-| `binaryCacheStore` | string path; example `/root/judge/cache` | 编译产物缓存；安装为 `<root>/data/judge/cache`。启动时清空，绝不能指向题库、数据备份或其他共享目录。 |
-| `binaryCacheMaxSize` | integer bytes; example `536870912` (512 MiB) | 类校验仅要求整数；实际必须至少等于后端 `limit.outputSize`，否则认证后退出。不是单个程序内存限制。安装器保留示例值。 |
-| `taskConsumingThreads` | positive integer; example `2` | 同时从后端领取并处理的任务/提交消费者数，不是 CPU 数；每个任务可含多个测试点。大于 3 启动警告。安装生成 `min(3,max(1,slots//2))`。 |
-| `maxConcurrentDownloads` | positive integer; example `10` | 测试文件下载队列并发；大于 20 警告。安装生成 `min(4,slots)`；提高它不会增加执行槽。 |
-| `maxConcurrentTasks` | positive integer; example `3` | 执行队列容量；实际为与工作目录数的较小值，编译、运行、AI 验证共用。安装器要求恰好等于工作目录数；大于 OS 报告逻辑 CPU 数会警告。 |
-| `memoryBudget` | optional positive integer MiB; example omitted | 同时运行的工作的沙箱合计可预留的内存。默认为评测主机内存的 85% 减 512 MiB（至少 256）。工作在其声明的内存限制装得下时才开始，因此多道大内存限制的题目不会耗尽主机内存。与其他服务共用主机时可调低。 |
-| `aiExecutionSlots` | optional positive integer; example omitted | 本机 AI 验证同时可用的执行槽位数。默认为除一个之外的全部槽位（只有一个槽位时为 1），保证评测总有槽位。 |
-| `taskWorkingDirectories` | nonempty string array; example 3 paths | 每个执行槽一个唯一绝对路径；解析后的重复路径会拒绝。安装为 `<root>/data/judge/work/1..N`，每个单独 tmpfs，启动时清空。不得复用缓存/数据目录。缺少 tmpfs 可能只警告，不能据此认为部署合格。 |
-| `rpcTimeout` | positive integer milliseconds; example `20000` | RPC/认证等待超时；超时重启进程并取消在途任务。安装生成 `30000`。 |
-| `downloadTimeout` | positive integer milliseconds; example `20000` | 每次下载取得响应后的流传输计时；当前代码不是覆盖 DNS/连接/响应头等待的完整请求截止时间。安装保留 `20000`。 |
-| `downloadRetry` | positive integer; example `3` | 总尝试次数，3 表示首次加最多 2 次重试；不是额外重试 3 次。 |
-| `aiRunnerSocket` | optional string; example omitted | 本机 AI UNIX socket；缺它或输出目录时不启动 AI worker。all 安装为 `<root>/data/judge/ai-runner.sock`，权限 root:后端组 `0660`；remote 为 null。不能改成公开 TCP 服务。 |
-| `aiGeneratedDirectory` | optional string; example omitted | 本机 AI 私有输出目录，all 安装为 `<root>/data/ai-generated`，真实目录、非符号链接，root:后端组 `0750`。与后端同机共享；remote 为 null。 |
-| `aiRunnerGid` | optional integer; example omitted | 启用 AI worker 时另行要求正整数；all 为 `libreoj` 组实际 GID。remote 生成 0 但 socket 为 null，因此不启用；不要在启用时使用 0。 |
-| `sandbox.rootfs` | string path; example `/opt/rootfs-ng` | 沙盒根文件系统；安装为 `<root>/runtime/sandbox-rootfs`。保留匹配的配方、UID 和挂载结构，不要递归 chown。 |
-| `sandbox.rootfsId` | 64 lowercase hex characters | 必填的 SHA-256 配方 ID；启动时与 ID 文件逐字比对，不匹配拒绝启动。示例占位符不能直接运行。 |
-| `sandbox.rootfsIdFile` | optional string; example omitted | 默认从 `<sandbox.rootfs>/etc/libreoj-rootfs-id` 读取；不可变镜像可把 ID 文件放镜像外并指定绝对路径。 |
-| `sandbox.hostname` | optional string/null; example `null` | 沙盒 hostname；安装生成 `libreoj-judge`。不是评测机到后端的网络地址。 |
-| `sandbox.immutable` | optional boolean; example omitted | 未设置按 false 路径处理；true 时内部工作路径使用 `/tmp/libreoj`，避免在镜像内建立挂载目录。不是自动将任意 rootfs 变为只读的开关，应与镜像布局成套使用。 |
-| `sandbox.resourceMode` | optional `default` or `arbiter`; example omitted | 安装生成 `default`；只作用于用户程序。default 使用 cgroup CPU 统计；arbiter 使用进程用户态 CPU 时间并附加地址空间限制。编译器/checker/interactor 固定 default。变更会影响判题口径，不能作为提速开关。 |
-| `sandbox.syscallFilter` | optional boolean; example omitted | 默认 `true`：seccomp 过滤器拒绝程序、编译器和运行时用不到的系统调用（创建命名空间或挂载、ptrace、密钥环、io_uring、bpf、内核模块与系统设置），64 位与 32 位程序均适用。只有在诊断某个运行时与它冲突时才设为 `false`；见[沙箱一节](#沙箱系统调用过滤器与自检)。 |
-| `sandbox.user` | string; example `sandbox` | rootfs 内的运行用户名，解析其 UID/GID；安装为 sandbox。不是宿主 systemd 服务的 User；沙盒管理器需要其宿主权限。 |
-| `sandbox.environments` | object of environment variables | 例子为 `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`、`HOME=/sandbox`、`LC_ALL=en_US.UTF-8`；值应写为字符串，按具体任务环境合并。此对象不控制宿主 Node 的线程池。 |
-| `cpuAffinity.compiler` | optional integer array; example `[0,1]` | 编译器允许使用的逻辑 CPU ID；安装生成所选 judge CPU 集合。 |
-| `cpuAffinity.userProgram` | optional integer array; example `[1]` | 用户程序允许使用的逻辑 CPU ID；不是为每个槽固定独占一个 CPU。 |
-| `cpuAffinity.interactor` | optional integer array; example `[0]` | 交互器允许使用的逻辑 CPU ID；必须与 cgroup 允许的 CPU 相容。 |
-| `cpuAffinity.checker` | optional integer array; example `[0,1]` | 检查器允许使用的逻辑 CPU ID；四个键未设置时不增加此类 affinity 约束，但仍受 systemd/父 cgroup 限制。 |
+| `serverUrl` | `http://api.libreoj.test/` | 站点地址，不带 `/api`。与站点在同一台服务器的评测机由安装器写入 `http://127.0.0.1:2002`，[远程评测机](Remote-Judge.zh-CN.md)写入站点的 HTTPS 地址 |
+| `downloadEndpointOverride` | `null` | 替换测试数据下载地址中的协议、主机和端口，保留路径和查询参数。同一服务器上的评测机使用 `127.0.0.1` 上的 Nginx；远程评测机通常不设置，但必须能访问站点的下载地址 |
+| `key` | 40 个 base64 字符 | 该评测机独有的密钥。文件所有者为 root、权限为 `0600`；不要把密钥写在命令行、截图或公开日志中 |
+| `rpcTimeout` | `20000` | 等待站点响应的毫秒数。超时后评测机会重启，并取消正在进行的工作。安装器写入 `30000` |
+| `downloadTimeout` | `20000` | 站点开始响应后，一次下载可用的毫秒数 |
+| `downloadRetry` | `3` | 每次下载总共尝试的次数：`3` 表示首次尝试加最多两次重试 |
+| `maxConcurrentDownloads` | `10` | 同时进行的下载数（超过 20 会警告）。安装器写入评测槽数量，最多 4 |
 
-示例环境映射完整键为 `sandbox.environments.PATH`、`sandbox.environments.HOME`、`sandbox.environments.LC_ALL`。`sandbox.environments.*` 是可扩展的字符串映射，没有另外一套固定字段；它们的示例值见上表。
+### 缓存
 
-## 宿主环境、队列与资源预算
+| 设置 | 示例 | 含义 |
+| --- | --- | --- |
+| `dataStore` | `/root/judge/data` | 已下载测试数据的缓存。安装器写入 `<root>/data/judge/testdata`。它的大小没有限制，请关注磁盘空间 |
+| `binaryCacheStore` | `/root/judge/cache` | 编译结果的缓存，评测机启动时清空。安装器写入 `<root>/data/judge/cache`。不要指向保存其他内容的目录 |
+| `binaryCacheMaxSize` | `536870912`（512 MiB） | 编译缓存的大小（字节）。必须至少等于站点的 `limit.outputSize`，否则评测机连接后会停止 |
 
-- `LIBREOJ_JUDGE_CONFIG_FILE`：必填路径；systemd 生成值为 `<root>/config/judge.yaml`。
-- `LIBREOJ_JUDGE_LOG_LEVEL`：未设置为 `info`；排错可暂用 `verbose`/`debug`，避免公开包含签名下载地址的日志。
-- `UV_THREADPOOL_SIZE`：在 Node 启动前设置，整数范围为 `2 × 实际执行槽 + 2` 到 `1024`。Node 默认 4 只够 1 槽；3 槽至少 8，6 槽至少 14。原生沙盒等待占 libuv worker，交互题每槽可能同时等待两个进程，另留两个文件系统 worker。安装生成 `max(4, slots*2+2)`，修改后必须重启 judge；写到 `sandbox.environments` 无效。
-- `NODE_OPTIONS=--max-old-space-size=512` 是安装服务的 Node 堆设置，不是用户程序内存上限；`PATH` 指向安装的 Node 和宿主工具。
-- `HYHOJ_AI_SAMPLE_INPUTS_DIR`：宿主 AI 输入样例目录，代码缺省 `/opt/LLMOJ/data/ai-sample-inputs`，服务生成 `<root>/data/ai-sample-inputs`；与后端必须一致，不能当作公共静态目录。
+### 评测槽与并发
 
-普通提交消费者由 `taskConsumingThreads` 控制；编译/测试点和本机 AI 验证共用 `min(maxConcurrentTasks, 工作目录数)` 的执行槽；执行槽还须在内存装得下 `memoryBudget` 时才分配：测试点预留程序与交互器内存限制之和（若校验器更大则取校验器的），编译预留 512 MiB，未声明的工作预留 256 MiB。按到达顺序分配；超过全部预算的工作单独运行。本机 AI 验证最多使用 `aiExecutionSlots` 个槽位，不会阻塞其后的评测；文件下载另有 `maxConcurrentDownloads` 队列。AI runner 还有固定 3 个生成管线并发、最多 8 个已接收的未完成请求（包含等待），它们不是额外的 3/8 个 CPU 槽，也没有对应 YAML 调节项；后端 AI 并发又是另一层限制。不要仅增加消费者或后台 AI 并发来“扩 CPU”。
+| 设置 | 示例 | 含义 |
+| --- | --- | --- |
+| `taskWorkingDirectories` | 三个路径 | 每个评测槽一个目录，互不相同。安装器写入 `<root>/data/judge/work/1` 到 `N`，每个都是单独的 tmpfs，评测机启动时清空。不要与缓存共用 |
+| `maxConcurrentTasks` | `3` | 评测槽数量，由编译、运行测试点和本机 AI 检查共用。安装器使它等于工作目录数；实际取两者中较小的值 |
+| `taskConsumingThreads` | `2` | 评测机同时从站点领取的提交数（超过 3 会警告），每份提交可以有很多测试点。安装器写入评测槽数的一半，范围 1～3。它不是 CPU 数 |
+| `memoryBudget` | 未设置 | 所有正在运行的工作的沙箱合计可预留的内存（MiB）。默认为服务器内存的 85% 减 512 MiB，至少 256。工作在其声明的内存限制装得下时才开始，因此多道内存限制很大的题目不会耗尽服务器内存。与其他服务共用服务器时可调低 |
+| `aiExecutionSlots` | 未设置 | 本机 AI 检查同时可用的评测槽数。默认为除一个之外的全部槽（只有一个槽时为 1），保证评测始终有槽可用 |
 
-后端认证时下发 `limit.compilerMessage`、`limit.outputSize`、`limit.dataDisplay`、`limit.dataDisplayForSubmitAnswer`、`limit.stderrDisplay`，这些不是 judge.yaml 键。代码对 compilerMessage 超过 1 MiB、dataDisplay 超过 1 KiB、stderrDisplay 超过 10 KiB 发警告；binaryCacheMaxSize 小于 outputSize 为致命错误。题目/语言本身的时间与内存限制也来自后端。
+### 本机 AI 任务
 
-## 默认容量与内存预算
+这些设置只用于与站点在同一台服务器上的评测机；远程评测机将它们留空，即关闭 AI 任务。
 
-首次安装会询问“评测实例数（执行槽）”。它表示同时执行编译/测试点的工作位置数量，不是安装多套 OJ，也不是操作系统线程数。一个 judge 服务使用多个工作目录和沙盒进程；`taskConsumingThreads` 是领取提交的消费者并发，`UV_THREADPOOL_SIZE` 则是 Node 原生等待/文件操作线程池，三者含义不同。
+| 设置 | 含义 |
+| --- | --- |
+| `aiRunnerSocket` | 后端发送 AI 检查所用的本机 socket：`<root>/data/judge/ai-runner.sock`，所有者为 root 和 `libreoj` 组，权限 `0660`。不要通过 TCP 公开 |
+| `aiGeneratedDirectory` | 与后端共用的 AI 结果私有目录：`<root>/data/ai-generated`，必须是真实目录（不能是链接），所有者为 root 和 `libreoj` 组，权限 `0750` |
+| `aiRunnerGid` | `libreoj` 组的 ID。开启 AI 任务时必须为正数；远程评测机为 `0` |
 
-默认槽数与最大值均为 `min(max(0, 有效 CPU 数-1), 有效内存 MiB//256, 511)`，本机 all 与远程 judge 使用相同公式。至少 2 个有效 CPU、256 MiB 内存才有 1 槽；零容量拒绝本机评测。有效 CPU 数同时考虑进程 affinity、cgroup 有效 cpuset 和各级 CPU quota；有限 quota 向下取整且至少计 1，不只读取宿主 `nproc`。默认从允许集合末尾选择所需 CPU ID，因此 CPU ID 不连续时也不会假定 0..N。
+### 沙箱
 
-内存使用宿主 RAM 与适用 cgroup `memory.max` 的较小值；每槽按 256 MiB 计算，两种模式均不额外预留内存。允许最大值为有效 CPU 数减 1、内存槽数向下取整与 libuv 上限 511 的最小值。**不再有 7 槽上限；默认值自动限制在允许最大值内。** 显式正整数也必须符合该上限，不能占用保留的 CPU。例如至少 3 个有效 CPU、512 MiB 内存最多允许 2 槽。
+| 设置 | 示例 | 含义 |
+| --- | --- | --- |
+| `sandbox.rootfs` | `/opt/rootfs-ng` | 沙箱的文件系统（rootfs）。安装器写入 `<root>/runtime/sandbox-rootfs`。不要修改其中文件的所有者 |
+| `sandbox.rootfsId` | 64 位十六进制数 | 沙箱镜像的 SHA-256 ID，必须与 ID 文件完全一致，否则评测机无法启动 |
+| `sandbox.rootfsIdFile` | 未设置 | ID 文件，默认为 `<sandbox.rootfs>/etc/libreoj-rootfs-id`。不可修改的镜像可以把它放在别处 |
+| `sandbox.hostname` | `null` | 沙箱内的主机名；安装器写入 `libreoj-judge` |
+| `sandbox.immutable` | 未设置 | 用于不可修改的镜像：设为 `true` 时，工作路径改为 `/tmp/libreoj`，而不是镜像内的目录。它本身不会让镜像变成只读 |
+| `sandbox.resourceMode` | 未设置 | `default`（安装器写入）用 cgroup 统计程序的 CPU 时间；`arbiter` 改用程序的用户态 CPU 时间，并额外限制地址空间。只影响提交的程序，会改变评测结果的计算方式 |
+| `sandbox.syscallFilter` | 未设置 | 默认 `true`：拒绝评测程序用不到的系统调用，见[下文](#沙箱系统调用过滤器与自检)。只在需要确认过滤器是否影响某种语言时设为 `false` |
+| `sandbox.user` | `sandbox` | 程序在沙箱中运行的用户（不是评测服务本身的运行用户） |
+| `sandbox.environments` | 见右 | 沙箱中程序的环境变量，值为文本。示例设置 `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`、`HOME=/sandbox` 和 `LC_ALL=en_US.UTF-8`。评测机自身的变量（如 `UV_THREADPOOL_SIZE`）不能写在这里 |
 
-| 有效 CPU 数 | 默认执行槽（内存足够时） |
+### CPU 亲和性
+
+`cpuAffinity.compiler`、`cpuAffinity.userProgram`、`cpuAffinity.interactor` 和 `cpuAffinity.checker` 分别列出各类程序可以使用的逻辑 CPU（例如 `[0, 1]`）。安装器为四者都写入它为评测选择的 CPU。它们不会为每个评测槽分配独占的 CPU，并且必须在 systemd 允许该服务使用的 CPU 范围内。不设置时只受 systemd 的限制。
+
+### 来自站点的限制
+
+评测机连接时，站点会发送一些限制：`limit.compilerMessage`、`limit.outputSize`、`limit.dataDisplay`、`limit.dataDisplayForSubmitAnswer` 和 `limit.stderrDisplay`。它们不是 `judge.yaml` 中的设置；每道题的时间和内存限制同样来自站点。
+
+## 评测机的环境变量
+
+- `LIBREOJ_JUDGE_CONFIG_FILE`：配置文件，`<root>/config/judge.yaml`。
+- `LIBREOJ_JUDGE_LOG_LEVEL`：默认 `info`。只在排查问题时使用 `verbose` 或 `debug`，并且不要公开这些日志，其中包含带签名的下载地址。
+- `UV_THREADPOOL_SIZE`：至少为评测槽数的两倍加二（最多 1024）；安装器写入 `max(4, 2 × 槽数 + 2)`。每个槽可能同时等待两个程序（交互题），另外两个线程处理文件。修改后需要重启评测机。
+- `NODE_OPTIONS=--max-old-space-size=512`：评测机自身的内存，不是提交程序的内存限制。
+- `HYHOJ_AI_SAMPLE_INPUTS_DIR`：AI 样例输入的私有目录，`<root>/data/ai-sample-inputs`。必须与后端相同，并且不能公开访问。
+
+## 工作如何调度
+
+- 评测机同时最多从站点领取 `taskConsumingThreads` 份提交。
+- 编译、运行测试点和本机 AI 检查共用评测槽。一个测试点预留程序的内存限制加上交互器的内存限制（如果校验器的更大则用校验器的），一次编译预留 512 MiB，其他工作预留 256 MiB；工作按到达顺序，在评测槽和所需内存都空闲时开始。需要的内存超过全部预算的工作单独运行。
+- 本机 AI 检查最多使用 `aiExecutionSlots` 个槽，不会阻塞排在它后面的评测。
+- 下载有单独的队列，大小为 `maxConcurrentDownloads`。
+- AI 任务另外最多同时运行三个 AI 流程，最多接受八个请求；这些不是额外的评测槽，也不能配置。
+
+提高 `taskConsumingThreads` 或 AI 并发不会增加评测能力：只有评测槽（以及它们背后的 CPU 和内存）才会。
+
+## 如何确定评测槽数量
+
+一个评测槽同一时间运行一次编译或一个测试点。一个评测服务运行它所有的评测槽。默认的评测槽数量（也是允许的最大值）为：
+
+> 评测机可用的 CPU 数减一，与其可用内存（MiB）除以 256，两者取较小值，且不超过 511
+
+与站点在同一台服务器上的评测机和远程评测机都使用这一规则。只有一个 CPU 或内存不足 256 MiB 的服务器不能评测。
+
+“可用的 CPU 数”会考虑 CPU 亲和性、cgroup CPU 集合和 CPU 配额，而不仅是 `nproc`；“可用内存”取服务器内存与 cgroup `memory.max` 中的较小值。评测机使用的 CPU 从允许列表的末尾选取，列表不必从 0 开始，也不必连续。
+
+| CPU 数 | 评测槽数（内存足够时） |
 | --- | --- |
 | 1 | 0 |
 | 2 | 1 |
@@ -76,134 +108,126 @@
 | 16 | 15 |
 | 32 | 31 |
 
-**8 个有效逻辑 CPU、8 GiB RAM 的 all 示例**：若允许 ID 为 0–7，则默认使用 1–7 的 7 槽、3 个消费者、4 个下载并发、工作目录 1–7、线程池 16。8 CPU、4 GiB 可用内存仍允许 7 槽；内存为 512 MiB 时，默认与最大值均为 2 槽，使用 CPU 6–7、线程池 6。高内存题或 AI 工作负载可明确选择更少槽数。有了上述内存准入，大内存限制的题目会等待内存而不会超额使用，只有此类题目很常见时才需要减少槽数。
+例如有 8 个 CPU（0–7）和 8 GiB 内存时，评测机使用 CPU 1–7、7 个评测槽、同时领取 3 份提交、4 个下载、工作目录 1–7 和 16 个线程。只有 512 MiB 内存时，它使用 CPU 6 和 7 上的 2 个评测槽和 6 个线程。由于工作会等待内存，除非大部分题目都有很大的内存限制，否则不需要减少评测槽。
 
-每槽 512 MiB 是 **tmpfs 最大容量**，不是预分配，也不是进程内存上限。编译器、选手程序、页缓存、AI、数据库同时占 RAM。`TasksMax`、父 cgroup、CPU quota 和物理核心共享仍可能形成瓶颈。`lscpu -e=CPU,CORE,SOCKET,ONLINE` 可分辨逻辑 CPU 与物理核；SMT 不等于独占物理核，`cpuAffinity` 与 systemd `AllowedCPUs` 也不会自动给每槽分配独占核心。
+每个评测槽的 512 MiB tmpfs 是它最多能容纳的大小，而不是预留的内存。编译器、程序、页缓存、AI 和数据库共用服务器内存，`TasksMax`、cgroup 和 CPU 配额也仍然有效。`lscpu -e=CPU,CORE,SOCKET,ONLINE` 可以显示哪些逻辑 CPU 共用一个物理核心；评测槽不会独占核心。
 
-容量算法由 [judge_capacity.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/judge_capacity.py) 在安装和扩缩容中共用。该新文件及本节新策略属于待提交修订；发布前须确认部署版本已包含它，不能用旧提交的源码链接冒充已发布实现。
+安装器和扩缩容命令使用同一计算方法：[judge_capacity.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/judge_capacity.py)。
 
 ## 沙箱、系统调用过滤器与自检
 
 所有编译器、程序、校验器和交互器都在沙箱中运行：
-- 以无特权的 `sandbox.user` 身份运行，exec 时不能获得特权（`no_new_privs`）；
-- 使用独立的挂载、PID、网络、UTS 与 IPC 命名空间，rootfs 只读，只挂载本任务的目录；
-- 受 cgroup v2 的内存、进程数和 CPU 时间限制。
+- 以无特权的 `sandbox.user` 身份运行，无法获得特权（`no_new_privs`）；
+- 使用独立的挂载、PID、网络、UTS 和 IPC 命名空间，文件系统只读，只能访问自己任务的目录；
+- 受 cgroup v2 对内存、进程数和 CPU 时间的限制。
 
-此外，seccomp 过滤器拒绝评测程序用不到的系统调用（`sandbox.syscallFilter`，默认开启）：
-- 创建或进入命名空间、挂载与更改根目录；
-- ptrace 与读取其他进程的内存；
-- 密钥环、io_uring、bpf、性能事件与 userfaultfd；
-- 内核模块、重启、交换区以及系统时间或主机名。
+此外，seccomp 过滤器会拒绝评测程序用不到的系统调用（`sandbox.syscallFilter`，默认开启）：
+- 创建或进入命名空间、挂载和更改根目录；
+- ptrace 和读取其他进程的内存；
+- 密钥环、io_uring、bpf、性能事件和 userfaultfd；
+- 内核模块、重启、交换区以及设置系统时间或主机名。
 
-这些调用返回“不允许的操作”，经由 32 位系统调用表（`-m32` 程序与 `int 0x80`）同样如此；x32 调用一律失败。`clone3` 返回“未实现”，使 C 库回退到 `clone`，由过滤器检查其标志。过滤器无法安装时不运行任何程序。
+这些调用返回“不允许的操作”，通过 32 位系统调用表（`-m32` 程序和 `int 0x80`）调用时也一样；x32 调用同样失败。`clone3` 返回“未实现”，使 C 库改用 `clone`，过滤器可以检查后者的参数。如果过滤器无法安装，任何程序都不会运行。
 
-检查本评测机（用评测端自身的代码编译并运行每种语言，并以 64 位与 32 位程序探测过滤器）：
+检查本评测机（通过评测机自身的代码编译并运行每种语言，并用 64 位和 32 位程序测试过滤器）：
 
 ```bash
 sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh
 ```
 
-每项检查输出一行，耗时几秒到一分钟。它使用自己的临时目录，从不使用评测机密钥，因此可以在评测端运行时执行，但会与评测争用 CPU。`--only cpp,java` 只检查部分语言。评测端或沙箱有改动时，升级器会在切换之前用新版本运行它。
+每项检查输出一行，耗时几秒到一分钟。它使用自己的临时目录，从不使用评测机密钥，因此可以在评测机工作时运行，但会与评测争用 CPU。`--only cpp,java` 只检查部分语言。每当评测机或沙箱有改动时，升级器都会在切换之前用新版本运行它。
 
-**沙箱不能做到的事。** 沙箱中的程序与宿主共享内核，内核漏洞仍可能导致逃逸；过滤器减少了程序可触及的内核范围，但并不能证明隔离。评测端的控制进程以 root 运行。对公开比赛：
-- 在专用机器上运行评测机，不要放在网页服务器上；
+**沙箱不能做到的事。** 沙箱中的程序与服务器共用内核，因此内核漏洞仍可能让程序逃逸。过滤器减少了程序能接触到的内核功能，但不能证明完全隔离，而且评测机的控制进程以 root 运行。对于公开的比赛：
+- 在独立的机器上运行评测机，不要放在网页服务器上；
 - 及时更新内核；
-- 远程评测机上不要存放平台凭据（数据库、MinIO、AI 密钥），它们只需要评测机密钥。
+- 不要在远程评测机上存放站点的凭据（数据库、MinIO、AI 密钥），它们只需要评测机密钥。
 
-## 生成的 systemd 服务与 tmpfs 挂载
+## systemd 服务
 
-下面列出 `configure-judge.py` 生成单元的所有指令，并标明常见但未显式生成的 accounting/limit 项。部署模板可能与按实际槽数生成后的内容不同，应检查生成后的文件；service drop-in 的优先级仍可能更高。
+安装器和扩缩容命令为评测服务写入以下设置。请检查它们写入的文件，以及可能覆盖这些设置的 drop-in。
 
-| 指令 | 生成值 | 含义/注意点 |
-| --- | --- | --- |
-| `Unit.Description` | `Judge: slots/consumers; workspace/remote target descriptions` | 说明文本，不是资源限制。 |
-| `Unit.After` | `local: libreoj-backend.service; remote: network-online.target` | 定义启动顺序；远程 target 同样 After=network-online.target。 |
-| `Unit.Requires` | `local service: libreoj-backend.service` | 远程无此后端依赖；停本机后端会影响依赖的 judge。 |
-| `Unit.Wants` | `remote service: network-online.target; remote target: libreoj-judge.service` | 远程启动网络及 judge 的弱依赖；不是多机任务调度规则。 |
-| `Unit.PartOf` | `service and mounts: libreoj.target or libreoj-judge.target` | all 与 remote 的停止/重启归属不同；扩槽只停 judge service，不停整个 all target。 |
-| `Unit.RequiresMountsFor` | `all taskWorkingDirectories` | service 自动依赖配置中的工作目录挂载；必须与 YAML 同步。 |
-| `Unit.Before` | `not explicitly generated` | 不要从 source 样例猜测显式 Before 值；RequiresMountsFor 与 systemd 默认依赖另行形成顺序。 |
-| `Service.WorkingDirectory` | `<root>/apps/judge` | Node 启动目录；保持该目录的依赖可读。 |
-| `Service.Environment` | `NODE_ENV=production; PATH=<node-parent>:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin` | 另生成 LIBREOJ_JUDGE_CONFIG_FILE、UV_THREADPOOL_SIZE、NODE_OPTIONS=--max-old-space-size=512、HYHOJ_AI_SAMPLE_INPUTS_DIR；含义见上节。 |
-| `Service.ExecStart` | `<node> -r @swc-node/register index.mjs` | 当前 judge 运行 TypeScript 注册入口，不是 backend dist/main.js。 |
-| `Service.Delegate` | `cpu memory pids` | 委托 cgroup 控制器给原生沙盒；不要删除或靠sudo前缀替代。 |
-| `Service.DelegateSubgroup` | `supervisor` | 需要 systemd 254+；管理进程与沙盒子 cgroup 分离。 |
-| `Service.OOMPolicy` | `continue` | 单个沙盒 OOM 不按 stop/kill 策略杀整个服务；不保证宿主不会内存耗尽。 |
-| `Service.AllowedCPUs` | `union of the four cpuAffinity sets` | 是逻辑 CPU ID 集合，受父 cgroup 限制；重新生成后需重启生效。 |
-| `Service.TasksMax` | `2048` | 宿主服务的任务/线程数量上限；不是并发提交数或评测槽数。 |
-| `Service.Restart` | `on-failure` | 异常退出时重启；配置错误可能导致重复失败，应检查日志。 |
-| `Service.RestartSec` | `3` | 失败重启等待 3 秒。 |
-| `Service.TimeoutStopSec` | `30` | 停止超时为 30 秒；不等于排空队列，不保证在途任务完成。请先在评测机页面排空该评测机。 |
-| `Service.UMask` | `0022` | judge 新建普通文件的默认掩码；私有配置和 AI 目录/socket 仍有显式更严格权限。 |
-| `Service.LimitCORE` | `0` | 禁止 core dump。其他 Limit*（如 LimitNOFILE）未由生成器显式设置，继承宿主/systemd 配置。 |
-| `Service.StandardOutput` | `journal` | 标准输出进入 systemd journal；诊断日志应私有保存。 |
-| `Service.StandardError` | `journal` | 标准错误进入 systemd journal。 |
-| `Service.User / Service.Group` | `not explicitly generated` | system service 默认宿主 root；sandbox.user 是沙盒内用户，两者不可混淆。 |
-| `Service.CPUAccounting / Service.MemoryAccounting / Service.TasksAccounting` | `not explicitly generated` | 继承 systemd 管理器/父 slice 设置；不要声称本生成器启用了某个值。用 systemctl show 查询生效值。 |
-| `Service.MemoryMax / Service.CPUQuota` | `not explicitly generated` | 本机父 cgroup 或 drop-in 仍可能限额；每题沙盒限制另行由评测参数配置。 |
-| `Mount.What` | `tmpfs` | 每个工作目录一个独立 tmpfs 文件系统。 |
-| `Mount.Where` | `each taskWorkingDirectories path` | 单元名由 systemd-escape --path --suffix=mount 得到；不要手写假定路径转义。 |
-| `Mount.Type` | `tmpfs` | 不是磁盘题库目录，也不能挂在 rootfs 上替代题库。 |
-| `Mount.Options` | `size=512m,mode=0755,nodev,nosuid` | size 是每个 tmpfs 的上限；mode 是挂载根权限；nodev/nosuid 禁止设备节点与 setuid 生效。 |
-| `Install.WantedBy` | `service/mounts: mode target; remote target: multi-user.target` | 启用服务/挂载单元建立对应 .wants；远程目标需开机启用。已有安装的目标启用状态在扩缩容时保留。 |
+| 设置 | 值 |
+| --- | --- |
+| `After`、`Requires`、`Wants` | 与站点在同一服务器上的评测机在 `libreoj-backend.service` 之后启动，并依赖它。远程评测机等待网络就绪（`network-online.target`） |
+| `PartOf`、`WantedBy` | 服务及其挂载在站点服务器上属于 `libreoj.target`，在远程评测机上属于开机启动的 `libreoj-judge.target` |
+| `RequiresMountsFor` | 所有工作目录，因此服务只在它们的 tmpfs 挂载完成后启动 |
+| `WorkingDirectory`、`ExecStart` | `<root>/apps/judge`，运行 `<node> -r @swc-node/register index.mjs` |
+| `Environment` | `NODE_ENV=production`、`PATH`，以及[评测机的环境变量](#评测机的环境变量)中的变量 |
+| `Delegate`、`DelegateSubgroup` | `cpu memory pids` 和 `supervisor`（需要 systemd 254 或更高版本）：由沙箱自己管理 cgroup。不要删除 |
+| `OOMPolicy` | `continue`：某个程序内存不足不会停止整个服务 |
+| `AllowedCPUs` | `cpuAffinity` 中的所有 CPU |
+| `TasksMax` | 总共 `2048` 个进程和线程 |
+| `Restart`、`RestartSec` | 失败 3 秒后重启 |
+| `TimeoutStopSec` | `30` 秒。停止服务不会等待排队的工作：请先[排空](#2-排空评测机并应用)评测机 |
+| `UMask`、`LimitCORE` | `0022`，不生成 core 文件 |
+| `StandardOutput`、`StandardError` | `journal` |
 
-`CPUAccounting`、`MemoryAccounting`、`TasksAccounting` 可用以下只读查询确认；不需要为改槽数而额外修改它们。
+没有设置 `User` 和 `Group`，因此服务以 root 运行；`sandbox.user` 是沙箱内的另一个用户。`CPUAccounting`、`MemoryAccounting`、`TasksAccounting`、`MemoryMax`、`CPUQuota` 等限制也没有设置，由 systemd 默认值或上级 slice 决定。查看实际生效的值：
 
 ```bash
 sudo systemctl show libreoj-judge.service -p CPUAccounting -p MemoryAccounting -p TasksAccounting -p LimitCORE -p TasksMax
 ```
 
-## 使用正式脚本扩容或缩容
+每个工作目录有自己的挂载单元（名称由 `systemd-escape --path --suffix=mount` 生成）：一个 `tmpfs`，选项为 `size=512m,mode=0755,nodev,nosuid`。
 
-使用包含本次修改的 [resize-judge.sh](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/resize-judge.sh)，不再复制长段维护程序。新脚本属于待提交修订，旧安装不存在该文件时，先按更新包说明部署匹配版本。已有实例的安装器参数用于首次安装；不要通过改安装元数据、删除 YAML/key 或以不同 `--judge-slots` 重跑安装来强行扩容。
+## 修改评测槽数量
 
-脚本要求已安装 `libreoj-judge.service`、标准 `work/1..N` 工作目录及受管理的服务/挂载单元。纯 web 节点没有本机 judge 可扩；可部署 [远程评测机](Remote-Judge.zh-CN.md)。本机 all 保留 AI worker，remote 使用 `libreoj-judge.target`。模式默认 `--mode auto`，从已安装服务推断；`--mode all` 或 `--mode remote` 仅用于明确并核验模式，不会把网页节点转换为远程节点。
+增加或减少 CPU、内存后，请使用扩缩容命令修改评测槽数量。不要用不同的 `--judge-slots` 重新运行安装器，不要修改安装记录，也不要删除 `judge.yaml` 或密钥来强行修改。
 
-入口调用同目录的 `resize-judge.py` 实现并原样传递参数，不下载远程脚本。主单元直接设置的 `MemoryMax` / `CPUQuota`、任意相关 drop-in 或不属于该 prefix 的服务也会被拒绝，需先人工审查。
+该命令适用于安装器安装的评测机，要求使用标准的工作目录和服务。仅网页的服务器没有可调整的评测机；请改为添加[远程评测机](Remote-Judge.zh-CN.md)。`--mode auto`（默认）会判断这是完整站点还是远程评测机；`--mode all` 或 `--mode remote` 只用于确认是否为你预期的那一种。如果服务自己设置了 `MemoryMax` 或 `CPUQuota`、有影响它的 drop-in，或属于其他安装目录，命令会拒绝修改：请先人工检查。
+
+`resize-judge.sh` 输出英文，`resize-judge.zh-CN.sh` 输出中文，其他方面完全相同。
 
 ### 1. 查看计划
 
 ```bash
-sudo bash /opt/LLMOJ/deploy/resize-judge.sh --prefix /opt/LLMOJ --plan
-# 指定目标：数字为示例，必须满足本机 CPU／内存预算
-sudo bash /opt/LLMOJ/deploy/resize-judge.sh --prefix /opt/LLMOJ --slots 6 --plan
+sudo bash /opt/LLMOJ/deploy/resize-judge.zh-CN.sh --prefix /opt/LLMOJ --plan
+# 指定数量（必须符合 CPU 和内存）：
+sudo bash /opt/LLMOJ/deploy/resize-judge.zh-CN.sh --prefix /opt/LLMOJ --slots 6 --plan
 ```
 
-`--plan` 不写配置、不停服务。检查旧/新槽数、CPU 集合、内存预算和线程池；自定义安装路径替换 `--prefix`。脚本会拒绝需要人工审查的服务 drop-in 或非标准布局，不会删除这些设置来绕过校验。
+`--plan` 不做任何修改，只显示新旧评测槽数、CPU、内存和线程数。
 
-### 2. 排空并应用
+### 2. 排空评测机并应用
 
-安排维护时间，阻止新的提交、重评、测试运行及 AI 任务，确认**所有用户**的排队/运行任务结束；若其他评测机可以处理队列，也可在评测机页面 **排空** 该评测机并等待 **已排空**，但本机 AI 任务仍须结束，排空不包括它们，验收后再恢复；CPU 空闲或只看自己的 AI 列表不能证明已排空。脚本的 `--drained` 是操作者确认，不是自动排空队列的功能。
+选择空闲时段。停止新的提交、重测、测试运行和 AI 任务，等待**所有人**排队中和运行中的工作完成。如果其他评测机可以接手队列，也可以在 **评测机状态** 页面 **排空** 本评测机，等待显示 **已排空**；但本机 AI 任务仍需完成，因为排空不包括它们。CPU 空闲或自己的 AI 任务列表为空，都不能证明没有工作在运行。`--drained` 表示你确认已完成这一步，命令本身不会排空任何东西。
 
-默认交互方式会用中文展示容量和排空要求，只询问实例数。**提交该数字（或按回车接受默认值）即表示已经排空，并立即执行维护，没有第二次确认。** 未排空时按 Ctrl+C 退出：
+不带参数运行时，命令会显示容量和排空要求，并询问评测槽数量。**输入数字（或直接回车使用默认值）即表示确认已排空，并立即执行修改，不会再次确认。** 如果仍有工作在运行，请按 Ctrl+C 退出。
 
 ```bash
-sudo bash /opt/LLMOJ/deploy/resize-judge.sh --prefix /opt/LLMOJ
+sudo bash /opt/LLMOJ/deploy/resize-judge.zh-CN.sh --prefix /opt/LLMOJ
 ```
 
-已排空后的非交互示例：
+或者不提问直接执行：
 
 ```bash
-sudo bash /opt/LLMOJ/deploy/resize-judge.sh --prefix /opt/LLMOJ --slots 6 --apply --drained
+sudo bash /opt/LLMOJ/deploy/resize-judge.zh-CN.sh --prefix /opt/LLMOJ --slots 6 --apply --drained
 ```
 
-脚本先将私有 judge YAML、受管理单元及状态备份到 `<prefix>/backups/judge-resize/<UTC时间>/`，打印该私有目录，再只停止 judge，更新槽数、工作目录、CPU affinity、消费者/下载并发、线程池、挂载和服务单元；不会重新生成节点 key、改变服务器 URL、rootfs 或 AI 配置。它会检查 systemd 单元并执行真实沙盒探针；原来运行的 judge 恢复运行并核对实际 CPU/线程池，原来停止的 judge 保持停止。验证失败会尝试恢复备份；若自动恢复也失败则保持 judge 停止，报告供人工回滚的目录。保管备份目录，不要把含 key 的 YAML 放入公开报告。
+该命令会：
+1. 把 `judge.yaml`、评测服务及其状态备份到 `<prefix>/backups/judge-resize/<UTC 时间>/`，并输出该目录；
+2. 只停止评测机；
+3. 更新评测槽、工作目录、CPU、并发、线程、挂载和服务，保留密钥、站点地址、沙箱镜像和 AI 设置；
+4. 检查服务并运行真实的沙箱测试；
+5. 如果评测机之前在运行，则重新启动它（并检查其 CPU 和线程）；之前已停止的评测机保持停止。
 
-### 3. 验收与回滚
+如果检查失败，它会恢复备份。如果恢复也失败，评测机保持停止，命令会告诉你备份所在的位置。请妥善保管备份：其中包含评测机密钥。
 
-应用完成后确认服务正常、网页评测节点在线，再实际提交普通题、交互/通信题及所需语言。使用本机 AI 时再验证小型 AI 数据任务；命令成功不等于全部业务通过。
+### 3. 检查或回滚
+
+确认服务正在运行、站点上显示评测机在线，然后用常用语言提交普通题和交互题；如果使用本机 AI，再运行一个小的 AI 任务。
 
 ```bash
 sudo systemctl is-active libreoj-judge.service
 sudo systemctl show libreoj-judge.service -p AllowedCPUs -p EffectiveCPUs -p TasksMax
 ```
 
-需要回退时，先阻止新任务并再次排空，将下面路径替换为脚本实际输出的私有备份目录：
+要撤销修改，先停止新的工作并再次排空，然后传入命令输出的备份目录：
 
 ```bash
-sudo bash /opt/LLMOJ/deploy/resize-judge.sh --prefix /opt/LLMOJ --rollback /path/to/private-backup --drained
+sudo bash /opt/LLMOJ/deploy/resize-judge.zh-CN.sh --prefix /opt/LLMOJ --rollback /path/to/backup --drained
 ```
 
-回滚恢复备份中的配置/单元及记录的运行、挂载状态；不是题库或数据库备份恢复，也不会撤回扩容后已完成的提交。回滚后同样检查节点在线和真实提交结果。
+这会恢复评测机的配置、服务及其之前的状态。它不会改动题目或数据库，也不会撤销期间已评测的提交。之后请再次检查评测机。
 
-本文介绍待提交修订的接口与隔离回归范围，不宣称当前运行服务器已经完成扩容或 Ubuntu 26.04 全新部署验收。相关内容：[独立评测机](Remote-Judge.zh-CN.md) · [分布式评测](Distributed-Judging.zh-CN.md)。
+另见：[远程评测机](Remote-Judge.zh-CN.md) · [分布式评测](Distributed-Judging.zh-CN.md)。来源：[config.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/config.ts)、[configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-judge.py)、[executionCapacity.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/executionCapacity.ts)、[taskQueue.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/taskQueue.ts)、[aiRunner.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiRunner.ts)。

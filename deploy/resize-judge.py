@@ -20,7 +20,7 @@ import tempfile
 import time
 
 import yaml
-from judge_capacity import discover_capacity, select_cpu_ids, validate_slots, MAX_SLOTS
+from judge_capacity import discover_capacity, select_cpu_ids, validate_slots, MAX_SLOTS, say
 from judge_units import mount_name, render_units, workspace_paths
 
 SERVICE = 'libreoj-judge.service'
@@ -55,18 +55,18 @@ class Host:
 def safe_directory(path, create=False, private=False):
     path = Path(path)
     if not path.is_absolute() or not re.fullmatch(r'/[A-Za-z0-9_./-]+', str(path)) or '..' in path.parts:
-        raise MaintenanceError('目录必须为无空格的安全绝对路径 / unsafe directory')
+        raise MaintenanceError(say('The directory must be a safe absolute path without spaces', '目录必须为无空格的安全绝对路径'))
     for p in [*reversed(path.parents), path]:
         if p.is_symlink():
-            raise MaintenanceError('拒绝符号链接目录 / symlink directory: '+str(p))
+            raise MaintenanceError(say('Refusing a symbolic-link directory: ', '拒绝符号链接目录：')+str(p))
     if create:
         path.mkdir(parents=True, exist_ok=True, mode=0o700 if private else 0o755)
     if path.exists():
         st = path.stat()
         if not stat.S_ISDIR(st.st_mode) or st.st_uid != 0 or st.st_mode & 0o022:
-            raise MaintenanceError('目录必须由 root 所有且不可由其他用户写入 / unsafe directory ownership: '+str(path))
+            raise MaintenanceError(say('The directory must be owned by root and not writable by other users: ', '目录必须由 root 所有且不可由其他用户写入：')+str(path))
         if private and st.st_mode & 0o077:
-            raise MaintenanceError('备份/锁目录必须为 root 私有 / private directory required: '+str(path))
+            raise MaintenanceError(say('The backup or lock directory must be private to root: ', '备份/锁目录必须为 root 私有：')+str(path))
     return path
 
 
@@ -76,7 +76,7 @@ def regular(path, private=False, missing=False):
         return
     st = path.lstat()
     if not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or st.st_nlink != 1 or st.st_mode & (0o077 if private else 0o022):
-        raise MaintenanceError('拒绝不安全的文件 / unsafe file: '+str(path))
+        raise MaintenanceError(say('Refusing an unsafe file: ', '拒绝不安全的文件：')+str(path))
 
 
 def atomic_write(path, data, mode=0o600):
@@ -110,16 +110,16 @@ def read_config(root):
             raise ValueError()
         paths = workspace_paths(root, config)
         if paths != [root/'data/judge/work'/str(i) for i in range(1, len(paths)+1)]:
-            raise MaintenanceError('自定义工作目录需人工维护；仅支持 work/1..N / custom workspace layout')
+            raise MaintenanceError(say('Custom workspace directories need manual maintenance; only work/1..N is supported', '自定义工作目录需人工维护；仅支持 work/1..N'))
         if config['maxConcurrentTasks'] != len(paths):
-            raise MaintenanceError('现有并发数与工作目录数不一致 / inconsistent existing capacity')
+            raise MaintenanceError(say('The configured concurrency differs from the number of workspaces', '现有并发数与工作目录数不一致'))
         for path in [root/'data', root/'data/judge', root/'data/judge/work', *paths]:
             safe_directory(path)
         return config
     except MaintenanceError:
         raise
     except Exception:
-        raise MaintenanceError('judge.yaml 无效；私有内容未输出 / invalid private judge configuration') from None
+        raise MaintenanceError(say('judge.yaml is invalid (its private contents are not shown)', 'judge.yaml 无效；私有内容未输出')) from None
 
 
 @contextlib.contextmanager
@@ -133,7 +133,7 @@ def maintenance_lock(directory=Path('/run/libreoj-installer')):
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise MaintenanceError('已有安装/维护任务运行，请稍后重试 / another installer or resize is running') from None
+            raise MaintenanceError(say('Another installation, upgrade or resize is running; try again later', '已有安装/维护任务运行，请稍后重试')) from None
         yield
     finally:
         os.close(fd)
@@ -156,7 +156,7 @@ class Resize:
         membership = self.host.property(SERVICE, 'PartOf').split()
         actual = 'remote' if 'libreoj-judge.target' in membership else ('all' if 'libreoj.target' in membership else None)
         if actual is None or (requested != 'auto' and requested != actual):
-            raise MaintenanceError('无法确认现有节点模式，或 --mode 不匹配 / judge target/mode mismatch')
+            raise MaintenanceError(say("Can't determine this judge's mode, or it doesn't match --mode", '无法确认现有节点模式，或 --mode 不匹配'))
         return actual
 
     def capacity(self, remote):
@@ -178,20 +178,20 @@ class Resize:
     def verify_instance(self):
         if (self.host.property(SERVICE, 'FragmentPath') != str(self.units/SERVICE) or
                 self.host.property(SERVICE, 'WorkingDirectory') != str(self.root/'apps/judge')):
-            raise MaintenanceError('同名服务不属于指定 prefix，拒绝覆盖 / service belongs to another prefix')
+            raise MaintenanceError(say('The judge service belongs to another installation directory; not overwriting it', '同名服务不属于指定 prefix，拒绝覆盖'))
         env = dict(x.split('=', 1) for x in shlex.split(self.host.property(SERVICE, 'Environment')) if '=' in x)
         if env.get('LIBREOJ_JUDGE_CONFIG_FILE') != str(self.root/'config/judge.yaml'):
-            raise MaintenanceError('生效配置路径不属于指定 prefix / configuration path differs')
+            raise MaintenanceError(say("The judge's configuration file is outside this installation directory", '生效配置路径不属于指定 prefix'))
         for name in ('MemoryMax', 'CPUQuotaPerSecUSec'):
             if self.host.property(SERVICE, name) not in ('infinity', 'max'):
-                raise MaintenanceError('主单元已有自定义 '+name+'，请人工审查；不会静默删除 / custom service resource limit')
+                raise MaintenanceError(say('The judge service has a custom '+name+' setting; review it by hand (it is not removed)', '主单元已有自定义 '+name+'，请人工审查；不会静默删除'))
 
     def plan(self, slots=None, mode='auto'):
         self.verify_instance()
         config = read_config(self.root)
         mode = self.mode(mode)
         if mode == 'remote' and config.get('aiRunnerSocket'):
-            raise MaintenanceError('远程节点仍启用本机 AI socket，请先人工检查 / remote AI socket is unexpected')
+            raise MaintenanceError(say('This remote judge has a local AI socket configured; check it by hand first', '远程节点仍启用本机 AI socket，请先人工检查'))
         capacity = self.capacity(mode == 'remote')
         chosen = capacity['default_slots'] if slots is None else slots
         validate_slots(chosen, capacity)
@@ -209,16 +209,16 @@ class Resize:
         for name in names:
             regular(self.units/name, missing=True)
             if self.host.property(name, 'DropInPaths'):
-                raise MaintenanceError('存在 systemd drop-in，未覆盖或删除；请先审查：'+name)
+                raise MaintenanceError(say('A systemd drop-in exists and was left as it is; review it first: ', '存在 systemd drop-in，未覆盖或删除；请先审查：')+name)
         # Missing or unrelated installed units must not be silently taken over.
         regular(self.units/SERVICE)
         for name in old_mounts:
             regular(self.units/name)
             if 'Description=LibreOJ judge workspace\n' not in (self.units/name).read_text():
-                raise MaintenanceError('现有 mount 不是本项目生成单元 / unmanaged mount: '+name)
+                raise MaintenanceError(say('A workspace mount was not generated by LLMOJ: ', '现有 mount 不是本项目生成单元：')+name)
         for name in set(new_units)-set(old_mounts)-{SERVICE, 'libreoj-judge.target'}:
             if (self.units/name).exists() or self.host.active(name):
-                raise MaintenanceError('新增工作目录已有 mount 单元 / new mount already exists: '+name)
+                raise MaintenanceError(say('A mount unit already exists for a new workspace: ', '新增工作目录已有 mount 单元：')+name)
         return {'old':config, 'new':updated, 'capacity':capacity, 'mode':mode,
                 'old_mounts':old_mounts, 'new_mounts':[n for n in new_units if n.endswith('.mount')],
                 'units':new_units, 'names':names}
@@ -234,7 +234,7 @@ class Resize:
                     'mount_states':{}, 'new_unit_names':list(plan['units'])}
         raw = (self.root/'config/judge.yaml').read_bytes()
         if read_config(self.root) != plan['old']:
-            raise MaintenanceError('配置在计划后发生变化，请重新运行 / stale plan')
+            raise MaintenanceError(say('The configuration changed after planning; run again', '配置在计划后发生变化，请重新运行'))
         atomic_write(self.backup/'judge.yaml', raw)
         manifest['config_sha256'] = hashlib.sha256(raw).hexdigest()
         for kind, directory, names in [
@@ -269,26 +269,26 @@ class Resize:
         for path in workspace_paths(self.root, plan['new']):
             fs_type = self.host.run(['findmnt', '-n', '-o', 'FSTYPE', '--mountpoint', path]).stdout.strip()
             if fs_type != 'tmpfs':
-                raise MaintenanceError('工作目录没有正确挂载 tmpfs / workspace is not tmpfs')
+                raise MaintenanceError(say('A workspace is not mounted as tmpfs', '工作目录没有正确挂载 tmpfs'))
         if not self.host.active(SERVICE):
             raise MaintenanceError('Judge service did not become active')
         values = dict(x.split('=', 1) for x in shlex.split(self.host.property(SERVICE, 'Environment')) if '=' in x)
         if (int(values.get('UV_THREADPOOL_SIZE', '0')) < plan['new']['maxConcurrentTasks']*2+2 or
                 values.get('LIBREOJ_JUDGE_CONFIG_FILE') != str(self.root/'config/judge.yaml')):
-            raise MaintenanceError('生效线程池或配置路径被覆盖 / effective environment differs')
+            raise MaintenanceError(say("The judge's effective thread pool size or configuration path differs from the plan", '生效线程池或配置路径被覆盖'))
         actual = self.host.property(SERVICE, 'AllowedCPUs')
         from judge_capacity import parse_cpu_list
         expected = set(plan['new']['cpuAffinity']['userProgram'])
         if parse_cpu_list(actual.replace(' ', ',')) != expected:
-            raise MaintenanceError('生效 CPU 集合被覆盖 / effective AllowedCPUs differs')
+            raise MaintenanceError(say("The judge's effective CPU set differs from the plan", '生效 CPU 集合被覆盖'))
         effective = self.host.property(SERVICE, 'EffectiveCPUs')
         if not expected <= parse_cpu_list(effective.replace(' ', ',')):
-            raise MaintenanceError('父 cgroup/在线 CPU 无法满足预期 CPU 集合 / effective CPUs are insufficient')
+            raise MaintenanceError(say("The parent cgroup or the online CPUs don't provide the planned CPUs", '父 cgroup/在线 CPU 无法满足预期 CPU 集合'))
         self.verify_instance()
 
     def apply(self, plan):
         manifest = self.snapshot(plan)
-        print('私有备份 / Private backup:', self.backup, flush=True)
+        print(say('Private backup:', '私有备份：'), self.backup, flush=True)
         self.host.run(['systemd-analyze', 'verify', *[self.backup/'new-units'/n for n in plan['units']]])
         try:
             self.changed = True  # Include partial/failed stop in automatic rollback.
@@ -299,7 +299,7 @@ class Resize:
                 raise MaintenanceError('Judge did not stop')
             # Detect unrelated edits made after planning before replacing private config.
             if hashlib.sha256((self.root/'config/judge.yaml').read_bytes()).hexdigest() != manifest['config_sha256']:
-                raise MaintenanceError('配置在计划后发生变化 / configuration changed after planning')
+                raise MaintenanceError(say('The configuration changed after planning', '配置在计划后发生变化'))
             atomic_write(self.root/'config/judge.yaml', (self.backup/'new-judge.yaml').read_bytes())
             for path in workspace_paths(self.root, plan['new']):
                 safe_directory(path, create=True)
@@ -331,10 +331,11 @@ class Resize:
                 self.verify_running(plan)
             manifest['phase'] = 'complete'
             self.save_manifest(manifest)
-            print('调整完成；请确认节点在线和提交评测。原来停止的 judge 保持停止。 / Resize complete; verify judging.')
+            print(say('Resize complete. Check that the judge is online and judges a submission; a judge that was stopped stays stopped.',
+                      '调整完成；请确认节点在线并提交评测。原来停止的 judge 保持停止。'))
             return self.backup
         except BaseException:
-            print('调整失败，正在恢复私有备份 / Resize failed; rolling back', file=sys.stderr)
+            print(say('Resize failed; restoring the private backup', '调整失败，正在恢复私有备份'), file=sys.stderr)
             try:
                 if self.probe_started:
                     self.host.run(['systemctl', 'stop', 'libreoj-resize-check.service'], check=False)
@@ -342,14 +343,14 @@ class Resize:
                 self.restore(self.backup)
             except BaseException:
                 self.host.run(['systemctl', 'stop', SERVICE], check=False)
-                print('自动回滚未完成；judge 保持停止，请使用 --rollback：'+str(self.backup), file=sys.stderr)
+                print(say('Automatic rollback did not finish; the judge stays stopped. Use --rollback ', '自动回滚未完成；judge 保持停止，请使用 --rollback：')+str(self.backup), file=sys.stderr)
             raise
 
     def load_snapshot(self, backup):
         parent = self.root/'backups/judge-resize'
         backup = Path(backup)
         if backup.parent != parent:
-            raise MaintenanceError('备份必须位于本实例 backups/judge-resize 的直接子目录')
+            raise MaintenanceError(say("The backup must be a directory directly inside this installation's backups/judge-resize", '备份必须位于本实例 backups/judge-resize 的直接子目录'))
         safe_directory(backup, private=True)
         regular(backup/'manifest.json', private=True)
         manifest = json.loads((backup/'manifest.json').read_text())
@@ -429,26 +430,31 @@ class Resize:
                 raise MaintenanceError('Restored judge is not active')
         manifest['phase'] = 'rolled_back'
         self.save_manifest(manifest)
-        print('已恢复原配置与服务状态 / Original configuration and service state restored')
+        print(say('The original configuration and service state are restored', '已恢复原配置与服务状态'))
 
 
 def main():
-    parser = argparse.ArgumentParser(description='现有评测机扩缩容：默认取有效 CPU 数减 1、内存 / 256 MiB 和运行时上限的最小值；私有备份，失败自动回滚。')
+    parser = argparse.ArgumentParser(description=say(
+        'Change the number of execution slots of an installed judge. The default is the smallest of: effective CPUs minus 1, '
+        'RAM / 256 MiB and the runtime limit. A private backup is kept, and a failed change is rolled back.',
+        '现有评测机扩缩容：默认取有效 CPU 数减 1、内存 / 256 MiB 和运行时上限的最小值；私有备份，失败自动回滚。'))
     parser.add_argument('--prefix', default='/opt/LLMOJ')
     parser.add_argument('--mode', choices=('auto', 'all', 'remote'), default='auto')
     parser.add_argument('--slots', type=int)
     action = parser.add_mutually_exclusive_group()
-    action.add_argument('--plan', action='store_true', help='只读显示计划，不停止服务')
-    action.add_argument('--apply', action='store_true', help='应用 --slots 指定容量')
-    action.add_argument('--rollback', type=Path, help='恢复本实例私有备份')
-    parser.add_argument('--drained', action='store_true', help='确认已暂停新提交/AI且所有用户任务已排空')
+    action.add_argument('--plan', action='store_true', help=say('Show the plan without changing anything', '只读显示计划，不停止服务'))
+    action.add_argument('--apply', action='store_true', help=say('Apply the capacity given by --slots', '应用 --slots 指定容量'))
+    action.add_argument('--rollback', type=Path, help=say("Restore one of this installation's private backups", '恢复本实例私有备份'))
+    parser.add_argument('--drained', action='store_true', help=say("Confirm that new submissions and AI jobs are paused and every user's tasks have finished",
+                                                                     '确认已暂停新提交/AI且所有用户任务已排空'))
     args = parser.parse_args()
     if os.geteuid() != 0:
-        parser.error('请使用 sudo / root is required')
+        parser.error(say('Run with sudo: root is required', '请使用 sudo 运行：需要 root 权限'))
     try:
         if args.rollback:
             if not args.drained:
-                raise MaintenanceError('--rollback 需要 --drained；请先暂停新任务并排空')
+                raise MaintenanceError(say('--rollback requires --drained: pause new tasks and wait until they have finished first',
+                                           '--rollback 需要 --drained；请先暂停新任务并排空'))
             with maintenance_lock():
                 Resize(args.prefix).restore(args.rollback)
             return
@@ -457,30 +463,40 @@ def main():
         mode = manager.mode(args.mode)
         capacity = manager.capacity(mode == 'remote')
         current = read_config(manager.root)['maxConcurrentTasks']
-        print(f"当前 {current} 槽；有效 CPU {capacity['effective_cpu_count']}；默认 {capacity['default_slots']} 槽；"
-              f"有效内存 {capacity['memory_mib']} MiB；资源允许最多 {capacity['maximum_slots']} 槽"
-              f"（有效 CPU 减 1、内存 / {capacity['slot_memory_mib']} MiB 与运行时上限中的最小值）。")
+        print(say(f"Now {current} slots. Effective CPUs: {capacity['effective_cpu_count']}; effective RAM: "
+                  f"{capacity['memory_mib']} MiB; default {capacity['default_slots']} slots, at most "
+                  f"{capacity['maximum_slots']} (the smallest of effective CPUs minus 1, RAM / "
+                  f"{capacity['slot_memory_mib']} MiB and the runtime limit).",
+                  f"当前 {current} 槽；有效 CPU {capacity['effective_cpu_count']}；默认 {capacity['default_slots']} 槽；"
+                  f"有效内存 {capacity['memory_mib']} MiB；资源允许最多 {capacity['maximum_slots']} 槽"
+                  f"（有效 CPU 减 1、内存 / {capacity['slot_memory_mib']} MiB 与运行时上限中的最小值）。"))
         for warning in capacity['warnings']:
-            print('注意 / Notice:', warning)
+            print(say('Note:', '注意：'), warning)
         if capacity['maximum_slots'] == 0:
             validate_slots(capacity['default_slots'], capacity)
         slots = args.slots
         interactive = not args.plan and not args.apply
         if interactive:
             if not sys.stdin.isatty():
-                raise MaintenanceError('非交互请使用 --plan，或 --slots N --apply --drained')
-            print('请先暂停新提交、重测、测试运行和 AI，并排空所有用户任务。输入数量后将立即维护；未排空请 Ctrl+C 退出。')
-            answer = input(f"目标执行槽数量 [{capacity['default_slots']}]：").strip()
+                raise MaintenanceError(say('Without a terminal, use --plan, or --slots N --apply --drained',
+                                               '非交互请使用 --plan，或 --slots N --apply --drained'))
+            print(say("Pause new submissions, rejudges, test runs and AI jobs, and wait until every user's tasks have finished. "
+                      'Maintenance starts as soon as you enter the number; press Ctrl+C if tasks are still running.',
+                      '请先暂停新提交、重测、测试运行和 AI，并排空所有用户任务。输入数量后将立即维护；未排空请 Ctrl+C 退出。'))
+            answer = input(say(f"Execution slots [{capacity['default_slots']}]: ", f"目标执行槽数量 [{capacity['default_slots']}]：")).strip()
             slots = int(answer) if answer else capacity['default_slots']
         plan = manager.plan(slots, args.mode)
-        print(f"计划：{current} → {plan['new']['maxConcurrentTasks']} 槽；CPU {plan['new']['cpuAffinity']['userProgram']}；"
-              f"UV_THREADPOOL_SIZE={plan['new']['maxConcurrentTasks']*2+2}；只调整 judge。")
+        print(say(f"Plan: {current} → {plan['new']['maxConcurrentTasks']} slots; CPUs {plan['new']['cpuAffinity']['userProgram']}; "
+                  f"UV_THREADPOOL_SIZE={plan['new']['maxConcurrentTasks']*2+2}; only the judge is changed.",
+                  f"计划：{current} → {plan['new']['maxConcurrentTasks']} 槽；CPU {plan['new']['cpuAffinity']['userProgram']}；"
+                  f"UV_THREADPOOL_SIZE={plan['new']['maxConcurrentTasks']*2+2}；只调整 judge。"))
         if args.plan:
             return
         if interactive:
             args.drained = True  # The single numeric prompt explicitly describes immediate maintenance.
         if not args.drained or (args.apply and args.slots is None):
-            raise MaintenanceError('未应用：请先排空任务；非交互应用需 --slots N --apply --drained')
+            raise MaintenanceError(say('Not applied: wait until tasks have finished; without a terminal, use --slots N --apply --drained',
+                                       '未应用：请先排空任务；非交互应用需 --slots N --apply --drained'))
         with maintenance_lock():
             # Recompute under the same lock as installer; never apply a stale pre-lock plan.
             manager = Resize(args.prefix)
@@ -488,9 +504,10 @@ def main():
             manager.apply(plan)
     except (Exception, KeyboardInterrupt) as error:
         if isinstance(error, (MaintenanceError, ValueError)):
-            print('未完成 / Not completed: '+str(error), file=sys.stderr)
+            print(say('Not completed: ', '未完成：')+str(error), file=sys.stderr)
         else:
-            print('未完成；请检查权限、备份和服务状态（私有配置未输出） / Maintenance failed', file=sys.stderr)
+            print(say('Not completed; check permissions, the backup and the service state (private configuration is not shown)',
+                      '未完成；请检查权限、备份和服务状态（私有配置未输出）'), file=sys.stderr)
         sys.exit(1)
 
 

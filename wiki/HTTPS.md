@@ -1,41 +1,50 @@
 # HTTPS and reverse proxies
 
-English | [简体中文](HTTPS.zh-CN.md)
+[简体中文](HTTPS.zh-CN.md) | English | [Wiki home](Home.en.md)
 
-Default installation serves HTTP on `0.0.0.0:80`. Configure certificates/proxying separately before sending admin passwords, AI keys or judge credentials over the public internet.
+A default installation serves plain HTTP on port 80 of every address (`0.0.0.0:80`). Set up HTTPS before anyone sends administrator passwords, AI keys or judge keys over the internet. [Passkeys](Two-Factor-Sign-In.md) also need HTTPS.
 
-## Caddy in front of the project Nginx
+## Caddy in front of LLMOJ
 
-Point the domain's A record to the server's public IP and allow TCP 80/443 in the firewall/cloud security group. Install LLMOJ on loopback:
+This is the simplest way to set up HTTPS on a new server.
 
-```bash
-sudo bash /tmp/llmoj-install.sh --repository houyhlouis/LLMOJ \
-  --yes --listen 127.0.0.1 --port 8080 --public-url https://oj.example.com
-```
+1. Point the domain's DNS A record at the server's public IP address, and allow TCP ports 80 and 443 in the firewall and the cloud provider's security group.
+2. Install LLMOJ so that it listens only on the server itself, with the final HTTPS address as its public URL:
 
-Add `--role web` for a web-only node. The public URL must match the final HTTPS origin so signed downloads and configured callbacks use a reachable address.
+   ```bash
+   sudo bash /tmp/llmoj-install.sh --repository houyhlouis/LLMOJ \
+     --yes --listen 127.0.0.1 --port 8080 --public-url https://oj.example.com
+   ```
 
-Follow [Caddy's installation guide](https://caddyserver.com/docs/install) for its systemd package. Set `/etc/caddy/Caddyfile`:
+   Add `--role web` for a server without a judge. The public URL must be exactly the address people use, because judge downloads and callbacks are built from it.
+3. Install Caddy's systemd package as described in [Caddy's installation guide](https://caddyserver.com/docs/install), and set `/etc/caddy/Caddyfile` to:
 
-```caddyfile
-oj.example.com {
-    reverse_proxy 127.0.0.1:8080
-}
-```
+   ```caddyfile
+   oj.example.com {
+       reverse_proxy 127.0.0.1:8080
+   }
+   ```
+4. Check the file, start Caddy and test the site:
 
-```bash
-sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-sudo systemctl enable --now caddy
-sudo systemctl reload caddy
-curl -I https://oj.example.com/
-```
+   ```bash
+   sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+   sudo systemctl enable --now caddy
+   sudo systemctl reload caddy
+   curl -I https://oj.example.com/
+   ```
 
-With DNS/ports available, Caddy obtains and renews certificates and redirects HTTP to HTTPS. See [automatic HTTPS](https://caddyserver.com/docs/quick-starts/https) and [reverse_proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy). This example does not enable request access logs.
+Caddy obtains and renews the certificate itself, redirects HTTP to HTTPS and passes WebSocket connections through. See Caddy's [automatic HTTPS](https://caddyserver.com/docs/quick-starts/https) and [reverse_proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy) documentation. This configuration doesn't log requests.
 
-## Existing proxy
+## Using another proxy
 
-Preserve WebSocket Upgrade and long connections for `/api/socket`. Forward `/api/`, `/socket.io/`, `/storage/` and frontend routes. Keep storage signature query parameters; let the project Nginx restore MinIO's signed internal Host rather than exposing MinIO directly.
+If you already have a proxy, make it:
 
-Judge authentication uses a WebSocket query key. Built-in Nginx disables access logging on that path and records query-free URIs elsewhere. Avoid query strings in the outer proxy's logs too. Do not enable debugging that records complete authenticated URLs.
+- pass WebSocket upgrades and keep long-lived connections open for `/api/socket`;
+- forward `/api/`, `/socket.io/`, `/storage/` and every other path to LLMOJ's Nginx;
+- keep the query string of `/storage/` requests, which carries the download signature. Send these requests to LLMOJ's Nginx, which passes them on to the storage server correctly; don't expose the storage server (MinIO) directly.
 
-Database, Redis, MinIO, backend and metrics remain local. Changing an installed origin/port/listener is a migration: back up private config, update public backend/storage URLs, Nginx and any local download override together, then validate and restart. The installer refuses to overwrite an existing instance with different options.
+Judges send their key in the query string of their WebSocket connection. LLMOJ's Nginx doesn't log that path, and logs other paths without query strings. Configure your proxy not to log query strings either, and don't turn on debug logging that records full URLs.
+
+## Changing the address later
+
+The database, Redis, MinIO, the backend and its metrics stay reachable only from the server itself. Changing the public address, port or listening address of an existing installation means changing several settings together: back up the private configuration, then update the backend's public URL, the storage download address, Nginx and any local download override at the same time, check the configuration and restart. The installer won't reinstall over an existing installation with different options.

@@ -1,55 +1,61 @@
-# AI 配置、权限与执行流程
+# AI
 
-[English](AI.md) | 简体中文 | [全部配置](Configuration.zh-CN.md) | [AI 环境变量](AI-Environment.zh-CN.md)
+简体中文 | [English](AI.md) | [Wiki 首页](Home.md) | [配置总览](Configuration.zh-CN.md) | [AI 环境](AI-Environment.zh-CN.md)
 
-本文按仓库内的配置和执行代码核对。AI 配置属于当前登录账号，不是全站共享服务。项目不附带模型、公共 Key 或服务额度。页面入口是 `/ai/configuration`；导入入口是 `/ai/import`，已有题的编辑页提供 AI 操作。
+LLMOJ 可以借助 AI 模型导入题目、翻译和添加标签、估计难度、撰写题解、查找题目出处，以及生成并检验测试数据。每位用户使用**自己的**服务商账号和密钥设置 AI：网站不提供模型、密钥或额度。
 
-仓库维护的 AI 系统指令和 Prompt 统一使用英文，覆盖导入/OCR、翻译、原题搜索与核验、题解、标签、难度、数据生成及修复。生成内容仍遵循原有语言要求：提取时保留原题语言，`zh_CN` 内容仍为中文，`en_US` 内容仍为英文，双语题解要求保持不变。用户输入、题目和搜索资料保留原语言；JSON 字段、评测约束和中文编辑器标签不变。
+- **AI API 配置**（`/ai/configuration`）：你的服务商、模型、联网搜索和用量。
+- **AI 导入**（`/ai/import`）：根据题面创建题目。
+- 题目编辑页中的 **AI** 面板：对已有题目执行 AI 操作。
 
-## 从页面完成配置
+LLMOJ 发给模型的指令是英文的，但模型输出的内容遵循所要求的语言：导入的题面保持原文语言，`zh_CN` 内容用中文撰写，`en_US` 内容用英文撰写。你自己的文本、题目和搜索结果按原样发送。
 
-1. 管理员按下面的权限表授权。用户用自己的账号打开“AI API 配置”。
-2. 选择预设或填写 API 类型、Base URL、Key、模型编号。预设只填写协议和地址，并清空模型选择；它不验证所选模型的能力。
-3. “获取模型列表”会先保存整个表单，再请求模型列表。接口不支持列模型时仍可手工输入模型编号。选择模型后再次保存。
-4. 在“搜索 / MCP”填写搜索服务；无需搜索时可不提供搜索 Key，但其 Base URL 仍须合法。
-5. “保存并测试连通性”先保存整个表单，再对当前页签做真实服务请求。模型测试要求回答 `OK`；搜索测试执行一次搜索，可能消耗额度。测试失败不会撤销已保存配置或清空已保存 Key。
-6. 保存只更新配置，不会自动运行题面、题解或数据任务。回到导入页或题目编辑页，明确点击所需 AI 操作。
+## 设置
 
-Base URL 必须是 HTTP/HTTPS，不能包含用户名、密码、查询参数或片段；长度为 1–2000 字符。模型接口会在地址后追加路径，不要把 `/chat/completions`、`/responses`、`/messages` 或 `/models` 填进模型 Base URL。搜索 MCP 则填写完整 MCP 端点路径。公网域名和地址对所有用户开放。内网、本机和链路本地地址由服务器发起访问而非用户自己的浏览器，因此只允许站点管理员自己的配置使用，或由服务器管理员在 `HYHOJ_AI_PRIVATE_HOSTS` 中列出的主机使用（见 [AI 环境](AI-Environment.zh-CN.md)）；其他用户会得到 `PRIVATE_ENDPOINT_BLOCKED`。每个解析结果都会检查，DNS 本次解析结果绑定到本次连接，不跟随 HTTP 重定向。模型列表和连接测试每个用户最多同时 2 个、全站最多同时 8 个。对于公网访问的 OJ，先设置 [HTTPS](HTTPS.zh-CN.md)。
+1. 请管理员授予你需要的权限（见[权限与任务](#权限与任务)），然后打开 **AI API 配置**。
+2. 选择 **服务商预设**，或自行填写 **API 类型**、Base URL、密钥和模型。预设只会填写 API 类型和 Base URL。
+3. **获取模型列表** 会先保存表单，再加载服务商的模型列表；选择模型后再保存一次。如果服务商无法列出模型，请直接输入模型编号。
+4. 如需联网搜索（用于查找题目出处），请配置 **搜索 / MCP**。
+5. **保存并测试连通性** 会先保存，然后发出一次真实请求：一条简短的模型回复或一次搜索。这可能消耗服务商额度。测试失败不会撤销保存。
 
-## 所有账号配置字段
+保存不会启动任何 AI 操作；请在导入页面或题目的 AI 面板中启动。
 
-下表是 `saveConfiguration` 的配置字段，不是环境变量。表单同时提交 `llm` 和 `search`，即使只修改一个页签，也会验证两组配置。
+**Base URL** 必须使用 HTTP 或 HTTPS，长度 1～2000 个字符，不能包含用户名、密码、查询参数或片段。LLMOJ 会自动添加路径，因此不要包含 `/chat/completions`、`/responses`、`/messages` 或 `/models`；MCP 请填写完整的接口地址。
 
-| 字段 | 初始值 / 缺省行为 | 校验与含义 |
+**内网地址。** 请求从服务器发出，因此内网、本机回环和链路本地地址会让用户访问到服务器所在的网络。只有站点管理员自己的配置，以及服务器管理员在 `HYHOJ_AI_PRIVATE_HOSTS` 中列出的主机（见 [AI 环境](AI-Environment.zh-CN.md)）可以使用这些地址；其他用户会收到 `PRIVATE_ENDPOINT_BLOCKED`。每个解析出的地址都会被检查并固定用于该次连接，也不会跟随重定向。
+
+在公开站点上让用户填写密钥之前，请先配置 [HTTPS](HTTPS.zh-CN.md)。
+
+## 配置字段
+
+以下是配置页面保存的字段。每次保存都会同时检查模型和搜索设置，即使你只修改了其中一项。
+
+| 字段 | 默认值 | 含义 |
 | --- | --- | --- |
-| `llm.type` | `chat` | `chat`、`responses`、`anthropic`，协议对应见下表。 |
-| `llm.baseUrl` | `https://api.openai.com/v1` | HTTP/HTTPS，1–2000 字符，使用前述 URL 规则。 |
-| `llm.apiKey` | 未配置 | 可省略，0–4096 字符。空值/省略仅在 Base URL 与已保存值**完全相同**时保留旧 Key。URL 改变且未给新 Key 时清除旧 Key；即使只是尾部斜线变化也属于不同字符串。调用模型时必须有非空 Key。 |
-| `llm.model` | 空字符串 | 0–200 字符；允许先保存空值以获取模型列表，模型生成与连接测试必须填写模型编号。 |
-| `llm.reasoning` | 空字符串 | 可省略，0–50 字符；空白按服务商默认行为，发送前去掉首尾空白。不同协议/域名的转换见下文。 |
-| `llm.maxTokens` | `16384` | 整数 512–1000000。是输出预算，不是上下文长度；模型可能有更小限制。保存时，`api.deepseek.com` 被自动限制到 393216，并返回调整提示。 |
-| `llm.responsesRecovery` | `auto` | `auto`、`off`、`background`；只对 `responses` 协议有意义，见下文。 |
-| `search.type` | `tavily` | `tavily` 或 `mcp`。 |
-| `search.baseUrl` | `https://api.tavily.com` | 同样的 URL/长度限制；Tavily 后接 `/search`，MCP 使用填入的完整端点。页面切换到 MCP 时预填 `https://mcp.tavily.com/mcp/`。 |
-| `search.apiKey` | 未配置 | 可省略，0–4096 字符；保留/清除规则与模型 Key 相同。当前实现的 Tavily 和 MCP 搜索均要求非空 Key。 |
-| `search.tool` | 空字符串 | 可省略，0–200 字符。仅 MCP 使用；指定名称须与 `tools/list` 完全匹配；留空选第一个名称包含 `search`（不区分大小写）的工具。 |
-| `maxConcurrentJobs` | `3` | 每用户最大运行任务数，整数 1–8。保存时省略会保留旧值，再回落到 3；旧配置无效值读取时回落到 3。它不会改变评测槽位。 |
-| `autoOnSave` | `false` | API DTO 仍要求布尔值，属于兼容字段；服务端保存/返回均强制为 `false`，页面也始终提交 `false`。传 `true` 不会恢复自动执行。 |
-| `clearLlmKey` | 省略 / `false` | 保存请求的布尔控制项；为 `true` 时清除模型 Key，优先于本次填写的新 Key。不是持久化配置字段。 |
-| `clearSearchKey` | 省略 / `false` | 同上，清除搜索 Key。页面“删除已保存的密钥”仅对当前页签设置对应标志。 |
+| `llm.type` | `chat` | API 类型：`chat`、`responses` 或 `anthropic`（见下文） |
+| `llm.baseUrl` | `https://api.openai.com/v1` | 服务商地址 |
+| `llm.apiKey` | 无 | 最多 4096 个字符。留空时，只有 Base URL 完全相同才保留已保存的密钥；URL 的任何改动（哪怕只是末尾的斜杠）都会清除它 |
+| `llm.model` | 空 | 模型编号，最多 200 个字符。生成和测试时必须填写 |
+| `llm.reasoning` | 空 | 推理强度或 token 预算，最多 50 个字符；为空时使用服务商的默认值（见下文） |
+| `llm.maxTokens` | `16384` | **输出 token 上限**，512～1000000：是输出上限，不是上下文长度。对 `api.deepseek.com` 最多为 393216，页面会提示调整 |
+| `llm.responsesRecovery` | `auto` | `responses` 类型的 **断线恢复**：`auto`、`off` 或 `background` |
+| `search.type` | `tavily` | `tavily` 或 `mcp` |
+| `search.baseUrl` | `https://api.tavily.com` | Tavily 会加上 `/search`；MCP 按原样使用。切换到 MCP 时自动填入 `https://mcp.tavily.com/mcp/` |
+| `search.apiKey` | 无 | 保留和清除规则与模型密钥相同。Tavily 和 MCP 都需要密钥 |
+| `search.tool` | 空 | 仅 MCP：要调用的工具名，必须与 `tools/list` 中的名称完全一致。为空时使用第一个名称包含 `search` 的工具 |
+| `maxConcurrentJobs` | `3` | **最大并行 AI 任务数**：你同时运行的任务数，1～8 |
 
-`llm.hasKey`、`search.hasKey` 是只读状态，不是密钥值；`presets` 和 `parallelism` 是页面元数据，不要作为保存参数。Key 保存后不会回填到输入框。`parallelism` 返回 `min=1`、`max=8`、`globalMax=8`、`maxQueuedJobs=100`；最后一个名称实际限制的是该用户**排队中加运行中**的任务总数。
+已保存的密钥永远不会返回给浏览器；页面只显示是否已保存。**删除已保存的密钥** 会删除当前标签页的密钥。
 
-### 协议与服务商预设
+### API 类型与预设
 
-| `type` | 生成路径 / 认证 | 输出预算与推理参数 |
+| 类型 | 接口与认证 | 输出上限与推理 |
 | --- | --- | --- |
-| `chat` | `/chat/completions`；Bearer Key | `api.openai.com` 使用 `max_completion_tokens`，其他地址使用 `max_tokens`。一般兼容服务发送 `reasoning_effort`。 |
-| `responses` | `/responses`；Bearer Key | 使用 `max_output_tokens`；非空推理设置写入 `reasoning.effort`。 |
-| `anthropic` | `/messages`；`x-api-key`，协议头 `anthropic-version: 2023-06-01` | 使用 `max_tokens`；具体推理转换见下文。 |
+| `chat` | `/chat/completions`，Bearer 密钥 | `api.openai.com` 使用 `max_completion_tokens`，其他服务商使用 `max_tokens`；推理以 `reasoning_effort` 发送 |
+| `responses` | `/responses`，Bearer 密钥 | `max_output_tokens`；推理以 `reasoning.effort` 发送 |
+| `anthropic` | `/messages`，`x-api-key` 和 `anthropic-version: 2023-06-01` | `max_tokens`；思考方式见下文 |
 
-模型发现对三种协议均请求 Base URL 下的 `/models`；Anthropic 最多翻 20 页后去重排序。预设只是以下内置地址，不表示已对这些服务商的全部模型做真实验收：
+模型列表来自 Base URL 下的 `/models`（Anthropic 最多读取 20 页）。预设如下：
 
 | 预设 | 类型 | Base URL |
 | --- | --- | --- |
@@ -61,104 +67,113 @@ Base URL 必须是 HTTP/HTTPS，不能包含用户名、密码、查询参数或
 | Mistral | `chat` | `https://api.mistral.ai/v1` |
 | OpenRouter | `chat` | `https://openrouter.ai/api/v1` |
 | SiliconFlow | `chat` | `https://api.siliconflow.cn/v1` |
-| 阿里云百炼 | `chat` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| 月之暗面 | `chat` | `https://api.moonshot.cn/v1` |
+| 阿里云 | `chat` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| Moonshot | `chat` | `https://api.moonshot.cn/v1` |
 
-推理设置按当前实现转换，是否被模型接受仍取决于服务商：
+预设只填写类型和地址，并不代表该服务商的每个模型都在 LLMOJ 中测试过。
 
-- DeepSeek 官方域名：只接受 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`、`ultra`。`chat` 下 `none` 关闭 `thinking`，其他值开启并发送 `reasoning_effort`。最大输出 393216 的限制也按域名识别，不会自动识别第三方代理。
-- Anthropic：空值或 `none` 不开启推理；纯数字须至少 1024 且严格小于 `maxTokens`，在生成/连接测试前校验，发送 `thinking.budget_tokens`。其他非空值发送 adaptive thinking 与 `output_config.effort`，未在本地枚举所有模型可用值。
-- 阿里云 `*dashscope.aliyuncs.com` 的 `chat`：`none` 关闭 `enable_thinking`；其他值开启，纯数字还发送 `thinking_budget`。
-- OpenRouter 的 `chat`：`none` 发送 `reasoning.enabled=false`，其他值发送 `reasoning.effort`。
-- 其他 `chat` 端点直接发送 `reasoning_effort`；不能据此认定每个兼容端点都支持推理参数或图像输入。
+**推理强度**按以下方式传递；你的模型必须支持收到的参数。
+- **DeepSeek**（`api.deepseek.com`）：`none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` 或 `ultra`。`none` 关闭思考，其他值以该强度开启思考。
+- **Anthropic：** 为空或 `none` 时不开启思考。数字表示思考的 token 预算：至少 1024，且小于输出 token 上限。其他值以该强度请求自适应思考。
+- **阿里云**（`dashscope.aliyuncs.com`，`chat`）：`none` 关闭思考，其他值开启思考；数字还会设置思考预算。
+- **OpenRouter**（`chat`）：`none` 关闭推理，其他值设置推理强度。
+- **其他 `chat` 服务商**按原样收到 `reasoning_effort`。
 
-### Responses 断线恢复
+### 断线恢复
 
-`auto` 只为 `responses` + 官方 `api.openai.com` 启用后台响应恢复；其他兼容端点默认关闭。`off` 明确关闭。`background` 为其他支持后台 Responses 的端点显式启用；DeepSeek 官方端点拒绝该组合。
-
-恢复请求包含 `background: true`、`store: false`，已有响应 ID 会按当前用户、任务和请求指纹保存。获得 ID 后可轮询继续取结果；创建请求的响应丢失时不会盲目重复 POST。Key、地址或请求内容改变会改变指纹，不能承诺继续恢复旧请求。轮询窗口、恢复超时是源码常量，见 [AI 环境与固定限制](AI-Environment.zh-CN.md)。这不是所有 OpenAI-compatible 服务的通用断线重试功能。
+开启 **断线恢复** 后，`responses` 请求在服务商处后台运行（`background: true`、`store: false`），LLMOJ 保存响应 ID 并轮询结果。连接中断时，任务可以继续获取同一个响应，而不必为新请求付费；如果只是回复丢失，LLMOJ 永远不会重新发送原请求。`auto` 只对官方 `api.openai.com` 使用这一方式；`background` 为其他支持的服务商开启（`api.deepseek.com` 不支持）；`off` 关闭。修改密钥、地址或请求内容后会成为新的请求。
 
 ### 搜索与 MCP
 
-Tavily 每次搜索最多取 5 项、使用 `advanced` 深度，不请求聚合答案；请求计入提供商用量。MCP 支持 Streamable HTTP 的 JSON/事件流响应，顺序执行 `initialize`、`notifications/initialized`、`tools/list`、`tools/call`，保留服务端会话头。不是本地 stdio MCP 启动器，也不会读取用户电脑上的 MCP 配置。
+Tavily 以 `advanced` 搜索请求最多五条结果。MCP 服务器通过 Streamable HTTP（JSON 或事件流）访问，使用 `initialize`、`notifications/initialized`、`tools/list` 和 `tools/call`；不支持本地 stdio MCP 服务器。查询以工具接受的 `query`、`search_query` 或 `q` 传递，接受时还会加上 `max_results=5`；需要其他参数的工具可能无法使用。对于 Tavily 托管的 MCP，LLMOJ 会自行把密钥加到地址中：不要把密钥写进 Base URL。
 
-工具参数只自动适配 `query`、`search_query`、`q` 三种查询字段（依次优先），若 schema 有 `max_results` 则发送 5；需要其他必填参数的任意 MCP 工具不保证兼容。Tavily 托管 MCP 的 Key 由后端加入其认证查询参数，不要自行把 Key 写入 Base URL。未配置搜索 Key 时，单独执行“来源”操作会以 `SEARCH_NOT_CONFIGURED` 失败；组合任务跳过该检索步骤并记录未配置状态，其他步骤仍可能运行。不能把“来源未经核实”解释为已找到原题。
+没有搜索密钥时，**出处**操作会以 `SEARCH_NOT_CONFIGURED` 失败，组合操作则跳过查找出处并继续。无法核实的出处永远不会被当作原题。
 
-## 权限、任务和生效时机
+## 权限与任务
 
-| 操作 | 所需权限 / 隔离边界 |
+| 操作 | 需要 |
 | --- | --- |
-| 读取/保存 AI 配置，列模型，测试连接 | `ManageAiConfiguration`；只能操作自己的配置。 |
-| 开始或重试 AI 任务 | `UseAi`；已有题必须有题目 `Modify` 权限。 |
-| 导入新题及准备 ZIP 附件 | `UseAi`、`ImportProblem`、`GenerateTestdata`，并且有创建题目权限。 |
-| `testdata`、`all`、`import` | 额外要求 `GenerateTestdata`；数据写入还检查 `EditProblemData` 决策及题目权限。 |
-| 查看任务/用量，取消任务 | 登录后仅能访问自己的任务/用量；取消也只按拥有者查找任务。管理员身份不把其他用户的 Key 暴露出来。 |
+| 修改 AI 配置、获取模型列表、测试连通性 | `ManageAiConfiguration`，只能操作自己的配置 |
+| 对题目启动或重试 AI 操作 | `UseAi` 和修改该题的权限 |
+| 生成测试数据（`testdata`、`all`） | 另外需要 `GenerateTestdata` 和编辑该题数据的权限 |
+| 导入题目（包括 ZIP 附件） | `UseAi`、`ImportProblem`、`GenerateTestdata` 和创建题目的权限 |
+| 查看或取消任务和用量 | 只能查看自己的。管理员也看不到其他用户的密钥 |
 
-权限决策包括全局允许/拒绝和题目 ACL；写入前会重新检查当前权限、任务状态与题目快照。任务运行期间改了题面、样例、评测配置或撤销权限，可能使任务以冲突/无权限结束，而不是覆盖用户刚保存的内容。
+写入任何内容之前都会再次检查权限。如果任务运行期间有人修改了题面、样例或评测设置，或者你的权限被撤销，任务会以冲突或权限错误停止，而不会覆盖这些修改。
 
-- 保存配置立即入库；列模型和连接测试读取最新配置。任务在开始实际执行时读取一份配置；已在运行的任务不会在每个阶段热切换 Key/模型，新任务及失败后重新执行的任务读取当时配置。
-- 调度器使用最新的每用户并发设置来接纳后续任务，全站最多 8 个运行任务，同一题不会同时运行两个 AI 任务，每用户排队与运行总数最多 100。降低并发不会主动取消已运行任务。
-- 本机 AI runner 最多接纳 8 个任务，固定同时执行 3 条生成流程，并与普通提交共用 judge 执行槽位。增加 `maxConcurrentJobs` 不能替代 [judge CPU/槽位配置](Judge-Configuration.zh-CN.md)。
-- 导入按“题面识别→来源→翻译→标签→难度→题解→测试数据”执行；`all` 不包含新建题步骤；`metadata` 只执行来源、翻译、标签、难度。`automatic: true` 的旧自动请求直接返回跳过，不恢复自动保存功能。
-- 数据数量默认 20，允许 5–1000。为了精确表达子任务等分分值，实际数量可能增加至不超过 1000，并有提示。AI 导入支持传统、交互、通信题；提交答案题需要手工创建。通信题可自动判断，也可指定 `run-twice` 或 C++ `grader` 接口。
-- 导入前端接受不超过 10 MiB 的 Markdown/文本/PNG/JPEG/WebP/GIF 题面文件；服务端 Markdown 上限为 500000 字符，图像 data URL 上限为 15000000 字符。ZIP 上限 64 MiB，后端准备阶段还要求至少 22 字节且验证 ZIP 凭据与拥有者；凭据入队有效期为 24 小时。文件大小合格不代表内容合格。
+- 任务在开始时读取你的配置，并在整个过程中使用它。修改只对之后启动（或重试）的任务生效。
+- 全站同时最多运行 8 个任务，每道题同时只有一个。每位用户最多同时运行 **最大并行 AI 任务数** 个任务，运行中和排队中的总数最多 100 个。调低上限不会停止正在运行的任务。
+- 生成的程序由本机评测机编译和运行，它同时最多运行三个 AI 流程，并与普通评测共用评测槽；见[评测配置](Judge-Configuration.zh-CN.md)。
+- **导入**依次执行：识别题面、出处、翻译、标签、难度、题解、测试数据。**全部**执行同样的步骤但不创建题目；**元数据**只执行出处、翻译、标签和难度。
+- 可以要求生成 5～1000 组测试数据（默认 20 组）。为了让子任务分数能够整除，数量可能会被调高（最多 1000），页面会提示。导入支持传统题、交互题和通信题（通信方式为 `run-twice` 或 C++ `grader`，自动识别或手动选择）；提交答案题请手动创建。
+- 导入接受最大 10 MiB 的题面文件（Markdown 或文本，或 PNG、JPEG、WebP、GIF 图片），以及最大 64 MiB 的 ZIP 附件。
+
+## 站点限制
+
+站点管理员可以在 **网站管理**（`/site-management`）的 **AI** 部分限制 AI 的使用。修改立即对所有账号生效，并写入审计日志。
+
+| 设置 | 默认值 | 含义 |
+| --- | --- | --- |
+| **暂停 AI** | 关闭 | 暂停期间不会发出任何 AI 请求：没有模型调用、搜索、模型列表或连通性测试。正在进行的请求会完成。排队中和运行中的任务会等待，恢复后从中断处继续 |
+| **每个账号 24 小时内的 token 数** | 0（不限制） | 服务商报告的输入和输出 token，按任意 24 小时计算 |
+| **每个账号 24 小时内的模型和搜索请求数** | 0（不限制） | 模型生成和联网搜索的次数，按任意 24 小时计算 |
+| **每个任务的模型和搜索请求数** | 500 | 一个任务所有尝试（包括重试）的总数（0 表示不限制） |
+| **同时进行的 AI 请求数** | 16 | 全站（每个后端进程）的数量。任务会等待空位；没有空位时，模型列表和连通性测试会被拒绝 |
+
+限制计入请求所使用的配置（也就是服务商密钥）所属的账号。模型列表、后台响应的进度查询和 MCP 握手不计为请求，但同样会在暂停时停止，并等待空位。连通性测试会计入：它会发出真实的模型请求或搜索。
+
+**token 如何计算。** 模型请求发出之前，会先占用它可能使用的最大 token 数：输出上限，加上对输入的宽松估计（每个 token 约三个英文字符或一个中文字符，每张图片 4096）。服务商报告实际用量后，用报告的数字代替占用的数量。如果服务商没有报告，或请求被中断，占用的数量会一直按最大值计算。服务商以错误状态拒绝的请求不计入。因此，如果已用量加上请求可能的用量会超过上限，请求就会被拒绝；如果单个请求的输出上限本身就超过上限，则会提示调低 **输出 token 上限**。
+
+用户可以在 **用量** 中查看自己最近 24 小时内已使用的额度，包括仍被占用的 token。
+
+任务因限制而停止时，会以说明是哪项限制的信息失败，并保留进度：额度允许后可以重试。这些额度不是金额：LLMOJ 不知道服务商的价格，被中断的请求也可能仍被服务商收费。
+
+暂停 AI 不会清空队列：[升级器](Upgrade.zh-CN.md)仍会等待排队中的 AI 任务，因此升级前请取消它们或等待其完成。
 
 ## 测试数据验证与覆盖
 
-传统题的数据生成在发布前执行以下检查，样例校验只是其中一步：
+对于传统题，生成的测试数据在发布前要通过以下检查：
 
-1. 先分析合法的边界、退化结构和复杂度反例，形成覆盖计划。计划说明正确算法、适用于小数据的精确参考算法，以及 1–4 个可实际运行的错误或低效实现，其中至少有一个错误实现。
-2. 分别生成小数据生成器、精确参考程序和一份独立高效正解。生成这些程序时提供题面、约束和覆盖计划，不提供已有生成器、标程或其他实现的代码。小数据优先使用暴力枚举等直接方法；题目不存在合法的小规模输入时，使用能处理最小合法规模的精确方法。
-3. 默认至少生成 64 组合法小数据，并覆盖每个子任务；子任务超过 64 个时相应增加组数。输入经过独立 validator 检查，再将标程和独立正解的输出与精确参考程序对拍。
-4. 所有正式数据都由独立正解交叉校验。多解或浮点题使用该题实际 checker/SPJ 判定，允许不同的合法输出，不要求与标程逐字相同。
-5. 编译并运行覆盖计划中的候选程序，验证正式数据确实能使每个目标失败。只有对拍、正解交叉校验和所有目标的反例验证均通过，才启用本次生成的数据。
+1. **规划。** 模型分析题目的限制、退化情形和复杂度，规划覆盖方案：正确算法、用于小数据的精确检查程序（“oracle”），以及一到四个需要击败的、看似合理的错误或过慢程序，其中至少一个是错误程序。
+2. **独立程序。** 小数据生成器、oracle 和另一个高效解法各自单独编写，只依据题面、限制和规划，看不到主生成器或参考解法。oracle 优先使用简单的穷举方法；如果没有合法的极小数据，则使用在最小合法规模下可行的精确方法。
+3. **对拍。** 至少 64 组合法的小数据（子任务超过 64 个时更多），覆盖每个子任务，先由独立的校验器检查，然后参考解法和另一个解法都必须与 oracle 在全部数据上一致。
+4. **交叉检查。** 每组最终测试数据都用另一个解法检查，并使用真实的 checker，因此多解和浮点输出的题目不会逐字比较。
+5. **挑战。** 规划中的错误和过慢程序会被编译和运行，每个都必须在导出的某组最终测试数据上失败。
 
-候选程序也须先通过正式样例。错误实现还须在每个适用子任务中通过至少一组小数据；低效实现须通过所有适用的小数据。正式数据上的 WA、RE、TLE、MLE 可作为错误实现的反例；低效实现只接受由实际时间或内存限制产生的 TLE/MLE，出现 WA/RE 会使该探针验证失败。编译失败、checker 的 `_fail` 或执行环境故障不能算作卡掉目标。
+只有全部检查通过，数据才会发布。
 
-生成器优先构造目标所需的合法数据，而不是只生成大规模随机输入。例如，最短路题只有在约束允许且真实图结构能触发超时时，才把某个 SPFA 实现视为低效目标；不能仅按算法名称拒绝程序。正确的替代算法按实际判题规则验收。
+挑战程序必须通过所有官方样例。错误程序必须在其针对的每个子任务中至少通过一组小数据，过慢程序必须通过其适用的所有小数据。错误程序在最终测试数据上答案错误、运行错误、超时或超内存都算被击败；过慢程序只有真正超出时间或内存限制才算（答案错误或崩溃会使该探测无效）。编译错误、checker 失败和基础设施错误都不算击败程序。
 
-若初始正式数据未覆盖所有目标，后端最多再尝试 16 次反例搜索。找到反例后只替换同一子任务内的普通测试点，保留索引 1/2 的最小/最大边界测试点和已经卡掉目标的测试点，不改变测试点数量及子任务分值。搜索耗尽仍有目标通过时，本次数据生成失败，不启用未通过验证的数据。
+生成器会为每个目标构造特定的合法输入，而不只依赖大规模随机数据。例如，最短路题中的 SPFA 只有在限制允许构造出真正让它超时的图时，才会被当作“过慢”目标；程序永远不会因算法名称而被拒绝，合法的其他算法会被真实的 checker 接受。
 
-任务页面显示对拍数量、独立正解校验数量，以及各目标的失败判定与正式测试点编号。接口 `result.testdataQuality` 还包含 `extraAttemptsUsed`，记录额外搜索次数。`data.yaml` 还保存 `qualityPlan`、`qualityValidation`、`finalCaseIndices` 和 `verificationSources`，记录覆盖计划、验证结果、最终子任务/索引及辅助源码的 SHA-256。这里的 `seed` 字段是生成器场景索引，不是可复现随机数种子；实际导出的输入文件才是反例凭据。小数据生成器、精确参考程序、独立正解和候选程序源码保留在私有任务状态，不随题目数据公开导出。
+如果某个目标通过了第一批最终测试，最多再尝试 16 次构造反例。有用的反例会替换同一子任务中的一组普通数据；最小和最大边界数据以及所有已有反例都会保留，数据组数和子任务分数不变。如果仍有目标存活，生成失败，数据不会发布。
 
-交互题、通信题保留原有协议模拟与校验，任务会提示 `TESTDATA_QUALITY_PROTOCOL_UNSUPPORTED`，表示上述独立对拍与反例验证暂不可用。有限数据和有限候选程序无法证明所有错误或低效实现都会失败，也不能证明标程绝对正确。新增的独立程序和候选程序生成会增加模型调用、费用及执行时间；并发和资源限制见 [AI 环境与固定限制](AI-Environment.zh-CN.md)。
+任务页面会显示对拍数量、另一个解法的检查结果、每个目标的结果以及击败它的测试数据；`result.testdataQuality.extraAttemptsUsed` 记录额外尝试次数。`data.yaml` 记录规划（`qualityPlan`）、结果（`qualityValidation`）、最终数据编号（`finalCaseIndices`）以及辅助程序的 SHA-256（`verificationSources`）。`seed` 是场景编号而不是随机种子：导出的输入本身就是证据。辅助程序只保存在任务中，不会随数据发布。
 
-## 文件读取、取消与生成失败
+交互题和通信题保留其协议模拟和检查，但无法使用这种独立测试，并会收到 `TESTDATA_QUALITY_PROTOCOL_UNSUPPORTED` 警告。无论通过多少测试，都不能证明所有错误或过慢的程序都会失败，也不能证明参考解法正确。这些检查需要更多的模型调用、费用和时间；见 [AI 环境](AI-Environment.zh-CN.md)。
 
-选择文件时先完成读取，再清空输入控件；ZIP 先形成浏览器内存中的文件副本。读取失败会显示错误，不继续上传。曾经真实复现的 Linux Snap Firefox 故障由 AppArmor 拒绝读取 root 所有的测试文件触发：把自己要上传的文件放在当前桌面用户有权访问的目录，并用该用户拥有的副本。不要为此关闭浏览器沙箱或全局放宽 AppArmor。
+## 上传、取消与失败
 
-附件只有取得明确 HTTP 2xx 才继续创建任务。上传阶段可点击“取消上传”；离开页面会取消尚未完成的读取/准备/上传，并阻止其稍后再发送创建任务请求。若服务器已经接受任务，关闭页面不会撤回它，应在“我的 AI 任务”取消；创建请求超时应先查看任务列表，避免重复导入。取消不能撤销已完成的模型收费或已发布步骤。
+- 文件上传成功后才会创建任务。**取消上传** 可以停止准备或上传，离开页面也会取消它们。服务器接受任务之后，关闭页面不会停止任务：请在 **我的 AI 任务** 中取消。如果启动任务超时，请先在 **我的 AI 任务** 中查看，再决定是否重新导入。
+- 取消无法撤销服务商已经收取的费用，也无法撤销任务已经发布的内容。
+- 如果生成的 `make.cpp` 无法编译，模型有一次修复的机会。上传的 checker、交互器、manager 和 grader 永远不会被改写。第二次失败、样例失败或数据检查失败都会使任务失败。
+- 题解在发布前会检查其中关于出处和计分的说法；这不能代替你自己审阅其中的算法。
+- 如果浏览器无法读取文件（例如以 Snap 安装的 Firefox 读取 root 拥有的文件），请把文件复制到桌面用户拥有的文件夹。不要关闭浏览器的沙箱。
 
-生成器仅在 AI 自己生成的 `make.cpp` 出现明确的编译失败时自动修复一次，修复预算持久化；不会循环修复，也不会自动改写用户附加的 checker、interactor、manager 或 grader。第二次失败、样例失败、数据校验失败继续作为失败报告。自动修复会额外调用模型。题解来源和部分分描述会经过事实校验；失败时阻止该次发布并给出可重试提示，仍不能代替人工审阅所有算法论证。
+## AI 在哪里运行，密钥保存在哪里
 
-## 执行位置与密钥备份
+模型和搜索请求由后端发出。编译和运行生成的程序使用**同一台服务器**上的评测机，通过本机 socket 进行，不能使用远程评测机。因此 AI 数据生成需要 `all` 模式；`web` 站点仍可以使用 AI 进行编辑、翻译和搜索。见[分布式评测](Distributed-Judging.zh-CN.md#ai)。
 
-模型与搜索请求由后端发送；生成、编译、运行及数据验证交给**同机** judge 的 UNIX socket worker。普通评测可以分布到远程 judge，但当前没有远程 AI runner 协议。`--role all` 提供本机 worker；`--role web` 本身不提供生成程序的执行环境。需要完整 AI 数据生成时，在网页节点保留本机 runner，再让远程 judge 分担普通提交。目录、socket 和权限见 [AI 环境变量](AI-Environment.zh-CN.md)。
+AI 配置保存在 `ai_configuration` 表中，每份都用站点主密钥以 AES-256-GCM 加密，主密钥默认为 `data/ai/master.key`（目录权限 `0700`，密钥 `0600`，所有者都是后端的运行用户）。如果已有保存的配置但密钥缺失，后端会拒绝启动，而不是创建新密钥。**请同时备份数据库和主密钥**：其他密钥无法解密。见 [AI 环境](AI-Environment.zh-CN.md)。
 
-数据库 `ai_configuration` 按 `userId` 存储整个加密配置；算法为 AES-256-GCM。主密钥默认位于 `data/ai/master.key`，目录 `0700`、文件 `0600`，必须由后端服务用户拥有，且为单硬链接的普通 32 字节文件；拒绝符号链接和不合格文件。数据库已有加密配置而主密钥丢失时，后端启动失败，不能自动新建一个替换旧密钥。
+用量记录保存每次请求的服务商、模型、耗时和报告的用量，从不保存密钥、提示词或回复。**用量** 可显示 1～366 天（默认 30 天）；服务商没有报告的用量在那里不做估计，失败和重试的请求都计为调用。
 
-备份数据库时必须同时安全备份对应主密钥；换一个不匹配的 Key 无法解密原配置。不要把数据库、主密钥、会话或提供商 Key 放入源码/报告包。用户配置读取仅返回 `hasKey`，用量记录保存请求元数据和服务商报告的消耗，不保存 Key、提示词或模型响应正文。用量默认查看 30 天，API 支持 1–366 天；没有提供商用量的请求不估算 token，失败和重试也属于调用。
+## 题解与自测
 
-## 已验证范围
+AI 撰写的题解显示在题目的 **题解** 标签和作者的 **我的讨论** 中；见[题解](Solutions.zh-CN.md)。
 
-此前在 Ubuntu 24.04 amd64 的真实部署中，使用真实 DeepSeek/Tavily 和 Firefox 完成过部分模型配置、搜索、图片/文字导入、题目内容与数据生成、提交评测和多用户权限路径。上传修复还经过实际 Firefox 组件回归，包括不可读文件、上传 HTTP 错误/超时、取消和离页；模拟服务用来控制网络响应时机。这不等于全部模型服务商、全部 MCP 服务、所有输出质量或真实多机 AI worker 已验收。
+为传统题发布正式数据时，还会保存生成这些数据的 make.cpp、std.cpp 和输入校验器，供之后开启[自测](Self-Evaluation.zh-CN.md)的 NOI / OI 比赛使用。在 **配置 Self Eval** 中，**AI 生成正式数据与 Self Eval 程序** 会运行测试数据操作，并使用该管理员自己的 AI 配置和权限。
 
-此版本后续修复还包括隔离单测、模拟服务、真实数据库或真实沙盒回归；各类测试只证明其实际覆盖范围。本次 Wiki 更新按源码核对配置，没有重新进行全新安装或完整付费 AI 业务验收。
+## 来源
 
-## 源码依据
-
-- [配置 DTO、范围与请求参数](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai.dto.ts)、[默认值和服务商预设](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai.types.ts)
-- [服务商协议实现](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-provider.ts)、[预算校验](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-validation.ts)、[Responses 恢复](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-responses.ts)
-- [权限、任务调度与写入](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.service.ts)、[密钥生命周期](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/backend/src/ai/ai-crypto.ts)
-- [配置界面](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/pages/ai/AiConfigurationPage.tsx)、[导入界面](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/frontend/src/pages/ai/AiImportPage.tsx)
-- [测试数据覆盖计划与验收](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-testdata-quality.ts)、[对拍与反例验证](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiQuality.ts)、[runner 执行与判定](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiRunner.ts)
-
-## 题解保存位置
-
-AI 新生成的题解显示在对应题目页内的“题解”栏目，仍属于讨论并出现在作者的“我的讨论”中。已有 AI 题解只通过明确的任务讨论 ID、题目和作者校验进行迁移；普通讨论不会按标题自动分类。参阅 [题解](Solutions.zh-CN.md)。
-
-## 为 NOI 比赛准备 Self Eval
-
-传统题的正式数据发布同时绑定本次实际使用的不可变 `make.cpp`、`std.cpp` 和输入校验器版本，供以后已开启 Self Eval 的 NOI / OI 比赛复用。其它题型和普通题库不开放 Self Eval 运行。
-
-比赛管理员可在赛前从比赛题目页的“自测”进入“配置 Self Eval”，点击“AI 生成正式数据与 Self Eval 程序”。该按钮运行已有 AI `testdata` 流程，会重新生成并更新本题正式评测数据；需要自己的已配置 AI 服务及相应 AI、出题和数据编辑权限。任务完成后界面载入同版 make/std，管理员再点击“准备预测试数据”，并沿用正式 checker/SPJ。生成或准备失败不会开放不完整的预测试集。手工维护 make/std 和全场次数限制见 [Self Eval](Self-Evaluation.zh-CN.md)。
+[ai.dto.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.dto.ts)、[ai.types.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.types.ts)、[ai-provider.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-provider.ts)、[ai-admission.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-admission.service.ts)、[ai-responses.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-responses.ts)、[ai.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.service.ts)、[ai-crypto.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-crypto.ts)、[ai-testdata-quality.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-testdata-quality.ts)、[aiQuality.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiQuality.ts)、[aiRunner.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiRunner.ts)。

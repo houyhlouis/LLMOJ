@@ -1,12 +1,17 @@
-# 独立评测机安装
+# 远程评测机
 
-[English](Remote-Judge.md) | 简体中文
+简体中文 | [English](Remote-Judge.md) | [Wiki 首页](Home.md)
 
-本教程只安装 judge，不安装网页、数据库、Redis 或 MinIO。每台评测机使用独立 key，主动连接网页服务器。目标为 Ubuntu 24.04 / 26.04 amd64（26.04 完整安装未验收）、systemd 254+、统一 cgroup v2，本机评测至少 2 个有效逻辑 CPU、256 MiB 有效内存（1 个执行槽）和 30 GiB 空闲空间；在评测机上编译需要更多内存，建议 8 GiB。使用普通虚拟机或物理机；限制 namespaces、挂载或 cgroup 委托的容器不适用。
+本教程在独立的服务器上安装评测机，不安装网站、数据库、Redis 或 MinIO。评测机使用自己的密钥主动连接站点，因此站点不需要访问评测机上的任何端口。
 
-## 1. 下载同版本源码
+需要：
+- Ubuntu 24.04 或 26.04（amd64），systemd 254 或更高版本，cgroup v2。Ubuntu 26.04 尚未完整测试。限制命名空间、挂载或 cgroup 的容器无法使用。
+- 一个评测槽至少需要 2 个 CPU 和 256 MiB 内存，以及 30 GiB 空闲磁盘空间。在评测机上构建需要更多内存，建议 8 GiB。
+- 一台已在站点上注册的评测机及其密钥（见[分布式评测](Distributed-Judging.zh-CN.md)）。
 
-先在网页节点查看 `config/install-complete.json` 的 `sourceCommit`，或使用双方统一的发布标签。以下命令中的仓库和提交必须替换：
+## 1. 下载与站点相同的版本
+
+评测机必须运行与站点相同的版本。在站点的 `config/install-complete.json` 中查看 `sourceCommit`，或在两边使用相同的发布标签。然后执行：
 
 ```bash
 sudo apt-get update
@@ -21,9 +26,9 @@ if [ ! -f apps/judge/vendor/testlib/testlib.h ]; then
 fi
 ```
 
-## 2. 安装固定 Node 和 pnpm，构建 judge
+## 2. 安装 Node.js 和 pnpm 并构建评测机
 
-以下版本和校验值与一键安装器一致。校验失败时停止，不跳过校验。
+以下版本和校验值与安装器相同。如果校验失败，请停止。
 
 ```bash
 OJ_NODE_STAGE=$(mktemp -d)
@@ -47,7 +52,7 @@ sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_module
   NODE_OPTIONS=--max-old-space-size=2300 pnpm install --frozen-lockfile --store-dir runtime/pnpm-store
 ```
 
-继续使用相同工具路径构建：
+然后用同样的工具构建：
 
 ```bash
 sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
@@ -60,11 +65,11 @@ sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_module
   '
 ```
 
-此步骤安装工作区依赖；build:artifacts 也构建共享前端/bootstrap 产物，但不会在评测机上安装或启动网页服务。
+`build:artifacts` 也会构建与网站共用的文件，但不会在评测机上安装或启动网站。
 
-## 3. 准备原版 rootfs
+## 3. 准备沙箱镜像
 
-按 [Docker 官方 Ubuntu 安装说明](https://docs.docker.com/engine/install/ubuntu/) 安装 Docker Engine 与 buildx；自定义源见 [Docker 源](Docker-Sources.zh-CN.md)。然后执行：
+按 [Docker 的 Ubuntu 安装说明](https://docs.docker.com/engine/install/ubuntu/) 安装 Docker Engine 和 buildx（其他下载源见 [Docker 源](Docker-Sources.zh-CN.md)），然后构建镜像：
 
 ```bash
 sudo docker info
@@ -73,20 +78,18 @@ sudo env BUILDX_BUILDER=default bash deploy/sandbox/build.sh build
 bash deploy/sandbox/build.sh plan
 ```
 
-用输出的实际 `ROOTFS_ID` 和 `ARCHIVE` 路径进行暂存。此处使用与一键安装器一致的验证配置：编译 x32，但不执行 x32 程序；仍完整验证 amd64/i386 和各语言。
+用构建输出的 `ROOTFS_ID` 和压缩包路径安装镜像。与安装器一样，x32 程序只编译不运行，其他检查照常进行。
 
 ```bash
 sudo env LIBREOJ_X32_SUPPORTED=0 unshare --net --mount --propagation private -- \
   bash deploy/sandbox/build.sh stage /opt/LLMOJ/runtime/sandbox-archives/rootfs-ACTUAL_ROOTFS_ID.tar.gz
 ```
 
-也可以在可信构建机上构建相同配方，复制 `rootfs-<ID>.tar.gz` 及其 `.sha256` 到评测机，再执行暂存与语言验证；这样评测机本身无需 Docker。不要混用不同版本的 rootfs。Docker 仅用于构建，每次提交由原生 `simple-sandbox` 执行。
+如果不想在评测机上安装 Docker，也可以在一台可信的机器上用相同配方构建，把 `rootfs-<ID>.tar.gz` 及其 `.sha256` 文件复制到评测机，再按上面的方法安装。不要混用不同版本。Docker 只用于构建镜像：提交的程序在 LLMOJ 自己的沙箱中运行。
 
-## 4. 保存 key 并生成远程配置
+## 4. 保存密钥并生成配置
 
-先按 [分布式教程](Distributed-Judging.zh-CN.md) 注册该节点，取得独立 key。用编辑器把 key 单独一行写入文件，避免出现在命令历史中：
-
-以下创建 key 文件的命令仅用于首次准备；已有 `/root/judge-01.key` 时不要覆盖，用原文件。
+用编辑器把评测机密钥写成一行，以免它出现在 shell 历史记录中。如果 `/root/judge-01.key` 已经存在，请保留它，不要重新创建。
 
 ```bash
 sudo install -m 0600 /dev/null /root/judge-01.key
@@ -99,13 +102,15 @@ sudo env HYHOJ_ROOT=/opt/LLMOJ NODE_BINARY=/opt/LLMOJ/runtime/node/bin/node \
   python3 deploy/configure-judge.py
 ```
 
-网页 URL 必须是 origin，不带 `/api`。key 文件必须为 root 所有、`0600` 的普通文件；脚本不输出 key。首次生成显式槽数须符合有效 CPU、内存和 libuv 的 511 上限；省略 `OJ_JUDGE_SLOTS` 时默认值与最大值均为 `min(有效 CPU 数-1, 有效内存 MiB//256, 511)`，不额外预留内存；1 个有效 CPU 或内存不足 256 MiB 时容量为 0，会拒绝生成评测配置。已有 YAML 不会因该变量改变而自动扩容，请使用正式 resize 脚本。完整字段、线程池与已有节点扩缩容见 [评测端配置](Judge-Configuration.zh-CN.md)。
+- `OJ_JUDGE_SERVER` 是站点的地址，不带 `/api`。
+- 密钥文件必须是所有者为 root、权限为 `0600` 的普通文件；其内容不会被输出。
+- `OJ_JUDGE_SLOTS` 必须符合服务器的 CPU 和内存。不设置时使用自动值（见[评测配置](Judge-Configuration.zh-CN.md#如何确定评测槽数量)）。只有一个 CPU 或内存不足 256 MiB 的服务器不能评测。
 
-生成的 `config/judge.yaml` 同样仅 root 可读；远程模式关闭本机 AI socket，并生成独立 `libreoj-judge.target`。再次生成会核对原配置，不覆盖不同服务器或 key；轮换密钥需停机后明确更新私有配置。
+生成的 `config/judge.yaml` 只有 root 可读。远程评测机没有本机 AI 任务，并使用自己的 `libreoj-judge.target`。再次运行脚本会保留已有配置，并拒绝不同的站点或密钥；要更换密钥，请停止评测机后明确修改。之后要修改评测槽数量，请使用[扩缩容命令](Judge-Configuration.zh-CN.md#修改评测槽数量)。每项设置的说明见[评测配置](Judge-Configuration.zh-CN.md)。
 
-## 5. 注册 systemd 和验证沙盒
+## 5. 安装服务并检查沙箱
 
-只安装 judge 单元及工作目录挂载，避免把网页服务模板注册到评测机：
+只安装评测服务及其工作目录挂载（不要安装网站的服务），检查沙箱，然后开始评测：
 
 ```bash
 sudo chmod -R a+rX apps packages node_modules runtime/node-v24.21.0-linux-x64 runtime/tooling runtime/pnpm-store
@@ -130,8 +135,8 @@ sudo systemctl status libreoj-judge.service
 sudo journalctl -u libreoj-judge.service -n 50 --no-pager
 ```
 
-该检查实际编译并运行程序，核对 UID、只读 rootfs、网络隔离、系统调用过滤器、tmpfs 和 cgroup 资源限制。之后可运行 `sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh` 检查每种语言（[自检](Judge-Configuration.zh-CN.md#沙箱系统调用过滤器与自检)）。不要递归修改 rootfs 的所有权；其中有专门的 sandbox UID。
+该检查会编译并运行一个真实的程序，检查沙箱用户、只读文件系统、网络隔离、系统调用过滤器、tmpfs 和 cgroup 限制。之后可以运行 `sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh` 检查每种语言（见[自检](Judge-Configuration.zh-CN.md#沙箱系统调用过滤器与自检)）。不要递归修改沙箱镜像中文件的所有者：其中有专门的沙箱用户。
 
-最后在网页端确认节点在线并提交程序验收。评测机无需开放入站网页端口，只需允许出站连接网页 origin 和必要下载源。停止用 `sudo systemctl stop libreoj-judge.target`；取消开机启动用 `sudo systemctl disable libreoj-judge.target`。
+最后在站点上确认评测机在线，并提交几份程序。评测机需要能主动访问站点地址及其下载地址，不需要开放入站端口。
 
-当前教程的配置与 systemd 单元已经隔离验证；完整独立机器安装和真实多机调度仍需部署者现场验收。
+停止评测机：`sudo systemctl stop libreoj-judge.target`。取消开机启动：`sudo systemctl disable libreoj-judge.target`。

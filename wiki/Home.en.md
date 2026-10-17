@@ -2,37 +2,60 @@
 
 [简体中文](Home.md) | English | [Repository](https://github.com/houyhlouis/LLMOJ)
 
-LLMOJ is an AI-assisted online judge based on LibreOJ. Start with [Configuration overview](Configuration.md) to find a setting, or the installation guide for a new deployment. After changing CPU or RAM capacity, follow [Judge configuration and resizing](Judge-Configuration.md) to update execution slots, CPU affinity, and systemd units together.
+LLMOJ is an online judge based on LibreOJ, with AI tools for problem setting. New here? Start with [Installation](Installation.md). To find a particular setting, see the [Configuration overview](Configuration.md).
 
-Open the member list (`/u`) using **View all** at the top-right of the site's **Top Users** panel. Members no longer appears in the top navigation. The button is shown only to users with the `ViewUsers` privilege.
+## Installing and maintaining
 
-| Topic | Page |
+| Page | Contents |
 | --- | --- |
-| Private teams from your profile, ID-based admission, review and resources | [Teams](Teams.md) |
-| Solutions inside problem pages, My discussions and verified AI classification | [Solutions](Solutions.md) |
-| Submission previews, live feedback, permissions and full-page links | [Submissions](Submissions.md) |
-| Zero-score cheating moderation, retained evidence and rejudge recovery | [Fake moderation](Submission-Moderation.md) |
-| Scoring and feedback for NOI / OI, IOI, ICPC and Strict IOI | [Contest rules](Contest-Rules.md) |
-| Submission-detail Hacks, STD code editor, results and filters | [Hacks](Hacks.md) |
-| Optional NOI Self Eval, make/std editors, formal SPJ and whole-contest quotas | [Self-evaluation](Self-Evaluation.md) |
-| Database and judge-task migration for community and contest features | [Community upgrade](Community-Upgrade.md) |
-| Website registration settings and delegated review | [Registration approval](Registration-Approval.md) |
-| Authenticator codes, passkeys, recovery codes and confirming sensitive changes | [Two-factor sign-in](Two-Factor-Sign-In.md) |
-| Preserve configuration/data while upgrading; compatibility and rollback | [Upgrade](Upgrade.md) |
-| Installation entry points, every flag, and retries | [Installation](Installation.md) |
-| Backend YAML: accounts, security, database, mail, storage, contests, and presentation | [Backend-Configuration](Backend-Configuration.md) |
-| Judge YAML, CPU/RAM resizing, service units, verification, and rollback | [Judge-Configuration](Judge-Configuration.md) |
-| Per-user AI models, search, permissions, and jobs | [AI](AI.md) |
-| AI directories, sandbox communication, key persistence, and environment | [AI-Environment](AI-Environment.md) |
-| Runtime, installation, and build environment variables; maintenance tool arguments | [Environment](Environment.md) |
-| Local frontend builds and optional CDN/bootstrap settings | [Frontend-Configuration](Frontend-Configuration.md) |
-| Nginx, MariaDB, Redis, MinIO, systemd, and post-install changes | [Operations-Configuration](Operations-Configuration.md) |
-| Distributed workflow diagrams and node responsibilities | [Distributed-Judging](Distributed-Judging.md) |
-| Remote judge setup and connection checks | [Remote-Judge](Remote-Judge.md) |
-| Docker package sources and registry mirrors | [Docker-Sources](Docker-Sources.md) |
-| Domains, TLS, and external reverse proxies | [HTTPS](HTTPS.md) |
-| Updating documentation with GitHub Desktop and publishing the Wiki | [Publishing](Publishing.md) |
+| [Installation](Installation.md) | Installation scripts, every option, and retrying a failed installation |
+| [Upgrade](Upgrade.md) | Upgrading while keeping configuration and data; compatibility and rollback |
+| [Feature upgrades](Community-Upgrade.md) | The database changes of LLMOJ's features, and applying them to a custom installation |
+| [HTTPS](HTTPS.md) | Domains, TLS certificates and external reverse proxies |
+| [Docker sources](Docker-Sources.md) | Docker package sources and registry mirrors |
+| [Operations](Operations-Configuration.md) | Nginx, MariaDB, Redis, MinIO and systemd after installation; backups and counts |
 
-The full installation includes the website, storage, and a local judge, with optional remote judges. `--role web` does not build a local rootfs; remote submission judging currently does not replace the local worker required for AI verification and data generation.
+## Using LLMOJ
 
-Registration approval and the upgrader extend baseline `20dec6f86213e886e79859187b9ef599bd33ec25`; new files must be published together with their release. Deployment and functional validation have been performed on Ubuntu 24.04 amd64; each revision’s test report defines its verified scope. The main project uses MIT; upstream components retain their licenses.
+| Page | Contents |
+| --- | --- |
+| [Contest rules](Contest-Rules.md) | Scoring and feedback in NOI / OI, IOI, ICPC and Strict IOI contests |
+| [Teams](Teams.md) | Private teams: joining by ID, reviews, groups and shared resources |
+| [Solutions](Solutions.md) | Solutions on problem pages, My discussions and AI solutions |
+| [Submissions](Submissions.md) | Submission previews, test data versions and earlier results |
+| [Hacks](Hacks.md) | Hacking submissions, the problem STD and hack results |
+| [Self Eval](Self-Evaluation.md) | Hidden pretests in NOI / OI contests and their quota |
+| [Fake moderation](Submission-Moderation.md) | Voiding cheating submissions while keeping the evidence |
+| [Registration approval](Registration-Approval.md) | Registration settings and delegated reviews |
+| [Two-factor sign-in](Two-Factor-Sign-In.md) | Authenticator apps, passkeys, recovery codes and confirming sensitive changes |
+
+The member list (`/u`) opens from **View all** in the **Top Users** panel on the home page, for users with the `ViewUsers` privilege.
+
+## Judging
+
+| Page | Contents |
+| --- | --- |
+| [Distributed judging](Distributed-Judging.md) | Architecture, the judge queue, draining and revoking judge machines |
+| [Remote judges](Remote-Judge.md) | Setting up a separate judge machine and checking it |
+| [Judge configuration](Judge-Configuration.md) | Judge settings, the sandbox and its self-test, capacity and resizing |
+
+## AI
+
+| Page | Contents |
+| --- | --- |
+| [AI](AI.md) | Each user's models and search services, permissions, AI jobs, and the site's AI pause and limits |
+| [AI environment](AI-Environment.md) | AI directories, the local sandbox connection, keys and environment variables |
+
+## Reference
+
+| Page | Contents |
+| --- | --- |
+| [Configuration overview](Configuration.md) | Where each setting lives |
+| [Backend configuration](Backend-Configuration.md) | Backend settings: accounts, security, database, mail, storage, contests and display |
+| [Frontend configuration](Frontend-Configuration.md) | Building the frontend locally; optional CDN settings |
+| [Environment](Environment.md) | Environment variables for running, installing and building; maintenance scripts |
+| [Publishing](Publishing.md) | Applying updates with GitHub Desktop, publishing this wiki, and releases |
+
+A full installation (`--role all`) runs the website, storage and a local judge, and can use remote judge machines too. A website-only installation (`--role web`) builds no local judging environment; remote judges handle submissions, but AI validation and test data generation need the local environment of a full installation.
+
+LLMOJ is tested on Ubuntu 24.04 amd64. Its own code is under the MIT license; upstream components keep their licenses.

@@ -102,20 +102,33 @@ def discover_capacity(remote=False, *, proc_root=Path('/proc'), cgroup_root=Path
             'remote': remote, 'warnings': warnings}
 
 
+def say(english, chinese):
+    """The message in the language of the entry script: the Chinese ones (install.zh-CN.sh, upgrade.zh-CN.sh,
+    resize-judge.zh-CN.sh) set LLMOJ_LANG or LLMOJ_INSTALL_LANG to zh-CN; everything else is English."""
+    return chinese if (os.environ.get('LLMOJ_LANG') or os.environ.get('LLMOJ_INSTALL_LANG')) == 'zh-CN' else english
+
+
 def validate_slots(slots, capacity):
     if capacity['maximum_slots'] < 1:
-        raise CapacityError(f"No judge capacity: at least 2 effective CPUs and {SLOT_MEMORY_MIB} MiB RAM are required; "
-                            f"available {capacity['effective_cpu_count']} CPUs and {capacity['memory_mib']} MiB / "
-                            f"无可用评测容量：至少需要 2 个有效 CPU 和 {SLOT_MEMORY_MIB} MiB 内存；请增加资源或仅安装网站（--role web）")
+        raise CapacityError(say(f"No judge capacity: at least 2 effective CPUs and {SLOT_MEMORY_MIB} MiB RAM are required; "
+                                f"available {capacity['effective_cpu_count']} CPUs and {capacity['memory_mib']} MiB. "
+                                "Add resources, or install only the website (--role web)",
+                                f"无可用评测容量：至少需要 2 个有效 CPU 和 {SLOT_MEMORY_MIB} MiB 内存，当前为 "
+                                f"{capacity['effective_cpu_count']} 个 CPU 和 {capacity['memory_mib']} MiB；"
+                                "请增加资源或仅安装网站（--role web）"))
     if type(slots) is not int or slots < 1:
-        raise CapacityError('Judge slots must be a positive integer / 评测槽数必须为正整数')
+        raise CapacityError(say('Judge slots must be a positive integer', '评测槽数必须为正整数'))
     if slots > capacity['cpu_slots']:
-        raise CapacityError(f"Requested {slots} slots exceed CPU capacity {capacity['cpu_slots']} "
-                            f"({capacity['effective_cpu_count']} effective CPUs minus 1) / 槽数不能超过有效 CPU 核心数减 1")
+        raise CapacityError(say(f"Requested {slots} slots exceed the CPU capacity of {capacity['cpu_slots']} "
+                                f"({capacity['effective_cpu_count']} effective CPUs minus 1)",
+                                f"请求的 {slots} 槽超过 CPU 容量 {capacity['cpu_slots']}（有效 CPU 核心数减 1）"))
     if slots > MAX_SLOTS:
         raise CapacityError(f'Judge slots exceed libuv capacity {MAX_SLOTS}')
     if slots > capacity['memory_slots']:
-        raise CapacityError(f"Requested {slots} slots need at least {slots*SLOT_MEMORY_MIB} MiB; effective RAM {capacity['memory_mib']} MiB permits at most {capacity['memory_slots']} slots / 每个评测实例需要 {SLOT_MEMORY_MIB} MiB 内存，请选择较少槽数")
+        raise CapacityError(say(f"Requested {slots} slots need at least {slots*SLOT_MEMORY_MIB} MiB; effective RAM of "
+                                f"{capacity['memory_mib']} MiB permits at most {capacity['memory_slots']} slots",
+                                f"请求的 {slots} 槽至少需要 {slots*SLOT_MEMORY_MIB} MiB 内存；有效内存 "
+                                f"{capacity['memory_mib']} MiB 最多支持 {capacity['memory_slots']} 槽"))
     return slots
 
 

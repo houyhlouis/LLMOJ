@@ -1,110 +1,81 @@
-# Distributed judging and web/judge separation
+# Distributed judging
 
-English | [简体中文](Distributed-Judging.zh-CN.md)
+[简体中文](Distributed-Judging.zh-CN.md) | English | [Wiki home](Home.en.md)
 
-## Architecture and deployment layouts
+A site can judge on its own server, on separate judge servers, or both.
 
-For full AI execution, use `--role all` on the web node, keeping its local judge/AI worker, then add remote judges for ordinary submissions. For complete separation, use `--role web`; it does not build local rootfs, so remote judges handle ordinary submissions.
+- **`all` site plus remote judges:** the site keeps its own judge and the local AI worker, and remote judges share ordinary judging. Choose this if you use AI to check reference solutions or generate test data.
+- **`web` site plus remote judges:** the site does no judging and doesn't build a sandbox; remote judges do all judging. AI checks and data generation aren't available (see [AI](#ai)).
 
 ```mermaid
 flowchart LR
     Browser[Browser] --> Nginx[Nginx]
-    Nginx --> Frontend[Frontend assets]
+    Nginx --> Frontend[Frontend]
     Nginx --> Backend[Backend]
     Backend --> DB[MariaDB]
     Backend --> Redis[Redis]
     Backend --> MinIO[MinIO]
     Judges[Local or remote judges] <-->|Authenticated WebSocket /api/socket| Backend
-    Judges --> Sandbox[Per-node simple-sandbox and rootfs]
+    Judges --> Sandbox[Each judge's own sandbox]
     Judges -->|Signed /storage/ downloads| Nginx
-    Backend -->|all mode: local UNIX socket| AIWorker[Local AI sandbox worker]
+    Backend -->|all role: local socket| AIWorker[Local AI worker]
 ```
 
-Judges initiate connections and need no inbound web port. They do not hold database, Redis or MinIO administrator credentials. They receive tasks, download/cache test files through signed URLs and return results. This deployment uses a single backend, not a highly available backend/database cluster.
+Judges connect to the site, so they need no open incoming port. They have no database, Redis or MinIO credentials: they receive tasks from the backend, download and cache test data through signed links, and send back results. There is one backend and one database; this isn't a high-availability cluster.
 
-## Judge queue
+## Setting up the site
 
-Judge tasks are kept in the database (table `judge_job`), not only in Redis: a submission, Hack or Self Eval and its task are saved in one transaction, so restarting the backend or Redis loses no queued work. Redis only wakes up waiting judges; they also look for tasks every few seconds.
-
-- A task is sent to one judge connection at a time, under a lease that the backend renews while the judge stays connected. The result is stored together with finishing the task, and a result from an older lease (for example after a reconnect) is ignored.
-- When a judge disconnects, its unfinished tasks are queued again at once. When the backend itself stops, its leases expire after 90 seconds and another backend process, or the restarted one, queues them again. A task can therefore be judged more than once, but its result counts once.
-- A task is given up on after 5 interruptions, or after 10 failures to prepare it (for example missing test data). Its submission then shows **System Error** with the reason and can be rejudged.
-- Site administrators see the queue at the bottom of **Judge Machine** (`/judge-machine`): tasks waiting or being judged, the judge machine holding each, retries, and the tasks given up on in the last 7 days. The `libreoj_judge_jobs` metric reports waiting and running tasks.
-- Every lease is recorded in `judge_job_attempt` with how it ended. Finished tasks and their records are deleted after 30 days.
-
-## Drain, revoke and capabilities
-
-These are on the **Judge Machine** page for site administrators, and every change is recorded in the audit log (`judge_client.add`, `delete`, `reset_key`, `drain`, `resume`).
-
-- **Drain** (pause icon) stops sending new tasks to one judge machine; it finishes the tasks it has. Its status shows **Draining** while it still judges, then **Drained**: it can now be stopped, updated or resized without interrupting judging, while the other judge machines take the queue. It stays drained after reconnecting or a backend restart until you **Resume** it (play icon). Draining doesn't affect local AI validation, which doesn't use the queue.
-- **Reset key** and **Delete** take effect at once: every backend process disconnects the connections using the old key, and their unfinished tasks are queued again for other judge machines. Reset the key when it may have leaked, then put the new key on the judge machine.
-- **Capabilities**: when a judge machine connects, it announces its protocol version, the task types it can run, its task threads, execution slots, slots for AI validation and memory budget; the **Capacity** column shows them. The backend sends it only the task types it announced. A judge machine of an older version announces nothing and is marked **Legacy**: it is sent only submissions, so Hacks and Self Evals wait until an updated judge machine is online.
-
-## Web node
+For a site that only serves the web:
 
 ```bash
 sudo bash /tmp/llmoj-install.sh --repository houyhlouis/LLMOJ \
   --role web --public-url http://oj.example.com
 ```
 
-For public remote judging, configure the final [HTTPS](HTTPS.md) origin first, or use a controlled private network. HTTP sends judge credentials without transport encryption.
+Judges send their key when they connect, so set up [HTTPS](HTTPS.md) before connecting judges over the internet, or use a private network you control.
 
-The installer configures WebSocket Upgrade at `/api/socket` and sets `services.minio.forJudge.urlEndpoint` to the public origin's `/storage/`. Nginx restores the internal Host used in MinIO signatures. Database and MinIO remain on loopback.
+The installer already sets up WebSocket connections on `/api/socket` and points judge downloads (`services.minio.forJudge.urlEndpoint`) at `/storage/` on the public address. The database and MinIO stay reachable only from the site's server.
 
-## Register each judge
+## Adding a judge
 
-An administrator registers a node with `POST /api/judgeClient/addJudgeClient` and body `{"name":"judge-01","allowedHosts":[]}`.
+1. As a site administrator, open **Judge Machine** (`/judge-machine`), click **Add**, enter a name such as `judge-01` and confirm.
+2. Click the key icon in the new judge's row to show its key, and save it in the judge server's private key file. Don't paste it anywhere else.
+3. Set up the judge server as described in [Remote judges](Remote-Judge.md), with the same version and sandbox image recipe as the site.
+4. When the judge's log shows "Successfully authorized as …", its row on **Judge Machine** shows **Online**.
+5. Submit a simple C++ program and check that it's downloaded, compiled, run and Accepted. Also try a compile error, a time limit, a memory limit and cancelling, on each judge.
 
-In the browser Console on the site while logged in as admin, run this request. It uses the current session without printing or copying its token:
+Register every judge separately with its own key: when a second connection uses the same key, it replaces the first. The `allowedHosts` field of a judge isn't checked when it connects; to restrict where judges may connect from, use a firewall, VPN or reverse proxy.
 
-```javascript
-if (!window._appState?.currentUser?.isAdmin) throw new Error('Sign in as an administrator first');
-fetch('/api/judgeClient/addJudgeClient', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': 'Bearer ' + window._appState.token
-  },
-  body: JSON.stringify({name: 'judge-01', allowedHosts: []})
-}).then(response => response.json()).then(result => {
-  console.log(result.judgeClient ? 'Created; save the key privately from this response' : result);
-});
-```
+## The judge queue
 
-In the Network panel, save `judgeClient.key` from that response to this node's private key file. Register each machine separately. A new connection using the same key replaces the previous session; do not share keys between judges.
+Judge tasks are stored in the database (table `judge_job`), not only in Redis: a submission, hack or Self Eval run is saved together with its task, so restarting the backend or Redis loses no queued work. Redis only wakes up waiting judges, which also check for tasks every few seconds.
 
-The gateway authenticates keys. Although the API stores `allowedHosts`, the current connection logic does not enforce source-IP checking through that field. Use a reverse proxy, VPN or firewall for source restrictions.
+- Each task goes to one judge connection at a time, under a lease that the backend renews while the judge stays connected. The result is saved together with finishing the task, and a result from an older lease (for example from before a reconnect) is ignored.
+- When a judge disconnects, its unfinished tasks are queued again at once. When the backend itself stops, its leases expire after 90 seconds, and another backend process, or the restarted one, queues them again. So a task may be judged more than once, but its result counts once.
+- A task is given up after 5 interruptions, or after 10 failures to prepare it (for example because test data is missing). Its submission then shows **System Error** with the reason, and can be rejudged.
+- Site administrators see the queue at the bottom of **Judge Machine**: tasks waiting or being judged, the judge holding each, retries, and the tasks given up in the last 7 days. The `libreoj_judge_jobs` metric reports waiting and running tasks.
+- Every lease is recorded in `judge_job_attempt` with how it ended. Finished tasks and their records are deleted after 30 days.
 
-## Deploy and verify
+## Draining, keys and capabilities
 
-Follow [Remote-Judge](Remote-Judge.md) using the same source version/rootfs recipe as the web node. After “Successfully authorized as …”, query status from the administrator Console:
+These actions are on the **Judge Machine** page for site administrators. Every change is recorded in the audit log (`judge_client.add`, `delete`, `reset_key`, `drain`, `resume`).
 
-```javascript
-fetch('/api/judgeClient/listJudgeClients', {
-  headers: {'Authorization': 'Bearer ' + window._appState.token}
-}).then(response => response.json()).then(result => {
-  console.table(result.judgeClients?.map(({id, name, online}) => ({id, name, online})));
-});
-```
+- **Drain** (pause icon) stops sending new tasks to a judge; it finishes those it has. Its status shows **Draining** while it's still judging, then **Drained**: you can now stop, upgrade or resize it without interrupting judging, while the other judges take the queue. It stays drained after reconnecting, or after the backend restarts, until you **Resume** it (play icon). Draining doesn't affect local AI checks, which don't use the queue.
+- **Reset key** and **Delete** take effect at once: the judge is disconnected from every backend process, and its unfinished tasks are queued again for other judges. Reset a key that may have leaked, then put the new key on the judge server.
+- **Capacity:** when a judge connects, it reports its protocol version, the task types it can run, its task threads, judge slots, slots for AI checks and memory budget, shown in the **Capacity** column. The backend sends it only the task types it reported. An older judge reports nothing and is marked **Legacy**: it receives only submissions, so hacks and Self Eval runs wait until an updated judge is online.
 
-Submit a simple C++ program and confirm downloading, compilation, execution and Accepted. Test compilation errors, time/memory limits and cancellation on each node. Restart a node to inspect recovery; multiple clients can consume the queue, but recovery is not an exactly-once execution guarantee.
+To change a judge's number of slots, see [Judge configuration](Judge-Configuration.md#changing-the-number-of-slots). Work on one judge at a time, and check it before moving on to the next.
 
-## AI limitation
+## AI
 
-Backend model calls, editing, translation and search can still be configured. AI reference-solution validation and test-data generation currently use a local UNIX socket and private shared directories on the web server; there is no cross-machine AI worker protocol. Adding remote judges for ordinary submissions does not move these actions off the web server. They need the local worker retained by `all` and are unavailable with `web`. Do not replace the private socket with an open TCP service or uncontrolled shared directory.
+AI features that only call a model, such as editing, translation and search, work in every layout. Checking AI reference solutions and generating test data, however, run on the site's own server through a local socket and private directories; there's no way yet to run them on a remote judge. Remote judges don't take over this work, and adding remote judge slots doesn't give the AI worker more capacity. These features need the `all` role and aren't available on a `web` site. Don't replace the local socket with an open TCP port or a shared directory.
 
 ## Troubleshooting
 
-- Connection fails: check final origin, TLS, `/api/socket` Upgrade and the node's key.
-- Online but downloads fail: inspect signed URLs for localhost/private endpoints and check `/storage/` Host handling.
-- Nodes replace one another: check for shared keys.
-- cgroup errors: check systemd delegation, cgroup v2 and kernel support.
-- AI execution fails despite remote judges: check whether the web node retains a local worker.
-- Hacks or Self Evals stay waiting: check that an online judge machine that isn't drained runs the current version (not **Legacy**) and lists them under **Capacity**.
-- A judge machine gets no tasks: check whether it is drained, and resume it.
-
-Real multi-machine deployment has not yet been validated end to end; complete the on-site tests above.
-
-## CPU and existing-node capacity
-
-See [Judge configuration](Judge-Configuration.md) for every YAML field, consumers versus execution/download queues, the 8 CPU/8 GiB example, and resizing/rollback while retaining keys. Maintain and verify one node at a time. More remote slots do not increase the web node's local AI worker capacity. Do not change installer metadata or rerun with a different `--judge-slots` as a substitute.
+- **A judge can't connect:** check the site's address, HTTPS, WebSocket forwarding of `/api/socket`, and the judge's key.
+- **A judge is online but downloads fail:** check whether the download links point to `127.0.0.1`, port 19000 or an address the judge can't reach, and check how `/storage/` is forwarded.
+- **Judges keep disconnecting each other:** two of them share a key.
+- **cgroup errors:** check systemd delegation, cgroup v2 and the kernel.
+- **AI checks fail although remote judges are online:** the site needs the `all` role and its local worker.
+- **Hacks or Self Eval runs keep waiting:** check that an online judge that isn't drained runs the current version (not **Legacy**) and lists them under **Capacity**.
+- **A judge gets no tasks:** check whether it's drained, and resume it.

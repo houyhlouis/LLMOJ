@@ -1,40 +1,42 @@
-# Self Eval for NOI / OI contests
+# Self Eval in NOI / OI contests
 
 [简体中文](Self-Evaluation.zh-CN.md) | English | [Wiki home](Home.en.md)
 
-Self Eval is available **only in NOI / OI contests** whose manager enables it. It is disabled by default. IOI, Strict IOI, ICPC / ACM, ordinary problem pages and submission pages do not offer Self Eval.
+Self Eval lets contestants test their code on a small set of hidden pretests during a contest. It exists **only in NOI / OI contests**, and only when the contest's manager turns it on; it's off by default. IOI, Strict IOI and ICPC contests, ordinary problem pages and submission pages don't have it.
 
-During the contest, open a contest problem and select **Self Eval**. Enter code, choose an allowed language and compiler options, and select **Run Self Eval**. The fixed hidden pretest set returns status, score, subtask scores, runtime and memory only. Test input, expected output, execution output, compiler diagnostics and checker messages remain private. Self Eval creates no official submission and does not change official scores, acceptance counts or standings. Official NOI submission results retain the format's normal concealment.
+During the contest, open a contest problem and click **Self Eval**. Enter your code, choose a language and compiler options the contest allows, and click **Run Self Eval**. You see the status, score, subtask scores, time and memory, and nothing else: the pretest input, expected output, your program's output, compiler messages and checker messages stay hidden. A Self Eval run isn't a submission: it doesn't change official scores, accepted counts or the scoreboard. Official NOI / OI results stay hidden as the contest rule requires.
 
-## Enable and prepare
+## Turning it on
 
-1. Edit the contest, select **NOI / OI**, enable **Self Eval**, set the contest-wide attempt allowance and save. The default is 30 per participant; supported limits are 1–1000, shared across every contest problem.
-2. Add a traditional code problem. Open its contest problem page, select **Self Eval**, and locate **Configure Self Eval**.
-3. Enter **make.cpp** and **std.cpp** in the code editors. These must be the programs used for the current official data. Both compile as C++17; each source is limited to 1 MiB.
-4. Verify the subtask IDs. If std.cpp uses file I/O, enter its actual input and output filenames.
-5. Confirm that the programs generated the current official data, then select **Save make.cpp / std.cpp**.
-6. Select **Prepare pretest data** and refresh until the set is Ready. Saving the programs and preparing the set must finish before the contest starts.
+1. Edit the contest, choose the **NOI / OI** rule, tick **Enable Self Eval** and set the maximum number of runs per participant, then save. The default is 30 runs per participant for the whole contest, shared by all its problems; you can set 1 to 1000.
+2. Add a traditional problem to the contest, open it from the contest, click **Self Eval** and go to **Configure Self Eval**.
+3. Enter **make.cpp** (the generator) and **std.cpp** (the standard solution) that produced the problem's current official test data. Both are compiled as C++17, and each may be up to 1 MiB.
+4. Check the subtask IDs. If std.cpp reads and writes files, tick **std.cpp uses file I/O** and enter its file names.
+5. Tick the confirmation that these programs generated the current official data, then click **Save make.cpp / std.cpp**.
+6. Click **Prepare pretest data** and refresh until the set is Ready.
 
-Configuration requires contest management, problem modification and test-data editing permissions. Participants need contest participation, problem submission and self-evaluation permissions. Existing contest, problem and team access checks remain effective.
+Steps 5 and 6 must be finished before the contest starts.
 
-The server hashes the sources and stores immutable versions. Pretests use the same official generator and standard solution. **They reuse the problem's official checker / SPJ automatically; no separate SPJ entry is needed.** An input validator bound by AI official-data generation is reused when present. Manual configuration requires only make.cpp and std.cpp.
+Configuring Self Eval needs permission to manage the contest, edit the problem and edit its test data. Contestants need permission to take part in the contest, submit to the problem and run self-evaluations. The usual contest, problem and team access rules still apply.
 
-The generator receives `subtaskId seed` as command-line arguments and as a line on standard input, then outputs one complete test input. The standard solution reads that input and produces the expected answer. Each contest/problem context receives one fixed set shared by all participants.
+The saved programs are kept as fixed versions. Pretests are judged with **the problem's own checker or special judge, so there's nothing extra to configure**. If AI generation attached an input validator to the problem's data, the pretests use it too.
 
-## AI generation
+make.cpp receives `subtaskId seed` both as command-line arguments and as one line on standard input, and prints one complete test input. std.cpp reads that input and prints the expected answer. Each problem in each contest gets one pretest set, the same for every contestant.
 
-The configuration section includes **AI: generate official data and Self Eval programs**. It requires AI-use and test-data-generation permissions, a configured AI API and a working judge. It runs the existing official-data generation pipeline, **updates this problem's official judging data**, and binds matching immutable make.cpp, std.cpp and validator versions.
+## Generating the programs with AI
 
-After completion, the configuration section reloads the generated sources. Select **Prepare pretest data** to prepare the contest's set. Official-data generation from the ordinary problem editor also binds matching programs for future NOI contests; it does not enable ordinary problem-bank Self Eval.
+**Configure Self Eval** also has a button **AI: generate official data and Self Eval programs**. It needs permission to use AI and to generate test data, a configured AI service and a working judge. It runs the usual official-data generation, which **replaces the problem's official test data**, and saves the matching make.cpp, std.cpp and validator.
 
-## Allowances and limits
+When it finishes, the generated programs appear in the configuration and you click **Prepare pretest data**. Generating official data from the ordinary problem editor also saves the programs for later NOI / OI contests; it doesn't add Self Eval to the problem set.
 
-- The default allowance is 30 per participant for the entire contest. Managers can change it; all problems share the allowance, which does not reset daily.
-- Runs are accepted only during the contest. Creating a record consumes one attempt, including later compilation errors, wrong answers, timeouts and runtime infrastructure errors.
-- Invalid parameters, denied access, unavailable data and failed preparation consume no attempt.
-- An account can have at most three pending runs. Atomic quota updates prevent concurrent requests from exceeding the allowance.
-- At most twenty subtasks are supported, with one generated case per configured subtask. Each input and expected output is limited to 4 MiB. The whole base64-encoded JSON set must fit within 16 MiB.
+## Limits
 
-These are LLMOJ's configurable implementation limits, not a claim that every NOI event uses the same allowance. Passing Self Eval does not guarantee a full official score.
+- Each participant has 30 runs for the whole contest by default, shared by all its problems; the count doesn't reset daily.
+- Runs are possible only while the contest is running. Every run counts once it starts, whatever the result, including compile errors, wrong answers, time-outs and judge errors.
+- Runs refused for invalid input, missing permission, missing data or failed preparation don't count.
+- Each account can have at most three runs waiting at once, and simultaneous requests can't go over the limit.
+- A set has at most 20 subtasks, with one generated test for each configured subtask. Each input and each expected output may be up to 4 MiB, and the whole set up to 16 MiB.
 
-Changing the formal judge configuration or program versions invalidates the prepared set. A set already used in the same contest context cannot be replaced, ensuring that participants do not receive different tests. Use a new context when necessary. Sets cannot be configured or prepared after the contest begins.
+These limits are LLMOJ settings, not the rules of any particular NOI event. Passing Self Eval doesn't guarantee full marks in official judging.
+
+Changing the problem's judge settings or the saved programs invalidates a prepared set. Once contestants have used a set in a contest, it can't be replaced there, so that everyone is tested on the same data. Sets can't be configured or prepared after the contest starts.

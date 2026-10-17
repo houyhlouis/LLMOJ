@@ -17,15 +17,17 @@ export default observer(function AiJobs({
   heading?: string;
 }) {
   const [jobs, setJobs] = useState<AiJob[]>([]),
+    [paused, setPaused] = useState(false),
     [error, setError] = useState("");
   const running = useRef(new Set<string>());
   useEffect(() => {
     let mounted = true;
     const refresh = async () => {
       try {
-        const result = await aiCall<{ jobs: AiJob[] }>("jobs", problemId ? { problemId } : {});
+        const result = await aiCall<{ jobs: AiJob[]; paused?: boolean }>("jobs", problemId ? { problemId } : {});
         if (!mounted) return;
         setJobs(result.jobs);
+        setPaused(result.paused === true);
         setError("");
         for (const job of result.jobs) {
           if (["queued", "running"].includes(job.status)) running.current.add(job.id);
@@ -48,8 +50,9 @@ export default observer(function AiJobs({
     setError("");
     try {
       await aiCall(method, { id, ...(retryFrom ? { retryFrom } : {}) });
-      const result = await aiCall<{ jobs: AiJob[] }>("jobs", problemId ? { problemId } : {});
+      const result = await aiCall<{ jobs: AiJob[]; paused?: boolean }>("jobs", problemId ? { problemId } : {});
       setJobs(result.jobs);
+      setPaused(result.paused === true);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -59,6 +62,14 @@ export default observer(function AiJobs({
   return (
     <>
       {error && <Message negative>{error}</Message>}
+      {paused && jobs.some(job => ["queued", "running"].includes(job.status)) && (
+        <Message warning>
+          {aiText(
+            "站点管理员已暂停 AI。排队中的任务会在恢复后从中断处继续。",
+            "AI is paused by the site administrator. Queued jobs continue from where they stopped when it's resumed."
+          )}
+        </Message>
+      )}
       {heading && jobs.length > 0 && (
         <Header as="h2" className={style.jobsHeading}>
           {heading}

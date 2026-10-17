@@ -1,90 +1,67 @@
-# 前端与 bootstrap 配置
+# 前端配置
 
-[English](Frontend-Configuration.md) | 简体中文 | [配置总览](Configuration.zh-CN.md)
+简体中文 | [English](Frontend-Configuration.md) | [Wiki 首页](Home.md) | [配置总览](Configuration.zh-CN.md)
 
-## 一键安装使用的本地前端
+## 安装器构建的前端
 
-一键安装使用 `deploy/build-frontend-offline.mjs`：准备本地依赖、构建前端并发布到 `<root>/public`。名称中的 offline 指页面运行时依赖本地资源；首次准备缺少的依赖／emoji 等仍可能联网。
+安装器使用 `deploy/build-frontend-offline.mjs` 构建前端，并发布到 `<安装目录>/public`。“offline”指页面从你自己的服务器加载全部资源；构建过程本身仍可能需要下载缺少的依赖和表情图片。
 
-公开输入只有 `OJ_SITE_NAME`（缺省 LLMOJ）、`HYHOJ_PUBLIC_DIR`（缺省 `<root>/public`）、`HYHOJ_QUOTE_FILE`（可选语录 JSON）和 `PNPM_BINARY`（`--build` 时使用，缺省 pnpm）。`--assets-only` 只准备资产后退出；`--build` 先执行构建再发布；无参数发布已有 `dist`。不要把两个开关同时传入来期待完整构建，assets-only 会提前退出。构建时脚本设置 `NODE_OPTIONS=--max-old-space-size=2300`。
+脚本读取以下环境变量：
 
-下面是脚本当前写入的固定替换，不是额外可设置的环境变量：
+| 变量 | 含义 | 默认值 |
+| --- | --- | --- |
+| `OJ_SITE_NAME` | 在后端设置加载完成前显示的站点名称 | `LLMOJ` |
+| `HYHOJ_PUBLIC_DIR` | 页面发布的位置。Nginx 不会随之修改 | `<安装目录>/public` |
+| `HYHOJ_QUOTE_FILE` | 可选的语录 JSON 文件 | 无 |
+| `PNPM_BINARY` | `--build` 使用的 pnpm 程序 | `pnpm` |
 
-| 占位符 | 本地值 |
-| --- | --- |
-| `__public_path__` | `/frontend` |
-| `__default_title__` | `OJ_SITE_NAME / LLMOJ` |
-| `__api_endpoint__` | `"" → /` |
-| `__favicon__` | `""` |
-| `__applogo__` | `null` |
-| `__gravatar__` | `https://gravatar.com` |
-| `__ghavatar__` | `https://github.com` |
-| `__cdnjs__` | `/cdnjs` |
+以及以下参数：
 
-改站名通常需同时更新后端 `preference.siteName` 和重新构建时的 `OJ_SITE_NAME`。`preference.misc.appLogo` 影响页面拿到公共配置后的 logo；favicon 和初始 bootstrap 资源属于前端发布。只改 `HYHOJ_PUBLIC_DIR` 不会改变 Nginx 的 `root`。本地脚本会重新整理输出资产及 `index.html`，并生成用于注销旧 service worker／清理缓存的 `sw.js`，不要把输出目录当作长期手改源码。
+- `--build`：构建前端后发布。
+- `--assets-only`：只准备本地资源，然后结束（即使同时给了 `--build`）。
+- 不带参数：发布 `dist` 中已有的构建结果。
 
-已有完整源码和依赖时，可在维护／构建目录执行下例；它会写入静态文件，先备份输出目录，并按实际路径和站名替换。用与安装器一致的 Node／pnpm 和文件所有权，构建完成后验证首页、资源加载、登录、上传和浏览器缓存。
+这样构建的页面从 `/frontend` 加载脚本，调用同一站点的 API，并从同一站点的 `/cdnjs` 加载依赖库。这些值在脚本中固定。
+
+发布时会重写输出文件和 `index.html`，并生成 `sw.js`，用于移除旧的 service worker 并清除其缓存。不要手动修改发布后的文件，下次构建时修改会丢失。
+
+如需手动重新构建（例如修改了站点名称后），在安装目录中用安装器的 Node.js 和 pnpm 运行下面的命令。请先备份 `public`，完成后在浏览器中检查首页、登录和上传：
 
 ```bash
 cd /opt/LLMOJ
-sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin   OJ_SITE_NAME="AI Practice"   /opt/LLMOJ/runtime/node/bin/node deploy/build-frontend-offline.mjs --build
+sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  OJ_SITE_NAME="AI Practice" /opt/LLMOJ/runtime/node/bin/node deploy/build-frontend-offline.mjs --build
 ```
 
-## 项目入口与显示名称
+## 站点名称、标志和页脚
 
-页脚动态显示“站点名称 Powered by LLMOJ”，站点名称来自后端 `preference.siteName`，其中 LLMOJ 链接和 GitHub 图标指向 [houyhlouis/LLMOJ](https://github.com/houyhlouis/LLMOJ)。自定义 `preference.copyrightNotice` 另起一行保留；空白及精确默认值 `LLMOJ`、`LibreOJ Open Source Project` 不另显示重复行，不自动改写配置。页面初始标题和加载失败提示默认使用 LLMOJ。自定义首页内容、原始版权、许可证和上游来源说明继续保留。
+- **站点名称：** 在 [`backend.yaml`](Backend-Configuration.zh-CN.md) 中设置 `preference.siteName`，重新构建时把同样的名称作为 `OJ_SITE_NAME`。前者在页面加载完成后显示，后者在加载过程中显示。
+- **标志：** `preference.misc.appLogo` 设置页面加载完成后显示的标志。浏览器标签页图标属于前端构建。
+- **页脚：** 显示“*站点名称* Powered by LLMOJ”，其中 LLMOJ 和 GitHub 图标链接到 [houyhlouis/LLMOJ](https://github.com/houyhlouis/LLMOJ)。自定义的 `preference.copyrightNotice` 显示在下一行；内容为空或是旧的默认值 `LLMOJ`、`LibreOJ Open Source Project` 时不显示。
 
-站点管理员的用户菜单提供“网站管理”（`/site-management`），可查看当前注册方式、服务器默认值和是否启用了网页覆盖，并即时保存或恢复服务器配置。普通用户及仅获审核／首页编辑权限的用户不能进入该管理功能。已打开的注册页可刷新以显示最新模式；完整规则见 [注册审核](Registration-Approval.zh-CN.md)。
+你的首页内容以及原有的版权、许可证和来源说明都会保留。
 
-`packages/frontend/scripts/generate-api.js` 无 URL 参数时读取本机 `http://127.0.0.1:2002/docs-json`；后端位于其它地址时传入对应完整 Swagger URL。这个地址用于开发时生成接口类型，与项目 GitHub 链接是不同用途。
+管理员用户菜单中的 **网站管理** 用于设置注册模式，见[注册审核](Registration-Approval.zh-CN.md)。
 
-## 可选的上游 CDN/bootstrap 路径
+## 提交与 Hack 预览窗口
 
-`packages/bootstrap-config/settings.json` 属于另外的 bootstrap 发布体系，一键本地安装不读取它。展示标题已统一为 LLMOJ；以下 API／资源地址仍是上游发布体系的演示配置，不能直接用于自己的生产站点，否则资源或请求会指向别人的服务。这条旧发布路径本次仅核对配置结构，没有实际发布验收。
+在提交列表或 Hack 列表中点击一项会打开预览窗口，大小为 1100 × 720 像素，屏幕较小时随之缩小。窗口显示通常的详情页，并在地址中加上 `embed=1` 以隐藏网站导航栏。窗口内的链接仍在窗口中打开；在窗口内打开的列表不会再弹出新的窗口。**#编号** 链接和普通链接打开完整页面。登录、代码可见性、比赛反馈和所有操作的权限检查与完整页面完全相同。见[提交记录](Submissions.zh-CN.md)和 [Hack](Hacks.zh-CN.md)。
 
-`env` 是 JSON 字典，**不是进程环境变量**。构建器按顺序展开 `${name}` 引用，后面的值可引用前面定义的键。表中列出当前全部 15 个示例键；字典可新增自定义字符串供替换引用。
+## 开发时生成 API 类型
 
-| 键 | 示例值（非本地默认） | 用途 |
-| --- | --- | --- |
-| `env.title` | `LLMOJ` | 初始页面标题 |
-| `env.cdnRoot` | `https://static.cdn.menci.xyz/libreoj-frontend` | 前端资源基址 |
-| `env.apiEndpoint` | `https://api.loj.ac` | 默认区域后端地址 |
-| `env.apiEndpointCN` | `https://api.loj.ac` | CN 区域后端地址 |
-| `env.bootstrapCdnRoot` | `bootstrap.loj.ac.cn` | bootstrap 正式域名 |
-| `env.bootstrapCdnRootStaging` | `bootstrap-staging.loj.ac.cn` | bootstrap 预发布域名 |
-| `env.assets` | `https://static.cdn.menci.xyz/libreoj-assets` | favicon／logo 共用资源前缀 |
-| `env.favicon` | `${assets}/favicon.ico` | 浏览器图标 URL |
-| `env.appLogo` | `${assets}/logo-website.min.svg` | 站点标志 URL |
-| `env.gravatar` | `https://gravatar.com` | 默认头像服务 |
-| `env.gravatarCN` | `https://cravatar.cn` | CN 头像服务 |
-| `env.ghAvatar` | `https://github.com` | 默认 GitHub 头像服务 |
-| `env.ghAvatarCN` | `https://cdn.menci.xyz/gh-avatar` | CN GitHub 头像服务 |
-| `env.cdnjs` | `https://cdnjs.cloudflare.com/ajax/libs` | 默认依赖 CDN |
-| `env.cdnjsCN` | `https://cdnjs.baoshuo.ren/ajax/libs` | CN 依赖 CDN |
+`packages/frontend/scripts/generate-api.js` 从运行在 `http://127.0.0.1:2002/docs-json` 的后端读取 API 描述。要使用其他后端，把它的 `docs-json` 完整地址作为参数传入。
 
-`substitution` 的值可为字符串（所有区域相同），或区域代码到字符串的映射；空键 `""` 是后备区域，`CN` 是现有中国区域示例，也可扩展其他区域。完整占位符及当前映射如下：
+## bootstrap CDN 构建（安装器不使用）
 
-| 键 | 值 |
-| --- | --- |
-| `substitution.__api_endpoint__` | `{"CN": "${apiEndpointCN}", "": "${apiEndpoint}"}` |
-| `substitution.__default_title__` | `"${title}"` |
-| `substitution.__public_path__` | `{"": "${cdnRoot}"}` |
-| `substitution.__favicon__` | `{"": "${favicon}"}` |
-| `substitution.__applogo__` | `{"": "${appLogo}"}` |
-| `substitution.__gravatar__` | `{"CN": "${gravatarCN}", "": "${gravatar}"}` |
-| `substitution.__ghavatar__` | `{"CN": "${ghAvatarCN}", "": "${ghAvatar}"}` |
-| `substitution.__cdnjs__` | `{"CN": "${cdnjsCN}", "": "${cdnjs}"}` |
-| `substitution.__bootstrap_cdn_root__` | `{"": "${bootstrapCdnRoot}"}` |
-| `substitution.__bootstrap_cdn_root_staging__` | `{"": "${bootstrapCdnRootStaging}"}` |
+`packages/bootstrap-config/settings.json` 属于另一种通过 CDN 发布前端的方式，继承自上游 LibreOJ。安装器不使用它，也没有在 LLMOJ 中测试过。其中的示例地址指向上游项目的服务器：使用前必须全部替换，否则你的站点会从别人的服务器加载。
 
-修改后需要重新构建 bootstrap-config 及对应 bootstrap 应用，再部署 HTML／service worker／静态资源。生成的 `config.json` 中 `responseDataForRegion`、`body`、`contentType`、`cacheControl`、`serviceWorker`、`buildInfo` 都是构建产物，不是新的手工配置接口。该构建路径读取 Git 提交元数据，源码归档不等价于完整 Git 工作区。
+文件包含两部分：
 
-Cloudflare 变体要求 `CLOUDFLARE_WORKER_NAME`、`CLOUDFLARE_ACCOUNT_ID`，生成 `wrangler.toml`；OSS 变体要求 `ALIYUN_ACCESS_KEY_ID`、`ALIYUN_ACCESS_KEY_SECRET`、`ALIYUN_OSS_BUCKET`、`ALIYUN_OSS_ENDPOINT`，会发布 CN 区域页面。它们与一键安装无关；密钥不要写入 settings.json 或 Wiki。详见 [环境变量](Environment.zh-CN.md)。
+- `env`：具名的值（不是环境变量）。值中可以用 `${name}` 引用前面定义的值。示例定义了 `title`、`cdnRoot`、`apiEndpoint`、`apiEndpointCN`、`bootstrapCdnRoot`、`bootstrapCdnRootStaging`、`assets`、`favicon`、`appLogo`、`gravatar`、`gravatarCN`、`ghAvatar`、`ghAvatarCN`、`cdnjs` 和 `cdnjsCN`，也可以添加自己的值。
+- `substitution`：页面中各占位符的替换内容（`__api_endpoint__`、`__default_title__`、`__public_path__`、`__favicon__`、`__applogo__`、`__gravatar__`、`__ghavatar__`、`__cdnjs__`、`__bootstrap_cdn_root__`、`__bootstrap_cdn_root_staging__`）。值可以是一个字符串，也可以是从区域到字符串的映射，其中 `""` 是默认区域，`CN` 是中国区域，例如 `{"CN": "${apiEndpointCN}", "": "${apiEndpoint}"}`。
 
-来源：[deploy/build-frontend-offline.mjs](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/deploy/build-frontend-offline.mjs), [packages/bootstrap-config/settings.json](https://github.com/houyhlouis/LLMOJ/blob/main/packages/bootstrap-config/settings.json), [packages/bootstrap-config/src/build.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/packages/bootstrap-config/src/build.ts), [apps/bootstrap-cloudflare/config.mjs](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/bootstrap-cloudflare/config.mjs), [apps/bootstrap-static/deploy-oss.ts](https://github.com/houyhlouis/LLMOJ/blob/43a88bdd62fbf200889b36932fa921439a293190/apps/bootstrap-static/deploy-oss.ts).
+修改后需要重新构建 bootstrap-config 和 bootstrap 应用并部署。生成的 `config.json` 中的其他字段都由构建产生。构建会读取 Git 提交信息，因此需要 Git 工作区，而不是源码压缩包。
 
-## 固定尺寸的详情窗口
+Cloudflare 版本需要 `CLOUDFLARE_WORKER_NAME` 和 `CLOUDFLARE_ACCOUNT_ID`；发布中国区域页面的阿里云 OSS 版本需要 `ALIYUN_ACCESS_KEY_ID`、`ALIYUN_ACCESS_KEY_SECRET`、`ALIYUN_OSS_BUCKET` 和 `ALIYUN_OSS_ENDPOINT`。见[环境变量](Environment.zh-CN.md)。不要把这些凭据写进 `settings.json` 或 Wiki。
 
-提交和 Hack 列表使用 1100 × 720 像素的固定窗口，小屏幕按可用空间缩小。窗口通过 iframe 加载原同源详情链接，并附加 `embed=1`；该参数只在内嵌页面中隐藏顶部导航及其占位。普通详情链接、窗口中的 **#编号** 仍打开完整页面。登录、代码可见性、比赛反馈和所有操作沿用原页面的权限检查。详见 [提交预览](Submissions.zh-CN.md) 和 [Hack](Hacks.zh-CN.md)。
-
-内嵌模式在窗口启动时确定，框内普通链接进行客户端导航后仍保留该布局；在框内进入列表时使用普通链接，不递归打开更多预览窗口。不需要新增后端权限或配置开关。
+来源：[build-frontend-offline.mjs](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/build-frontend-offline.mjs)、[settings.json](https://github.com/houyhlouis/LLMOJ/blob/main/packages/bootstrap-config/settings.json)、[build.ts](https://github.com/houyhlouis/LLMOJ/blob/main/packages/bootstrap-config/src/build.ts)、[bootstrap-cloudflare/config.mjs](https://github.com/houyhlouis/LLMOJ/blob/main/apps/bootstrap-cloudflare/config.mjs)、[bootstrap-static/deploy-oss.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/bootstrap-static/deploy-oss.ts)。

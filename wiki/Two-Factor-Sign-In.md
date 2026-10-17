@@ -24,7 +24,7 @@ Removing the last authenticator app and passkey turns two-factor sign-in off and
 
 ## Signing in
 
-After the password, the login page asks for the second step. A passkey is offered first when the account has one for this site and the browser supports it; **Use an authenticator code** and **Use a recovery code** switch methods. Each authenticator code works once. Five wrong answers end that sign-in attempt, and ten failures within 15 minutes pause second-step checks for the account.
+After the password, the login page asks for the second step. A passkey is offered first when the account has one for this site and the browser supports it; **Use an authenticator code** and **Use a recovery code** switch methods. Each authenticator code works once. After five wrong answers you start again from the password, and after ten failures within 15 minutes the account can't complete the second step for a while.
 
 Resetting a forgotten password by email changes the password but still asks for the second step before signing in.
 
@@ -34,7 +34,7 @@ Changing the email address, the password (with two-factor sign-in on, or as a us
 
 ## Lost phone, passkeys and recovery codes
 
-A site administrator, or a user with the `ManageUser` privilege (not for administrator accounts), opens the user's **Security** page and selects **Turn off two-factor sign-in**. The user then signs in with the password alone and can set it up again. The action is recorded in the audit log.
+A site administrator, or a user with the **Manage user** privilege (who can't do this for administrators), opens the user's **Security** page and selects **Turn off two-factor sign-in**. The user then signs in with the password alone and can set it up again. The action is recorded in the audit log.
 
 ## Administration notes
 

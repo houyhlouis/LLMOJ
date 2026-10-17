@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { observer } from "mobx-react";
-import { Button, Form, Icon, Message, Table } from "semantic-ui-react";
+import { Button, Form, Header, Icon, Message, Segment, Table } from "semantic-ui-react";
 import { defineRoute } from "@/AppRouter";
 import { appState } from "@/appState";
 import { Link, useNavigationChecked, useScreenWidthWithin } from "@/utils/hooks";
@@ -189,68 +189,91 @@ const HacksPage = observer(function HacksPage({
           <Button type="button" icon="refresh" loading={busy} onClick={refresh} title={tr("刷新", "Refresh")} />
         </Form.Group>
       </Form>
-      <div className={style.tableScroll} aria-busy={busy}>
-        <Table textAlign="center" basic="very" unstackable fixed className={`${listStyle.table} ${style.hackTable}`}>
-          <Table.Header>
-            <Table.Row>
-              <Table.HeaderCell textAlign="left" className={style.statusColumn}>
-                {tr("状态", "Status")}
-              </Table.HeaderCell>
-              <Table.HeaderCell>{tr("提交编号", "Submission")}</Table.HeaderCell>
-              <Table.HeaderCell className={style.problemColumn}>{tr("题目", "Problem")}</Table.HeaderCell>
-              <Table.HeaderCell>{tr("提交者", "Submitter")}</Table.HeaderCell>
-              <Table.HeaderCell>Hacker</Table.HeaderCell>
-              <Table.HeaderCell>{tr("运行时间", "Runtime")}</Table.HeaderCell>
-              <Table.HeaderCell>{tr("运行内存", "Memory")}</Table.HeaderCell>
-              <Table.HeaderCell>{tr("Hack 时间", "Hack time")}</Table.HeaderCell>
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {data.hacks.map(record => {
-              const time = friendlyFormatDateTime(record.createTime);
-              return (
-                <Table.Row key={record.id}>
-                  <Table.Cell textAlign="left">
-                    <HackPreviewLink hackId={record.id} className={style[`status${record.status}`]}>
-                      {statusText(record.status)}
-                    </HackPreviewLink>
-                  </Table.Cell>
-                  <Table.Cell>
-                    <SubmissionPreviewLink
-                      submissionId={record.submissionId}
-                      contestId={record.contestId}
-                      href={submissionUrl(record)}
-                    >
-                      #{record.submissionId}
-                    </SubmissionPreviewLink>
-                  </Table.Cell>
-                  <Table.Cell>
-                    <Link href={problemUrl(record)}>
-                      P{record.problemId}
-                      {record.problemTitle ? ` ${record.problemTitle}` : ""}
-                    </Link>
-                  </Table.Cell>
-                  <Table.Cell>
-                    <Link href={`/u/${encodeURIComponent(record.submitter.username)}`}>
-                      {record.submitter.username}
-                    </Link>
-                  </Table.Cell>
-                  <Table.Cell>
-                    <Link href={`/u/${encodeURIComponent(record.hacker.username)}`}>{record.hacker.username}</Link>
-                  </Table.Cell>
-                  <Table.Cell>{record.timeUsed == null ? "—" : `${Math.round(record.timeUsed)} ms`}</Table.Cell>
-                  <Table.Cell title={record.memoryUsed == null ? undefined : `${record.memoryUsed} KiB`}>
-                    {record.memoryUsed == null ? "—" : formatFileSize(record.memoryUsed * 1024, 1)}
-                  </Table.Cell>
-                  <Table.Cell title={time[1]}>
-                    <HackPreviewLink hackId={record.id}>{time[0]}</HackPreviewLink>
-                  </Table.Cell>
-                </Table.Row>
-              );
-            })}
-          </Table.Body>
-        </Table>
-      </div>
+      {data.hacks.length === 0 ? (
+        <Segment placeholder>
+          <Header icon>
+            {[query.problemId, query.submissionId, query.hacker, query.status, query.mine].some(x => x) ? (
+              <>
+                <Icon name="search" />
+                {tr("找不到符合条件的 Hack", "No matching hacks")}
+              </>
+            ) : (
+              <>
+                <Icon name="bug" />
+                {tr("暂无 Hack", "No hacks")}
+              </>
+            )}
+          </Header>
+          <Segment.Inline>
+            <Button primary onClick={() => navigation.goBack()}>
+              {tr("返回", "Go back")}
+            </Button>
+          </Segment.Inline>
+        </Segment>
+      ) : (
+        <div className={style.tableScroll} aria-busy={busy}>
+          <Table textAlign="center" basic="very" unstackable fixed className={`${listStyle.table} ${style.hackTable}`}>
+            <Table.Header>
+              <Table.Row>
+                <Table.HeaderCell textAlign="left" className={style.statusColumn}>
+                  {tr("状态", "Status")}
+                </Table.HeaderCell>
+                <Table.HeaderCell>{tr("提交编号", "Submission")}</Table.HeaderCell>
+                <Table.HeaderCell className={style.problemColumn}>{tr("题目", "Problem")}</Table.HeaderCell>
+                <Table.HeaderCell>{tr("提交者", "Submitter")}</Table.HeaderCell>
+                <Table.HeaderCell>Hacker</Table.HeaderCell>
+                <Table.HeaderCell>{tr("运行时间", "Runtime")}</Table.HeaderCell>
+                <Table.HeaderCell>{tr("运行内存", "Memory")}</Table.HeaderCell>
+                <Table.HeaderCell>{tr("Hack 时间", "Hack time")}</Table.HeaderCell>
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              {data.hacks.map(record => {
+                const time = friendlyFormatDateTime(record.createTime);
+                return (
+                  <Table.Row key={record.id}>
+                    <Table.Cell textAlign="left">
+                      <HackPreviewLink hackId={record.id} className={style[`status${record.status}`]}>
+                        {statusText(record.status)}
+                      </HackPreviewLink>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <SubmissionPreviewLink
+                        submissionId={record.submissionId}
+                        contestId={record.contestId}
+                        href={submissionUrl(record)}
+                      >
+                        #{record.submissionId}
+                      </SubmissionPreviewLink>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Link href={problemUrl(record)}>
+                        P{record.problemId}
+                        {record.problemTitle ? ` ${record.problemTitle}` : ""}
+                      </Link>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Link href={`/u/${encodeURIComponent(record.submitter.username)}`}>
+                        {record.submitter.username}
+                      </Link>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Link href={`/u/${encodeURIComponent(record.hacker.username)}`}>{record.hacker.username}</Link>
+                    </Table.Cell>
+                    <Table.Cell>{record.timeUsed == null ? "—" : `${Math.round(record.timeUsed)} ms`}</Table.Cell>
+                    <Table.Cell title={record.memoryUsed == null ? undefined : `${record.memoryUsed} KiB`}>
+                      {record.memoryUsed == null ? "—" : formatFileSize(record.memoryUsed * 1024, 1)}
+                    </Table.Cell>
+                    <Table.Cell title={time[1]}>
+                      <HackPreviewLink hackId={record.id}>{time[0]}</HackPreviewLink>
+                    </Table.Cell>
+                  </Table.Row>
+                );
+              })}
+            </Table.Body>
+          </Table>
+        </div>
+      )}
       {(query.page > 1 || (query.page || 1) * data.pageSize < data.total) && (
         <div className={listStyle.pagination}>
           <SimplePagination

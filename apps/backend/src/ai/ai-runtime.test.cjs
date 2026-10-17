@@ -508,7 +508,19 @@ test("usage report queries only its authenticated owner and strips internal resp
   await assert.rejects(usage.report(7, 367), /INVALID_USAGE_PERIOD/);
   const service = Object.create(AiService.prototype);
   service.usage = { report: async (id, days) => ({ id, days }) };
-  assert.deepEqual(await service.usageReport({ id: 7 }, 30), { id: 7, days: 30 });
+  const reported = await service.usageReport({ id: 7 }, 30);
+  assert.deepEqual({ id: reported.id, days: reported.days }, { id: 7, days: 30 });
+  // Without the site policy (isolated harness), the defaults apply: no budget, nothing used.
+  assert.deepEqual(reported.budget, {
+    paused: false,
+    userDailyTokens: 0,
+    userDailyRequests: 0,
+    jobRequests: 500,
+    windowHours: 24,
+    usedTokens: 0,
+    usedRequests: 0,
+    heldTokens: 0
+  });
   await assert.rejects(service.usageReport(null, 30), /PERMISSION_DENIED/);
 });
 test("a cancelled sibling frees capacity and reducing a user's limit prevents new starts without cancelling its running request", async () => {

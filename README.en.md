@@ -2,114 +2,108 @@
 
 [简体中文](README.md) | English
 
-**LLMOJ is an online judge based on LibreOJ for programming contests, everyday practice and AI-assisted problem authoring.** It brings together problems, contests, judging and user permissions, with AI workflows for statement preparation, translation, source discovery and test-data generation.
+**LLMOJ is an online judge based on LibreOJ, built for programming contests, everyday practice and AI-assisted problem setting.** It combines a problem archive, contests, judging and permission management, with AI tools to tidy up statements, translate them, find a problem's original source and generate test data.
 
 [Repository](https://github.com/houyhlouis/LLMOJ) · [Documentation](wiki/Home.en.md) · [AI configuration](wiki/AI.md) · [Distributed judging](wiki/Distributed-Judging.md) · [Report an issue](https://github.com/houyhlouis/LLMOJ/issues)
 
 ## Features
 
-### Problems, contests and permissions
+### Problems, contests and community
 
-- Chinese and English interfaces, a browser code editor, problem management, study lists, discussions and submission history.
-- [NOI / OI, IOI, ICPC and Strict IOI](wiki/Contest-Rules.md), with contest permissions, scoreboards and rejudging; Strict IOI combines the best result for each subtask.
-- Multiple users and groups, problem/discussion sharing, and permission controls for contests and administration.
-- [Private teams](wiki/Teams.md): open My teams from your own profile and join by numeric team ID. Approval-free, approval-required and invitation admission never publish a team directory. Teams include groups, delegated permissions, problems, contests, assignments, discussions and files.
-- [Solutions](wiki/Solutions.md): read and write within each problem page, preserving discussion replies and My discussions, explicit reclassification and AI solutions. The top navigation and discussion index have no separate solutions section.
-- [Fake moderation](wiki/Submission-Moderation.md): preserve cheating evidence while setting effective scores to zero and updating accepted counts, contests and assignments.
-- [Hacks](wiki/Hacks.md): start from a specific submission detail. Managers maintain the problem STD in a code editor or adopt an accepted submission as STD. The Hack page uses submission-list styling and only displays records, filters and My hacks. Successful hacks retain evidence and invalidate the target score.
-- [Self Eval](wiki/Self-Evaluation.md): optional for NOI / OI contests only, from the contest problem page. Before the contest, managers enter `make.cpp` and `std.cpp` in code editors; evaluation reuses the formal SPJ. AI can generate and bind the same program versions. Fixed hidden pretests do not affect official scores, with a default whole-contest quota of 30 attempts per participant.
-- Permission management adds team access, creation and administration, Fake, Hack viewing/creation/management, and self-evaluation. Site-wide denies and private team access remain effective.
-- Administrators can switch open, approval-based or closed registration in Site management. Saved changes take effect immediately without a restart. Reviews can be delegated, and rejected applications can later be approved with their audit history retained.
-- The footer displays the configured site name followed by “Powered by LLMOJ”, with custom copyright text preserved.
+- Chinese and English interfaces and an in-browser code editor; problem management, study lists, discussions and submission history.
+- [Contest rules](wiki/Contest-Rules.md): NOI / OI, IOI, ICPC and Strict IOI (each subtask counts the best of all submissions), with scoreboards and rejudging.
+- Users, groups and fine-grained permissions: problems and discussions can be shared individually, and contest and administration rights are granted separately.
+- [Private teams](wiki/Teams.md): join a team by its ID under **My teams** on your profile; there is no public team list. Teams have groups and roles, problems, contests, assignments, discussions and shared files (10 GiB in total; large files upload in parts).
+- [Solutions](wiki/Solutions.md): read and write them on the problem page, or have AI draft one.
+- [Hacks](wiki/Hacks.md): challenge a submission with a counterexample from its detail page. A successful hack voids the submission's score and keeps the evidence.
+- [Self Eval](wiki/Self-Evaluation.md): an option for NOI / OI contests. Contestants check their programs against hidden pretests that don't count toward their score, by default up to 30 times per contest.
+- [Fake moderation](wiki/Submission-Moderation.md): set a cheating submission's score to zero and update the statistics, while keeping its code and judging record as evidence.
+- Registration can be open, [approval-based](wiki/Registration-Approval.md) or closed, switched in **Site management** and effective immediately; reviewing can be delegated to other users.
+- [Two-factor sign-in](wiki/Two-Factor-Sign-In.md) with authenticator apps and passkeys.
 
-### Multiple languages and judge nodes
+### Judging
 
-- Languages including C/C++, Python and Java, with traditional, interactive, communication and output-only problems.
-- LibreOJ's `simple-sandbox` and original rootfs recipe, with process, filesystem and network isolation and resource limits.
-- Ordinary submissions can run on local or multiple remote judges. Each node connects with its own credentials and downloads test files on demand.
+- 12 languages, including C/C++, Python and Java; traditional, interactive, communication and output-only problems.
+- A sandbox based on LibreOJ's `simple-sandbox` and its original rootfs: separate process, filesystem and network environments, cgroup resource limits, and a filter that refuses dangerous system calls.
+- Judging tasks are kept in the database, so restarting the backend or a judge loses no submission. Editing a problem doesn't change how queued submissions are judged, and a rejudge keeps the earlier result.
+- Judge locally, or connect several [remote judge machines](wiki/Distributed-Judging.md). Each has its own key, and can be drained (sent no new tasks) from the **Judge Machine** page for maintenance.
 
-### AI-assisted authoring and learning
+### AI-assisted problem setting
 
-- **Statements and tutorials:** organize imported content, translate statements, and suggest tags, difficulty and tutorial drafts.
-- **Source discovery:** combine search results and semantic checks to help identify a problem's original source.
-- **Test data:** for traditional problems, run at least 64 small differential cases against an independent oracle, cross-check every full case with another correct solution, and require executable wrong or slow candidates to fail before installing data. Validation reports retain counterexamples and verdicts. Interactive and communication problems use protocol simulation.
-- **Task management:** view progress, cancel or retry jobs; problem writes recheck current permissions and the problem version.
-- **Per-user configuration:** bring your own model and search services (Tavily/MCP). API keys are encrypted at rest; HTTP/HTTPS public endpoints are supported; private-network and loopback endpoints are limited to site administrators unless the server administrator allows them in `HYHOJ_AI_PRIVATE_HOSTS`.
+- **Statements and solutions:** tidy up imported statements, translate them, suggest tags and difficulty, and draft solutions.
+- **Finding sources:** combine search results with semantic comparison to help find a problem's original source.
+- **Test data:** for traditional problems, at least 64 small cases are first checked against an independent reference algorithm, then all the data is cross-checked with a second correct solution, and prepared wrong or too-slow programs must actually fail on it. Only then is the data installed, together with a validation report. Interactive and communication problems are checked by simulating their protocol.
+- **Job management:** follow progress, cancel or retry; before writing to a problem, AI jobs check the permissions again and whether the problem has changed.
+- **Your own services:** each user enters their own model and search services (Tavily / MCP); API keys are stored encrypted. Private-network and local addresses are available only to site administrators, unless the server administrator allows them with `HYHOJ_AI_PRIVATE_HOSTS`.
+- **Site limits:** administrators can pause AI for the whole site, and limit each account's tokens and requests per 24 hours, each job's requests, and how many AI requests run at once. Every request is checked before it's sent.
 
-Review AI-generated content. Executing reference solutions and test-data generation requires a local sandbox on the web node; see the deployment modes below and the [AI guide](wiki/AI.md).
+Review everything AI generates. Validating reference solutions and generating test data run in a local sandbox on the web server; see the [AI guide](wiki/AI.md).
 
-## Quick installation
+## Installation
 
 ### Requirements
 
 | Item | Requirement |
 | --- | --- |
-| Verified system | Ubuntu 24.04 amd64 on a regular VM or physical server |
-| Judge resources | At least 2 effective logical CPUs; 256 MiB effective RAM per slot; 8 GiB recommended for compilation |
-| Free disk | At least 30 GiB for a full installation, 40 GiB recommended; 10 GiB for web-only mode |
-| System and network | systemd 254+, cgroup v2, and access to package repositories, GitHub and build dependency sources |
+| System | Ubuntu 24.04 amd64 (tested), on a virtual machine or physical server |
+| CPU and memory | At least 2 logical CPUs; 256 MiB of RAM per judge execution slot; 8 GiB recommended for building |
+| Disk | At least 30 GiB free for a full installation (40 GiB recommended), 10 GiB for the website only |
+| Other | systemd 254 or later, cgroup v2, and access to package repositories, GitHub and the build dependencies' download sources |
 
-Run the English installation entry point in the server terminal:
+Run the English installation script on the server:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/install.sh -o /tmp/llmoj-install.sh && \
   sudo bash /tmp/llmoj-install.sh --repository houyhlouis/LLMOJ
 ```
 
-The installer prompts for deployment mode, port, hostname, site name, installation directory and Docker sources, then installs dependencies, builds the application and configures services. Full mode also builds the judging rootfs; allow time for downloads and compilation on the first run.
+The script asks for the deployment mode, port, domain, site name, installation directory and Docker sources, then installs dependencies, builds LLMOJ and sets up its services. A full installation also builds the rootfs used for judging, so the first run takes a while.
 
-The default directory is `/opt/LLMOJ`, with the site listening on `0.0.0.0:80` at `http://SERVER_IP`. See the [installation guide](wiki/Installation.md) for custom ports, mirrors, unattended installation and version pinning.
+By default LLMOJ is installed in `/opt/LLMOJ` and listens on `0.0.0.0:80`; open `http://SERVER_IP` in a browser. Custom ports, mirrors, unattended installation and pinned versions are covered in the [installation guide](wiki/Installation.md).
 
-When first creating judge configuration without an explicit slot count, all mode asks for judge instances (execution slots). Default and maximum both use `min(effective CPUs-1, effective RAM MiB//256, 511)`, with no extra memory reservation. For example, at least 3 effective CPUs and 512 MiB RAM default to 2 slots; 1 CPU or less than 256 MiB RAM cannot run a local judge and can use web-only mode. Slots are not OS threads; existing deployments use the [resize guide](wiki/Judge-Configuration.md). The Ubuntu 26.04 database-init failure has an isolated reproduction and fix workflow; fresh 26.04 installation remains unverified. See [installation and troubleshooting](wiki/Installation.md).
+A full installation asks how many judge execution slots to use (how many programs can be judged at the same time). The default is the smaller of "logical CPUs minus 1" and "RAM in MiB ÷ 256": for example, 2 slots with 3 CPUs and 512 MiB. With a single CPU or less than 256 MiB of RAM there is no local judging; install the website only. To change the number of slots later, use the [resize script](wiki/Judge-Configuration.md).
 
 ### After installation
 
-1. **Sign in as administrator:** on success, the terminal prints `admin` and a random password. The server also saves `config/admin-credentials.json` under the installation directory (`/opt/LLMOJ` by default), readable only by root. Change the password after signing in; rerunning installation does not reset it.
-2. **Start using the judge:** create users, assign permissions and add a problem. Submit a simple program to confirm judging, then create study lists or contests as needed.
-3. **Configure AI:** users with AI configuration permission enter their service URL, model and API key, then test the connection. The project does not provide shared keys or prepaid services.
+1. **Sign in as administrator:** when the installation finishes, the terminal shows the user `admin` and a random password. They are also saved in `config/admin-credentials.json` in the installation directory, readable only by root. Change the password after signing in; running the installer again doesn't reset it.
+2. **Start using it:** create users, assign permissions and add a problem. Submit a simple program to check that judging works, then create study lists or contests.
+3. **Set up AI:** users with permission to configure AI enter their own service URL, model and API key, and test the connection. LLMOJ doesn't provide shared keys or paid services.
 
-For public access, configure [HTTPS](wiki/HTTPS.md) and allow the chosen website port in your firewall or cloud security group. The installer does not change firewall rules.
+For public access, set up [HTTPS](wiki/HTTPS.md) and open the website's port in your firewall or cloud security group; the installer doesn't change firewall rules.
 
-## Registration approval and upgrades
+## Upgrading
 
-Administrators open **Site management** (`/site-management`) from the user menu, select open, approval-based or closed registration and save. Changes take effect immediately without a restart. The database setting overrides YAML; before saving an override or after **Restore server configuration**, the server configuration applies. Only site administrators can change this policy; review or homepage-editing permissions do not grant that authority.
-
-Administrators and reviewers granted `ManageRegistrationReviews` process applications in **Registration reviews**. Changing the registration mode never activates existing pending/rejected applications. Approval creates the account and assigns its user ID; rejected applications can later be approved with previous audit entries retained, while approval cannot be reversed. See [Registration approval](wiki/Registration-Approval.md).
-
-Existing official one-click deployments can use the separate upgrade entry:
+An installation made with the installation script can be upgraded with:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/upgrade.sh -o /tmp/llmoj-upgrade.sh && \
   sudo bash /tmp/llmoj-upgrade.sh --prefix /opt/LLMOJ
 ```
 
-The updater checks compatibility, builds in staging, takes backups and switches versions after maintenance confirmation. Accounts, problems, API keys, configuration and judge slots are preserved. Add `--plan` for a read-only check. It supports known-compatible official `all` / `web` layouts and refuses unsupported dependency, runtime or schema changes; it cannot promise upgrades across arbitrary historical versions. Pause submissions and drain local/remote judging and AI jobs before maintenance. The new files must be published to GitHub before first use. See [Upgrade](wiki/Upgrade.md) for options and rollback.
+The script checks compatibility, builds the new version in a separate directory, makes a backup, and switches versions only after you confirm. Accounts, problems, API keys, configuration and judge slots are kept. Add `--plan` to check without changing anything. Before upgrading, pause new submissions and wait until judging on all judge machines and AI jobs have finished. Incompatible dependency, runtime or database changes are refused, so not every old version can be upgraded directly. Options and rollback are described in the [upgrade guide](wiki/Upgrade.md); for the database changes each feature brings, see [Feature upgrades](wiki/Community-Upgrade.md).
 
 ## Deployment modes
 
-The teams, solutions, Fake, Hack, Strict IOI and self-evaluation release includes fixed additive database migrations and reviewed judge-task extensions. Existing installations should read [Community upgrade](wiki/Community-Upgrade.md). The upgrader rehearses fixed-schema changes on a restored database copy and refuses unknown changes or downgrades that could bypass team privacy, moderation, self-evaluation quotas or new permission rules. Automatic upgrades for the new Hack/SelfEval judge tasks support `all` installations; `web` installations require separately coordinated remote-judge versions. An unpublished complete local source tree can use the local upgrade workflow in the guide.
-
-| Mode | Components and purpose |
+| Mode | Contents |
 | --- | --- |
-| `--role all` (default) | Web application, storage, local judging and AI execution; additional remote judges can handle ordinary submissions |
-| `--role web` | Web application and storage, without a local rootfs; ordinary submissions require remote judges |
+| `--role all` (default) | Website, storage, local judging and the AI execution environment; remote judge machines can be added |
+| `--role web` | Website and storage only, without a rootfs; submissions are judged by remote judge machines |
 
-Use `all` on the web node for AI reference-solution validation and test-data generation. Remote ordinary judges do not automatically replace the local AI worker. See [distributed judging](wiki/Distributed-Judging.md) for architecture diagrams, node registration and setup.
+To validate reference solutions and generate test data with AI, use `all` on the web server: remote judge machines don't replace the local AI execution environment. Architecture diagrams, judge registration and setup steps are in [Distributed judging](wiki/Distributed-Judging.md).
 
-Team files have 10 GiB total space with no separate per-file cap; large files upload in chunks. Submission lists offer previews that preserve filters and link to the full page; see [Submission previews](wiki/Submissions.md). Open Members through **View all** in the home page Top Users panel.
-
-## Documentation and development
+## Documentation
 
 | Documentation | Topics |
 | --- | --- |
 | [Installation](wiki/Installation.md) · [Docker sources](wiki/Docker-Sources.md) | Installer options, mirrors, service management and retries |
-| [Distributed judging](wiki/Distributed-Judging.md) · [Remote judges](wiki/Remote-Judge.md) | Architecture, web/judge separation and node setup |
-| [Contest rules](wiki/Contest-Rules.md) · [Hacks](wiki/Hacks.md) · [Self-evaluation](wiki/Self-Evaluation.md) | Subtask scoring, submission-detail Hacks, NOI hidden pretests and whole-contest quotas |
-| [AI features](wiki/AI.md) · [HTTPS](wiki/HTTPS.md) | Model configuration, execution environment and encrypted site access |
-| [Development](README-DEVELOPMENT.md) · [Source package](deploy/SOURCE-PACKAGE.md) | Builds, tests and source distribution scope |
+| [Distributed judging](wiki/Distributed-Judging.md) · [Remote judges](wiki/Remote-Judge.md) · [Judge configuration](wiki/Judge-Configuration.md) | Architecture, adding judge machines, the sandbox and capacity |
+| [Registration approval](wiki/Registration-Approval.md) · [Two-factor sign-in](wiki/Two-Factor-Sign-In.md) · [Upgrade](wiki/Upgrade.md) | Registration settings, sign-in security, upgrading and rollback |
+| [Contest rules](wiki/Contest-Rules.md) · [Hacks](wiki/Hacks.md) · [Self Eval](wiki/Self-Evaluation.md) | Scoring, Hacks and Self Eval |
+| [AI features](wiki/AI.md) · [HTTPS](wiki/HTTPS.md) | Model configuration, execution environment and encrypted access |
+| [Development](README-DEVELOPMENT.md) · [Source package](deploy/SOURCE-PACKAGE.md) | Building, testing and what the source package contains |
 
-Browse the full [English Wiki](wiki/Home.en.md) / [中文 Wiki](wiki/Home.md). 
+Browse the full [English Wiki](wiki/Home.en.md) / [中文 Wiki](wiki/Home.md).
 
 ## License and acknowledgements
 
-LLMOJ is based on LibreOJ. The main source is [MIT](LICENSE), retaining upstream copyright and license notices. Thanks to LibreOJ and the contributors to its open-source dependencies. Third-party components and the rootfs recipe retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.md).
+LLMOJ is based on LibreOJ. Its own code is under the [MIT](LICENSE) license, and the upstream copyright and license notices are kept. Thanks to LibreOJ and the contributors of its open-source components. Third-party components and the rootfs recipe keep their own licenses; see the [third-party notices](THIRD_PARTY_NOTICES.md).

@@ -90,6 +90,11 @@ COMMUNITY_PERMISSIONS = (
 )
 
 
+def say(english, chinese):
+    """A message for people in the entry script's language: upgrade.zh-CN.sh sets LLMOJ_LANG=zh-CN."""
+    return chinese if os.environ.get('LLMOJ_LANG') == 'zh-CN' else english
+
+
 class UpgradeError(RuntimeError):
     """Only deliberately non-sensitive messages may reach the terminal."""
 
@@ -694,21 +699,27 @@ class Upgrade:
             match = re.fullmatch(r'UPGRADE_COMPATIBILITY: ([A-Z_]+)\n?', result.stderr.decode(errors='replace'))
             code = match[1] if match else 'DATABASE_OPERATION_FAILED'
             reasons = {
-                'SCHEMA_CHANGE_UNSUPPORTED': '数据库结构变更不在支持范围 / unsupported schema change',
-                'LEGACY_NONDEFAULT_PROFILE': '旧未激活账号有非默认资料或缺失账户记录 / non-default or incomplete legacy profile',
-                'LEGACY_CREDENTIALS_OR_PREFERENCES': '旧凭据或偏好需要人工审查 / legacy credentials/preferences require review',
-                'LEGACY_REVIEW_METADATA': '旧审核记录不一致 / inconsistent legacy review metadata',
-                'LEGACY_INVALID_ACCOUNT': '旧审核引用无效账号 / invalid legacy review account',
-                'APPLICATION_CONFLICT': '已有申请的用户名、邮箱或账号关联冲突 / application reservation/link conflict',
-                'UNKNOWN_TABLE': '未知数据库表可能引用旧账号 / unknown tables may reference legacy accounts',
-                'UNKNOWN_FOREIGN_KEY': '未知外键需要人工审查 / unknown foreign key',
-                'LEGACY_BUSINESS_REFERENCES': '旧未激活账号已有业务内容、权限或关联 / legacy account has business data or privileges',
-                'LEGACY_UNSUPPORTED_AUDIT': '旧账号有注册白名单之外的审计历史 / unsupported legacy audit history',
-                'AUDIT_COPY_VERIFICATION': '审计归档回读校验失败 / audit archive verification failed',
-                'MIGRATION_CONCURRENT_CHANGE': '迁移期间记录变化 / data changed during migration',
-                'MIGRATION_WRITE_VERIFICATION': '迁移写入校验失败 / migration write verification failed'
+                'SCHEMA_CHANGE_UNSUPPORTED': ('the database structure change is not supported', '数据库结构变更不在支持范围'),
+                'LEGACY_NONDEFAULT_PROFILE': ('an unactivated old account has a non-default or incomplete profile',
+                                              '旧未激活账号有非默认资料或缺失账户记录'),
+                'LEGACY_CREDENTIALS_OR_PREFERENCES': ('old credentials or preferences need a manual review', '旧凭据或偏好需要人工审查'),
+                'LEGACY_REVIEW_METADATA': ('old registration review records are inconsistent', '旧审核记录不一致'),
+                'LEGACY_INVALID_ACCOUNT': ('an old registration review refers to an invalid account', '旧审核引用无效账号'),
+                'APPLICATION_CONFLICT': ("a registration application's username, email or account conflicts with another",
+                                         '已有申请的用户名、邮箱或账号关联冲突'),
+                'UNKNOWN_TABLE': ('unknown database tables may refer to old accounts', '未知数据库表可能引用旧账号'),
+                'UNKNOWN_FOREIGN_KEY': ('an unknown foreign key needs a manual review', '未知外键需要人工审查'),
+                'LEGACY_BUSINESS_REFERENCES': ('an unactivated old account already has content, privileges or links',
+                                               '旧未激活账号已有业务内容、权限或关联'),
+                'LEGACY_UNSUPPORTED_AUDIT': ('an old account has audit history the migration does not support',
+                                             '旧账号有注册白名单之外的审计历史'),
+                'AUDIT_COPY_VERIFICATION': ('reading back the archived audit records failed', '审计归档回读校验失败'),
+                'MIGRATION_CONCURRENT_CHANGE': ('records changed during the migration', '迁移期间记录变化'),
+                'MIGRATION_WRITE_VERIFICATION': ('verifying the migrated records failed', '迁移写入校验失败')
             }
-            fail('Database upgrade refused ('+code+'): '+reasons.get(code, 'database operation failed; private connection details withheld'))
+            reason = reasons.get(code, ('the database operation failed (connection details are not shown)',
+                                        '数据库操作失败（未输出连接信息）'))
+            fail(say('Database upgrade refused ('+code+'): ', '数据库升级被拒绝（'+code+'）：')+say(*reason))
         return json.loads(result.stdout)
 
     def schema_on_clone(self, dump):
@@ -896,7 +907,7 @@ class Upgrade:
         # record the guard before the first mutation so rollback cannot let an
         # older backend synchronize away a partially applied schema.
         self.manifest['communitySchemaApplied'] = any(
-            re.search(r'`(?:team(?:_[a-z]+)*|file|discussion|submission|hack(?:_[a-z]+)*|self_eval(?:_[a-z]+)*|contest|user_privilege|user_permission_rule|user_two_factor|user_passkey|judge_job(?:_attempt)?|judge_client|problem_data_version|deferred_file_deletion|submission_result_history|statistics_outbox)`', query)
+            re.search(r'`(?:team(?:_[a-z]+)*|file|discussion|submission|hack(?:_[a-z]+)*|self_eval(?:_[a-z]+)*|contest|user_privilege|user_permission_rule|user_two_factor|user_passkey|judge_job(?:_attempt)?|judge_client|problem_data_version|deferred_file_deletion|submission_result_history|statistics_outbox|ai_reservation)`', query)
             for query in self.manifest['schemaQueries']
         )
         self.save()
@@ -999,6 +1010,12 @@ class Upgrade:
             overrides = self.sql("SELECT COUNT(*) FROM `settings` WHERE `key`='registration-policy' AND (COALESCE(JSON_TYPE(`value`), '') <> 'OBJECT' OR COALESCE(JSON_TYPE(JSON_EXTRACT(`value`, '$.registrationMode')), 'MISSING') <> 'NULL')", 'libreoj')
             if int(overrides):
                 fail('Rollback refused: the saved website registration policy requires this release; restore server configuration in Website Management before downgrading, or recover the new release')
+        # An older backend ignores the AI pause and budgets: AI would resume, unlimited, after the downgrade.
+        if previous_backend.exists() and not (previous_backend/'dist/settings/ai-policy.service.js').is_file():
+            limited = self.sql("SELECT COUNT(*) FROM `settings` WHERE `key`='ai-policy' AND (COALESCE(JSON_TYPE(`value`), '') <> 'OBJECT' OR COALESCE(JSON_EXTRACT(`value`, '$.paused'), 'false') <> 'false' OR COALESCE(JSON_EXTRACT(`value`, '$.userDailyTokens'), '0') <> '0' OR COALESCE(JSON_EXTRACT(`value`, '$.userDailyRequests'), '0') <> '0')", 'libreoj')
+            if int(limited):
+                fail(say('Rollback refused: the older release would ignore the AI pause and budgets saved in Site management; turn them off there before downgrading, or repair this release',
+                         '拒绝回滚：旧版本会忽略在网站管理中保存的 AI 暂停和预算；请先在网站管理中关闭它们再回滚，或修复当前版本'))
         for table in ('registration_review', 'registration_application'):
             exists = self.sql(f"SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='libreoj' AND TABLE_NAME='{table}'")
             if exists == '1' and int(self.sql(f"SELECT COUNT(*) FROM `{table}` WHERE status <> 'approved'", 'libreoj')):
@@ -1064,13 +1081,17 @@ def validate_manifest(manifest):
 
 
 def parser():
-    result = argparse.ArgumentParser(allow_abbrev=False, description='官方 all/web 保守升级：保留配置、评测容量和数据；不支持任意历史版本。')
+    result = argparse.ArgumentParser(allow_abbrev=False, description=say(
+        'Upgrade an official all/web installation, keeping its configuration, judge capacity and data. '
+        'Only the supported upgrade paths are accepted.',
+        '官方 all/web 保守升级：保留配置、评测容量和数据；不支持任意历史版本。'))
     result.add_argument('--prefix', type=Path, default=Path('/opt/LLMOJ'))
     result.add_argument('--ref', default='main')
     result.add_argument('--source', type=Path)
     result.add_argument('--source-sha256')
     result.add_argument('--verified-commit', help=argparse.SUPPRESS)
-    result.add_argument('--source-digest', action='store_true', help='只读输出本地完整源码树 SHA256')
+    result.add_argument('--source-digest', action='store_true', help=say('Print the SHA-256 of a local source tree, read-only',
+                                                                          '只读输出本地完整源码树 SHA256'))
     result.add_argument('--plan', action='store_true')
     result.add_argument('--apply', action='store_true')
     result.add_argument('--drained', action='store_true')
@@ -1086,7 +1107,8 @@ def main(argv=None):
         print(tree_digest(args.source.resolve()))
         return
     if os.geteuid() != 0:
-        fail('请使用 sudo / root is required to inspect private installation metadata')
+        fail(say('Run with sudo: root is required to read the private installation metadata',
+                 '请使用 sudo 运行：需要 root 权限读取私有安装信息'))
     if args.plan and (args.apply or args.rollback):
         fail('--plan cannot be combined with --apply or --rollback')
     upgrade = Upgrade(args.prefix)
@@ -1112,7 +1134,8 @@ def main(argv=None):
         # current service activity; only our own guard and recorded code are reverted.
         with maintenance_lock():
             upgrade.rollback(manual=True)
-        print('代码回滚完成；数据库及新增兼容审核表保留。 / Code rollback complete; database retained.')
+        print(say('Code rollback complete; the database, including tables added since, is kept.',
+                  '代码回滚完成；数据库及新增兼容审核表保留。'))
         return
     info = upgrade.preflight()
     source = args.source.resolve() if args.source else None
@@ -1148,8 +1171,11 @@ def main(argv=None):
     else:
         if not sys.stdin.isatty():
             fail('Non-interactive use requires --apply --drained')
-        print('请先暂停新提交/导入，排空本机及远程评测、AI 作业。升级将短暂停止网站并保留全部配置与数据。')
-        if input('确认已排空并开始升级？输入 UPGRADE：').strip() != 'UPGRADE':
+        print(say('Pause new submissions and imports, and wait until judging (local and remote) and AI jobs have '
+                  'finished. The upgrade stops the website briefly and keeps all configuration and data.',
+                  '请先暂停新提交/导入，排空本机及远程评测、AI 作业。升级将短暂停止网站并保留全部配置与数据。'))
+        if input(say('Type UPGRADE to confirm that everything has finished and start: ',
+                     '确认已排空并开始升级？输入 UPGRADE：')).strip() != 'UPGRADE':
             fail('Upgrade cancelled before modification')
     with maintenance_lock():
         temporary = None
@@ -1193,8 +1219,9 @@ def main(argv=None):
             finally:
                 for s, handler in old_handlers.items():
                     signal.signal(s, handler)
-            print('升级完成；配置和数据保留。私有备份：'+str(upgrade.backup))
-            print('Upgrade complete; configuration and data preserved. Schema auto-sync is disabled by '+str(upgrade.guard))
+            print(say('Upgrade complete; configuration and data kept. Private backup: ',
+                      '升级完成；配置和数据保留。私有备份：')+str(upgrade.backup))
+            print(say('Automatic schema synchronization stays disabled by ', '数据库结构自动同步保持关闭：')+str(upgrade.guard))
         finally:
             if temporary:
                 shutil.rmtree(temporary)
@@ -1204,8 +1231,9 @@ if __name__ == '__main__':
     try:
         main()
     except UpgradeError as error:
-        print('升级未完成 / Upgrade not completed: '+str(error), file=sys.stderr)
+        print(say('Upgrade not completed: ', '升级未完成：')+str(error), file=sys.stderr)
         sys.exit(1)
     except Exception:
-        print('升级未完成 / Upgrade not completed; private configuration and command output withheld.', file=sys.stderr)
+        print(say('Upgrade not completed (private configuration and command output are not shown).',
+                  '升级未完成（未输出私有配置和命令输出）。'), file=sys.stderr)
         sys.exit(1)
