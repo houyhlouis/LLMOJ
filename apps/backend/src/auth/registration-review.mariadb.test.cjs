@@ -28,6 +28,9 @@ const {
   sessionService
 } = require("./registration-test-helpers.cjs");
 const { AuditService } = require("../audit/audit.service.ts");
+// Permission edits need a recent password entry (covered by step-up.test.cjs); these actors just signed in.
+const signedInRecently = { requireRecentAuthentication: async () => {} },
+  quietAudit = { log: async () => {} };
 const { EmailVerificationCodeType } = require("./auth-email-verification-code.service.ts");
 
 test(
@@ -87,7 +90,7 @@ test(
         registrationSettings
       );
       const privileges = new UserPrivilegeService(db, db.getRepository(UserPrivilegeEntity), userService);
-      const permissions = new AccessController(db, privileges);
+      const permissions = new AccessController(db, privileges, signedInRecently, quietAudit);
       const reviews = new RegistrationReviewService(db, privileges),
         { sessions } = sessionService(reviews, userService);
       const api = controller({
@@ -99,7 +102,9 @@ test(
         configService: settings,
         registrationSettings,
         userMigrationService: { findUserMigrationInfoByOldUsername: async () => null },
-        authEmailVerificationCodeService: { verify: async () => true }
+        authEmailVerificationCodeService: { verify: async () => true },
+        // These accounts sign in with a password alone (two-factor sign-in has its own tests).
+        twoFactorService: { isEnabled: async () => false }
       });
       const req = { ip: "127.0.0.1", headers: { "user-agent": "isolated test" } };
       let n = 0;
@@ -677,7 +682,7 @@ test(
             await authorized.promise;
             revocation =
               writer === "detailed override"
-                ? new AccessController(observedDb, privileges).set(admin, {
+                ? new AccessController(observedDb, privileges, signedInRecently, quietAudit).set(admin, {
                     userId: manager.id,
                     overrides: { ManageRegistrationReviews: false }
                   })

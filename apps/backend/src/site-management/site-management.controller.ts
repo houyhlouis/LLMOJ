@@ -9,6 +9,8 @@ import { RegistrationSettingsService } from "../settings/registration-settings.s
 import { AiPolicyService } from "../settings/ai-policy.service";
 import { CurrentUser } from "../common/user.decorator";
 import { UserEntity } from "../user/user.entity";
+import { AuthSessionService } from "../auth/auth-session.service";
+import { RequestWithSession } from "../auth/auth.middleware";
 
 @ApiTags("SiteManagement")
 @ApiBearerAuth()
@@ -16,8 +18,16 @@ import { UserEntity } from "../user/user.entity";
 export class SiteManagementController {
   constructor(
     private readonly registrationSettings: RegistrationSettingsService,
-    private readonly aiPolicy: AiPolicyService
+    private readonly aiPolicy: AiPolicyService,
+    private readonly sessions: AuthSessionService
   ) {}
+
+  /** Site settings change for everyone at once, so administrators confirm their password first. */
+  private async confirmAdministrator(user: UserEntity, request: Request): Promise<void> {
+    // Others are refused by the settings services, without being asked for a password.
+    if (user?.isAdmin)
+      await this.sessions.requireRecentAuthentication(user, (request as RequestWithSession)?.session?.sessionId);
+  }
 
   @Get("getSettings")
   @ApiOperation({ summary: "Get the effective registration mode and its source (site administrators only)." })
@@ -32,6 +42,7 @@ export class SiteManagementController {
     @Body() body: UpdateRegistrationModeRequestDto,
     @Req() request: Request
   ): Promise<SiteManagementSettingsDto> {
+    await this.confirmAdministrator(user, request);
     return await this.registrationSettings.updateRegistrationMode(user, body.registrationMode, request.ip);
   }
 
@@ -48,6 +59,7 @@ export class SiteManagementController {
     @Body() body: AiPolicyDto,
     @Req() request: Request
   ): Promise<AiPolicyDto> {
+    await this.confirmAdministrator(user, request);
     return await this.aiPolicy.update(user, body, request.ip);
   }
 }

@@ -41,6 +41,10 @@ return {
   "judge_client.reset_key": "Reset the key of a judge machine",
   "judge_client.drain": "Drain a judge machine",
   "judge_client.resume": "Resume a judge machine",
+  "judge_client.show_key": "Show the key of a judge machine",
+
+  "site.registration_mode.update": "Change the registration mode",
+  "site.ai_policy.update": "Change the site AI settings",
 
   "group.create": "Create group [firstObject]",
   "group.delete": "Delete group [firstObject]",
@@ -71,8 +75,10 @@ return {
   "submission.cancel": "Cancel submission [firstObject]",
   "submission.set_public": "Set submission [firstObject] public",
   "submission.set_non_public": "Set submission [firstObject] nonpublic",
+  "submission.delete": "Delete submission [firstObject]",
 
   "user.set_privileges": "Set privileges of user [firstObject]",
+  "user.set_permissions": "Set detailed permissions of user [firstObject]",
   "user.change_username": "Change username",
   "user.change_others_username": "Change username of user [firstObject]",
   "user.change_email": "Change email (privileged)",

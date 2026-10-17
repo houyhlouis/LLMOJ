@@ -42,7 +42,11 @@ function load(relative, overrides = {}) {
   return module.exports;
 }
 const catalog = load("access/permission-catalog.ts");
-const { UserPrivilegeService } = load("user/user-privilege.service.ts", { "../access/permission-catalog": catalog });
+const { UserPrivilegeService } = load("user/user-privilege.service.ts", {
+  "../access/permission-catalog": catalog,
+  // Checks here run outside any HTTP request (capability-cache.test.cjs covers requests).
+  "../common/request-context": { requestContext: new (require("node:async_hooks").AsyncLocalStorage)() }
+});
 const { AccessGuard } = load("access/access.guard.ts");
 const { withoutTestData } = load("submission/submission-redaction.ts");
 const { ProblemService, ProblemPermissionType } = load("problem/problem.service.ts");

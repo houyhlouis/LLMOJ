@@ -77,6 +77,14 @@ The services in use are in `/etc/systemd/system`; `deploy/systemd` holds the tem
 
 The installer also sets `vm.overcommit_memory=1` for Redis in `/etc/sysctl.d/99-libreoj-redis.conf` (unless that file already exists) and installs the AppArmor rules the judge's sandbox needs. Docker sources are described in [Docker sources](Docker-Sources.md). The versions of Node.js, Go and pnpm and the sandbox image are part of each release, not settings.
 
+### Server errors
+
+When a page reports a server error, the message ends with an error ID. The backend's log has the details under the same ID, in brackets at the start of the line. For AI pages, the log names only the kind of error, never its details. Every API response also carries its ID in the `X-Request-Id` header.
+
+```bash
+sudo journalctl -u libreoj-backend --since today | grep 'ERROR-ID-FROM-THE-MESSAGE'
+```
+
 ## Settings that change together
 
 | To change | Also change |

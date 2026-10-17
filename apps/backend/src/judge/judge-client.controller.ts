@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get } from "@nestjs/common";
+import { Controller, Post, Body, Get, Req } from "@nestjs/common";
 import { ApiOperation, ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 
 import { JudgeClientService } from "./judge-client.service";
@@ -11,6 +11,9 @@ import {
   DeleteJudgeClientRequestDto,
   DeleteJudgeClientResponseDto,
   DeleteJudgeClientResponseError,
+  GetJudgeClientKeyRequestDto,
+  GetJudgeClientKeyResponseDto,
+  GetJudgeClientKeyResponseError,
   GetJudgeQueueStatusResponseDto,
   GetJudgeQueueStatusResponseError,
   ListJudgeClientsResponseDto,
@@ -25,6 +28,8 @@ import {
 import { CurrentUser } from "../common/user.decorator";
 import { UserEntity } from "../user/user.entity";
 import { AuditService } from "../audit/audit.service";
+import { AuthSessionService } from "../auth/auth-session.service";
+import { RequestWithSession } from "../auth/auth.middleware";
 
 @ApiTags("Judge Client")
 @Controller("judgeClient")
@@ -32,8 +37,14 @@ export class JudgeClientController {
   constructor(
     private readonly judgeClientService: JudgeClientService,
     private readonly judgeQueueService: JudgeQueueService,
-    private readonly auditService: AuditService
+    private readonly auditService: AuditService,
+    private readonly authSessionService: AuthSessionService
   ) {}
+
+  /** A judge key lets a machine receive test data and report results, so issuing or showing one needs the password. */
+  private async recentlyAuthenticated(req: RequestWithSession, user: UserEntity): Promise<boolean> {
+    return await this.authSessionService.isRecentlyAuthenticated(user.id, req.session?.sessionId);
+  }
 
   @ApiOperation({
     summary: "Add a new judge client."
@@ -41,6 +52,7 @@ export class JudgeClientController {
   @ApiBearerAuth()
   @Post("addJudgeClient")
   async addJudgeClient(
+    @Req() req: RequestWithSession,
     @CurrentUser() user: UserEntity,
     @Body() request: AddJudgeClientRequestDto
   ): Promise<AddJudgeClientResponseDto> {
@@ -48,6 +60,8 @@ export class JudgeClientController {
       return {
         error: AddJudgeClientResponseError.PERMISSION_DENIED
       };
+    if (!(await this.recentlyAuthenticated(req, user)))
+      return { error: AddJudgeClientResponseError.REAUTHENTICATION_REQUIRED };
 
     const judgeClient = await this.judgeClientService.addJudgeClient(request.name, request.allowedHosts);
     await this.auditService.log("judge_client.add", { judgeClientId: judgeClient.id, name: judgeClient.name });
@@ -63,6 +77,7 @@ export class JudgeClientController {
   @ApiBearerAuth()
   @Post("deleteJudgeClient")
   async deleteJudgeClient(
+    @Req() req: RequestWithSession,
     @CurrentUser() user: UserEntity,
     @Body() request: DeleteJudgeClientRequestDto
   ): Promise<DeleteJudgeClientResponseDto> {
@@ -70,6 +85,8 @@ export class JudgeClientController {
       return {
         error: DeleteJudgeClientResponseError.PERMISSION_DENIED
       };
+    if (!(await this.recentlyAuthenticated(req, user)))
+      return { error: DeleteJudgeClientResponseError.REAUTHENTICATION_REQUIRED };
 
     const judgeClient = await this.judgeClientService.findJudgeClientById(request.id);
     if (!judgeClient)
@@ -89,6 +106,7 @@ export class JudgeClientController {
   @ApiBearerAuth()
   @Post("resetJudgeClientKey")
   async resetJudgeClientKey(
+    @Req() req: RequestWithSession,
     @CurrentUser() user: UserEntity,
     @Body() request: ResetJudgeClientKeyRequestDto
   ): Promise<ResetJudgeClientKeyResponseDto> {
@@ -96,6 +114,8 @@ export class JudgeClientController {
       return {
         error: ResetJudgeClientKeyResponseError.PERMISSION_DENIED
       };
+    if (!(await this.recentlyAuthenticated(req, user)))
+      return { error: ResetJudgeClientKeyResponseError.REAUTHENTICATION_REQUIRED };
 
     const judgeClient = await this.judgeClientService.findJudgeClientById(request.id);
     if (!judgeClient)
@@ -109,6 +129,25 @@ export class JudgeClientController {
     return {
       key: judgeClient.key
     };
+  }
+
+  @ApiOperation({
+    summary: "Show the key of a judge client (site administrators only, with the password entered recently)."
+  })
+  @ApiBearerAuth()
+  @Post("getJudgeClientKey")
+  async getJudgeClientKey(
+    @Req() req: RequestWithSession,
+    @CurrentUser() user: UserEntity,
+    @Body() request: GetJudgeClientKeyRequestDto
+  ): Promise<GetJudgeClientKeyResponseDto> {
+    if (!user || !user.isAdmin) return { error: GetJudgeClientKeyResponseError.PERMISSION_DENIED };
+    const judgeClient = await this.judgeClientService.findJudgeClientById(request.id);
+    if (!judgeClient) return { error: GetJudgeClientKeyResponseError.NO_SUCH_JUDGE_CLIENT };
+    if (!(await this.recentlyAuthenticated(req, user)))
+      return { error: GetJudgeClientKeyResponseError.REAUTHENTICATION_REQUIRED };
+    await this.auditService.log("judge_client.show_key", { judgeClientId: judgeClient.id, name: judgeClient.name });
+    return { key: judgeClient.key };
   }
 
   @ApiOperation({
@@ -143,7 +182,8 @@ export class JudgeClientController {
       judgeClients: await Promise.all(
         judgeClients.map(
           async judgeClient =>
-            await this.judgeClientService.getJudgeClientInfo(judgeClient, currentUser && currentUser.isAdmin)
+            // Keys are shown one at a time with getJudgeClientKey, which asks for the password.
+            await this.judgeClientService.getJudgeClientInfo(judgeClient, currentUser && currentUser.isAdmin, false)
         )
       ),
       hasManagePermission: currentUser && currentUser.isAdmin

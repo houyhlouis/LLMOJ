@@ -154,49 +154,63 @@ export class SubmissionProgressGateway implements OnGatewayConnection, OnGateway
     }
   }
 
-  private async isAuthorized(
-    subscription: SubmissionProgressSubscription,
-    submission: SubmissionEntity
-  ): Promise<boolean> {
-    if (!submission || subscription.exp * 1000 <= Date.now()) return false;
+  /**
+   * Checks the subscription's session and site-wide permissions once, and returns the check for one submission:
+   * a connection authorizes all of its submissions with one session lookup.
+   */
+  private async authorize(
+    subscription: SubmissionProgressSubscription
+  ): Promise<(submission: SubmissionEntity) => Promise<boolean>> {
+    const denied = async () => false;
+    if (subscription.exp * 1000 <= Date.now()) return denied;
     const user =
       subscription.userId === null
         ? null
         : await this.authSessionService.accessSessionById(subscription.userId, subscription.sessionId);
-    if (subscription.userId !== null && !user) return false;
+    if (subscription.userId !== null && !user) return denied;
     if (
       !(await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ViewSite)) ||
       !(await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ViewSubmission))
     )
-      return false;
+      return denied;
+    // Disconnect a formerly detailed stream instead of diffing to a redacted object:
+    // jsondiffpatch deletion deltas themselves contain the previous private values.
+    if (
+      subscription.type === SubmissionProgressSubscriptionType.Detail &&
+      !(await this.userPrivilegeService.permissionDecision(user, UserPrivilegeType.ReadProblemData, true))
+    )
+      return denied;
 
-    if (!(await this.submissionService.userHasTeamResourceAccess(user, submission))) return false;
+    let managesProblems: Promise<boolean>;
+    return async submission => {
+      if (!submission) return false;
+      if (!(await this.submissionService.userHasTeamResourceAccess(user, submission))) return false;
 
-    if (subscription.type === SubmissionProgressSubscriptionType.Meta && !submission.contestId) {
-      // List progress exposes metadata; keep its visibility rules independent of code access.
-      if (
-        !(
+      if (subscription.type === SubmissionProgressSubscriptionType.Meta && !submission.contestId) {
+        // List progress exposes metadata; keep its visibility rules independent of code access.
+        managesProblems ??= this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageProblem);
+        return (
           submission.isPublic ||
           user?.id === submission.submitterId ||
-          (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageProblem)) ||
+          (await managesProblems) ||
           (await this.problemService.userHasPermission(
             user,
             await this.problemService.findProblemById(submission.problemId),
             ProblemPermissionType.View
           ))
-        )
-      )
-        return false;
-    } else if (!(await this.submissionService.userHasPermission(user, submission, SubmissionPermissionType.View))) {
-      return false;
-    }
+        );
+      }
+      return await this.submissionService.userHasPermission(user, submission, SubmissionPermissionType.View);
+    };
+  }
 
-    // Disconnect a formerly detailed stream instead of diffing to a redacted object:
-    // jsondiffpatch deletion deltas themselves contain the previous private values.
-    return (
-      subscription.type !== SubmissionProgressSubscriptionType.Detail ||
-      (await this.userPrivilegeService.permissionDecision(user, UserPrivilegeType.ReadProblemData, true))
-    );
+  private async isAuthorized(
+    subscription: SubmissionProgressSubscription,
+    submission: SubmissionEntity
+  ): Promise<boolean> {
+    return await (
+      await this.authorize(subscription)
+    )(submission);
   }
 
   private getRoom(subscriptionType: SubmissionProgressSubscriptionType, submissionId: number) {
@@ -303,7 +317,8 @@ export class SubmissionProgressGateway implements OnGatewayConnection, OnGateway
       const submissions = await Promise.all(
         subscription.submissionIds.map(id => this.submissionService.findSubmissionById(id))
       );
-      const permissions = await Promise.all(submissions.map(submission => this.isAuthorized(subscription, submission)));
+      const authorized = await this.authorize(subscription);
+      const permissions = await Promise.all(submissions.map(authorized));
       if (!client.connected || permissions.some(allowed => !allowed)) {
         client.disconnect(true);
         return;

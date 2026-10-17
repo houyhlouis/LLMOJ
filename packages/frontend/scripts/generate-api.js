@@ -1,14 +1,29 @@
+// Usage: node scripts/generate-api.js [<docs-json URL> | --from-backend-build] [--out <directory>]
+// --from-backend-build reads the API from the compiled backend (apps/backend/dist) instead of a running server.
+const path = require("path");
 const fetch = require("node-fetch");
 const dtsgenerator = require("dtsgenerator").default;
 const fs = require("fs-extra");
+const prettier = require("prettier");
 
 const apiUrl =
   process.argv.filter(arg => arg.toLowerCase().startsWith("http://") || arg.toLowerCase().startsWith("https://"))[0] ||
   "http://127.0.0.1:2002/docs-json";
+const fromBackendBuild = process.argv.includes("--from-backend-build");
+const outIndex = process.argv.indexOf("--out");
+const defaultOutput = path.join(__dirname, "../src/api-generated");
+const output = outIndex > 0 ? path.resolve(process.argv[outIndex + 1]) : defaultOutput;
 
-if (!apiUrl) {
-  console.error("Usage: node scripts/generate-api.js <url>");
-  process.exit(2);
+async function readApi() {
+  if (fromBackendBuild)
+    return await require("../../../apps/backend/scripts/openapi-document.cjs").buildOpenApiDocument();
+  return await (await fetch(apiUrl)).json();
+}
+
+// Formatted as the repository's files are, so the output can be compared with the committed client.
+async function write(file, code) {
+  const options = await prettier.resolveConfig(path.join(defaultOutput, "index.ts"));
+  await fs.writeFile(path.join(output, file), prettier.format(code, { ...options, parser: "typescript" }));
 }
 
 const skipTags = ["App", "CORS"];
@@ -34,17 +49,16 @@ function normalizeModuleName(moduleName, forFilename) {
 }
 
 (async () => {
-  await fs.remove(__dirname + "/../src/api-generated");
-  await fs.ensureDir(__dirname + "/../src/api-generated/modules");
-
-  const api = await (await fetch(apiUrl)).json();
+  const api = await readApi();
+  await fs.remove(output);
+  await fs.ensureDir(path.join(output, "modules"));
 
   // Generate types file with dtsgenerator
   const typesFile = await dtsgenerator({
     contents: [api],
     namespaceName
   });
-  await fs.writeFile(__dirname + "/../src/api-generated/types.d.ts", generatedMessage + typesFile);
+  await write("types.d.ts", generatedMessage + typesFile);
 
   // Parse OpenAPI definitions
   const tags = {};
@@ -171,7 +185,7 @@ function normalizeModuleName(moduleName, forFilename) {
       }
     }
 
-    await fs.writeFile(__dirname + `/../src/api-generated/modules/${normalizeModuleName(moduleName, true)}.ts`, code);
+    await write(`modules/${normalizeModuleName(moduleName, true)}.ts`, code);
   }
 
   // Generate index file
@@ -191,5 +205,8 @@ function normalizeModuleName(moduleName, forFilename) {
     code += `export const ${exportModule} = Imported${importedModule}Api;\n`;
   }
 
-  await fs.writeFile(__dirname + `/../src/api-generated/index.ts`, code);
-})();
+  await write("index.ts", code);
+})().catch(error => {
+  console.error(error);
+  process.exit(1);
+});

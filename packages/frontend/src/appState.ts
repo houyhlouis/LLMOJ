@@ -131,6 +131,10 @@ export class AppState {
   @observable
   logout = false;
 
+  // The server reported that the stored login session ended; the layout says so until the user signs in again.
+  @observable
+  sessionEnded = false;
+
   @observable
   currentUser: ApiTypes.UserMetaDto = null;
 

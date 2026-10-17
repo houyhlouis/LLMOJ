@@ -136,6 +136,7 @@ export class UserController {
     summary: "Set a user's privileges."
   })
   async setUserPrivileges(
+    @Req() req: RequestWithSession,
     @CurrentUser() currentUser: UserEntity,
     @Body() request: SetUserPrivilegesRequestDto
   ): Promise<SetUserPrivilegesResponseDto> {
@@ -143,6 +144,8 @@ export class UserController {
       return {
         error: SetUserPrivilegesResponseError.PERMISSION_DENIED
       };
+    if (!(await this.authSessionService.isRecentlyAuthenticated(currentUser.id, req.session?.sessionId)))
+      return { error: SetUserPrivilegesResponseError.REAUTHENTICATION_REQUIRED };
 
     const oldPrivileges = await this.userPrivilegeService.getUserPrivileges(request.userId);
 
@@ -164,6 +167,7 @@ export class UserController {
     summary: "Update a user's username, email, bio or password."
   })
   async updateUserProfile(
+    @Req() req: RequestWithSession,
     @CurrentUser() currentUser: UserEntity,
     @Body() request: UpdateUserProfileRequestDto
   ): Promise<UpdateUserProfileResponseDto> {
@@ -213,6 +217,16 @@ export class UserController {
     //       };
     //   }
     // }
+
+    // The email address can reset the password: changing it here (possible when email verification is off)
+    // needs a recent sign-in or re-authentication, like updateUserSelfEmail.
+    if (
+      request.email != null &&
+      request.email !== user.email &&
+      !this.configService.config.preference.security.requireEmailVerification &&
+      !(await this.authSessionService.isRecentlyAuthenticated(currentUser.id, req.session?.sessionId))
+    )
+      return { error: UpdateUserProfileResponseError.REAUTHENTICATION_REQUIRED };
 
     const oldUsername = user.username;
     const oldEmail = user.email;

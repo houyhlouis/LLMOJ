@@ -1,11 +1,12 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Button, Form, Header, Input, Message, Modal } from "semantic-ui-react";
 
-import api, { ApiResponse } from "@/api";
+import api from "@/api";
 import { appState } from "@/appState";
 import TwoFactorPrompt, { TwoFactorProof } from "@/components/TwoFactorPrompt";
 import { useLocalizer } from "@/utils/hooks";
 import { onEnterPress } from "@/utils/onEnterPress";
+import { setReauthenticationHandler } from "@/utils/reauthentication";
 import toast from "@/utils/toast";
 
 interface PendingConfirmation {
@@ -14,10 +15,11 @@ interface PendingConfirmation {
 }
 
 /**
- * Sensitive account changes are refused with `REAUTHENTICATION_REQUIRED` unless the password (and second factor)
- * was entered recently. `withReauthentication` asks for them in a dialog and then repeats the request once.
+ * The one "Confirm it's you" dialog of the app. Sensitive changes are refused with `REAUTHENTICATION_REQUIRED` unless
+ * the password (and second factor) was entered recently; the API clients then ask here (see utils/reauthentication)
+ * and repeat the request once confirmed.
  */
-export function useReauthentication() {
+const ReauthenticationHost: React.FC = () => {
   const _ = useLocalizer("components.two_factor");
   const [confirmation, setConfirmation] = useState<PendingConfirmation>(null);
   const [password, setPassword] = useState("");
@@ -70,16 +72,13 @@ export function useReauthentication() {
     }
   }
 
-  async function withReauthentication<T extends { error?: string }>(
-    send: () => Promise<Omit<ApiResponse<T>, "requestCancelled">>
-  ): Promise<Omit<ApiResponse<T>, "requestCancelled">> {
-    const result = await send();
-    if (result.response?.error !== "REAUTHENTICATION_REQUIRED" || !(await confirm())) return result;
-    return await send();
-  }
+  useEffect(() => {
+    setReauthenticationHandler(confirm);
+    return () => setReauthenticationHandler(null);
+  }, []);
 
   const passwordError = error === "WRONG_PASSWORD" || error === "EMPTY_PASSWORD";
-  const element = (
+  return (
     <Modal size="tiny" open={!!confirmation} onClose={() => !pending && finish(false)}>
       <Header icon="shield alternate" content={_(".reauthenticate.header")} />
       <Modal.Content>
@@ -135,6 +134,6 @@ export function useReauthentication() {
       </Modal.Actions>
     </Modal>
   );
+};
 
-  return { element, withReauthentication };
-}
+export default ReauthenticationHost;

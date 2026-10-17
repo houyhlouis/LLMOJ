@@ -17,8 +17,9 @@ require.extensions[".ts"] = (module, filename) =>
   );
 const main = path.resolve(__dirname, "../main.ts");
 require.cache[main] = { id: main, filename: main, loaded: true, exports: { appGitRepoInfo: {} } };
+// As in main.ts (strict mode, where `this` is the primitive string).
 String.prototype.format ||= function (...args) {
-  return require("node:util").format(this, ...args);
+  return require("node:util").format(String(this), ...args);
 };
 const { UserEntity } = require("../user/user.entity.ts");
 const { UserAuthEntity } = require("./user-auth.entity.ts");

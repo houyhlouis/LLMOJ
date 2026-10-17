@@ -82,7 +82,8 @@ test(
         userRepository: users
       });
       const auth = new AuthService(db, db.getRepository(UserAuthEntity), userService, {}, configuration, settings);
-      const site = new SiteManagementController(settings);
+      // Administrators here just signed in; the password confirmation itself is covered by step-up.test.cjs.
+      const site = new SiteManagementController(settings, {}, { requireRecentAuthentication: async () => {} });
       const request = { ip: "127.0.0.1" };
       let serial = 0;
       const register = async () => {

@@ -14,6 +14,10 @@ import * as ImportedDiscussionApi from "./modules/discussion";
 import * as ImportedHomepageApi from "./modules/homepage";
 import * as ImportedContestApi from "./modules/contest";
 import * as ImportedAIApi from "./modules/ai";
+import * as ImportedSiteManagementApi from "./modules/sitemanagement";
+import * as ImportedTeamApi from "./modules/team";
+import * as ImportedHackApi from "./modules/hack";
+import * as ImportedSelfevaluationApi from "./modules/self-evaluation";
 
 export const captcha = ImportedCaptchaApi;
 export const proofofWork = ImportedProofofWorkApi;
@@ -29,3 +33,7 @@ export const discussion = ImportedDiscussionApi;
 export const homepage = ImportedHomepageApi;
 export const contest = ImportedContestApi;
 export const aI = ImportedAIApi;
+export const siteManagement = ImportedSiteManagementApi;
+export const team = ImportedTeamApi;
+export const hack = ImportedHackApi;
+export const selfevaluation = ImportedSelfevaluationApi;

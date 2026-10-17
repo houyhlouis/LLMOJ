@@ -1,6 +1,7 @@
 import { callApiWithFileUpload, FileUploadApiProgress } from "@/utils/callApiWithFileUpload";
 import axios from "axios";
 import { appState } from "@/appState";
+import { noteSessionEnded, responseRequestId } from "@/utils/session";
 export const aiText = (zh: string, en: string) => (appState.locale === "zh_CN" ? zh : en);
 const errors: Record<string, [string, string]> = {
   INVALID_ATTACHMENT_TOKEN: [
@@ -376,9 +377,10 @@ export async function aiCall<T = any>(
 ): Promise<T> {
   if (options.signal?.aborted) throw new DOMException("AI request cancelled.", "AbortError");
   let response;
+  const { token } = appState;
   try {
     response = await axios.post(window.apiEndpoint + `api/ai/${method}`, body, {
-      headers: { Authorization: appState.token ? `Bearer ${appState.token}` : undefined },
+      headers: { Authorization: token ? `Bearer ${token}` : undefined },
       validateStatus: () => true,
       signal: options.signal,
       timeout: options.timeout
@@ -403,6 +405,7 @@ export async function aiCall<T = any>(
   }
   if (options.signal?.aborted) throw new DOMException("AI request cancelled.", "AbortError");
   const { status, data } = response;
+  if (response.headers?.["x-session-ended"]) noteSessionEnded(token);
   if (status === 400) throw new Error(validationError(data) + " (HTTP 400)");
   const httpErrors: Record<number, [string, string]> = {
     401: ["登录已失效，请重新登录后重试。", "Your session has expired. Sign in again and retry."],
@@ -420,15 +423,18 @@ export async function aiCall<T = any>(
       "The OJ timed out waiting for the provider. Configuration may already be saved; refresh to confirm before testing again."
     ]
   };
-  if (status < 200 || status >= 300)
+  if (status < 200 || status >= 300) {
+    // The server's log quotes the same ID for the failure.
+    const requestId = status >= 500 ? responseRequestId(response.headers, data) : undefined;
     throw new Error(
       aiText(
         ...(httpErrors[status] || [
           "OJ 服务器处理请求失败，请稍后重试。",
           "The OJ server could not process the request. Please retry later."
         ])
-      ) + ` (HTTP ${status})`
+      ) + (requestId ? ` (HTTP ${status}, ${aiText("错误编号", "error ID")} ${requestId})` : ` (HTTP ${status})`)
     );
+  }
   if (!data || typeof data !== "object")
     throw new Error(
       aiText("OJ 服务器返回了无效响应，请稍后重试。", "The OJ server returned an invalid response. Please retry later.")

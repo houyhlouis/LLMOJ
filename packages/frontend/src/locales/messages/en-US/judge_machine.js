@@ -74,7 +74,8 @@ return {
   },
   error: {
     PERMISSION_DENIED: "Permission denied.",
-    NO_SUCH_JUDGE_CLIENT: "No such judge machine."
+    NO_SUCH_JUDGE_CLIENT: "No such judge machine.",
+    REAUTHENTICATION_REQUIRED: "Confirm your password to see or change judge machine keys."
   },
   no_judge_machine: "No judge machine"
 };

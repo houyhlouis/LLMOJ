@@ -243,6 +243,18 @@ class SecurityConfig {
   @Min(0)
   @IsOptional()
   readonly sessionMaxAgeDays?: number;
+
+  // A site administrator's session expires after this many days without use, if sooner (default 3; 0: no extra limit)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  readonly adminSessionIdleTimeoutDays?: number;
+
+  // A site administrator's session expires this many days after login, if sooner (default 30; 0: no extra limit)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  readonly adminSessionMaxAgeDays?: number;
 }
 
 // These config items will be sent to client

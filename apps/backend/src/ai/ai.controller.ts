@@ -22,14 +22,16 @@ import { CurrentUser } from "../common/user.decorator";
 export class AiController {
   constructor(private readonly ai: AiService) {}
 
+  /**
+   * Expected AI failures are answered like the rest of the API: HTTP 200 with an error code. Anything else is
+   * a server error, which the global error filter logs (redacted) and answers with HTTP 500 and the request ID.
+   */
   private async call<T>(work: () => Promise<T>) {
     try {
       return await work();
     } catch (error) {
-      return {
-        error: error instanceof AiError ? error.code : "INTERNAL_ERROR",
-        message: error instanceof AiError ? error.message : "INTERNAL_ERROR"
-      };
+      if (!(error instanceof AiError)) throw error;
+      return { error: error.code, message: error.message };
     }
   }
 

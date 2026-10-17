@@ -33,11 +33,15 @@ export const setProblemPublic = createPostApi<
   ApiTypes.SetProblemPublicRequestDto,
   ApiTypes.SetProblemPublicResponseDto
 >("problem/setProblemPublic", {});
-export const addProblemFile = createPostApi<
-  ApiTypes.AddProblemFileRequestDto,
-  ApiTypes.AddProblemFileResponseDto,
+export const importTestDataZip = createPostApi<
+  ApiTypes.ImportTestDataZipRequestDto,
+  ApiTypes.ImportTestDataZipResponseDto,
   { proofOfWorkAction: "add_problem_file" }
->("problem/addProblemFile", { proofOfWorkAction: "add_problem_file" });
+>("problem/importTestDataZip", { proofOfWorkAction: "add_problem_file" });
+export const addProblemFile = createPostApi<ApiTypes.AddProblemFileRequestDto, ApiTypes.AddProblemFileResponseDto>(
+  "problem/addProblemFile",
+  {}
+);
 export const removeProblemFiles = createPostApi<
   ApiTypes.RemoveProblemFilesRequestDto,
   ApiTypes.RemoveProblemFilesResponseDto

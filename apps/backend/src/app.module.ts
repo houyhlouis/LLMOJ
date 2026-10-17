@@ -4,6 +4,7 @@ import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { ErrorFilter } from "./error.filter";
 import { AuthMiddleware } from "./auth/auth.middleware";
+import { RequestIdMiddleware } from "./common/request-id.middleware";
 import { MetricsMiddleware } from "./metrics/metrics.middleware";
 
 import { SharedModule } from "./shared.module";
@@ -70,6 +71,10 @@ import { SelfEvalModule } from "./self-eval/self-eval.module";
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(RequestIdMiddleware).forRoutes({
+      path: "*",
+      method: RequestMethod.ALL
+    });
     consumer.apply(AuthMiddleware).forRoutes({
       path: "*",
       method: RequestMethod.ALL

@@ -11,3 +11,4 @@ export * from "./list-judge-clients-response.dto";
 
 export * from "./get-judge-queue-status-response.dto";
 export * from "./set-judge-client-draining.dto";
+export * from "./get-judge-client-key.dto";

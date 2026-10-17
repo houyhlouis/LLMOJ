@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { observer } from "mobx-react";
 import { useLoadingRoute } from "react-navi";
-import { Menu, Button, Dropdown, Container, Icon, Segment, Sidebar, SemanticICONS } from "semantic-ui-react";
+import { Menu, Button, Dropdown, Container, Icon, Message, Segment, Sidebar, SemanticICONS } from "semantic-ui-react";
 
 import "fomantic-ui-css/components/site.css";
 import "noty/src/themes/semanticui.scss";
@@ -9,6 +9,7 @@ import "noty/src/themes/semanticui.scss";
 import style from "./AppLayout.module.less";
 
 import GlobalProgressBar from "@/components/GlobalProgressBar";
+import ReauthenticationHost from "@/components/ReauthenticationDialog";
 import SiteFooterBranding from "@/components/SiteFooterBranding";
 
 import { Locale } from "@/interfaces/Locale";
@@ -363,7 +364,18 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
         </Menu>
       )}
       {getFooter(style.footer + " " + style.real)}
-      <Container id={style.mainUiContainer}>{props.children}</Container>
+      <Container id={style.mainUiContainer}>
+        {appState.sessionEnded && !appState.token && (
+          <Message warning onDismiss={() => (appState.sessionEnded = false)}>
+            {_(".session_ended.message")}{" "}
+            <Button size="mini" primary compact onClick={() => onLoginOrRegisterClick("login")}>
+              {_(".session_ended.sign_in")}
+            </Button>
+          </Message>
+        )}
+        {props.children}
+      </Container>
+      <ReauthenticationHost />
       {getFooter(style.footer + " " + style.placeholder)}
       {!wide && !embeddedDetailMode && (
         <>

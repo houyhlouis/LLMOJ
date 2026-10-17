@@ -11,8 +11,31 @@ import { SetUserPrivilegesResponseError } from "./dto";
 
 import { defaultUserPermissions, guestPermissions } from "../access/permission-catalog";
 import { UserPermissionRuleEntity } from "../access/user-permission-rule.entity";
+import { requestContext } from "../common/request-context";
 
 export { UserPrivilegeType } from "./user-privilege.entity";
+
+/** A user's explicit allow/deny rules and granted privileges. */
+interface CapabilityRecords {
+  rules: Map<string, boolean>;
+  privileges: Set<string>;
+}
+
+const REQUEST_CAPABILITIES = Symbol("request capabilities");
+
+interface RequestWithCapabilities {
+  [REQUEST_CAPABILITIES]?: Map<number, Promise<CapabilityRecords>>;
+  res?: { writableEnded?: boolean };
+}
+
+/**
+ * The request whose checks may share one read of the rules. Work a request starts in the background (an AI job, for
+ * example) inherits its context, and must see permission changes: once the response is sent, nothing is shared.
+ */
+function answeringRequest(): RequestWithCapabilities {
+  const request = requestContext.getStore() as RequestWithCapabilities;
+  return request && !request.res?.writableEnded ? request : null;
+}
 
 @Injectable()
 export class UserPrivilegeService {
@@ -39,6 +62,12 @@ export class UserPrivilegeService {
     // Management of detailed permissions is always restricted to site administrators.
     if (privilegeType === UserPrivilegeType.ManagePermissions) return user.isAdmin;
     if (user.isAdmin) return true;
+    const request = answeringRequest();
+    if (!manager && request) {
+      const { rules, privileges } = await this.requestCapabilities(request, user.id);
+      if (rules.has(privilegeType)) return rules.get(privilegeType);
+      return privileges.has(privilegeType) || fallback;
+    }
     // Locking reads use the transaction's current database state, even when an
     // earlier snapshot exists, and keep an accepted grant stable through commit.
     const ruleMatch = { userId: user.id, permission: privilegeType };
@@ -54,6 +83,38 @@ export class UserPrivilegeService {
     )
       return true;
     return fallback;
+  }
+
+  /**
+   * An HTTP request reads each user's rules and privileges once, and all of its checks share them: a page can check
+   * dozens of capabilities. Requests that change them call `forgetRequestCapabilities`. Transactions (`manager`) and
+   * work outside a request always read the current rows.
+   */
+  private requestCapabilities(request: RequestWithCapabilities, userId: number): Promise<CapabilityRecords> {
+    if (!request[REQUEST_CAPABILITIES]) request[REQUEST_CAPABILITIES] = new Map();
+    const cache = request[REQUEST_CAPABILITIES];
+    let records = cache.get(userId);
+    if (!records) {
+      records = (async () => {
+        const [rules, privileges] = await Promise.all([
+          this.connection.getRepository(UserPermissionRuleEntity).findBy({ userId }),
+          this.userPrivilegeRepository.findBy({ userId })
+        ]);
+        return {
+          rules: new Map(rules.map(rule => [rule.permission, rule.allowed])),
+          privileges: new Set<string>(privileges.map(privilege => privilege.privilegeType))
+        };
+      })();
+      cache.set(userId, records);
+      // A failed read isn't kept: a later check reads again.
+      records.catch(() => cache.get(userId) === records && cache.delete(userId));
+    }
+    return records;
+  }
+
+  /** After changing a user's rules or privileges, the rest of the request sees the change. */
+  forgetRequestCapabilities(userId: number): void {
+    (requestContext.getStore() as RequestWithCapabilities)?.[REQUEST_CAPABILITIES]?.delete(userId);
   }
 
   async userHasPrivilege(
@@ -85,7 +146,7 @@ export class UserPrivilegeService {
   ): Promise<SetUserPrivilegesResponseError> {
     if (!(await this.userService.userExists(userId))) return SetUserPrivilegesResponseError.NO_SUCH_USER;
 
-    return await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
+    const error = await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
       // Share the per-user serialization point used by detailed permission edits
       // and registration review transactions before changing either grant table.
       if (
@@ -124,5 +185,7 @@ export class UserPrivilegeService {
       }
       return null;
     });
+    this.forgetRequestCapabilities(userId);
+    return error;
   }
 }

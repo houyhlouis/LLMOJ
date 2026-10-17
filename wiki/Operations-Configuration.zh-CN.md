@@ -77,6 +77,14 @@ sudo systemctl reload libreoj-nginx
 
 安装器还会为 Redis 在 `/etc/sysctl.d/99-libreoj-redis.conf` 中设置 `vm.overcommit_memory=1`（该文件已存在时不覆盖），并安装评测沙箱所需的 AppArmor 规则。Docker 下载源见 [Docker 源](Docker-Sources.zh-CN.md)。Node.js、Go、pnpm 的版本和沙箱镜像属于每个发行版本，不是可修改的设置。
 
+### 服务器错误
+
+页面报告服务器错误时，消息末尾会附上错误编号。后端日志以同一编号（在行首的方括号中）记录了详细信息；对于 AI 页面，日志只记录错误类型，不记录具体内容。每个 API 响应的 `X-Request-Id` 头中也带有它的编号。
+
+```bash
+sudo journalctl -u libreoj-backend --since today | grep '消息中的错误编号'
+```
+
 ## 需要一起修改的设置
 
 | 修改 | 同时修改 |

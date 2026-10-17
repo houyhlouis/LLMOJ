@@ -6,7 +6,7 @@ declare namespace ApiTypes {
     allowedHosts: string[];
   }
   export interface AddJudgeClientResponseDto {
-    error?: "PERMISSION_DENIED";
+    error?: "PERMISSION_DENIED" | "REAUTHENTICATION_REQUIRED";
     judgeClient?: ApiTypes.JudgeClientInfoDto;
   }
   export interface AddProblemFileRequestDto {
@@ -38,8 +38,49 @@ declare namespace ApiTypes {
   export interface AiJobQueryDto {
     problemId?: number;
   }
+  export interface AiPolicyDto {
+    /**
+     * No AI provider request starts while paused.
+     */
+    paused: boolean;
+    /**
+     * Tokens per account in any 24 hours; 0 for no limit.
+     */
+    userDailyTokens: number;
+    /**
+     * Model and search requests per account in any 24 hours; 0 for no limit.
+     */
+    userDailyRequests: number;
+    /**
+     * Model and search requests per AI job; 0 for no limit.
+     */
+    jobRequests: number;
+    /**
+     * AI provider requests running at the same time in one backend process.
+     */
+    concurrentRequests: number;
+  }
+  export interface AiPrepareAttachmentDto {
+    filename: string;
+    size: number;
+  }
+  export interface AiRetryJobDto {
+    id: string;
+    retryFrom?: "validate-samples" | "std";
+  }
   export interface AiTestDto {
     target: "llm" | "search";
+  }
+  export interface AiUsageQueryDto {
+    days?: number;
+  }
+  export interface ArchiveNameMapDto {
+    archivePath: string;
+    filename: string;
+  }
+  export interface ArchiveTestcaseDto {
+    inputFile: string;
+    outputFile: string;
   }
   export interface BeginPasskeyRegistrationResponseDto {
     error?:
@@ -98,7 +139,7 @@ declare namespace ApiTypes {
   }
   export interface ChangeProblemTypeRequestDto {
     problemId: number;
-    type: "Traditional" | "Interaction" | "Communication" | "SubmitAnswer";
+    type: "Traditional" | "Interaction" | "SubmitAnswer" | "Communication";
   }
   export interface ChangeProblemTypeResponseDto {
     error?: "NO_SUCH_PROBLEM" | "PERMISSION_DENIED" | "PROBLEM_HAS_SUBMISSION";
@@ -162,7 +203,7 @@ declare namespace ApiTypes {
     isPublic?: boolean;
   }
   export interface CreateDiscussionResponseDto {
-    error?: "PERMISSION_DENIED" | "NO_SUCH_PROBLEM" | "SOLUTION_REQUIRES_PROBLEM";
+    error?: "SOLUTION_REQUIRES_PROBLEM" | "PERMISSION_DENIED" | "NO_SUCH_PROBLEM";
     discussionId?: number;
   }
   export interface CreateGroupRequestDto {
@@ -173,7 +214,7 @@ declare namespace ApiTypes {
     groupId?: number;
   }
   export interface CreateProblemRequestDto {
-    type: "Traditional" | "Interaction" | "Communication" | "SubmitAnswer";
+    type: "Traditional" | "Interaction" | "SubmitAnswer" | "Communication";
     statement: ApiTypes.ProblemStatementDto;
   }
   export interface CreateProblemResponseDto {
@@ -210,7 +251,7 @@ declare namespace ApiTypes {
     id: number;
   }
   export interface DeleteJudgeClientResponseDto {
-    error?: "PERMISSION_DENIED" | "NO_SUCH_JUDGE_CLIENT";
+    error?: "PERMISSION_DENIED" | "NO_SUCH_JUDGE_CLIENT" | "REAUTHENTICATION_REQUIRED";
   }
   export interface DeleteProblemRequestDto {
     problemId: number;
@@ -223,12 +264,6 @@ declare namespace ApiTypes {
   }
   export interface DeleteProblemTagResponseDto {
     error?: "NO_SUCH_PROBLEM_TAG" | "PERMISSION_DENIED";
-  }
-  export interface FakeSubmissionRequestDto {
-    submissionId: number;
-  }
-  export interface FakeSubmissionResponseDto {
-    error?: "NO_SUCH_SUBMISSION" | "PERMISSION_DENIED";
   }
   export interface DeleteSubmissionRequestDto {
     submissionId: number;
@@ -302,6 +337,12 @@ declare namespace ApiTypes {
     error?: "NO_SUCH_SUBMISSION" | "NO_SUCH_FILE" | "PERMISSION_DENIED";
     url?: string;
   }
+  export interface FakeSubmissionRequestDto {
+    submissionId: number;
+  }
+  export interface FakeSubmissionResponseDto {
+    error?: "NO_SUCH_SUBMISSION" | "PERMISSION_DENIED";
+  }
   export interface FileUploadInfoDto {
     uuid?: string;
     size: number;
@@ -329,11 +370,11 @@ declare namespace ApiTypes {
     queryRepliesType?: "HeadTail" | "IdRange";
     getDiscussion?: boolean;
     /**
-     * Only valid for `type` = `HeadTail`.
+     * Only valid for `queryRepliesType` = `HeadTail`. Omitted means no replies from this end.
      */
     headTakeCount?: number;
     /**
-     * Only valid for `type` = `HeadTail`.
+     * Only valid for `queryRepliesType` = `HeadTail`. Omitted means no replies from this end.
      */
     tailTakeCount?: number;
     /**
@@ -345,7 +386,7 @@ declare namespace ApiTypes {
      */
     afterId?: number;
     /**
-     * Only valid for `type` = `IdRange`.
+     * Only valid for `queryRepliesType` = `IdRange`. Omitted means no replies.
      */
     idRangeTakeCount?: number;
   }
@@ -427,11 +468,18 @@ declare namespace ApiTypes {
     settings?: ApiTypes.HomepageSettings;
     annnouncementDiscussions?: ApiTypes.DiscussionMetaDto[];
   }
-  export interface GetPermissionsDto {}
+  export interface GetJudgeClientKeyRequestDto {
+    id: number;
+  }
+  export interface GetJudgeClientKeyResponseDto {
+    error?: "PERMISSION_DENIED" | "NO_SUCH_JUDGE_CLIENT" | "REAUTHENTICATION_REQUIRED";
+    key?: string;
+  }
   export interface GetJudgeQueueStatusResponseDto {
     error?: "PERMISSION_DENIED";
     status?: ApiTypes.JudgeQueueStatusDto;
   }
+  export interface GetPermissionsDto {}
   export interface GetProblemRequestDto {
     id?: number;
     displayId?: number;
@@ -502,7 +550,17 @@ declare namespace ApiTypes {
     /**
      * Present when the account uses two-factor sign-in.
      */
-    twoFactor?: ApiTypes.TwoFactorChallengeDto;
+    twoFactor?: {
+      /**
+       * Single-use, expires after 5 minutes.
+       */
+      token: string;
+      methods: ("totp" | "passkey" | "recoveryCode")[];
+      /**
+       * PublicKeyCredentialRequestOptions with base64url binary fields.
+       */
+      passkey?: {};
+    };
   }
   export interface GetSessionInfoResponseDto {
     userMeta?: ApiTypes.UserMetaDto;
@@ -773,6 +831,28 @@ declare namespace ApiTypes {
     name: string;
     memberCount: number;
   }
+  export interface HackRequestDto {
+    id?: number;
+    problemId?: number;
+    submissionId?: number;
+    contestId?: number;
+    hackerId?: number;
+    page?: number;
+    hacker?: string;
+    status?: string;
+    inputData?: string;
+    referenceSubmissionId?: number;
+    standardCode?: string;
+    standardLanguage?: string;
+    standardCompileAndRunOptions?: {};
+    standardFileIo: {
+      inputFilename?: string;
+      outputFilename?: string;
+    };
+    validatorCode?: string;
+    validatorLanguage?: string;
+    mine?: {};
+  }
   export interface HeaderParameters {
     "X-Proof-Of-Work": ApiTypes.Parameters.XProofOfWork;
   }
@@ -802,6 +882,20 @@ declare namespace ApiTypes {
   export interface HomepageSettingsNotice {
     enabled: boolean;
     contents: {};
+  }
+  export interface ImportTestDataZipRequestDto {
+    problemId: number;
+    filename: string;
+    uploadInfo: ApiTypes.FileUploadInfoDto;
+    replaceExisting?: boolean;
+  }
+  export interface ImportTestDataZipResponseDto {
+    error?: string;
+    signedUploadRequest?: ApiTypes.SignedFileUploadRequestDto;
+    importedFiles?: ApiTypes.ProblemFileDto[];
+    detectedTestcases?: ApiTypes.ArchiveTestcaseDto[];
+    nameMap?: ApiTypes.ArchiveNameMapDto[];
+    skippedFiles?: string[];
   }
   export interface IssueProofOfWorkChallengeRequestDto {
     action:
@@ -914,6 +1008,16 @@ declare namespace ApiTypes {
     judgeClients: ApiTypes.JudgeClientInfoDto[];
     hasManagePermission: boolean;
   }
+  export interface ListRegistrationReviewsRequestDto {
+    status?: "pending" | "approved" | "rejected";
+    skipCount?: number;
+    takeCount?: number;
+  }
+  export interface ListRegistrationReviewsResponseDto {
+    error?: "PERMISSION_DENIED" | "NO_SUCH_APPLICATION" | "ALREADY_REVIEWED" | "DUPLICATE_USERNAME" | "DUPLICATE_EMAIL";
+    reviews?: ApiTypes.RegistrationReviewDto[];
+    count?: number;
+  }
   export interface ListUserSessionsRequestDto {
     userId?: number;
     username?: string;
@@ -927,6 +1031,7 @@ declare namespace ApiTypes {
     currentSessionId?: number;
   }
   export interface LlmConfigurationDto {
+    responsesRecovery?: "auto" | "off" | "background";
     type: "chat" | "responses" | "anthropic";
     baseUrl: string;
     apiKey?: string;
@@ -972,14 +1077,30 @@ declare namespace ApiTypes {
     token?: string;
   }
   namespace Parameters {
+    export type ContestId = number;
     export type Email = string;
     export type GroupId = string;
+    export type Hacker = string;
+    export type HackerId = number;
+    export type Id = number;
+    export type InputData = string;
     export type Jsonp = string;
     export type Locale = "en_US" | "zh_CN";
     export type MaintainceKey = string;
+    export type Mine = string;
+    export type Page = number;
+    export type ProblemId = number;
     export type Query = string;
+    export type ReferenceSubmissionId = number;
+    export type StandardCode = string;
+    export type StandardFileIo = any;
+    export type StandardLanguage = string;
+    export type Status = string;
+    export type SubmissionId = number;
     export type Token = string;
     export type Username = string;
+    export type ValidatorCode = string;
+    export type ValidatorLanguage = string;
     export type Wildcard = "Start" | "End" | "Both";
     export type XCaptchaResult = string;
     export type XProofOfWork = string;
@@ -1093,13 +1214,15 @@ declare namespace ApiTypes {
   export interface ProblemMetaDto {
     id: number;
     displayId?: number;
-    type: "Traditional" | "Interaction" | "Communication" | "SubmitAnswer";
+    type: "Traditional" | "Interaction" | "SubmitAnswer" | "Communication";
     isPublic: boolean;
     publicTime: string; // date-time
     ownerId: number;
     locales: ("en_US" | "zh_CN")[];
     difficulty: number | null;
     originalProblem: string;
+    originalProblemTitle?: string;
+    originalProblemLabel?: string;
     submissionCount?: number;
     acceptedSubmissionCount?: number;
   }
@@ -1169,7 +1292,7 @@ declare namespace ApiTypes {
     locale: "en_US" | "zh_CN";
     keyword?: string;
     /**
-     * `null` for global. `-1` for ALL problems.
+     * `null` for global. `-1` for all problems. `-2` for global and problem discussions.
      */
     problemId?: number;
     publisherId?: number;
@@ -1204,7 +1327,21 @@ declare namespace ApiTypes {
     titleLocale: "en_US" | "zh_CN";
   }
   export interface QueryParameters {
-    locale: ApiTypes.Parameters.Locale;
+    id?: ApiTypes.Parameters.Id;
+    problemId?: ApiTypes.Parameters.ProblemId;
+    submissionId?: ApiTypes.Parameters.SubmissionId;
+    contestId?: ApiTypes.Parameters.ContestId;
+    hackerId?: ApiTypes.Parameters.HackerId;
+    page?: ApiTypes.Parameters.Page;
+    hacker?: ApiTypes.Parameters.Hacker;
+    status?: ApiTypes.Parameters.Status;
+    inputData?: ApiTypes.Parameters.InputData;
+    referenceSubmissionId?: ApiTypes.Parameters.ReferenceSubmissionId;
+    standardCode?: ApiTypes.Parameters.StandardCode;
+    standardLanguage?: ApiTypes.Parameters.StandardLanguage;
+    standardFileIo?: ApiTypes.Parameters.StandardFileIo;
+    validatorCode?: ApiTypes.Parameters.ValidatorCode;
+    validatorLanguage?: ApiTypes.Parameters.ValidatorLanguage;
   }
   export interface QueryProblemSetRequestDto {
     difficultyMin?: number;
@@ -1257,8 +1394,6 @@ declare namespace ApiTypes {
       | "ConfigurationError"
       | "SystemError"
       | "Canceled"
-      | "Fake"
-      | "Hacked"
       | "CompilationError"
       | "FileError"
       | "RuntimeError"
@@ -1268,7 +1403,9 @@ declare namespace ApiTypes {
       | "PartiallyCorrect"
       | "WrongAnswer"
       | "Accepted"
-      | "JudgementFailed";
+      | "JudgementFailed"
+      | "Fake"
+      | "Hacked";
     minId: number;
     maxId: number;
     takeCount: number;
@@ -1302,39 +1439,6 @@ declare namespace ApiTypes {
     error?: "ALREADY_LOGGEDIN" | "NO_SUCH_USER";
     migrated?: boolean;
     usernameMustChange?: boolean;
-  }
-  export interface RegistrationReviewDto {
-    applicationId: number;
-    userId: number | null;
-    username: string;
-    email: string;
-    registrationTime: string; // date-time
-    status: "pending" | "approved" | "rejected";
-    reviewedAt: string | null; // date-time
-    reviewedBy: number | null;
-    reason: string | null;
-  }
-  export interface ListRegistrationReviewsRequestDto {
-    status?: "pending" | "approved" | "rejected";
-    skipCount?: number;
-    takeCount?: number;
-  }
-  export interface ListRegistrationReviewsResponseDto {
-    error?: "PERMISSION_DENIED" | "NO_SUCH_APPLICATION" | "ALREADY_REVIEWED" | "DUPLICATE_USERNAME" | "DUPLICATE_EMAIL";
-    reviews?: ApiTypes.RegistrationReviewDto[];
-    count?: number;
-  }
-  export interface ResetUserTwoFactorRequestDto {
-    userId: number;
-  }
-  export interface ReviewRegistrationRequestDto {
-    applicationId: number;
-    decision: "approved" | "rejected";
-    reason?: string;
-  }
-  export interface ReviewRegistrationResponseDto {
-    error?: "PERMISSION_DENIED" | "NO_SUCH_APPLICATION" | "ALREADY_REVIEWED" | "DUPLICATE_USERNAME" | "DUPLICATE_EMAIL";
-    review?: ApiTypes.RegistrationReviewDto;
   }
   export interface ReauthenticateRequestDto {
     totpCode?: string;
@@ -1386,6 +1490,17 @@ declare namespace ApiTypes {
     registrationStatus?: "pending" | "approved";
     token?: string;
   }
+  export interface RegistrationReviewDto {
+    applicationId: number;
+    userId: number | null;
+    username: string;
+    email: string;
+    registrationTime: string; // date-time
+    status: "pending" | "approved" | "rejected";
+    reviewedAt: string | null; // date-time
+    reviewedBy: number | null;
+    reason: string | null;
+  }
   export interface RejudgeSubmissionRequestDto {
     submissionId: number;
   }
@@ -1431,12 +1546,12 @@ declare namespace ApiTypes {
   export interface RenameProblemFileResponseDto {
     error?: "NO_SUCH_PROBLEM" | "PERMISSION_DENIED" | "NO_SUCH_FILE" | "FILE_ALREADY_EXISTS";
   }
-  export type RequestBody = ApiTypes.AiJobIdDto;
+  export type RequestBody = ApiTypes.SelfEvalRequestDto;
   export interface ResetJudgeClientKeyRequestDto {
     id: number;
   }
   export interface ResetJudgeClientKeyResponseDto {
-    error?: "PERMISSION_DENIED" | "NO_SUCH_JUDGE_CLIENT";
+    error?: "PERMISSION_DENIED" | "NO_SUCH_JUDGE_CLIENT" | "REAUTHENTICATION_REQUIRED";
     key?: string;
   }
   export interface ResetPasswordRequestDto {
@@ -1454,10 +1569,22 @@ declare namespace ApiTypes {
     token?: string;
     twoFactorChallenge?: ApiTypes.TwoFactorChallengeDto;
   }
+  export interface ResetUserTwoFactorRequestDto {
+    userId: number;
+  }
   namespace Responses {
     export interface $200 {}
     export interface $201 {}
     export interface $403 {}
+  }
+  export interface ReviewRegistrationRequestDto {
+    applicationId: number;
+    decision: "approved" | "rejected";
+    reason?: string;
+  }
+  export interface ReviewRegistrationResponseDto {
+    error?: "PERMISSION_DENIED" | "NO_SUCH_APPLICATION" | "ALREADY_REVIEWED" | "DUPLICATE_USERNAME" | "DUPLICATE_EMAIL";
+    review?: ApiTypes.RegistrationReviewDto;
   }
   export interface RevokeUserSessionRequestDto {
     userId: number;
@@ -1473,6 +1600,7 @@ declare namespace ApiTypes {
     llm: ApiTypes.LlmConfigurationDto;
     search: ApiTypes.SearchConfigurationDto;
     autoOnSave: boolean;
+    maxConcurrentJobs?: number;
     clearLlmKey?: boolean;
     clearSearchKey?: boolean;
   }
@@ -1488,6 +1616,26 @@ declare namespace ApiTypes {
   }
   export interface SearchUserResponseDto {
     userMetas: ApiTypes.UserMetaDto[];
+  }
+  export interface SelfEvalRequestDto {
+    id?: number;
+    problemId?: number;
+    contestId?: number;
+    submissionId?: number;
+    page?: number;
+    content: {
+      language?: string;
+      code?: string;
+      compileAndRunOptions?: {};
+    };
+    generatorCode?: string;
+    standardCode?: string;
+    subtaskIds?: number[];
+    attestSameGenerator?: boolean;
+    standardFileIo: {
+      inputFilename?: string;
+      outputFilename?: string;
+    };
   }
   export interface SendEmailVerificationCodeRequestDto {
     email: string;
@@ -1670,7 +1818,7 @@ declare namespace ApiTypes {
     )[];
   }
   export interface SetUserPrivilegesResponseDto {
-    error?: "PERMISSION_DENIED" | "NO_SUCH_USER" | "FAILED";
+    error?: "PERMISSION_DENIED" | "NO_SUCH_USER" | "FAILED" | "REAUTHENTICATION_REQUIRED";
   }
   export interface SignedFileUploadRequestDto {
     uuid: string;
@@ -1679,14 +1827,19 @@ declare namespace ApiTypes {
     extraFormData?: {};
     fileFieldName?: string;
   }
+  export interface SiteManagementSettingsDto {
+    registrationMode: "open" | "approval" | "closed";
+    configuredRegistrationMode: "open" | "approval" | "closed";
+    usesOverride: boolean;
+  }
   export interface StartAiJobDto {
     problemId?: number;
     action: "metadata" | "tags" | "source" | "difficulty" | "translate" | "tutorial" | "testdata" | "all" | "import";
+    attachmentToken?: string;
     count?: number;
     markdown?: string;
     image?: string;
     automatic?: boolean;
-    attachmentToken?: string;
     problemType?: "Traditional" | "Interaction" | "Communication";
     communicationMode?: "run-twice" | "grader";
   }
@@ -1702,8 +1855,6 @@ declare namespace ApiTypes {
       | "ConfigurationError"
       | "SystemError"
       | "Canceled"
-      | "Fake"
-      | "Hacked"
       | "CompilationError"
       | "FileError"
       | "RuntimeError"
@@ -1713,7 +1864,9 @@ declare namespace ApiTypes {
       | "PartiallyCorrect"
       | "WrongAnswer"
       | "Accepted"
-      | "JudgementFailed";
+      | "JudgementFailed"
+      | "Fake"
+      | "Hacked";
     submitTime: string; // date-time
     timeUsed: number;
     memoryUsed: number;
@@ -1769,8 +1922,6 @@ declare namespace ApiTypes {
       | "ConfigurationError"
       | "SystemError"
       | "Canceled"
-      | "Fake"
-      | "Hacked"
       | "CompilationError"
       | "FileError"
       | "RuntimeError"
@@ -1780,7 +1931,9 @@ declare namespace ApiTypes {
       | "PartiallyCorrect"
       | "WrongAnswer"
       | "Accepted"
-      | "JudgementFailed";
+      | "JudgementFailed"
+      | "Fake"
+      | "Hacked";
     submitTime: string; // date-time
     timeUsed: number;
     memoryUsed: number;
@@ -1798,6 +1951,53 @@ declare namespace ApiTypes {
     error?: "PERMISSION_DENIED" | "NO_SUCH_PROBLEM" | "FILE_TOO_LARGE" | "FILE_UUID_EXISTS" | "FILE_NOT_UPLOADED";
     submissionId?: number;
     signedUploadRequest?: ApiTypes.SignedFileUploadRequestDto;
+  }
+  export interface TeamAssignmentItemDto {
+    problemId: number;
+    section: string;
+    note: string;
+  }
+  export interface TeamRequestDto {
+    teamId?: number;
+    id?: number;
+    name?: string;
+    description?: string;
+    announcement?: string;
+    joinPolicy?: "open" | "approval" | "closed";
+    groupChangeLocked?: boolean;
+    archived?: boolean;
+    message?: string;
+    userId?: number;
+    userIds?: number[];
+    action?: "approve" | "reject" | "remove" | "block" | "unblock" | "setGroup" | "note" | "permissions";
+    groupId?: number | null;
+    note?: string;
+    permissions?: "settings" | "members" | "problems" | "contests" | "assignments" | "discussions" | "files";
+    sourceProblemId?: number;
+    title?: string;
+    subtitle?: string;
+    rule?: "noi" | "ioi" | "acm" | "strictioi";
+    startTime?: string;
+    endTime?: string;
+    languages?: string[];
+    visibility?: "private" | "public" | "invite";
+    invitedUserIds?: number[];
+    contestId?: number;
+    problemId?: number;
+    content?: string;
+    kind?: "problem" | "contest" | "discussion" | "assignment";
+    resourceId?: number;
+    items?: ApiTypes.TeamAssignmentItemDto[];
+    deadline?: string | null;
+    assignedUserIds?: number[];
+    assignedGroupIds?: number[];
+    size?: number;
+    uuid?: string;
+    part?: number;
+    uploadInfo?: ApiTypes.FileUploadInfoDto;
+    token?: string;
+    maxUses?: number;
+    expiresAt?: string;
   }
   export interface ToggleReactionRequestDto {
     type: "Discussion" | "DiscussionReply";
@@ -1856,13 +2056,13 @@ declare namespace ApiTypes {
   }
   export interface UpdateDiscussionRequestDto {
     type?: "Discussion" | "Solution";
-    problemId?: number;
+    problemId?: number | null;
     discussionId: number;
     title: string;
     content: string;
   }
   export interface UpdateDiscussionResponseDto {
-    error?: "PERMISSION_DENIED" | "NO_SUCH_DISCUSSION" | "NO_SUCH_PROBLEM" | "SOLUTION_REQUIRES_PROBLEM";
+    error?: "SOLUTION_REQUIRES_PROBLEM" | "NO_SUCH_PROBLEM" | "PERMISSION_DENIED" | "NO_SUCH_DISCUSSION";
   }
   export interface UpdateHomepageSettingsRequestDto {
     settings: ApiTypes.HomepageSettings;
@@ -1904,6 +2104,12 @@ declare namespace ApiTypes {
   export interface UpdateProblemTagResponseDto {
     error?: "NO_SUCH_PROBLEM_TAG" | "PERMISSION_DENIED";
   }
+  export interface UpdateRegistrationModeRequestDto {
+    /**
+     * Null restores the server YAML mode.
+     */
+    registrationMode: "open" | "approval" | "closed";
+  }
   export interface UpdateUserPasswordRequestDto {
     userId: number;
     oldPassword?: string;
@@ -1930,7 +2136,12 @@ declare namespace ApiTypes {
     information: ApiTypes.UserInformationDto;
   }
   export interface UpdateUserProfileResponseDto {
-    error?: "PERMISSION_DENIED" | "NO_SUCH_USER" | "DUPLICATE_USERNAME" | "DUPLICATE_EMAIL";
+    error?:
+      | "PERMISSION_DENIED"
+      | "NO_SUCH_USER"
+      | "DUPLICATE_USERNAME"
+      | "DUPLICATE_EMAIL"
+      | "REAUTHENTICATION_REQUIRED";
   }
   export interface UpdateUserSelfEmailRequestDto {
     email: string;

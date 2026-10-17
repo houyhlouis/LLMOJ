@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Post,
+  Req,
   ForbiddenException,
   BadRequestException,
   NotFoundException
@@ -19,6 +20,9 @@ import { permissionCatalog } from "./permission-catalog";
 import { CurrentUser } from "../common/user.decorator";
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
+import { AuthSessionService } from "../auth/auth-session.service";
+import { RequestWithSession } from "../auth/auth.middleware";
+import { AuditLogObjectType, AuditService } from "../audit/audit.service";
 
 class GetPermissionsDto {
   @IsInt() @Min(1) userId: number;
@@ -29,7 +33,12 @@ class SetPermissionsDto extends GetPermissionsDto {
 
 @Controller("access")
 export class AccessController {
-  constructor(@InjectDataSource() private readonly db: DataSource, private readonly privileges: UserPrivilegeService) {}
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly privileges: UserPrivilegeService,
+    private readonly sessions: AuthSessionService,
+    private readonly audit: AuditService
+  ) {}
 
   private requireAdmin(user: UserEntity) {
     if (!user?.isAdmin) throw new ForbiddenException();
@@ -75,8 +84,9 @@ export class AccessController {
   }
 
   @Post("set")
-  async set(@CurrentUser() user: UserEntity, @Body() body: SetPermissionsDto) {
+  async set(@CurrentUser() user: UserEntity, @Body() body: SetPermissionsDto, @Req() req: RequestWithSession) {
     this.requireAdmin(user);
+    await this.sessions.requireRecentAuthentication(user, req?.session?.sessionId);
     const keys = new Set<string>(Object.values(UserPrivilegeType));
     if (
       Object.entries(body.overrides).some(
@@ -85,18 +95,28 @@ export class AccessController {
     )
       throw new BadRequestException("Invalid permission rule");
     if (!(await this.db.getRepository(UserEntity).countBy({ id: body.userId }))) throw new NotFoundException();
-    await this.db.transaction(async manager => {
+    const changed = await this.db.transaction(async manager => {
       // Serialize permission changes with registration-review authorization,
       // including insertion of a deny where no explicit rule existed before.
       if (!(await manager.findOne(UserEntity, { where: { id: body.userId }, lock: { mode: "pessimistic_write" } })))
         throw new NotFoundException();
+      const before = await manager.findBy(UserPermissionRuleEntity, { userId: body.userId });
+      const old = Object.fromEntries(before.map(row => [row.permission, row.allowed]));
       for (const [permission, allowed] of Object.entries(body.overrides)) {
         // eslint-disable-next-line no-await-in-loop -- Permission decisions depend on the current user and are evaluated in order.
         if (allowed === null) await manager.delete(UserPermissionRuleEntity, { userId: body.userId, permission });
         // eslint-disable-next-line no-await-in-loop -- Permission decisions depend on the current user and are evaluated in order.
         else await manager.save(UserPermissionRuleEntity, { userId: body.userId, permission, allowed });
       }
+      return Object.fromEntries(
+        Object.entries(body.overrides)
+          .filter(([permission, allowed]) => (old[permission] ?? null) !== allowed)
+          .map(([permission, allowed]) => [permission, { old: old[permission] ?? null, new: allowed }])
+      );
     });
+    this.privileges.forgetRequestCapabilities(body.userId);
+    if (Object.keys(changed).length)
+      await this.audit.log("user.set_permissions", AuditLogObjectType.User, body.userId, { changed });
     return await this.get(user, body);
   }
 }

@@ -41,6 +41,10 @@ return {
   "judge_client.reset_key": "重置评测机密钥",
   "judge_client.drain": "暂停向评测机分配任务",
   "judge_client.resume": "恢复向评测机分配任务",
+  "judge_client.show_key": "查看评测机密钥",
+
+  "site.registration_mode.update": "修改注册方式",
+  "site.ai_policy.update": "修改全站 AI 设置",
 
   "group.create": "创建用户组 [firstObject]",
   "group.delete": "删除用户组 [firstObject]",
@@ -71,8 +75,10 @@ return {
   "submission.cancel": "取消提交记录 [firstObject] 的评测",
   "submission.set_public": "将提交记录 [firstObject] 设为公开",
   "submission.set_non_public": "将提交记录 [firstObject] 设为非公开",
+  "submission.delete": "删除提交记录 [firstObject]",
 
   "user.set_privileges": "设置用户 [firstObject] 的特权",
+  "user.set_permissions": "修改用户 [firstObject] 的详细权限",
   "user.change_username": "修改用户名",
   "user.change_others_username": "修改用户 [firstObject] 的用户名",
   "user.change_email": "修改邮箱（特权）",

@@ -46,7 +46,6 @@ export class AccessGuard implements CanActivate {
       throw new ForbiddenException();
     let permission = map[path];
     if (area === "studylist") permission = P.ManageStudyLists;
-    if (area === "summary" || area === "summaries") permission = P.ManageSummaries;
     if (
       area === "problem" &&
       ["addproblemfile", "renameproblemfile", "removeproblemfiles", "updateproblemjudgeinfo"].includes(action)

@@ -20,18 +20,14 @@ import style from "./UserEdit.module.less";
 import api from "@/api";
 import { appState } from "@/appState";
 import QrCode from "@/components/QrCode";
-import { useReauthentication } from "@/components/ReauthenticationDialog";
 import toast from "@/utils/toast";
 import { useAsyncCallbackPending, useLocalizer } from "@/utils/hooks";
 import formatDateTime from "@/utils/formatDateTime";
 import { createPasskey, isPasskeyCancelled, isPasskeySupported } from "@/utils/webauthn";
 
-type WithReauthentication = ReturnType<typeof useReauthentication>["withReauthentication"];
-
 interface TwoFactorSettingsProps {
   meta: ApiTypes.UserMetaDto;
   status: ApiTypes.TwoFactorStatusDto;
-  withReauthentication: WithReauthentication;
 }
 
 function defaultPasskeyName() {
@@ -74,7 +70,6 @@ const groupedSecret = (secret: string) => secret.replace(/(.{4})/g, "$1 ").trim(
 
 const TwoFactorSettings: React.FC<TwoFactorSettingsProps> = props => {
   const _ = useLocalizer("user_edit.security.two_factor");
-  const { withReauthentication } = props;
   const isCurrentUser = props.meta.id === appState.currentUser.id;
   const [status, setStatus] = useState(props.status);
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>(null);
@@ -94,7 +89,7 @@ const TwoFactorSettings: React.FC<TwoFactorSettingsProps> = props => {
   const [totpCode, setTotpCode] = useState("");
   const [totpCodeInvalid, setTotpCodeInvalid] = useState(false);
   const [pendingBeginTotp, onBeginTotp] = useAsyncCallbackPending(async () => {
-    const { requestError, response } = await withReauthentication(() => api.twoFactor.beginTotpSetup());
+    const { requestError, response } = await api.twoFactor.beginTotpSetup();
     if (requestError) toast.error(requestError(_));
     else if (response.error) failed(response.error);
     else {
@@ -105,9 +100,7 @@ const TwoFactorSettings: React.FC<TwoFactorSettingsProps> = props => {
   });
   const [pendingConfirmTotp, onConfirmTotp] = useAsyncCallbackPending(async () => {
     if (!/^\d{6}$/.test(totpCode)) return setTotpCodeInvalid(true);
-    const { requestError, response } = await withReauthentication(() =>
-      api.twoFactor.confirmTotpSetup({ code: totpCode })
-    );
+    const { requestError, response } = await api.twoFactor.confirmTotpSetup({ code: totpCode });
     if (requestError) toast.error(requestError(_));
     else if (response.error === "INVALID_CODE") setTotpCodeInvalid(true);
     else if (response.error) {
@@ -121,7 +114,7 @@ const TwoFactorSettings: React.FC<TwoFactorSettingsProps> = props => {
     }
   });
   const [pendingDisableTotp, onDisableTotp] = useAsyncCallbackPending(async () => {
-    const { requestError, response } = await withReauthentication(() => api.twoFactor.disableTotp());
+    const { requestError, response } = await api.twoFactor.disableTotp();
     if (requestError) toast.error(requestError(_));
     else if (response.error) failed(response.error);
     else {
@@ -134,7 +127,7 @@ const TwoFactorSettings: React.FC<TwoFactorSettingsProps> = props => {
   const passkeySupported = isPasskeySupported();
   const [passkeyName, setPasskeyName] = useState(defaultPasskeyName);
   const [pendingAddPasskey, onAddPasskey] = useAsyncCallbackPending(async () => {
-    const begun = await withReauthentication(() => api.twoFactor.beginPasskeyRegistration());
+    const begun = await api.twoFactor.beginPasskeyRegistration();
     if (begun.requestError) return toast.error(begun.requestError(_));
     if (begun.response.error) return failed(begun.response.error);
     let credential: ApiTypes.PasskeyRegistrationDto;
@@ -146,9 +139,10 @@ const TwoFactorSettings: React.FC<TwoFactorSettingsProps> = props => {
       else toast.error(_(".passkeys.browser_error", { message: e.message }));
       return;
     }
-    const { requestError, response } = await withReauthentication(() =>
-      api.twoFactor.finishPasskeyRegistration({ name: passkeyName.trim() || defaultPasskeyName(), credential })
-    );
+    const { requestError, response } = await api.twoFactor.finishPasskeyRegistration({
+      name: passkeyName.trim() || defaultPasskeyName(),
+      credential
+    });
     if (requestError) toast.error(requestError(_));
     else if (response.error) failed(response.error);
     else {
@@ -158,7 +152,7 @@ const TwoFactorSettings: React.FC<TwoFactorSettingsProps> = props => {
     }
   });
   const [, onRemovePasskey] = useAsyncCallbackPending(async (id: number) => {
-    const { requestError, response } = await withReauthentication(() => api.twoFactor.removePasskey({ id }));
+    const { requestError, response } = await api.twoFactor.removePasskey({ id });
     if (requestError) toast.error(requestError(_));
     else if (response.error) failed(response.error);
     else {
@@ -169,7 +163,7 @@ const TwoFactorSettings: React.FC<TwoFactorSettingsProps> = props => {
 
   // Recovery codes
   const [pendingRegenerate, onRegenerate] = useAsyncCallbackPending(async () => {
-    const { requestError, response } = await withReauthentication(() => api.twoFactor.regenerateRecoveryCodes());
+    const { requestError, response } = await api.twoFactor.regenerateRecoveryCodes();
     if (requestError) toast.error(requestError(_));
     else if (response.error) failed(response.error);
     else {
@@ -190,9 +184,7 @@ const TwoFactorSettings: React.FC<TwoFactorSettingsProps> = props => {
 
   // A user manager turns off every second factor for a user who lost them.
   const [pendingReset, onReset] = useAsyncCallbackPending(async () => {
-    const { requestError, response } = await withReauthentication(() =>
-      api.twoFactor.resetUserTwoFactor({ userId: props.meta.id })
-    );
+    const { requestError, response } = await api.twoFactor.resetUserTwoFactor({ userId: props.meta.id });
     if (requestError) toast.error(requestError(_));
     else if (response.error) failed(response.error);
     else {

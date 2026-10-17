@@ -25,6 +25,15 @@ testlib is included in source archives. Run `git submodule update --init --recur
 
 `pnpm check` runs what CI's first step runs: the build, type checks, lint and formatting checks.
 
+### The frontend's API client
+
+`packages/frontend/src/api-generated` is generated from the backend's controllers and DTOs, and `packages/frontend/test/api-contract.test.cjs` fails when it's out of date. After changing a controller or a DTO, build the backend and regenerate the client. No running server is needed:
+
+```bash
+pnpm --filter @libreoj/backend build
+node packages/frontend/scripts/generate-api.js --from-backend-build
+```
+
 ## Layout and configuration
 
 | Directory | Contents |
@@ -49,6 +58,9 @@ Tests are run with `node --test` or `python3` from the repository root. CI ([.gi
 # backend, by area
 node --test --test-concurrency=1 apps/backend/src/ai/*.test.cjs
 node apps/backend/src/access/access-permissions.test.cjs
+node --test --test-concurrency=1 apps/backend/src/access/capability-cache.test.cjs \
+  apps/backend/src/access/route-access.test.cjs apps/backend/src/access/permission-matrix.mariadb.test.cjs \
+  apps/backend/src/site-management/*.test.cjs
 node --test --test-concurrency=1 apps/backend/src/discussion/*.test.cjs apps/backend/src/team/*.test.cjs \
   apps/backend/src/hack/*.test.cjs apps/backend/src/self-eval/*.test.cjs apps/backend/src/contest/*.test.cjs \
   apps/backend/src/judge/*.test.cjs apps/backend/src/auth/*.test.cjs apps/backend/src/auth/two-factor/*.test.cjs \
@@ -118,6 +130,8 @@ Tests named `*.mariadb.test.*` (and a few others) use a real MariaDB. Each is sk
 | `LLMOJ_TWO_FACTOR_TEST_DB_CONFIG` | `auth/two-factor/two-factor.mariadb.test.cjs` |
 | `LLMOJ_JUDGE_QUEUE_TEST_DB_CONFIG` | `judge/judge-queue.test.cjs` |
 | `LLMOJ_DATA_VERSION_TEST_DB_CONFIG` | `submission/submission-data-version.mariadb.test.cjs` |
+| `LLMOJ_AI_BUDGET_TEST_DB_CONFIG` | `ai/ai-budget.mariadb.test.cjs` (empty database) |
+| `LLMOJ_ACCESS_MATRIX_TEST_DB_CONFIG` | `access/permission-matrix.mariadb.test.cjs` (empty database) |
 | `LLMOJ_SCHEMA_TEST_DB_CONFIG` | `deploy/test/initialize-schema.test.mjs` |
 | `LLMOJ_REGISTRATION_TEST_DATABASE` | `auth/registration-review.mariadb.test.cjs`, `site-management/registration-settings.mariadb.test.cjs` |
 

@@ -1,5 +1,3 @@
-import { AsyncLocalStorage } from "async_hooks";
-
 import { NestMiddleware, Injectable } from "@nestjs/common";
 
 import { Request, Response } from "express"; // eslint-disable-line import/no-extraneous-dependencies
@@ -8,8 +6,7 @@ import { AuthSessionService } from "./auth-session.service";
 
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
-
-const asyncLocalStorage = new AsyncLocalStorage();
+import { requestContext } from "../common/request-context";
 
 export interface Session {
   sessionKey?: string;
@@ -33,7 +30,9 @@ export class AuthMiddleware implements NestMiddleware {
     const authHeader = req.headers.authorization;
     const sessionKey = authHeader && authHeader.split(" ")[1];
     if (sessionKey) {
-      const [sessionId, user] = await this.authSessionService.accessSession(sessionKey);
+      const { sessionId, user, ended } = await this.authSessionService.resolveSession(sessionKey);
+      // The request continues as a visitor's. The header lets the client sign out instead of acting signed in.
+      if (ended) res.setHeader("X-Session-Ended", "1");
       if (user) {
         let userHasSkipRecaptchaPrivilegePromise: Promise<boolean>;
         req.session = {
@@ -53,7 +52,7 @@ export class AuthMiddleware implements NestMiddleware {
       }
     }
 
-    asyncLocalStorage.run(req, () => next());
+    requestContext.run(req, () => next());
   }
 }
 
@@ -64,5 +63,5 @@ export class AuthMiddleware implements NestMiddleware {
  * run in different contexts.
  */
 export function getCurrentRequest(): RequestWithSession {
-  return asyncLocalStorage.getStore() as RequestWithSession;
+  return requestContext.getStore() as RequestWithSession;
 }

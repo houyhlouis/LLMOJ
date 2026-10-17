@@ -34,6 +34,10 @@ export const rejudgeSubmission = createPostApi<
   ApiTypes.RejudgeSubmissionRequestDto,
   ApiTypes.RejudgeSubmissionResponseDto
 >("submission/rejudgeSubmission", {});
+export const fakeSubmission = createPostApi<ApiTypes.FakeSubmissionRequestDto, ApiTypes.FakeSubmissionResponseDto>(
+  "submission/fakeSubmission",
+  {}
+);
 export const cancelSubmission = createPostApi<
   ApiTypes.CancelSubmissionRequestDto,
   ApiTypes.CancelSubmissionResponseDto
@@ -46,7 +50,3 @@ export const deleteSubmission = createPostApi<
   ApiTypes.DeleteSubmissionRequestDto,
   ApiTypes.DeleteSubmissionResponseDto
 >("submission/deleteSubmission", {});
-export const fakeSubmission = createPostApi<ApiTypes.FakeSubmissionRequestDto, ApiTypes.FakeSubmissionResponseDto>(
-  "submission/fakeSubmission",
-  {}
-);

@@ -59,11 +59,15 @@ export class JudgeClientService {
     return await this.judgeClientRepository.find();
   }
 
-  async getJudgeClientInfo(judgeClient: JudgeClientEntity, showSensitive = false): Promise<JudgeClientInfoDto> {
+  async getJudgeClientInfo(
+    judgeClient: JudgeClientEntity,
+    showSensitive = false,
+    showKey = showSensitive
+  ): Promise<JudgeClientInfoDto> {
     return {
       id: judgeClient.id,
       name: judgeClient.name,
-      key: !showSensitive ? null : judgeClient.key,
+      key: showSensitive && showKey ? judgeClient.key : null,
       allowedHosts: !showSensitive ? null : judgeClient.allowedHosts,
       online: await this.isJudgeClientOnline(judgeClient),
       systemInfo: await this.getJudgeClientSystemInfo(judgeClient),

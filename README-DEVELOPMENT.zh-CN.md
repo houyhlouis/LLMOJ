@@ -25,6 +25,15 @@ pnpm check-types
 
 `pnpm check` 执行与 CI 第一步相同的内容：构建、类型检查、lint 和格式检查。
 
+### 前端的 API 客户端
+
+`packages/frontend/src/api-generated` 由后端的控制器和 DTO 生成，内容过时时 `packages/frontend/test/api-contract.test.cjs` 会失败。修改控制器或 DTO 后，先构建后端再重新生成客户端，不需要运行服务器：
+
+```bash
+pnpm --filter @libreoj/backend build
+node packages/frontend/scripts/generate-api.js --from-backend-build
+```
+
 ## 目录与配置
 
 | 目录 | 内容 |
@@ -49,6 +58,9 @@ pnpm check-types
 # 后端，按模块
 node --test --test-concurrency=1 apps/backend/src/ai/*.test.cjs
 node apps/backend/src/access/access-permissions.test.cjs
+node --test --test-concurrency=1 apps/backend/src/access/capability-cache.test.cjs \
+  apps/backend/src/access/route-access.test.cjs apps/backend/src/access/permission-matrix.mariadb.test.cjs \
+  apps/backend/src/site-management/*.test.cjs
 node --test --test-concurrency=1 apps/backend/src/discussion/*.test.cjs apps/backend/src/team/*.test.cjs \
   apps/backend/src/hack/*.test.cjs apps/backend/src/self-eval/*.test.cjs apps/backend/src/contest/*.test.cjs \
   apps/backend/src/judge/*.test.cjs apps/backend/src/auth/*.test.cjs apps/backend/src/auth/two-factor/*.test.cjs \
@@ -118,6 +130,8 @@ node --test deploy/test/bootstrap-admin.test.mjs
 | `LLMOJ_TWO_FACTOR_TEST_DB_CONFIG` | `auth/two-factor/two-factor.mariadb.test.cjs` |
 | `LLMOJ_JUDGE_QUEUE_TEST_DB_CONFIG` | `judge/judge-queue.test.cjs` |
 | `LLMOJ_DATA_VERSION_TEST_DB_CONFIG` | `submission/submission-data-version.mariadb.test.cjs` |
+| `LLMOJ_AI_BUDGET_TEST_DB_CONFIG` | `ai/ai-budget.mariadb.test.cjs` (empty database) |
+| `LLMOJ_ACCESS_MATRIX_TEST_DB_CONFIG` | `access/permission-matrix.mariadb.test.cjs` (empty database) |
 | `LLMOJ_SCHEMA_TEST_DB_CONFIG` | `deploy/test/initialize-schema.test.mjs` |
 | `LLMOJ_REGISTRATION_TEST_DATABASE` | `auth/registration-review.mariadb.test.cjs`、`site-management/registration-settings.mariadb.test.cjs` |
 

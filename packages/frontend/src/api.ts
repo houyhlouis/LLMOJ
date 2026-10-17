@@ -4,12 +4,16 @@ import { appState } from "./appState";
 import { makeToBeLocalizedText, ToBeLocalizedText } from "./locales";
 import type { CaptchaAction, CaptchaController, CaptchaResult } from "./utils/hooks/useCaptcha";
 import { ProofOfWorkAction, ProofOfWorkResult, solveProofOfWork } from "./utils/proofOfWork";
+import { confirmIdentity, needsReauthentication, REAUTHENTICATION_REQUIRED } from "./utils/reauthentication";
+import { noteSessionEnded, responseRequestId } from "./utils/session";
 
 export interface ApiResponse<T> {
   requestCancelled?: boolean;
   requestError?: ToBeLocalizedText;
   requestErrorStatus?: number;
   requestErrorCode?: string;
+  /** The server's ID for a failed request; its error log quotes the same ID. */
+  requestId?: string;
   response?: T;
 }
 
@@ -19,9 +23,11 @@ async function request<T>(
   params?: any,
   body?: any,
   captchaResult?: CaptchaResult,
-  proofOfWorkResult?: ProofOfWorkResult
+  proofOfWorkResult?: ProofOfWorkResult,
+  confirmed = false
 ): Promise<ApiResponse<T>> {
   let response: any;
+  const { token } = appState;
   try {
     response = await axios(window.apiEndpoint + "api/" + path, {
       method: method,
@@ -29,7 +35,7 @@ async function request<T>(
       data: body && JSON.stringify(body),
       headers: {
         "Content-Type": "application/json",
-        Authorization: appState.token && `Bearer ${appState.token}`,
+        Authorization: token && `Bearer ${token}`,
         ...(captchaResult ? { "X-Captcha-Result": JSON.stringify(captchaResult) } : {}),
         ...(proofOfWorkResult ? { "X-Proof-Of-Work": JSON.stringify(proofOfWorkResult) } : {})
       },
@@ -42,6 +48,19 @@ async function request<T>(
     };
   }
 
+  if (response.headers?.["x-session-ended"]) noteSessionEnded(token);
+
+  // A sensitive change refused for want of a recent password entry changed nothing: confirm and send it again.
+  // Captcha and proof-of-work answers are single-use, so those requests aren't repeated.
+  if (
+    !confirmed &&
+    !captchaResult &&
+    !proofOfWorkResult &&
+    needsReauthentication(response.data) &&
+    (await confirmIdentity())
+  )
+    return await request<T>(path, method, params, body, captchaResult, proofOfWorkResult, true);
+
   if (![200, 201].includes(response.status)) {
     try {
       console.log("response.data:", response.data);
@@ -49,10 +68,22 @@ async function request<T>(
       console.log("response:", response);
     }
 
+    const requestId = responseRequestId(response.headers, response.data);
     const errorDetails = {
       requestErrorStatus: response.status,
-      requestErrorCode: typeof response.data?.error === "string" ? response.data.error : undefined
+      requestErrorCode: typeof response.data?.error === "string" ? response.data.error : undefined,
+      requestId
     };
+    if (errorDetails.requestErrorCode === REAUTHENTICATION_REQUIRED)
+      return {
+        ...errorDetails,
+        requestError: makeToBeLocalizedText("common.request_error.reauthentication_required")
+      };
+    if (response.status >= 500 && requestId)
+      return {
+        ...errorDetails,
+        requestError: makeToBeLocalizedText("common.request_error.server_error_with_id", { id: requestId })
+      };
     if ([400, 401, 403, 429, 500, 502, 503, 504].includes(response.status))
       return {
         ...errorDetails,

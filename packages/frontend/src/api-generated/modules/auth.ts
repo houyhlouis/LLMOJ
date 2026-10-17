@@ -26,6 +26,14 @@ export const register = createPostApi<
   ApiTypes.RegisterResponseDto,
   { proofOfWorkAction: "register" }
 >("auth/register", { proofOfWorkAction: "register" });
+export const listRegistrationReviews = createPostApi<
+  ApiTypes.ListRegistrationReviewsRequestDto,
+  ApiTypes.ListRegistrationReviewsResponseDto
+>("auth/listRegistrationReviews", {});
+export const reviewRegistration = createPostApi<
+  ApiTypes.ReviewRegistrationRequestDto,
+  ApiTypes.ReviewRegistrationResponseDto
+>("auth/reviewRegistration", {});
 export const resetPassword = createPostApi<
   ApiTypes.ResetPasswordRequestDto,
   ApiTypes.ResetPasswordResponseDto,
@@ -39,12 +47,3 @@ export const revokeUserSession = createPostApi<
   ApiTypes.RevokeUserSessionRequestDto,
   ApiTypes.RevokeUserSessionResponseDto
 >("auth/revokeUserSession", {});
-
-export const listRegistrationReviews = createPostApi<
-  ApiTypes.ListRegistrationReviewsRequestDto,
-  ApiTypes.ListRegistrationReviewsResponseDto
->("auth/listRegistrationReviews", {});
-export const reviewRegistration = createPostApi<
-  ApiTypes.ReviewRegistrationRequestDto,
-  ApiTypes.ReviewRegistrationResponseDto
->("auth/reviewRegistration", {});

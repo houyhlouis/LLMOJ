@@ -251,3 +251,57 @@ test("global filter hides unhandled errors from HTTP, redacts AI logs and logs n
     Logger.prototype.error = originalLogger;
   }
 });
+
+test("server errors quote the ID the request was given, and AI routes no longer answer them with HTTP 200", async () => {
+  const { RequestIdMiddleware } = require("../common/request-id.middleware.ts");
+  const { AiController } = require("./ai.controller.ts");
+  const { AiError } = require("./ai.types.ts");
+  const headers = {},
+    req = {};
+  new RequestIdMiddleware().use(req, { setHeader: (name, value) => (headers[name] = value) }, () => {});
+  assert.match(req.requestId, /^[0-9a-f-]{36}$/);
+  assert.equal(headers["X-Request-Id"], req.requestId);
+
+  const logs = [],
+    originalLogger = Logger.prototype.error;
+  Logger.prototype.error = (...args) => logs.push(args);
+  try {
+    let body, status;
+    const response = {
+      status(code) {
+        status = code;
+        return this;
+      },
+      send(value) {
+        body = value;
+      }
+    };
+    const filter = new ErrorFilter({ report() {} }, { counter: () => ({ inc() {} }) });
+    filter.catch(new TypeError("synthetic-provider-secret"), {
+      getType: () => "http",
+      switchToHttp: () => ({
+        getRequest: () => ({ ...req, originalUrl: "/api/ai/start", body: {} }),
+        getResponse: () => response
+      })
+    });
+    assert.equal(status, 500);
+    assert.deepEqual(body, { error: "INTERNAL_ERROR", requestId: req.requestId });
+    const logged = JSON.stringify(logs);
+    assert(logged.includes(req.requestId) && logged.includes("TypeError"));
+    assert(!logged.includes("synthetic-provider-secret"));
+  } finally {
+    Logger.prototype.error = originalLogger;
+  }
+
+  // Expected AI failures stay HTTP 200 with their code; anything else reaches the error filter.
+  const controller = new AiController({
+    listJobs: async () => {
+      throw new AiError("NO_SUCH_PROBLEM");
+    },
+    cancel: async () => {
+      throw new TypeError("bug");
+    }
+  });
+  assert.deepEqual(await controller.jobs({ id: 1 }, {}), { error: "NO_SUCH_PROBLEM", message: "NO_SUCH_PROBLEM" });
+  await assert.rejects(controller.cancel({ id: 1 }, { id: "x" }), TypeError);
+});

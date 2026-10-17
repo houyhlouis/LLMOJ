@@ -72,7 +72,8 @@ return {
   },
   error: {
     PERMISSION_DENIED: "权限不足。",
-    NO_SUCH_JUDGE_CLIENT: "无此评测机。"
+    NO_SUCH_JUDGE_CLIENT: "无此评测机。",
+    REAUTHENTICATION_REQUIRED: "查看或修改评测机密钥前，请先确认密码。"
   },
   no_judge_machine: "暂无评测机"
 };

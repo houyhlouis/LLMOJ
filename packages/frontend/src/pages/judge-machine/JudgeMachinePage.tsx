@@ -174,6 +174,16 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
     );
   }
 
+  // Keys aren't part of the list. Clicking the key icon fetches one (asking for the password if it wasn't entered
+  // recently), shows it in a popup, and forgets it when the popup closes.
+  const [shownKey, setShownKey] = useState<{ id: number; key: string }>(null);
+  async function onShowKey(id: number) {
+    const { requestError, response } = await api.judgeClient.getJudgeClientKey({ id });
+    if (requestError) toast.error(requestError(_));
+    else if (response.error) toast.error(_(`.error.${response.error}`));
+    else setShownKey({ id, key: response.key });
+  }
+
   const [resetPopupOpened, setResetPopupOpened] = useState<number>(null);
   async function onResetKey(id: number) {
     const { requestError, response } = await api.judgeClient.resetJudgeClientKey({
@@ -314,8 +324,11 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
                 {props.hasManagePermission && (
                   <Table.Cell textAlign="center" className={style.columnOperations}>
                     <Popup
+                      open={shownKey?.id === judgeClient.id}
+                      onOpen={() => onShowKey(judgeClient.id)}
+                      onClose={() => setShownKey(null)}
                       trigger={<Icon name="key" title={_(".key")} />}
-                      content={<code>{judgeClient.key}</code>}
+                      content={<code>{shownKey?.key}</code>}
                       on="click"
                       position="left center"
                     />

@@ -13,6 +13,7 @@ import { EventReportModule } from "../event-report/event-report.module";
 import { FileModule } from "../file/file.module";
 import { RedisModule } from "../redis/redis.module";
 import { AuditModule } from "../audit/audit.module";
+import { AuthModule } from "../auth/auth.module";
 
 @Module({
   imports: [
@@ -21,7 +22,8 @@ import { AuditModule } from "../audit/audit.module";
     forwardRef(() => FileModule),
     forwardRef(() => EventReportModule),
     forwardRef(() => MetricsModule),
-    forwardRef(() => AuditModule)
+    forwardRef(() => AuditModule),
+    forwardRef(() => AuthModule)
   ],
   controllers: [JudgeClientController],
   providers: [JudgeGateway, JudgeClientService, JudgeQueueService],

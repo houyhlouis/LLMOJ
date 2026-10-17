@@ -19,6 +19,9 @@ function load(relative, dependencies = {}, globals = {}) {
       module,
       exports: module.exports,
       require: name => {
+        // The real session helpers, sharing the test's app state.
+        if (name === "@/utils/session" && !(name in dependencies))
+          return load("utils/session.ts", { "@/appState": dependencies["@/appState"] });
         if (!(name in dependencies)) throw new Error(`Unexpected runtime import: ${name}`);
         return dependencies[name];
       },
@@ -379,6 +382,42 @@ test("AI attachment applies bounded requests and returns a token only after conf
     "fixture-token"
   );
   assert.equal(axios.requests.length, 2);
+});
+
+test("AI server errors quote the server's error ID, and an ended session is forgotten", async () => {
+  const id = "0f8fad5b-d9cb-469f-a165-70867728950e";
+  const appState = { locale: "en_US", token: "stale" };
+  const axios = mockAxios(async () => ({
+    status: 500,
+    data: { error: "INTERNAL_ERROR", requestId: id },
+    headers: { "x-request-id": id, "x-session-ended": "1" }
+  }));
+  const api = load(
+    "pages/ai/api.ts",
+    { axios, "@/utils/callApiWithFileUpload": {}, "@/appState": { appState } },
+    { window: { apiEndpoint: "/" } }
+  );
+  await assert.rejects(api.aiCall("jobs", {}), error => error.message.includes(`(HTTP 500, error ID ${id})`));
+  assert.equal(axios.requests[0].config.headers.Authorization, "Bearer stale");
+  assert.equal(appState.token, "");
+  assert.equal(appState.sessionEnded, true);
+  // A sign-in completed while the request was out is kept.
+  appState.token = "fresh";
+  appState.sessionEnded = false;
+  const later = load(
+    "pages/ai/api.ts",
+    {
+      axios: mockAxios(async () => ({ status: 200, data: {}, headers: { "x-session-ended": "1" } })),
+      "@/utils/callApiWithFileUpload": {},
+      "@/appState": { appState }
+    },
+    { window: { apiEndpoint: "/" } }
+  );
+  const request = later.aiCall("jobs", {});
+  appState.token = "newer";
+  await request;
+  assert.equal(appState.token, "newer");
+  assert.equal(appState.sessionEnded, false);
 });
 
 test("tutorial fact errors are localized without rendering arbitrary backend detail", () => {

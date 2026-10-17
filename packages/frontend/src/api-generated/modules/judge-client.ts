@@ -16,6 +16,10 @@ export const resetJudgeClientKey = createPostApi<
   ApiTypes.ResetJudgeClientKeyRequestDto,
   ApiTypes.ResetJudgeClientKeyResponseDto
 >("judgeClient/resetJudgeClientKey", {});
+export const getJudgeClientKey = createPostApi<
+  ApiTypes.GetJudgeClientKeyRequestDto,
+  ApiTypes.GetJudgeClientKeyResponseDto
+>("judgeClient/getJudgeClientKey", {});
 export const setJudgeClientDraining = createPostApi<
   ApiTypes.SetJudgeClientDrainingRequestDto,
   ApiTypes.SetJudgeClientDrainingResponseDto

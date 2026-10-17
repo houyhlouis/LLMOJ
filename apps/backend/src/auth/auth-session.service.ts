@@ -1,7 +1,7 @@
 import { join } from "path";
 import fs from "fs-extra";
 
-import { Injectable } from "@nestjs/common";
+import { ForbiddenException, Injectable } from "@nestjs/common";
 
 import jwt from "jsonwebtoken";
 import { Redis } from "ioredis";
@@ -38,6 +38,19 @@ const REDIS_KEY_RECENT_AUTHENTICATION = "session-recent-authentication:%d:%d";
 // Used when the configuration doesn't set `security.sessionIdleTimeoutDays` / `security.sessionMaxAgeDays`.
 export const DEFAULT_SESSION_IDLE_TIMEOUT_DAYS = 30;
 export const DEFAULT_SESSION_MAX_AGE_DAYS = 90;
+// Site administrators' sessions end sooner (`security.adminSessionIdleTimeoutDays` / `security.adminSessionMaxAgeDays`).
+export const DEFAULT_ADMIN_SESSION_IDLE_TIMEOUT_DAYS = 3;
+export const DEFAULT_ADMIN_SESSION_MAX_AGE_DAYS = 30;
+
+/** Returned for a sensitive change when the password wasn't entered recently; the client confirms and repeats it. */
+export const REAUTHENTICATION_REQUIRED = "REAUTHENTICATION_REQUIRED";
+
+export interface ResolvedSession {
+  sessionId?: number;
+  user?: UserEntity;
+  /** The key can never be used again: invalid, revoked, expired, or its account may no longer sign in. */
+  ended?: boolean;
+}
 
 @Injectable()
 export class AuthSessionService {
@@ -87,6 +100,15 @@ export class AuthSessionService {
     return (await this.redis.exists(REDIS_KEY_RECENT_AUTHENTICATION.format(userId, sessionId))) === 1;
   }
 
+  /**
+   * For routes that report errors with HTTP status codes: refuses a sensitive change with 403
+   * `{ error: "REAUTHENTICATION_REQUIRED" }` unless the password was entered recently in this session.
+   */
+  async requireRecentAuthentication(user: UserEntity, sessionId: number): Promise<void> {
+    if (!(await this.isRecentlyAuthenticated(user?.id, sessionId)))
+      throw new ForbiddenException({ error: REAUTHENTICATION_REQUIRED });
+  }
+
   private decodeSessionKey(sessionKey: string): [userId: number, sessionId: number] {
     const jwtString = jwt.verify(sessionKey, this.configService.config.security.sessionSecret) as string;
     return jwtString.split(" ").map(s => Number(s)) as [userId: number, sessionId: number];
@@ -94,12 +116,18 @@ export class AuthSessionService {
 
   /**
    * A session expires when unused for the idle timeout, or when older than the maximum age (0: no limit).
+   * A site administrator's session gets the stricter of the general and the administrator limits.
    */
-  private sessionLimits(): [idleTimeout: number, maxAge: number] {
-    const { sessionIdleTimeoutDays, sessionMaxAgeDays } = this.configService.config.security;
+  private sessionLimits(user: UserEntity): [idleTimeout: number, maxAge: number] {
+    const { security } = this.configService.config;
+    const days = (value: number, fallback: number) => (value ?? fallback) * DAY_MILLISECONDS;
+    const idleTimeout = days(security.sessionIdleTimeoutDays, DEFAULT_SESSION_IDLE_TIMEOUT_DAYS);
+    const maxAge = days(security.sessionMaxAgeDays, DEFAULT_SESSION_MAX_AGE_DAYS);
+    if (!user?.isAdmin) return [idleTimeout, maxAge];
+    const stricter = (a: number, b: number) => (a && b ? Math.min(a, b) : a || b);
     return [
-      (sessionIdleTimeoutDays ?? DEFAULT_SESSION_IDLE_TIMEOUT_DAYS) * DAY_MILLISECONDS,
-      (sessionMaxAgeDays ?? DEFAULT_SESSION_MAX_AGE_DAYS) * DAY_MILLISECONDS
+      stricter(idleTimeout, days(security.adminSessionIdleTimeoutDays, DEFAULT_ADMIN_SESSION_IDLE_TIMEOUT_DAYS)),
+      stricter(maxAge, days(security.adminSessionMaxAgeDays, DEFAULT_ADMIN_SESSION_MAX_AGE_DAYS))
     ];
   }
 
@@ -120,48 +148,60 @@ export class AuthSessionService {
     }
   }
 
-  async accessSession(sessionKey: string): Promise<[sessionId: number, user: UserEntity]> {
+  /** Checks a session key and refreshes its last use. Storage errors resolve to neither a user nor `ended`. */
+  async resolveSession(sessionKey: string): Promise<ResolvedSession> {
+    let ids: [userId: number, sessionId: number];
     try {
-      const [userId, sessionId] = this.decodeSessionKey(sessionKey);
-
-      const success = await this.redis.callSessionManager(
-        "access",
-        +new Date(),
-        userId,
-        sessionId,
-        ...this.sessionLimits()
-      );
-      if (!success) return [null, null];
-
-      const user = await this.userService.findUserById(userId);
-      await this.registrationReviews.requireApproved(user);
-      return [sessionId, user];
-    } catch (e) {
-      return [null, null];
+      ids = this.decodeSessionKey(sessionKey);
+    } catch {
+      return { ended: true };
+    }
+    const [userId, sessionId] = ids;
+    try {
+      const user = await this.accessSessionById(userId, sessionId);
+      return user ? { sessionId, user } : { ended: true };
+    } catch {
+      return {};
     }
   }
 
-  // Subscription credentials carry the issuing session's IDs, never its login token.
+  async accessSession(sessionKey: string): Promise<[sessionId: number, user: UserEntity]> {
+    const { sessionId, user } = await this.resolveSession(sessionKey);
+    return user ? [sessionId, user] : [null, null];
+  }
+
+  /**
+   * The session's user, or null when the session is unknown, expired, or its account may not sign in.
+   * Subscription credentials carry the issuing session's IDs, never its login token.
+   */
   async accessSessionById(userId: number, sessionId: number): Promise<UserEntity> {
+    // The user decides the session's limits: administrators' sessions end sooner.
+    const user = await this.userService.findUserById(userId);
+    if (!user) {
+      await this.revokeSession(userId, sessionId);
+      return null;
+    }
     const success = await this.redis.callSessionManager(
       "access",
       Date.now(),
       userId,
       sessionId,
-      ...this.sessionLimits()
+      ...this.sessionLimits(user)
     );
     if (!success) return null;
-    const user = await this.userService.findUserById(userId);
     try {
       await this.registrationReviews.requireApproved(user);
       return user;
-    } catch {
-      return null;
+    } catch (error) {
+      // A pending or rejected registration may not use its sessions; storage errors propagate.
+      if (error instanceof ForbiddenException) return null;
+      throw error;
     }
   }
 
   async listUserSessions(userId: number): Promise<SessionInfo[]> {
-    const result = (await this.redis.callSessionManager("list", userId, Date.now(), ...this.sessionLimits())) as [
+    const user = await this.userService.findUserById(userId);
+    const result = (await this.redis.callSessionManager("list", userId, Date.now(), ...this.sessionLimits(user))) as [
       sessionId: string,
       lastAccessTime: string,
       sessionInfo: string

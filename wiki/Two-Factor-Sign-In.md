@@ -30,7 +30,19 @@ Resetting a forgotten password by email changes the password but still asks for 
 
 ## Confirming sensitive changes
 
-Changing the email address, the password (with two-factor sign-in on, or as a user manager), or two-factor settings requires that the password was entered in this browser session within the last 10 minutes. Otherwise a **Confirm it's you** dialog asks for the password and, with two-factor sign-in on, a second step. This applies to every account: changing the email address always needs it.
+Some changes need the password to have been entered in this browser session within the last 10 minutes. Otherwise a **Confirm it's you** dialog asks for it (and, with two-factor sign-in on, for the second step), then makes the change. This applies to every account, with or without two-factor sign-in:
+
+- your email address (always), your password (with two-factor sign-in on), and your two-factor settings;
+- as a user manager: another user's password, email address or two-factor sign-in;
+- as a site administrator: privileges and detailed permissions, the registration mode and AI settings in **Site management**, and adding, deleting or resetting judge machines. The **Judge Machine** page no longer lists keys: the key icon shows one key after the same confirmation, and each time it's recorded in the audit log.
+
+Cancelling the dialog leaves everything unchanged.
+
+## Sessions
+
+A session ends after 30 days without use, or 90 days after signing in. A site administrator's session ends sooner: after 3 days without use, or 30 days after signing in. [Backend configuration](Backend-Configuration.md#security-sessions-captcha-proof-of-work-and-rate-limits) explains how to change these.
+
+When a session has ended, or was signed out from another device, the page says **Your session has ended** with a **Sign in** button, instead of quietly treating you as a visitor.
 
 ## Lost phone, passkeys and recovery codes
 

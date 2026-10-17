@@ -87,6 +87,8 @@ LLMOJ doesn't check that mail can actually be sent. Send yourself a test message
 | `security.sessionSecret` | `REPLACE_WITH_SESSION_SECRET` | Key that signs sign-in sessions, random in installations. Secret. Changing it signs everyone out. |
 | `security.sessionIdleTimeoutDays` | `30` | **Optional.** A session unused for this many days ends. `0` means never; 30 if left out. |
 | `security.sessionMaxAgeDays` | `90` | **Optional.** A session ends this many days after signing in, even if it's used. `0` means never; 90 if left out. |
+| `security.adminSessionIdleTimeoutDays` | `3` | **Optional.** A site administrator's session ends after this many days without use, when that's sooner than `sessionIdleTimeoutDays`. `0` adds no limit of its own; 3 if left out. |
+| `security.adminSessionMaxAgeDays` | `30` | **Optional.** A site administrator's session ends this many days after signing in, when that's sooner than `sessionMaxAgeDays`. `0` adds no limit of its own; 30 if left out. |
 | `security.maintainceKey` | `REPLACE_WITH_MAINTENANCE_KEY` | Key for the `maintaince-key` header of `POST /api/runMaintainceTasks` (the misspelling is intentional). Secret. |
 | `security.proofOfWork.difficulty` | `4` | Proof-of-work difficulty for protected actions, 1 to 8. Higher values make browsers work longer. It can't be turned off. |
 | `security.proofOfWork.expensiveActionDifficulty` | `5` | Proof-of-work difficulty for expensive actions such as submitting, 1 to 8 |

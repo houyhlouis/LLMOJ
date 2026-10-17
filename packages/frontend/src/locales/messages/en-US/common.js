@@ -52,7 +52,14 @@ return {
     502: "Couldn't connect to the server. Please try again later.",
     503: "Couldn't connect to the server. Please try again later.",
     504: "Timeout connecting to the server. Please try again later.",
+    server_error_with_id:
+      "Server error. Please try again later. If it keeps happening, give the administrator this error ID: {id}",
+    reauthentication_required: "Confirm your password to make this change.",
     unknown: "Request error: {text}"
+  },
+  session_ended: {
+    message: "Your session has ended, so you're now signed out. Sign in again to continue.",
+    sign_in: "Sign in"
   },
   confirm_navigation: "Be sure to leave this page? Your changes will not be saved."
 };

@@ -51,7 +51,13 @@ return {
     502: "无法连接到服务器，请稍后重试。",
     503: "无法连接到服务器，请稍后重试。",
     504: "连接服务器超时，请稍后重试。",
+    server_error_with_id: "服务器错误，请稍后重试。如果一直出现，请把错误编号告诉管理员：{id}",
+    reauthentication_required: "请先确认密码再进行此更改。",
     unknown: "请求出错：{text}"
+  },
+  session_ended: {
+    message: "登录会话已结束，你已退出登录。请重新登录后继续。",
+    sign_in: "登录"
   },
   confirm_navigation: "确定要离开当前页面吗？您的修改将不被保存。"
 };

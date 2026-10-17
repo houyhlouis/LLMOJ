@@ -90,13 +90,15 @@ export class AuthController {
   @Get("getSessionInfo")
   @ApiOperation({
     summary: "A (JSONP or JSON) request to get current user's info and server preference.",
-    description: "In order to support JSONP, this API doesn't use HTTP Authorization header."
+    description:
+      "Same-origin pages send the session in the HTTP Authorization header. JSONP can't, so it passes `token` instead."
   })
   async getSessionInfo(
     @Query() request: GetSessionInfoRequestDto,
-    @Res({ passthrough: true }) response: Response
+    @Res({ passthrough: true }) response: Response,
+    @CurrentUser() currentUser?: UserEntity
   ): Promise<GetSessionInfoResponseDto> {
-    const [, user] = await this.authSessionService.accessSession(request.token);
+    const user = request.token ? (await this.authSessionService.accessSession(request.token))[1] : currentUser;
 
     const result: GetSessionInfoResponseDto = {
       serverPreference: {

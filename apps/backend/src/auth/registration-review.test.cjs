@@ -189,7 +189,7 @@ test("ManageUser cannot replace an administrator password or recovery email", as
   assert.deepEqual(await users.updateUserPassword({}, manager, { userId: 1, password: "synthetic" }), {
     error: "PERMISSION_DENIED"
   });
-  assert.deepEqual(await users.updateUserProfile(manager, { userId: 1, email: "attacker@example.test" }), {
+  assert.deepEqual(await users.updateUserProfile({}, manager, { userId: 1, email: "attacker@example.test" }), {
     error: "PERMISSION_DENIED"
   });
 });

@@ -338,6 +338,31 @@ function safeStringify(object) {
       };
 
       if (!token) token = getSessionToken() || "";
+      var deliver = function (sessionInfo) {
+        (window.getSessionInfoCallback || function (sessionInfo) { window.sessionInfo = sessionInfo; })(sessionInfo);
+      };
+
+      // On the same origin, send the token in a header, so it never appears in a URL that a proxy could log.
+      var sameOrigin = !/^([a-z][a-z0-9+.-]*:)?\/\//i.test(window.apiEndpoint) ||
+        window.apiEndpoint.indexOf(location.origin + "/") === 0;
+      if (sameOrigin) {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", window.apiEndpoint + "api/auth/getSessionInfo");
+        if (token) xhr.setRequestHeader("Authorization", "Bearer " + token);
+        xhr.onload = function () {
+          var sessionInfo;
+          try {
+            sessionInfo = JSON.parse(xhr.responseText);
+          } catch (e) {}
+          if (xhr.status === 200 && sessionInfo) deliver(sessionInfo);
+          else handleLoadingError();
+        };
+        xhr.onerror = handleLoadingError;
+        xhr.send();
+        return;
+      }
+
+      // Another origin needs JSONP, which can only carry the token in the URL.
       var script = document.createElement("script");
       script.async = true;
       script.onerror = handleLoadingError;
