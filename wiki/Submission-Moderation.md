@@ -8,7 +8,7 @@ The submission ID, code, answer file and original judge results are preserved as
 
 Fake cancels the active judge task and rejects its late results. Accepted-submission/problem counts and score caches are updated; contest and assignment scores use zero. The submission record and total submission history remain available.
 
-Rejudge can clear Fake and run a fresh evaluation. It requires both rejudge permission and Fake authorization for that record, including explicit Fake denials. Rejudging clears or replaces the original judge detail, so export evidence first if it must be retained long term. A user with rejudge permission alone cannot reverse moderation, and batch rejudging does not automatically clear Fake.
+Rejudge can clear Fake and run a fresh evaluation. It requires both rejudge permission and Fake authorization for that record, including explicit Fake denials. Rejudging replaces the current judge detail; the replaced result is kept among the submission's [earlier results](Submissions.md#test-data-versions-and-earlier-results), the five most recent, so export evidence first if it must be retained longer. A user with rejudge permission alone cannot reverse moderation, and batch rejudging does not automatically clear Fake.
 
 In NOI, a Fake latest submission scores zero. IOI may fall back to another valid highest-scoring submission. Strict IOI combines the best valid subtask results and excludes Fake and Hacked records. ICPC treats Fake as an unsuccessful attempt. Other valid submissions and the contest rules determine the resulting score; the fake record never counts as accepted. Score histograms exclude Fake.
 

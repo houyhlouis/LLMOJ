@@ -18,6 +18,8 @@ const { DataSource, EntitySchema } = require('typeorm');
 const { SubmissionService } = require('./submission.service.ts');
 const { SubmissionEntity } = require('./submission.entity.ts');
 const { SubmissionDetailEntity } = require('./submission-detail.entity.ts');
+const { StatisticsOutboxEntity } = require('./statistics-outbox.entity.ts');
+const { StatisticsOutboxService } = require('./statistics-outbox.service.ts');
 const { UserEntity } = require('../user/user.entity.ts');
 const { UserService } = require('../user/user.service.ts');
 const { ProblemEntity } = require('../problem/problem.entity.ts');
@@ -33,7 +35,9 @@ test('deleted submissions keep owner counts atomic (real MariaDB)',
     [ProblemEntity,'problem',{id:{...int,primary:true},submissionCount:int,acceptedSubmissionCount:int}],
     [SubmissionEntity,'submission',{id:{...int,primary:true,generated:true},problemId:int,submitterId:int,
       contestId:{...int,nullable:true},taskId:{type:String,nullable:true},status:{type:String}}],
-    [SubmissionDetailEntity,'detail',{submissionId:{...int,primary:true},fileUuid:{type:String,nullable:true}}]
+    [SubmissionDetailEntity,'detail',{submissionId:{...int,primary:true},fileUuid:{type:String,nullable:true}}],
+    [StatisticsOutboxEntity,'outbox',{id:{...int,primary:true,generated:true},kind:{type:String},targetId:int,
+      submissions:int,accepted:int,createdAt:{type:Date}}]
   ];
   const db = new DataSource({...cfg,entities:defs.map(([target,name,columns])=>new EntitySchema({
     name:target.name,target,tableName:prefix+name,columns})),synchronize:true,logging:false});
@@ -48,6 +52,7 @@ test('deleted submissions keep owner counts atomic (real MariaDB)',
       const gate=new Promise(done=>release=done),tail=previous.then(()=>gate);tails.set(key,tail);await previous;
       try{return await callback();}finally{release();if(tails.get(key)===tail)tails.delete(key);}
     }};
+    const outbox=Object.create(StatisticsOutboxService.prototype);Object.assign(outbox,{connection:db});
     const problemService=Object.create(ProblemService.prototype);
     Object.assign(problemService,{problemRepository:problems,lockProblemById:async(id,_type,callback)=>callback(await problems.findOneBy({id}))});
     const svc=Object.create(SubmissionService.prototype),userService=Object.create(UserService.prototype);
@@ -55,7 +60,7 @@ test('deleted submissions keep owner counts atomic (real MariaDB)',
     Object.assign(svc,{connection:db,submissionRepository:subs,submissionDetailRepository:details,problemService,
       userService,lockService:locks,submissionStatisticsService:{onSubmissionUpdated:async()=>{}},
       judgeGateway:{cancelTask:()=>{}},submissionProgressService:{emitSubmissionEvent:async()=>{}},
-      fileService:{deleteFile:async()=>()=>{}}});
+      fileService:{deleteFile:async()=>()=>{}},statisticsOutboxService:outbox});
     async function fixture(contest=false,status='WrongAnswer') {
       await users.save([{id:1,submissionCount:9,acceptedProblemCount:2},{id:2,submissionCount:contest?0:1,acceptedProblemCount:status==='Accepted'?1:0}]);
       await problems.save({id:1,submissionCount:contest?0:1,acceptedSubmissionCount:status==='Accepted'?1:0});
@@ -87,7 +92,8 @@ test('deleted submissions keep owner counts atomic (real MariaDB)',
       const s=await fixture(true);await svc.deleteSubmission(s);await check(s,true,0);
       assert.equal((await problems.findOneBy({id:1})).submissionCount,0);
     });
-    for(const failure of ['remove','increment'])await run(failure+' failure rolls back deletion and owner count together',async()=>{
+    // 'insert' records the change of the counts
+    for(const failure of ['remove','insert'])await run(failure+' failure rolls back deletion and owner count together',async()=>{
       const s=await fixture();const original=svc.connection;
       svc.connection={transaction:(level,callback)=>db.transaction(level,manager=>{
         manager[failure]=async()=>{throw new Error('forced '+failure+' failure');};return callback(manager);
@@ -102,7 +108,7 @@ test('deleted submissions keep owner counts atomic (real MariaDB)',
       await check(s,true,1);
     });
   } finally {
-    if(db.isInitialized){for(const name of ['detail','submission','problem','user'])await db.query('DROP TABLE IF EXISTS `'+prefix+name+'`');
+    if(db.isInitialized){for(const name of ['outbox','detail','submission','problem','user'])await db.query('DROP TABLE IF EXISTS `'+prefix+name+'`');
       const remaining=await db.query('SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND LEFT(TABLE_NAME,?)=?',[prefix.length,prefix]);
       report.remainingTables=remaining;assert.equal(remaining.length,0);await db.destroy();}
     if(process.env.HYHOJ_SUBMISSION_TEST_OUTPUT)fs.writeFileSync(process.env.HYHOJ_SUBMISSION_TEST_OUTPUT,JSON.stringify(report,null,2)+'\n');

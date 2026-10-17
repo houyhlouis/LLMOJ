@@ -72,6 +72,7 @@ function componentHarness(file, options = {}) {
   };
   const widgets = {};
   for (const name of [
+    "Accordion",
     "Header",
     "Checkbox",
     "Segment",

@@ -18,6 +18,7 @@ import { ProblemFileType, ProblemFileEntity } from "./problem-file.entity";
 import { ProblemSampleEntity } from "./problem-sample.entity";
 import { ProblemJudgeInfoEntity } from "./problem-judge-info.entity";
 import { ProblemEntity, ProblemType } from "./problem.entity";
+import { deferTestDataDeletion } from "./deferred-file-deletion";
 
 import {
   ProblemStatementDto,
@@ -910,8 +911,14 @@ export class ProblemService {
             for (const old of replaced) {
               // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
               await manager.delete(ProblemFileEntity, { problemId: problem.id, type, filename: old.filename });
-              // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
-              removeObjects.push(await this.fileService.deleteFile(old.uuid, manager));
+              // Test data may still be needed by submissions pinned to an earlier data version
+              if (type === ProblemFileType.TestData) {
+                // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
+                await deferTestDataDeletion([old.uuid], manager);
+              } else {
+                // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
+                removeObjects.push(await this.fileService.deleteFile(old.uuid, manager));
+              }
             }
             for (const file of prepared) {
               // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
@@ -1109,7 +1116,10 @@ export class ProblemService {
           type,
           filename
         });
-        if (oldProblemFile)
+        // Test data may still be needed by submissions pinned to an earlier data version
+        if (oldProblemFile && type === ProblemFileType.TestData)
+          await deferTestDataDeletion([oldProblemFile.uuid], transactionalEntityManager);
+        else if (oldProblemFile)
           deleteOldFileActually = await this.fileService.deleteFile(oldProblemFile.uuid, transactionalEntityManager);
 
         const problemFile = new ProblemFileEntity();
@@ -1156,10 +1166,17 @@ export class ProblemService {
           filename: In(filenames)
         });
 
-        deleteFilesActually = await this.fileService.deleteFile(
-          problemFiles.map(problemFile => problemFile.uuid),
-          transactionalEntityManager
-        );
+        // Test data may still be needed by submissions pinned to an earlier data version
+        if (type === ProblemFileType.TestData)
+          await deferTestDataDeletion(
+            problemFiles.map(problemFile => problemFile.uuid),
+            transactionalEntityManager
+          );
+        else
+          deleteFilesActually = await this.fileService.deleteFile(
+            problemFiles.map(problemFile => problemFile.uuid),
+            transactionalEntityManager
+          );
       });
 
       if (deleteFilesActually) deleteFilesActually();
@@ -1249,20 +1266,6 @@ export class ProblemService {
         await this.redisService.cacheDelete(REDIS_KEY_PROBLEM_PREPROCESSED_JUDGE_INFO.format(problem.id));
       return renamed;
     });
-  }
-
-  async updateProblemStatistics(
-    problemId: number,
-    incSubmissionCount: number,
-    incAcceptedSubmissionCount: number
-  ): Promise<void> {
-    if (incSubmissionCount !== 0) {
-      await this.problemRepository.increment({ id: problemId }, "submissionCount", incSubmissionCount);
-    }
-
-    if (incAcceptedSubmissionCount !== 0) {
-      await this.problemRepository.increment({ id: problemId }, "acceptedSubmissionCount", incAcceptedSubmissionCount);
-    }
   }
 
   async findProblemTagById(id: number): Promise<ProblemTagEntity> {

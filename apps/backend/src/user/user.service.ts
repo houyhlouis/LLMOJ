@@ -28,8 +28,6 @@ import {
 } from "./dto";
 
 import { escapeLike } from "../database/database.utils";
-import { LockService } from "../redis/lock.service";
-import { SubmissionService } from "../submission/submission.service";
 import { SubmissionEntity } from "../submission/submission.entity";
 import { ConfigService } from "../config/config.service";
 import { AuthEmailVerificationCodeService } from "../auth/auth-email-verification-code.service";
@@ -50,12 +48,8 @@ export class UserService {
     private readonly userPreferenceRepository: Repository<UserPreferenceEntity>,
     @Inject(forwardRef(() => AuthEmailVerificationCodeService))
     private readonly authEmailVerificationCodeService: AuthEmailVerificationCodeService,
-    @Inject(forwardRef(() => LockService))
-    private readonly lockService: LockService,
     @Inject(forwardRef(() => ConfigService))
     private readonly configService: ConfigService,
-    @Inject(forwardRef(() => SubmissionService))
-    private readonly submissionService: SubmissionService,
     @Inject(forwardRef(() => UserPrivilegeService))
     private readonly userPrivilegeService: UserPrivilegeService,
     private readonly auditService: AuditService
@@ -311,30 +305,6 @@ export class UserService {
       .where(() => `id IN (${queryAcceptedUsers.getQuery()})`)
       .setParameters(queryAcceptedUsers.expressionMap.parameters)
       .execute();
-  }
-
-  async updateUserSubmissionCount(userId: number, incSubmissionCount: number): Promise<void> {
-    if (incSubmissionCount !== 0) {
-      await this.userRepository.increment({ id: userId }, "submissionCount", incSubmissionCount);
-    }
-  }
-
-  async updateUserAcceptedCount(
-    userId: number,
-    problemId: number,
-    type: "NON_AC_TO_AC" | "AC_TO_NON_AC"
-  ): Promise<void> {
-    await this.lockService.lock(`updateUserAcceptedCount_${userId}_${problemId}`, async () => {
-      if (type === "NON_AC_TO_AC") {
-        if ((await this.submissionService.getUserProblemAcceptedSubmissionCount(userId, problemId)) === 1) {
-          await this.userRepository.increment({ id: userId }, "acceptedProblemCount", 1);
-        }
-      } else {
-        if ((await this.submissionService.getUserProblemAcceptedSubmissionCount(userId, problemId)) === 0) {
-          await this.userRepository.increment({ id: userId }, "acceptedProblemCount", -1);
-        }
-      }
-    });
   }
 
   async getUserRank(user: UserEntity): Promise<number> {

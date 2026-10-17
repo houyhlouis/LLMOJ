@@ -356,6 +356,12 @@ export class SubmissionController {
       true
     );
     const displayedProgress = submissionDisplayProgress(submission, progress || submissionDetail.result);
+    const [dataVersion, earlierResults] = permissionRejudge
+      ? await Promise.all([
+          this.submissionService.getSubmissionDataVersion(submission, problem),
+          this.submissionService.getEarlierResults(submission)
+        ])
+      : [null, null];
     return {
       meta: {
         id: submission.id,
@@ -387,7 +393,9 @@ export class SubmissionController {
       permissionCancel,
       permissionSetPublic,
       permissionDelete,
-      permissionFake
+      permissionFake,
+      dataVersion: dataVersion ?? undefined,
+      earlierResults: earlierResults ?? undefined
     };
   }
 

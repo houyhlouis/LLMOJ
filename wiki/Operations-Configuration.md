@@ -90,6 +90,24 @@ sudo systemctl reload libreoj-nginx
 
 Restart `libreoj-backend` for backend YAML changes. Restart database/Redis/MinIO in a maintenance window when their configuration changes. Verify login, a normal submission, a small upload/download, remote judge connectivity, and basic AI worker execution; a home-page HTTP 200 alone is insufficient. For an outer TLS proxy, preserve WebSocket and signed storage behavior as described in [HTTPS](HTTPS.md).
 
+## Submission and accepted counts
+
+Each problem's submission and accepted-submission counts and each user's submission and accepted-problem counts follow the non-contest submissions exactly. The change of the counts is recorded in the same transaction as the submission and applied right after it; if the backend stops in between, another backend process, or the restarted one, applies it within about a minute.
+
+To check the counts against the submissions, for example after restoring a backup or an older version:
+
+```bash
+sudo bash /opt/LLMOJ/deploy/rebuild-statistics.sh
+```
+
+It prints one JSON line: for `problems` and `users`, how many rows differ and up to 20 examples with their `stored` and `counted` values. To correct them:
+
+```bash
+sudo bash /opt/LLMOJ/deploy/rebuild-statistics.sh --apply
+```
+
+Both are safe while the site is running: each row is recounted while locked, taking changes that are still being applied into account. Use `--prefix` for another installation directory.
+
 ## Secrets, installation state, and backups
 
 `config/secrets.json` fields `database`, `redis`, `minioAccess`, `minioSecret`, `session`, `maintenance`, `judge`, and `instanceId` are generator records, not live-update controls. Rotation requires matching real service credentials, backend.yaml, judge records, and clients. Do not delete the file and rerun installation. `config/admin-credentials.json` records initial administrator credentials, verified before terminal display; editing it does not change the account password. `config/install-state.json` records initial inputs/phases, not later capacity changes.

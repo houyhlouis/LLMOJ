@@ -863,7 +863,7 @@ class Upgrade:
         # record the guard before the first mutation so rollback cannot let an
         # older backend synchronize away a partially applied schema.
         self.manifest['communitySchemaApplied'] = any(
-            re.search(r'`(?:team(?:_[a-z]+)*|file|discussion|submission|hack(?:_[a-z]+)*|self_eval(?:_[a-z]+)*|contest|user_privilege|user_permission_rule|user_two_factor|user_passkey|judge_job(?:_attempt)?|judge_client)`', query)
+            re.search(r'`(?:team(?:_[a-z]+)*|file|discussion|submission|hack(?:_[a-z]+)*|self_eval(?:_[a-z]+)*|contest|user_privilege|user_permission_rule|user_two_factor|user_passkey|judge_job(?:_attempt)?|judge_client|problem_data_version|deferred_file_deletion|submission_result_history|statistics_outbox)`', query)
             for query in self.manifest['schemaQueries']
         )
         self.save()

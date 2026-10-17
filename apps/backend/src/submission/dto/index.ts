@@ -1,4 +1,5 @@
 export * from "./submission-meta.dto";
+export * from "./submission-judging-data.dto";
 
 export * from "./submit-request.dto";
 export * from "./submit-response.dto";

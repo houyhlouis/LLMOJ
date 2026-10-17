@@ -96,6 +96,10 @@ export class SubmissionEntity {
   @Index()
   submitterId: number;
 
+  // The problem data version it is (being) judged with; null for submissions from before data versions
+  @Column({ type: "integer", nullable: true })
+  problemDataVersionId: number;
+
   @OneToOne(() => SubmissionDetailEntity, submissionDetail => submissionDetail.submission)
   detail: Promise<SubmissionDetailEntity>;
 }

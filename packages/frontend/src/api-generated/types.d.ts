@@ -593,6 +593,23 @@ declare namespace ApiTypes {
     permissionSetPublic?: boolean;
     permissionDelete?: boolean;
     permissionFake?: boolean;
+    /**
+     * With rejudge permission; absent for submissions from before data versions
+     */
+    dataVersion?: {
+      /**
+       * The problem's data version number the submission is (being) judged with
+       */
+      version: number;
+      /**
+       * Whether the problem's test data and judge settings are still that version
+       */
+      current: boolean;
+    };
+    /**
+     * With rejudge permission: results rejudges replaced, the most recent first
+     */
+    earlierResults?: ApiTypes.SubmissionEarlierResultDto[];
   }
   export interface GetTencentCaptchaAppIdResponseDto {
     appId: string;
@@ -1700,6 +1717,46 @@ declare namespace ApiTypes {
     submitTime: string; // date-time
     timeUsed: number;
     memoryUsed: number;
+  }
+  export interface SubmissionDataVersionDto {
+    /**
+     * The problem's data version number the submission is (being) judged with
+     */
+    version: number;
+    /**
+     * Whether the problem's test data and judge settings are still that version
+     */
+    current: boolean;
+  }
+  export interface SubmissionEarlierResultDto {
+    status:
+      | "Pending"
+      | "ConfigurationError"
+      | "SystemError"
+      | "Canceled"
+      | "CompilationError"
+      | "FileError"
+      | "RuntimeError"
+      | "TimeLimitExceeded"
+      | "MemoryLimitExceeded"
+      | "OutputLimitExceeded"
+      | "PartiallyCorrect"
+      | "WrongAnswer"
+      | "Accepted"
+      | "JudgementFailed"
+      | "Fake"
+      | "Hacked";
+    score?: number;
+    timeUsed?: number;
+    memoryUsed?: number;
+    /**
+     * The data version it was judged with; null if not recorded
+     */
+    dataVersion?: number;
+    /**
+     * When a rejudge replaced it
+     */
+    replacedAt: string; // date-time
   }
   export interface SubmissionMetaDto {
     id: number;

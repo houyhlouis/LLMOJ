@@ -90,6 +90,24 @@ sudo systemctl reload libreoj-nginx
 
 后端 YAML 配置变更重启 `libreoj-backend`，数据库／Redis／MinIO 变更在维护窗口重启对应服务。验证首页及登录、普通提交、小文件上传／下载、远程评测连接、AI worker 的基础运行；不要只验证首页 HTTP 200。HTTPS 外层代理还需按 [HTTPS](HTTPS.zh-CN.md) 保持 WebSocket 和签名存储请求一致。
 
+## 提交数与通过数
+
+每道题目的提交数和通过提交数、每个用户的提交数和通过题目数，与非比赛提交严格一致。计数的变化与提交在同一事务中记录，并在其后立即应用；如果后端在两者之间停止，其他后端进程或重启后的后端会在大约一分钟内应用。
+
+需要核对计数与提交是否一致时（例如恢复备份或旧版本之后）：
+
+```bash
+sudo bash /opt/LLMOJ/deploy/rebuild-statistics.sh
+```
+
+它输出一行 JSON：分别给出 `problems` 与 `users` 中不一致的行数，以及最多 20 个示例的 `stored`（存储值）和 `counted`（统计值）。修正：
+
+```bash
+sudo bash /opt/LLMOJ/deploy/rebuild-statistics.sh --apply
+```
+
+两者都可以在站点运行时执行：每一行在加锁后重新统计，并考虑正在应用中的变化。其他安装目录请使用 `--prefix`。
+
 ## 机密文件、安装状态与备份
 
 `config/secrets.json` 的 `database`、`redis`、`minioAccess`、`minioSecret`、`session`、`maintenance`、`judge`、`instanceId` 是生成器的实例记录，不会热更新正在运行的服务。轮换应逐项同步真实数据库／服务端配置、backend.yaml、judge 节点记录和客户端，不能删除整个文件后重跑。`config/admin-credentials.json` 记录初始管理员凭据，安装器会核验后在终端显示；它不是修改管理员密码的入口。`config/install-state.json` 记录初次安装参数和阶段，不是后续扩容控制面板。

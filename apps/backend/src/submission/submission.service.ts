@@ -27,8 +27,10 @@ import { SubmissionStatisticsService } from "./submission-statistics.service";
 import { SubmissionEntity } from "./submission.entity";
 
 import { SubmissionDetailEntity } from "./submission-detail.entity";
+import { SubmissionResultHistoryEntity } from "./submission-result-history.entity";
+import { StatisticsOutboxService } from "./statistics-outbox.service";
 
-import { SubmissionBasicMetaDto } from "./dto";
+import { SubmissionBasicMetaDto, SubmissionDataVersionDto, SubmissionEarlierResultDto } from "./dto";
 
 import type { ProblemJudgeInfoTraditional } from "../problem-type/types/traditional/problem-judge-info.interface";
 
@@ -39,8 +41,9 @@ import { ProblemEntity, ProblemType } from "../problem/problem.entity";
 import { JudgeQueueService, JudgeTaskPriorityType, JudgeTask, JudgeTaskExtraInfo } from "../judge/judge-queue.service";
 import { JudgeTaskCompletion, JudgeTaskService } from "../judge/judge-task-service.interface";
 import { ProblemFileType } from "../problem/problem-file.entity";
+import { ProblemDataVersionService } from "../problem/problem-data-version.service";
+import { ProblemDataVersionEntity, ProblemDataVersionFile } from "../problem/problem-data-version.entity";
 import { ProblemJudgeInfo } from "../problem/problem-judge-info.interface";
-import { UserService } from "../user/user.service";
 import { ProblemSampleData } from "../problem/problem-sample-data.interface";
 import { LockService } from "../redis/lock.service";
 import { JudgeGateway } from "../judge/judge.gateway";
@@ -82,6 +85,9 @@ interface SubmissionTaskExtraInfo extends JudgeTaskExtraInfo {
 // The judge task's lease ended before its result was stored: the result is discarded.
 class ObsoleteResultError extends Error {}
 
+// Results replaced by rejudges kept per submission
+const RESULT_HISTORY_KEPT = 5;
+
 @Injectable()
 export class SubmissionService implements JudgeTaskService<SubmissionProgress, SubmissionTaskExtraInfo> {
   constructor(
@@ -93,8 +99,6 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
     private readonly submissionDetailRepository: Repository<SubmissionDetailEntity>,
     private readonly problemService: ProblemService,
     private readonly problemTypeFactoryService: ProblemTypeFactoryService,
-    @Inject(forwardRef(() => UserService))
-    private readonly userService: UserService,
     private readonly judgeQueueService: JudgeQueueService,
     private readonly lockService: LockService,
     private readonly submissionProgressService: SubmissionProgressService,
@@ -105,7 +109,10 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
     private readonly configService: ConfigService,
     @Inject(forwardRef(() => UserPrivilegeService))
     private readonly userPrivilegeService: UserPrivilegeService,
-    private readonly metricsService: MetricsService
+    private readonly metricsService: MetricsService,
+    @Inject(forwardRef(() => ProblemDataVersionService))
+    private readonly problemDataVersionService: ProblemDataVersionService,
+    private readonly statisticsOutboxService: StatisticsOutboxService
   ) {
     this.judgeQueueService.registerTaskType(JudgeTaskType.Submission, this);
 
@@ -436,6 +443,8 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
     ]
   > {
     const problemTypeService = this.problemTypeFactoryService.type(problem.type);
+    const dataVersion = await this.dataVersionToPin(problem);
+    let countChanges: number[] = [];
 
     const [fileUploadErrorOrRequest, submission] = await this.connection.transaction<
       [
@@ -471,6 +480,7 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
       submission.submitTime = new Date();
       submission.problemId = problem.id;
       submission.submitterId = submitter.id;
+      submission.problemDataVersionId = dataVersion?.id ?? null;
       await transactionalEntityManager.save(submission);
 
       const submissionDetail = new SubmissionDetailEntity();
@@ -482,18 +492,14 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
 
       // The submission and its judge task are committed together, so a new submission is never left unjudged.
       await this.queueJudgeTask(submission, false, transactionalEntityManager);
+      countChanges = await this.statisticsOutboxService.record(transactionalEntityManager, null, submission);
 
       return [null, submission];
     });
 
     if (submission) {
       this.judgeQueueService.notifyJobsAvailable();
-
-      if (!contestContext) {
-        await this.problemService.updateProblemStatistics(problem.id, 1, 0);
-        await this.userService.updateUserSubmissionCount(submitter.id, 1);
-      }
-
+      await this.statisticsOutboxService.apply(countChanges);
       return [null, submission];
     }
 
@@ -573,21 +579,93 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
   }
 
   /**
-   * @param submission Must be locked (or just created, ID not exposed to user).
+   * Judges the submission again with the problem's current data. Its result is kept in its history.
+   *
+   * @param submission Must be locked.
    */
-  async judgeSubmission(submission: SubmissionEntity, isRejudge?: boolean): Promise<void> {
+  async judgeSubmission(
+    submission: SubmissionEntity,
+    isRejudge?: boolean,
+    problem?: ProblemEntity,
+    actingUserId?: number
+  ): Promise<void> {
     const oldSubmission = { ...submission };
 
     if (submission.taskId) {
       this.judgeGateway.cancelTask(submission.taskId);
     }
 
+    const dataVersion = problem ? await this.dataVersionToPin(problem) : null;
+
+    let countChanges: number[] = [];
     await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
+      submission.problemDataVersionId = dataVersion?.id ?? null;
+      // Writes the submission first, so that its history row's foreign key check finds it locked by this transaction
       await this.queueJudgeTask(submission, isRejudge, transactionalEntityManager);
+      if (isRejudge) await this.retainResult(transactionalEntityManager, oldSubmission, actingUserId);
+      countChanges = await this.statisticsOutboxService.record(transactionalEntityManager, oldSubmission, submission);
     });
     this.judgeQueueService.notifyJobsAvailable();
+    await this.statisticsOutboxService.apply(countChanges);
 
     await this.onSubmissionUpdated(oldSubmission, submission);
+  }
+
+  /**
+   * The problem's current data version to judge a submission with, or `null` (judged with the current data when its
+   * task is sent, as before data versions) if it can't be taken.
+   */
+  private async dataVersionToPin(problem: ProblemEntity): Promise<ProblemDataVersionEntity> {
+    try {
+      return await this.problemDataVersionService.current(problem);
+    } catch (e) {
+      logger.error(`Couldn't take the data version of problem ${problem.id}: ${e}`);
+      return null;
+    }
+  }
+
+  /**
+   * Before a rejudge, in its transaction: keeps the submission's result in its history (the most recent
+   * `RESULT_HISTORY_KEPT`) and clears it.
+   */
+  private async retainResult(
+    manager: EntityManager,
+    submission: SubmissionEntity,
+    actingUserId?: number
+  ): Promise<void> {
+    const submissionDetail = await manager.findOneBy(SubmissionDetailEntity, { submissionId: submission.id });
+    if (submission.status !== SubmissionStatus.Pending) {
+      await manager.insert(SubmissionResultHistoryEntity, {
+        submissionId: submission.id,
+        problemDataVersionId: submission.problemDataVersionId ?? null,
+        status: submission.status,
+        score: submission.score,
+        timeUsed: submission.timeUsed,
+        memoryUsed: submission.memoryUsed,
+        totalOccupiedTime: submission.totalOccupiedTime,
+        result: submissionDetail?.result ?? null,
+        replacedAt: new Date(),
+        replacedBy: actingUserId ?? null
+      });
+      const kept: { id: number }[] = await manager
+        .createQueryBuilder(SubmissionResultHistoryEntity, "history")
+        .select("history.id", "id")
+        .where("history.submissionId = :submissionId", { submissionId: submission.id })
+        .orderBy("history.id", "DESC")
+        .limit(RESULT_HISTORY_KEPT)
+        .getRawMany();
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(SubmissionResultHistoryEntity)
+        .where("submissionId = :submissionId", { submissionId: submission.id })
+        .andWhere("id NOT IN (:...kept)", { kept: kept.map(row => row.id) })
+        .execute();
+    }
+    if (submissionDetail && submissionDetail.result != null) {
+      submissionDetail.result = null;
+      await manager.save(submissionDetail);
+    }
   }
 
   /**
@@ -676,7 +754,7 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
 
   async rejudgeSubmission(submission: SubmissionEntity, actingUser?: UserEntity): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-shadow
-    await this.lockSubmission(submission, true, async submission => {
+    await this.lockSubmission(submission, true, async (submission, problem) => {
       if (!submission) return;
 
       // A fake may have been applied after the caller's initial permission check.
@@ -686,11 +764,7 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
       )
         throw new ForbiddenException("Restoring a fake submission requires disqualification permission");
 
-      await this.judgeSubmission(submission, true);
-
-      const submissionDetail = await this.getSubmissionDetail(submission);
-      submissionDetail.result = null;
-      await this.submissionDetailRepository.save(submissionDetail);
+      await this.judgeSubmission(submission, true, problem, actingUser?.id);
     });
   }
 
@@ -712,10 +786,13 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
       const submissionDetail = await this.getSubmissionDetail(submission);
       submissionDetail.result = null;
 
+      let countChanges: number[] = [];
       await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
         await transactionalEntityManager.save(submission);
         await transactionalEntityManager.save(submissionDetail);
+        countChanges = await this.statisticsOutboxService.record(transactionalEntityManager, oldSubmission, submission);
       });
+      await this.statisticsOutboxService.apply(countChanges);
 
       await this.onSubmissionUpdated(oldSubmission, submission);
 
@@ -743,7 +820,12 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
       lockedSubmission.status = SubmissionStatus.Fake;
       lockedSubmission.score = 0;
       // Code, uploaded files, execution resources and original judge result remain intact.
-      await this.submissionRepository.save(lockedSubmission);
+      let countChanges: number[] = [];
+      await this.connection.transaction("READ COMMITTED", async manager => {
+        await manager.save(lockedSubmission);
+        countChanges = await this.statisticsOutboxService.record(manager, oldSubmission, lockedSubmission);
+      });
+      await this.statisticsOutboxService.apply(countChanges);
       await this.onSubmissionUpdated(oldSubmission, lockedSubmission);
       await this.auditService.log(actingUserId, "submission.fake", AuditLogObjectType.Submission, lockedSubmission.id, {
         previousStatus: oldSubmission.status,
@@ -782,10 +864,13 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
       const old = { ...locked };
       locked.status = SubmissionStatus.Hacked;
       locked.score = 0;
+      let countChanges: number[] = [];
       await this.connection.transaction("READ COMMITTED", async manager => {
         await manager.save(locked);
         if (persistHack) await persistHack(manager);
+        countChanges = await this.statisticsOutboxService.record(manager, old, locked);
       });
+      await this.statisticsOutboxService.apply(countChanges);
       await this.onSubmissionUpdated(old, locked);
       await this.auditService.log(hackerId, "submission.hacked", AuditLogObjectType.Submission, locked.id, {
         hackId,
@@ -813,44 +898,30 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
         await this.submissionProgressService.emitSubmissionEvent(submission.id, SubmissionEventType.Deleted);
       }
 
+      let countChanges: number[] = [];
       await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
         const submissionDetail = await this.getSubmissionDetail(submission);
         if (submissionDetail.fileUuid)
           deleteFileActually = await this.fileService.deleteFile(submissionDetail.fileUuid, transactionalEntityManager);
 
         await transactionalEntityManager.remove(submission);
-        if (submission.contestId == null)
-          await transactionalEntityManager.increment(UserEntity, { id: submission.submitterId }, "submissionCount", -1);
+        countChanges = await this.statisticsOutboxService.record(transactionalEntityManager, submission, null);
       });
+      await this.statisticsOutboxService.apply(countChanges);
 
       if (submission.contestId) return;
       await this.submissionStatisticsService.onSubmissionUpdated(submission, null);
-      if (submission.status === SubmissionStatus.Accepted) {
-        await this.problemService.updateProblemStatistics(submission.problemId, -1, -1);
-        await this.userService.updateUserAcceptedCount(submission.submitterId, submission.problemId, "AC_TO_NON_AC");
-      } else {
-        await this.problemService.updateProblemStatistics(submission.problemId, -1, 0);
-      }
     });
     if (deleteFileActually) deleteFileActually();
   }
 
   /**
-   * This function updates related info, the problem must be locked for Read first, then the submission must be locked.
+   * After a change of a submission is committed: purges the cached statistics it affects. Its transaction recorded
+   * how the counts change (`StatisticsOutboxService`).
    */
   private async onSubmissionUpdated(oldSubmission: SubmissionEntity, submission: SubmissionEntity): Promise<void> {
     if (submission.contestId) return;
     await this.submissionStatisticsService.onSubmissionUpdated(oldSubmission, submission);
-
-    const oldAccepted = oldSubmission.status === SubmissionStatus.Accepted;
-    const newAccepted = submission.status === SubmissionStatus.Accepted;
-    if (!oldAccepted && newAccepted) {
-      await this.problemService.updateProblemStatistics(submission.problemId, 0, 1);
-      await this.userService.updateUserAcceptedCount(submission.submitterId, submission.problemId, "NON_AC_TO_AC");
-    } else if (oldAccepted && !newAccepted) {
-      await this.problemService.updateProblemStatistics(submission.problemId, 0, -1);
-      await this.userService.updateUserAcceptedCount(submission.submitterId, submission.problemId, "AC_TO_NON_AC");
-    }
   }
 
   /**
@@ -878,12 +949,14 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
     submission.timeUsed = timeAndMemory.timeUsed;
     submission.memoryUsed = timeAndMemory.memoryUsed;
 
+    let countChanges: number[] = [];
     try {
-      await this.connection.transaction(async transactionalEntityManager => {
+      await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
         // Finish the judge task's job first: if the reporting judge client's lease isn't current, store nothing
         if (completion && !(await completion.confirm(transactionalEntityManager))) throw new ObsoleteResultError();
         await transactionalEntityManager.save(submission);
         await transactionalEntityManager.save(submissionDetail);
+        countChanges = await this.statisticsOutboxService.record(transactionalEntityManager, oldSubmission, submission);
       });
     } catch (e) {
       if (!(e instanceof ObsoleteResultError)) throw e;
@@ -893,6 +966,7 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
     }
 
     logger.log(`Submission ${submission.id} finished with status ${submission.status}`);
+    await this.statisticsOutboxService.apply(countChanges);
 
     await this.onSubmissionUpdated(oldSubmission, submission);
     return true;
@@ -949,7 +1023,14 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
         logger.warn(`Problem ${submission.problemId} of judge task ${taskId} no longer exists`);
         return null;
       }
-      const [baseJudgeInfo] = await this.problemService.getProblemPreprocessedJudgeInfo(problem);
+      // Judged with the data version it's pinned to; submissions from before data versions with the current data
+      const dataVersion = await this.problemDataVersionService.findById(submission.problemDataVersionId);
+      if (submission.problemDataVersionId && !dataVersion)
+        logger.warn(`Data version ${submission.problemDataVersionId} of submission ${submission.id} no longer exists`);
+      const problemType = (dataVersion?.problemType as ProblemType) ?? problem.type;
+      const baseJudgeInfo = dataVersion
+        ? (dataVersion.judgeInfo as ProblemJudgeInfo)
+        : (await this.problemService.getProblemPreprocessedJudgeInfo(problem))[0];
       const preprocessedJudgeInfo = submission.contestId
         ? {
             ...baseJudgeInfo,
@@ -967,9 +1048,11 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
               : null
           }
         : baseJudgeInfo;
-      const testData = await this.problemService.getProblemFiles(problem, ProblemFileType.TestData);
+      const testData: ProblemDataVersionFile[] = dataVersion
+        ? dataVersion.testData
+        : await this.problemService.getProblemFiles(problem, ProblemFileType.TestData);
 
-      const problemTypeService = this.problemTypeFactoryService.type(problem.type);
+      const problemTypeService = this.problemTypeFactoryService.type(problemType);
 
       return new JudgeTask<SubmissionTaskExtraInfo>(
         submission.taskId,
@@ -977,16 +1060,18 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
         JudgeTaskPriorityType.High,
         priotity,
         {
-          problemType: problem.type,
+          problemType,
           judgeInfo: preprocessedJudgeInfo,
           samples:
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             preprocessedJudgeInfo && (preprocessedJudgeInfo as ProblemJudgeInfoTraditional).runSamples
               ? [
-                  ...(await this.problemService.getProblemSamples(problem)).slice(
-                    0,
-                    this.configService.config.resourceLimit.problemSamplesToRun
-                  ),
+                  ...(dataVersion
+                    ? (dataVersion.samples as ProblemSampleData) ?? []
+                    : (await this.problemService.getProblemSamples(problem)).slice(
+                        0,
+                        this.configService.config.resourceLimit.problemSamplesToRun
+                      )),
                   ...((preprocessedJudgeInfo as ProblemJudgeInfoTraditional).hiddenSamples || []).map(sample => ({
                     inputFileUuid: testData.find(file => file.filename === sample.inputFile)?.uuid,
                     outputFileUuid: testData.find(file => file.filename === sample.outputFile)?.uuid,
@@ -1015,6 +1100,41 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
       logger.error(`Error in getTaskById("${taskId}"): ${e}`);
       throw e;
     }
+  }
+
+  /** The data version the submission is (being) judged with, and whether its problem still has that content. */
+  async getSubmissionDataVersion(
+    submission: SubmissionEntity,
+    problem: ProblemEntity
+  ): Promise<SubmissionDataVersionDto> {
+    const dataVersion = await this.problemDataVersionService.findById(submission.problemDataVersionId);
+    if (!dataVersion) return null;
+    let current = false;
+    try {
+      current = await this.problemDataVersionService.isCurrent(problem, dataVersion);
+    } catch (e) {
+      logger.warn(`Couldn't compare the data version of submission ${submission.id}: ${e}`);
+    }
+    return { version: dataVersion.version, current };
+  }
+
+  /** The results rejudges replaced, the most recent first. */
+  async getEarlierResults(submission: SubmissionEntity): Promise<SubmissionEarlierResultDto[]> {
+    const history = await this.connection.getRepository(SubmissionResultHistoryEntity).find({
+      where: { submissionId: submission.id },
+      order: { id: "DESC" }
+    });
+    const versions = await this.problemDataVersionService.findVersionNumbers(
+      history.map(result => result.problemDataVersionId)
+    );
+    return history.map(result => ({
+      status: result.status as SubmissionStatus,
+      score: result.score,
+      timeUsed: result.timeUsed,
+      memoryUsed: result.memoryUsed,
+      dataVersion: versions.get(result.problemDataVersionId) ?? null,
+      replacedAt: result.replacedAt
+    }));
   }
 
   async listActiveTasks(): Promise<{ taskId: string; priority: number }[]> {
@@ -1054,10 +1174,13 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
       submission.totalOccupiedTime = 0;
       submission.timeUsed = null;
       submission.memoryUsed = null;
+      let countChanges: number[] = [];
       await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
         await transactionalEntityManager.save(submission);
         await transactionalEntityManager.save(submissionDetail);
+        countChanges = await this.statisticsOutboxService.record(transactionalEntityManager, oldSubmission, submission);
       });
+      await this.statisticsOutboxService.apply(countChanges);
       logger.error(`Submission ${submission.id} could not be judged: ${message}`);
       await this.onSubmissionUpdated(oldSubmission, submission);
       await this.submissionProgressService.emitSubmissionEvent(submission.id, SubmissionEventType.Progress, result);

@@ -4,6 +4,8 @@ import { TypeOrmModule } from "@nestjs/typeorm";
 import { ProblemArchiveService } from "./problem-archive.service";
 
 import { ProblemService } from "./problem.service";
+import { ProblemDataVersionService } from "./problem-data-version.service";
+import { ProblemDataVersionEntity } from "./problem-data-version.entity";
 
 import { ProblemController } from "./problem.controller";
 
@@ -38,6 +40,7 @@ import { DiscussionModule } from "../discussion/discussion.module";
     TypeOrmModule.forFeature([ProblemFileEntity]),
     TypeOrmModule.forFeature([ProblemTagEntity]),
     TypeOrmModule.forFeature([ProblemTagMapEntity]),
+    TypeOrmModule.forFeature([ProblemDataVersionEntity]),
     forwardRef(() => LocalizedContentModule),
     forwardRef(() => UserModule),
     forwardRef(() => GroupModule),
@@ -49,8 +52,8 @@ import { DiscussionModule } from "../discussion/discussion.module";
     forwardRef(() => AuditModule),
     forwardRef(() => DiscussionModule)
   ],
-  providers: [ProblemService, ProblemArchiveService],
+  providers: [ProblemService, ProblemArchiveService, ProblemDataVersionService],
   controllers: [ProblemController],
-  exports: [ProblemService, ProblemArchiveService]
+  exports: [ProblemService, ProblemArchiveService, ProblemDataVersionService]
 })
 export class ProblemModule {}

@@ -13,6 +13,7 @@ import { SubmissionProgressService } from "./submission-progress.service";
 
 import { SubmissionProgressGateway } from "./submission-progress.gateway";
 
+import { StatisticsOutboxService } from "./statistics-outbox.service";
 import { SubmissionStatisticsService } from "./submission-statistics.service";
 
 import { AuthModule } from "../auth/auth.module";
@@ -40,7 +41,13 @@ import { MetricsModule } from "../metrics/metrics.module";
     forwardRef(() => FileModule),
     forwardRef(() => MetricsModule)
   ],
-  providers: [SubmissionService, SubmissionProgressService, SubmissionProgressGateway, SubmissionStatisticsService],
+  providers: [
+    SubmissionService,
+    SubmissionProgressService,
+    SubmissionProgressGateway,
+    SubmissionStatisticsService,
+    StatisticsOutboxService
+  ],
   controllers: [SubmissionController],
   exports: [SubmissionService]
 })

@@ -460,6 +460,15 @@ class RuntimeUpgradeTests(unittest.TestCase):
     def test_judge_client_draining_ddl_preserves_schema_sync_guard(self):
         self.assert_guard_survives('ALTER TABLE `judge_client` ADD `draining` tinyint NOT NULL DEFAULT 0')
 
+    def test_problem_data_version_ddl_preserves_schema_sync_guard(self):
+        self.assert_guard_survives('CREATE TABLE `problem_data_version` (...)')
+
+    def test_deferred_file_deletion_ddl_preserves_schema_sync_guard(self):
+        self.assert_guard_survives('CREATE TABLE `deferred_file_deletion` (...)')
+
+    def test_statistics_outbox_ddl_preserves_schema_sync_guard(self):
+        self.assert_guard_survives('CREATE TABLE `statistics_outbox` (...)')
+
     def test_self_eval_ddl_preserves_schema_sync_guard_on_empty_data_rollback(self):
         self.assert_guard_survives('CREATE TABLE `self_eval_quota` (...)')
 

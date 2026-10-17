@@ -93,3 +93,28 @@ test('the judge client draining flag is added exactly once, and only when absent
     await assert.rejects(() => validateJudgeQueueSchema(fixture({ ...column, ...changed }), []), /Unsupported existing judge client/);
   assert.equal(JUDGE_QUEUE_SQL.length, 2);
 });
+
+test('reproducible judging tables and the submission data version column are added exactly once', async () => {
+  const { validateDataVersionSchema, DATA_VERSION_SQL, DATA_VERSION_TABLES, SUBMISSION_DATA_VERSION_SQL,
+    STATISTICS_OUTBOX_CREATE_SQL } = await import('../data-version-schema.mjs');
+  assert.deepEqual(validateQueries([...DATA_VERSION_SQL]), [...DATA_VERSION_SQL]);
+  assert.throws(() => validateQueries([STATISTICS_OUTBOX_CREATE_SQL.replace('`accepted` int', '`accepted` bigint')]));
+  assert.throws(() => validateQueries([SUBMISSION_DATA_VERSION_SQL.replace('NULL', 'NOT NULL')]));
+  const column = { columnType: 'int(11)', isNullable: 'YES', defaultValue: 'NULL', extra: '', comment: '' };
+  const fixture = (tables, columnRow) => ({
+    query: async sql => sql.includes('information_schema.COLUMNS') ? (columnRow ? [columnRow] : []) : tables.map(name => ({ name }))
+  });
+  await validateDataVersionSchema(fixture([], null), [...DATA_VERSION_SQL]);
+  await validateDataVersionSchema(fixture(DATA_VERSION_TABLES, column), []);
+  await validateDataVersionSchema(fixture(DATA_VERSION_TABLES, { ...column, defaultValue: null }), []);
+  // Partially applied: each remaining statement exactly once
+  const remaining = DATA_VERSION_SQL.filter(sql => !sql.includes('`problem_data_version`') && sql !== SUBMISSION_DATA_VERSION_SQL);
+  await validateDataVersionSchema(fixture(['problem_data_version'], column), remaining);
+  await assert.rejects(() => validateDataVersionSchema(fixture([], null), DATA_VERSION_SQL.slice(1)));
+  await assert.rejects(() => validateDataVersionSchema(fixture(DATA_VERSION_TABLES, column), [SUBMISSION_DATA_VERSION_SQL]));
+  await assert.rejects(() => validateDataVersionSchema(fixture(DATA_VERSION_TABLES, null), []));
+  for (const changed of [{ isNullable: 'NO' }, { defaultValue: '0' }, { columnType: 'bigint(20)' }, { extra: 'auto_increment' }])
+    await assert.rejects(() => validateDataVersionSchema(fixture(DATA_VERSION_TABLES, { ...column, ...changed }), []),
+      /Unsupported existing submission data version/);
+  assert.equal(DATA_VERSION_SQL.length, 7);
+});

@@ -148,3 +148,34 @@
   &:empty { display: none; }
   :global(.button) { margin: 0 !important; }
 }
+
+.judgingRecord {
+  margin: -0.5em 0 1.5em;
+}
+
+.dataVersion {
+  color: var(--theme-description-message-foreground);
+
+  > :global(.icon) {
+    margin-right: 0.4em;
+  }
+}
+
+.dataVersionCurrent,
+.dataVersionChanged {
+  margin-left: 0.6em;
+  padding: 0 0.5em;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+.dataVersionCurrent {
+  color: #21ba45;
+  border: 1px solid #21ba45;
+}
+
+.dataVersionChanged {
+  color: #f2711c;
+  border: 1px solid #f2711c;
+  cursor: help;
+}

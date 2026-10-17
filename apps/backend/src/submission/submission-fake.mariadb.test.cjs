@@ -17,6 +17,9 @@ const { SubmissionStatisticsService, SubmissionStatisticsType } = require("./sub
 const { submissionDisplayProgress } = require("./submission-display-progress.ts");
 const { SubmissionEntity } = require("./submission.entity.ts");
 const { SubmissionDetailEntity } = require("./submission-detail.entity.ts");
+const { SubmissionResultHistoryEntity } = require("./submission-result-history.entity.ts");
+const { StatisticsOutboxEntity } = require("./statistics-outbox.entity.ts");
+const { StatisticsOutboxService } = require("./statistics-outbox.service.ts");
 const { UserEntity } = require("../user/user.entity.ts");
 const { UserService } = require("../user/user.service.ts");
 const { ProblemEntity } = require("../problem/problem.entity.ts");
@@ -39,6 +42,10 @@ test("fake retains evidence, updates statistics and resists judge races (real Ma
       score: { ...n, nullable: true }, timeUsed: { ...n, nullable: true }, memoryUsed: { ...n, nullable: true },
       totalOccupiedTime: { ...n, nullable: true }, answerSize: n, submitTime: { type: Date } }],
     [SubmissionDetailEntity, "detail", { submissionId: { ...n, primary: true }, content: { type: "json" }, fileUuid: { type: String, nullable: true }, result: { type: "json", nullable: true } }],
+    [SubmissionResultHistoryEntity, "history", { id: { ...n, primary: true, generated: true }, submissionId: n, problemDataVersionId: { ...n, nullable: true },
+      status: { type: String }, score: { ...n, nullable: true }, timeUsed: { ...n, nullable: true }, memoryUsed: { ...n, nullable: true },
+      totalOccupiedTime: { ...n, nullable: true }, result: { type: "json", nullable: true }, replacedAt: { type: Date }, replacedBy: { ...n, nullable: true } }],
+    [StatisticsOutboxEntity, "outbox", { id: { ...n, primary: true, generated: true }, kind: { type: String }, targetId: n, submissions: n, accepted: n, createdAt: { type: Date } }],
     [TeamEntity, "team", { id: { ...n, primary: true }, ownerId: n, archived: { type: Boolean } }],
     [TeamMemberEntity, "member", { id: { ...n, primary: true }, teamId: n, userId: n, status: { type: String }, permissions: { type: "json" } }],
     [TeamResourceEntity, "resource", { id: { ...n, primary: true }, teamId: n, resourceId: n, kind: { type: String }, visibility: { type: String }, invitedUserIds: { type: "json" }, archived: { type: Boolean } }],
@@ -68,7 +75,9 @@ test("fake retains evidence, updates statistics and resists judge races (real Ma
       submissionProgressService: { emitSubmissionEvent: async (...args) => events.push(args) }, auditService: { log: async (...args) => audits.push(args) },
       configService: { config: { preference: { serverSideOnly: { dynamicTaskPriority: false } } } },
       problemTypeFactoryService: { type: () => ({ getTimeAndMemoryUsedFromFinishedSubmissionProgress: () => ({ timeUsed: 4, memoryUsed: 8 }) }) },
-      metricSubmissionJudgeTime: { observe: () => {} }, userPrivilegeService: {
+      metricSubmissionJudgeTime: { observe: () => {} }, problemDataVersionService: { current: async () => null, findById: async () => null },
+      statisticsOutboxService: Object.assign(Object.create(StatisticsOutboxService.prototype), { connection: db }),
+      userPrivilegeService: {
         userHasPrivilege: async (u, p) => !!u && (u.isAdmin || ["ViewContest", "ViewSubmission"].includes(p)),
         permissionDecision: async (u, p) => !!u && (u.isAdmin || p === "RejudgeSubmission") }
     });
@@ -77,7 +86,7 @@ test("fake retains evidence, updates statistics and resists judge races (real Ma
       testcaseResult: { a: { status: "Accepted", score: 100, time: 4, memory: 8 } }, subtasks: [{ score: 100, fullScore: 100, testcases: [{ testcaseHash: "a" }] }] };
     const start = new Date("2026-01-01T00:00:00Z");
     async function reset(count = 1, accepted = 1) {
-      await details.clear(); await subs.clear(); cache.clear(); events.length = audits.length = canceled.length = queued.length = 0;
+      await db.getRepository(SubmissionResultHistoryEntity).clear(); await details.clear(); await subs.clear(); cache.clear(); events.length = audits.length = canceled.length = queued.length = 0;
       await users.save({ id: 2, submissionCount: count, acceptedProblemCount: accepted > 0 ? 1 : 0 });
       await problems.save({ id: 1, type: "Traditional", submissionCount: count, acceptedSubmissionCount: accepted });
     }
@@ -124,6 +133,9 @@ test("fake retains evidence, updates statistics and resists judge races (real Ma
       await svc.fakeSubmission(s, 9); await svc.rejudgeSubmission(s, { id: 9, isAdmin: true });
       const pending = await subs.findOneBy({ id: s.id }); assert.equal(pending.status, "Pending"); assert.notEqual(pending.taskId, oldTask);
       assert.equal((await details.findOneBy({ submissionId: s.id })).result, null);
+      const [kept, ...more] = await db.getRepository(SubmissionResultHistoryEntity).findBy({ submissionId: s.id });
+      assert.equal(more.length, 0); assert.equal(kept.status, "Fake"); assert.equal(kept.score, 0); assert.equal(kept.replacedBy, 9);
+      assert.deepEqual(kept.result, original, "the rejudge keeps the result it replaced");
       assert.equal(await svc.onTaskProgress(oldTask, original), false); assert.equal(await svc.onTaskProgress(pending.taskId, original), true);
       assert.equal((await subs.findOneBy({ id: s.id })).status, "Accepted"); assert.equal((await users.findOneBy({ id: 2 })).acceptedProblemCount, 1); assert.equal(queued.length, 1);
     });

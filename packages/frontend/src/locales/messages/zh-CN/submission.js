@@ -41,6 +41,20 @@ return {
     title: "子任务",
     score: "得分："
   },
+  judging_record: {
+    data_version: "测试数据版本 #{version}",
+    current: "当前",
+    changed: "已有变更",
+    changed_notes: "此提交评测后，题目的测试数据或评测设置有变更。重测会使用当前版本。",
+    earlier_results: "此前的评测结果（{count}）",
+    replaced_at: "被替换于",
+    status: "状态",
+    score: "分数",
+    time: "时间",
+    memory: "内存",
+    data_version_column: "数据版本",
+    not_recorded: "未记录"
+  },
   testcase: {
     title: "测试点",
     score: "得分：",

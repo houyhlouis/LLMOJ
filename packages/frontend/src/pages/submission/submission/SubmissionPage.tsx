@@ -5,6 +5,7 @@ import { v4 as uuid } from "uuid";
 import { patch } from "jsondiffpatch";
 
 import style from "./SubmissionPage.module.less";
+import SubmissionJudgingRecord from "./SubmissionJudgingRecord";
 
 import { appState } from "@/appState";
 import api from "@/api";
@@ -190,6 +191,8 @@ interface SubmissionPageProps {
   permissionSetPublic: boolean;
   permissionDelete: boolean;
   permissionFake: boolean;
+  dataVersion?: ApiTypes.SubmissionDataVersionDto;
+  earlierResults?: ApiTypes.SubmissionEarlierResultDto[];
   ProblemTypeSubmissionView: ProblemTypeSubmissionView;
   embedded?: boolean;
   onRefresh?: () => void;
@@ -1020,6 +1023,7 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
         <HackAction submissionId={meta.id} />
         <SubmissionReferenceButton submissionId={meta.id} status={progressMeta.status} />
       </div>
+      <SubmissionJudgingRecord dataVersion={props.dataVersion} earlierResults={props.earlierResults} />
       <props.ProblemTypeSubmissionView
         progress={progress}
         progressMeta={progressMeta}

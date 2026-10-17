@@ -27,7 +27,8 @@ require.extensions[extension] = (module, filename) => {
     entrySuppressed = true;
   }
   if (filename === gatewayFile && mode === "without-forward-ref") {
-    const declaration = "    __param(4, (0, common_1.Inject)((0, common_1.forwardRef)(() => user_privilege_service_1.UserPrivilegeService))),\n";
+    // A cyclic import: SubmissionService is still undefined when the gateway's class is defined
+    const declaration = "    __param(1, (0, common_1.Inject)((0, common_1.forwardRef)(() => submission_service_1.SubmissionService))),\n";
     if (!source.includes(declaration)) throw Error("Cannot locate the known regression mutation");
     source = source.replace(declaration, "");
     mutationApplied = true;
@@ -83,5 +84,5 @@ test("main-first production build imports resolve every constructor dependency",
 test("main-first production regression detects the omitted gateway forwardRef", requiresBuild, () => {
   const report = inspectFreshProcess("without-forward-ref");
   assert.equal(report.mutationApplied, true);
-  assert.deepEqual(report.missing, [{ component: "SubmissionProgressGateway", index: 4 }]);
+  assert.deepEqual(report.missing, [{ component: "SubmissionProgressGateway", index: 1 }]);
 });

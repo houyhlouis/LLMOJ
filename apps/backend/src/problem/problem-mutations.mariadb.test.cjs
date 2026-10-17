@@ -75,7 +75,7 @@ test('problem mutations preserve concurrent fields and file ownership (real Mari
     }
     for (const action of ['visibility', 'display ID', 'statement', 'type']) await run('stale ' + action + ' preserves unrelated committed fields', async () => {
       const p = await fixture();
-      await svc.updateProblemStatistics(p.id, 1, 1);
+      await repo.increment({ id: p.id }, 'submissionCount', 1); await repo.increment({ id: p.id }, 'acceptedSubmissionCount', 1);
       await repo.update(p.id, { isPublic: false, difficulty: 1800, originalProblemTitle: 'Concurrent title' });
       if (action === 'visibility') await svc.setProblemPublic(p, false);
       if (action === 'display ID') await svc.setProblemDisplayId(p, p.id + 10000);

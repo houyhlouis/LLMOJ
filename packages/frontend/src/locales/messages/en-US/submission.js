@@ -41,6 +41,21 @@ return {
     title: "Subtask",
     score: "Score"
   },
+  judging_record: {
+    data_version: "Test data version #{version}",
+    current: "current",
+    changed: "changed since",
+    changed_notes:
+      "The problem's test data or judging settings changed after this submission was judged. Rejudging it uses the current ones.",
+    earlier_results: "Earlier results ({count})",
+    replaced_at: "Replaced",
+    status: "Status",
+    score: "Score",
+    time: "Time",
+    memory: "Memory",
+    data_version_column: "Data version",
+    not_recorded: "not recorded"
+  },
   testcase: {
     title: "Testcase",
     score: "Score",

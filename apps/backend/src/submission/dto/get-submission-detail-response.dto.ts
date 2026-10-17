@@ -1,6 +1,7 @@
 import { ApiProperty } from "@nestjs/swagger";
 
 import { SubmissionMetaDto } from "./submission-meta.dto";
+import { SubmissionDataVersionDto, SubmissionEarlierResultDto } from "./submission-judging-data.dto";
 
 import { SubmissionContent } from "../submission-content.interface";
 import { SubmissionProgress } from "../submission-progress.interface";
@@ -40,4 +41,18 @@ export class GetSubmissionDetailResponseDto {
 
   @ApiProperty()
   permissionFake?: boolean;
+
+  @ApiProperty({
+    type: SubmissionDataVersionDto,
+    required: false,
+    description: "With rejudge permission; absent for submissions from before data versions"
+  })
+  dataVersion?: SubmissionDataVersionDto;
+
+  @ApiProperty({
+    type: [SubmissionEarlierResultDto],
+    required: false,
+    description: "With rejudge permission: results rejudges replaced, the most recent first"
+  })
+  earlierResults?: SubmissionEarlierResultDto[];
 }
