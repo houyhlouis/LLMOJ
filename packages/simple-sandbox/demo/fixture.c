@@ -8,12 +8,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 #include <sys/ipc.h>
+#include <sys/mount.h>
 #include <sys/msg.h>
+#include <sys/ptrace.h>
 #include <sys/resource.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <linux/io_uring.h>
+#include <linux/keyctl.h>
 
 // A System V message queue key shared by the "ipc-create" and "ipc-find" modes
 static const key_t demo_ipc_key = 0x4c4c4d4a;
@@ -101,6 +107,73 @@ static int exhaust_processes(void)
     return 0;
 }
 
+static const char *outcome(long result)
+{
+    if (result >= 0)
+        return "ok";
+    return errno == EPERM ? "EPERM" : errno == ENOSYS ? "ENOSYS" : errno == EINVAL ? "EINVAL" : strerror(errno);
+}
+
+#if defined(__x86_64__)
+// A 32-bit system call (int 0x80) from this 64-bit program; returns -errno on failure
+static long i386_syscall(long number, long a, long b)
+{
+    long result;
+    __asm__ volatile("int $0x80" : "=a"(result) : "a"(number), "b"(a), "c"(b) : "memory");
+    return result;
+}
+
+static const char *i386_outcome(long result)
+{
+    return result >= 0 ? "ok" : result == -EPERM ? "EPERM" : result == -ENOSYS ? "ENOSYS" : strerror((int)-result);
+}
+#endif
+
+static void *thread_main(void *argument)
+{
+    return argument;
+}
+
+// Tries system calls the syscall filter refuses, and ones programs need
+static int probe_syscalls(void)
+{
+    printf("unshare_user=%s\n", outcome(unshare(CLONE_NEWUSER)));
+    long child = syscall(SYS_clone, CLONE_NEWUSER | SIGCHLD, 0, 0, 0, 0);
+    if (child == 0)
+        _exit(0);
+    if (child > 0)
+        waitpid((pid_t)child, NULL, 0);
+    printf("clone_newuser=%s\n", outcome(child));
+    printf("clone3=%s\n", outcome(syscall(SYS_clone3, NULL, 0)));
+    printf("ptrace=%s\n", outcome(ptrace(PTRACE_TRACEME, 0, NULL, NULL)));
+    printf("keyctl=%s\n", outcome(syscall(SYS_keyctl, KEYCTL_GET_KEYRING_ID, KEY_SPEC_SESSION_KEYRING, 0)));
+    struct io_uring_params params;
+    memset(&params, 0, sizeof(params));
+    long ring = syscall(SYS_io_uring_setup, 1, &params);
+    if (ring >= 0)
+        close((int)ring);
+    printf("io_uring=%s\n", outcome(ring));
+    printf("bpf=%s\n", outcome(syscall(SYS_bpf, 0, NULL, 0)));
+    printf("mount=%s\n", outcome(mount("none", "/tmp", "tmpfs", 0, NULL)));
+#if defined(__x86_64__)
+    printf("x32=%s\n", outcome(syscall(0x40000000 | SYS_getpid)));
+    printf("i386_getpid=%s\n", i386_outcome(i386_syscall(20, 0, 0)));
+    printf("i386_ptrace=%s\n", i386_outcome(i386_syscall(26, PTRACE_TRACEME, 0)));
+    printf("i386_clone3=%s\n", i386_outcome(i386_syscall(435, 0, 0)));
+#endif
+    // Threads and processes still work: C libraries fall back from clone3 to clone
+    pthread_t thread;
+    void *joined = NULL;
+    const int created = pthread_create(&thread, NULL, thread_main, (void *)42);
+    printf("thread=%s\n", created == 0 && pthread_join(thread, &joined) == 0 && joined == (void *)42 ? "ok" : strerror(created));
+    const pid_t forked = fork();
+    if (forked == 0)
+        _exit(7);
+    int status = 0;
+    printf("fork=%s\n", forked > 0 && waitpid(forked, &status, 0) == forked && WEXITSTATUS(status) == 7 ? "ok" : strerror(errno));
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2)
@@ -133,6 +206,16 @@ int main(int argc, char **argv)
     }
     if (strcmp(argv[1], "pids") == 0)
         return exhaust_processes();
+    if (strcmp(argv[1], "syscalls") == 0)
+        return probe_syscalls();
+    // Without the filter: calls that are harmless to make for real (not ptrace, which would make the sandbox's
+    // parent the tracer)
+    if (strcmp(argv[1], "unfiltered") == 0)
+    {
+        printf("keyctl=%s\n", outcome(syscall(SYS_keyctl, KEYCTL_GET_KEYRING_ID, KEY_SPEC_SESSION_KEYRING, 0)));
+        printf("clone3=%s\n", outcome(syscall(SYS_clone3, NULL, 0)));
+        return 0;
+    }
     if (strcmp(argv[1], "ipc-create") == 0)
         return msgget(demo_ipc_key, IPC_CREAT | 0600) == -1 ? 30 : 0;
     if (strcmp(argv[1], "ipc-find") == 0)

@@ -7,7 +7,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include_directories(${CMAKE_JS_INC})
-file(GLOB SOURCE_FILES "native/*.cc" "native/*.h")
+# CONFIGURE_DEPENDS: a source file added later is built without reconfiguring by hand
+file(GLOB SOURCE_FILES CONFIGURE_DEPENDS "native/*.cc" "native/*.h")
 add_library(${PROJECT_NAME} SHARED ${SOURCE_FILES} ${CMAKE_JS_SRC})
 set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "" SUFFIX ".node")
 

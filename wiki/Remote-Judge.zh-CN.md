@@ -130,7 +130,7 @@ sudo systemctl status libreoj-judge.service
 sudo journalctl -u libreoj-judge.service -n 50 --no-pager
 ```
 
-该检查实际编译并运行程序，核对 UID、只读 rootfs、网络隔离、tmpfs 和 cgroup 资源限制。不要递归修改 rootfs 的所有权；其中有专门的 sandbox UID。
+该检查实际编译并运行程序，核对 UID、只读 rootfs、网络隔离、系统调用过滤器、tmpfs 和 cgroup 资源限制。之后可运行 `sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh` 检查每种语言（[自检](Judge-Configuration.zh-CN.md#沙箱系统调用过滤器与自检)）。不要递归修改 rootfs 的所有权；其中有专门的 sandbox UID。
 
 最后在网页端确认节点在线并提交程序验收。评测机无需开放入站网页端口，只需允许出站连接网页 origin 和必要下载源。停止用 `sudo systemctl stop libreoj-judge.target`；取消开机启动用 `sudo systemctl disable libreoj-judge.target`。
 

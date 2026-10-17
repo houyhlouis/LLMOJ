@@ -36,6 +36,7 @@ Unchanged field sources are pinned to `43a88bdd62fbf200889b36932fa921439a293190`
 | `sandbox.hostname` | optional string/null; example `null` | Sandbox hostname; installer sets `libreoj-judge`. Not the backend connection address. |
 | `sandbox.immutable` | optional boolean; example omitted | Absent behaves as false; true uses internal `/tmp/libreoj` paths and avoids creating mount directories inside the image. It does not turn an arbitrary rootfs read-only by itself; use with the matching layout. |
 | `sandbox.resourceMode` | optional `default` or `arbiter`; example omitted | Generated as `default`, affecting user programs only. Default uses cgroup CPU accounting; arbiter uses process user CPU time and an additional address-space limit. Compiler/checker/interactor stay default. Changes judging semantics, not a speed toggle. |
+| `sandbox.syscallFilter` | optional boolean; example omitted | Default `true`: a seccomp filter refuses system calls that programs, compilers and runtimes don't need (creating namespaces or mounts, ptrace, keyrings, io_uring, bpf, kernel modules and system settings), for 64-bit and 32-bit programs. Set `false` only to diagnose a runtime that fails with it; see [the sandbox section](#sandbox-syscall-filter-and-self-test). |
 | `sandbox.user` | string; example `sandbox` | User resolved inside rootfs to UID/GID; installer uses sandbox. Not the systemd service User; sandbox manager needs its host privileges. |
 | `sandbox.environments` | object of environment variables | Example sets `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`, `HOME=/sandbox`, `LC_ALL=en_US.UTF-8`. Use string values; merged with task-specific environment. Does not configure host Node thread pool. |
 | `cpuAffinity.compiler` | optional integer array; example `[0,1]` | Logical CPU IDs allowed for compilation; installer uses selected judge CPU set. |
@@ -80,6 +81,35 @@ With eight effective CPUs (IDs 0–7) and 8 GiB RAM, all mode defaults to CPUs 1
 Each slot's 512 MiB tmpfs is a **maximum filesystem size**, not preallocated RAM or a process memory cap. Compilers, programs, page cache, AI and databases share RAM. High-memory workloads may require fewer slots. `TasksMax`, parent cgroups and CPU quotas still apply; 511 is not a performance or acceptance guarantee. `lscpu -e=CPU,CORE,SOCKET,ONLINE` distinguishes logical CPUs from physical cores. SMT siblings share a core; affinity/AllowedCPUs do not provide exclusive cores per slot.
 
 The installer and resizer share [judge_capacity.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/judge_capacity.py). This new file and policy belong to the pending revision: confirm the deployed version contains them. Older pinned URLs do not represent the new implementation.
+
+## Sandbox, syscall filter and self-test
+
+Every compiler, program, checker and interactor runs in the sandbox:
+- as the unprivileged `sandbox.user`, without privilege gains on exec (`no_new_privs`);
+- in its own mount, PID, network, UTS and IPC namespaces, with a read-only rootfs and only its task's directories
+  mounted;
+- under cgroup v2 limits for memory, processes and CPU time.
+
+A seccomp filter also refuses system calls that judged programs don't need (`sandbox.syscallFilter`, on by default):
+- creating or entering namespaces, mounting and changing root;
+- ptrace and reading other processes' memory;
+- keyrings, io_uring, bpf, perf events and userfaultfd;
+- kernel modules, rebooting, swap and system time or name.
+
+These calls fail with "operation not permitted", also through the 32-bit system call table (`-m32` programs and `int 0x80`); x32 calls fail. `clone3` reports "not implemented", so that the C library falls back to `clone`, whose flags the filter checks. If the filter can't be installed, nothing runs.
+
+To check this judge machine — every language compiled and run through the judge's own code, and the filter probed for 64-bit and 32-bit programs:
+
+```bash
+sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh
+```
+
+It prints one line per check and takes a few seconds to a minute. It uses its own temporary directories and never the judge's key, so it can run while the judge runs, though it competes with judging for CPU. `--only cpp,java` limits it to some languages. The upgrader runs it with the new version, before switching, whenever the judge or sandbox changes.
+
+**What the sandbox doesn't do.** Sandboxed programs share the host's kernel, so a kernel vulnerability could still let one escape; the filter reduces how much of the kernel they can reach, but it is not a proof of isolation. The judge's control process runs as root. For contests open to the public:
+- run judges on dedicated machines, not on the web server;
+- keep the kernel updated;
+- keep platform credentials (database, MinIO, AI keys) off remote judge machines; they need only their judge key.
 
 ## Generated systemd service and tmpfs mounts
 

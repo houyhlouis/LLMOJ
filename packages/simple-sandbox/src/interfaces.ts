@@ -97,6 +97,10 @@ export interface SandboxParameter {
 
     // sched_setaffinity
     cpuAffinity?: number[];
+
+    // Install the seccomp filter before executing the program (default true): system calls that create
+    // namespaces or mounts, change the system or widen the kernel's attack surface fail with EPERM.
+    syscallFilter?: boolean;
 };
 
 export enum SandboxStatus {

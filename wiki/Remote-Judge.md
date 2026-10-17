@@ -137,7 +137,7 @@ sudo systemctl status libreoj-judge.service
 sudo journalctl -u libreoj-judge.service -n 50 --no-pager
 ```
 
-The check compiles and runs a real program and verifies UID, read-only rootfs, network isolation, tmpfs and cgroup limits. Never recursively change rootfs ownership; it contains the sandbox UID.
+The check compiles and runs a real program and verifies UID, read-only rootfs, network isolation, the syscall filter, tmpfs and cgroup limits. Afterwards, `sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh` checks every language ([self-test](Judge-Configuration.md#sandbox-syscall-filter-and-self-test)). Never recursively change rootfs ownership; it contains the sandbox UID.
 
 Confirm the judge is online and submit programs on the web site. No inbound judge web port is required; allow outbound access to the web origin/download sources. Stop with `sudo systemctl stop libreoj-judge.target`; disable startup with `sudo systemctl disable libreoj-judge.target`.
 

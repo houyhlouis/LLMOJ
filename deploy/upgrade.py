@@ -82,7 +82,8 @@ NATIVE_PACKAGES = {
     }
 }
 JUDGE_REGRESSIONS = ('apps/judge/src/task/hack/hack.test.cjs', 'apps/judge/src/task/self-eval/self-eval.test.cjs',
-                     'apps/judge/src/rpc.test.cjs', 'apps/judge/src/executionScheduler.test.cjs')
+                     'apps/judge/src/rpc.test.cjs', 'apps/judge/src/executionScheduler.test.cjs',
+                     'apps/judge/src/selfTestConfig.test.cjs')
 COMMUNITY_PERMISSIONS = (
     'ViewTeam', 'CreateTeam', 'ManageTeams', 'FakeSubmission',
     'ViewHack', 'CreateHack', 'ManageHack', 'CreateSelfEval'
@@ -134,11 +135,13 @@ def compatibility_digest(relative, path):
     return hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
-def community_runtime_transition(source, before, after):
+def community_runtime_transition(source, before, after, deployed_by_upgrade=False):
     """Accept one pinned runtime transition from older baselines; no wildcard or unreviewed hash.
 
     Paths already at the reviewed target are not part of the transition; later runtime changes to them
-    follow the general runtime policy, but may not revert them to an older baseline.
+    follow the general runtime policy, but may not revert them to an older baseline. A path an earlier
+    upgrade already moved past the target is likewise left to the general policy, but only when
+    `deployed_by_upgrade` proves that the installed source is exactly what a completed upgrade deployed.
     """
     contract_path = Path(source)/'deploy/community-runtime-contract.json'
     if not contract_path.is_file() or contract_path.is_symlink() or contract_path.stat().st_size > 32768:
@@ -169,7 +172,7 @@ def community_runtime_transition(source, before, after):
             for value in old_hashes
         ) or not isinstance(target_hash, str) or not re.fullmatch(r'[0-9a-f]{64}', target_hash):
             fail('Invalid runtime contract digest')
-        if before.get(relative) == target_hash:
+        if before.get(relative) == target_hash or (deployed_by_upgrade and before.get(relative) not in old_hashes):
             if after.get(relative) != target_hash and after.get(relative) in old_hashes:
                 fail('Target runtime code reverts the reviewed community runtime')
             continue
@@ -498,6 +501,25 @@ class Upgrade:
         return {'role': self.role, 'prefix': str(self.root), 'node': self.node_version, 'pnpm': self.pnpm_version,
                 'services': self.states, 'databaseBytes': self.database_bytes, 'scope': 'dependency/native-preserving code + frozen community/contest/permission schema + reviewed Hack/SelfEval runtime + verified data migration'}
 
+    def deployed_by_upgrade(self):
+        """Whether the installed source is exactly what one of this installation's completed upgrades deployed."""
+        installed = None
+        for manifest in sorted((self.root/'backups/upgrade').glob('*/manifest.json')):
+            try:
+                record = json.loads(manifest.read_text())
+            except (OSError, UnicodeError, ValueError):
+                continue
+            if not isinstance(record, dict) or not isinstance(record.get('provenance'), dict):
+                continue
+            tree = record['provenance'].get('treeSha256')
+            if record.get('status') != 'complete' or not isinstance(tree, str):
+                continue
+            if installed is None:
+                installed = tree_digest(self.root)
+            if tree == installed:
+                return True
+        return False
+
     def compatibility(self, source):
         required = ('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'deploy/upgrade-schema.mjs', 'deploy/build-frontend-offline.mjs', 'apps/backend/src/auth/registration-review.entity.ts', 'apps/backend/src/auth/registration-application.entity.ts', 'deploy/upgrade-registration.mjs')
         for name in required:
@@ -510,7 +532,8 @@ class Upgrade:
         old_dependencies = {name: compatibility_digest(name, self.root/name) for name in old_map if shared(name)}
         changed = {name for name in set(source_dependencies) | set(old_dependencies)
                    if source_dependencies.get(name) != old_dependencies.get(name)}
-        approved_runtime = community_runtime_transition(source, old_map, source_map) if changed else set()
+        approved_runtime = (community_runtime_transition(source, old_map, source_map, self.deployed_by_upgrade())
+                            if changed else set())
         runtime_changes = changed - approved_runtime
         if any(not runtime_source(name) for name in runtime_changes):
             fail('Dependencies, infrastructure or unsupported shared packages changed outside the frozen runtime contract')
@@ -762,15 +785,25 @@ class Upgrade:
                 fail('Application service did not stop')
 
     def verify_sandbox(self):
-        """Run the installer's sandbox check with the staged sandbox, while the judge is stopped."""
-        if not self.sandbox_changed:
-            return
-        self.host.run(['systemd-run', '--unit=libreoj-install-sandbox-check', '--wait', '--pipe', '--collect',
-                       '--property=Delegate=cpu memory pids', '--property=DelegateSubgroup=supervisor',
-                       '--property=LimitCORE=0', '--property=RuntimeMaxSec=120', '--property=TimeoutStopSec=15',
-                       '--property=WorkingDirectory='+str(self.stage/'apps/judge'),
-                       self.node, self.stage/'deploy/sandbox/verify-installed.mjs', '--root', self.root,
-                       '--sandbox', self.stage/'packages/simple-sandbox'], timeout=180)
+        """Check the staged sandbox and judge on this host, while the judge is stopped."""
+        if self.sandbox_changed:
+            # The installer's sandbox check, with the staged sandbox
+            self.host.run(['systemd-run', '--unit=libreoj-install-sandbox-check', '--wait', '--pipe', '--collect',
+                           '--property=Delegate=cpu memory pids', '--property=DelegateSubgroup=supervisor',
+                           '--property=LimitCORE=0', '--property=RuntimeMaxSec=120', '--property=TimeoutStopSec=15',
+                           '--property=WorkingDirectory='+str(self.stage/'apps/judge'),
+                           self.node, self.stage/'deploy/sandbox/verify-installed.mjs', '--root', self.root,
+                           '--sandbox', self.stage/'packages/simple-sandbox'], timeout=180)
+        if self.role == 'all' and self.runtime_changes and (self.stage/'apps/judge/self-test.mjs').is_file():
+            # Every language compiled and run through the staged judge and sandbox, and the syscall filter probed
+            self.host.run(['systemd-run', '--unit=libreoj-judge-self-test', '--wait', '--pipe', '--collect',
+                           '--property=Delegate=cpu memory pids', '--property=DelegateSubgroup=supervisor',
+                           '--property=LimitCORE=0', '--property=RuntimeMaxSec=900', '--property=TimeoutStopSec=15',
+                           '--property=WorkingDirectory='+str(self.stage/'apps/judge'),
+                           '--setenv=UV_THREADPOOL_SIZE=16',
+                           '--setenv=PATH='+str(Path(self.node).parent)+':/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+                           self.node, '-r', '@swc-node/register', 'self-test.mjs',
+                           '--config', self.root/'config/judge.yaml'], timeout=960)
 
     def guard_install(self):
         if not self.guard.parent.exists():

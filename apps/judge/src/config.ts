@@ -58,6 +58,12 @@ export class SandboxConfig {
   @IsOptional()
   resourceMode?: "default" | "arbiter";
 
+  // The seccomp filter refusing system calls programs don't need (default true). Turn it off only to diagnose a
+  // runtime that fails with it; `self-test.sh` checks every language with it.
+  @IsBoolean()
+  @IsOptional()
+  syscallFilter?: boolean;
+
   @IsString()
   user: string;
 

@@ -99,6 +99,9 @@ struct SandboxParameter
 
     // sched_setaffinity
     std::vector<int> cpuAffinity;
+
+    // Install the seccomp filter of syscall-filter.h before executing the program.
+    bool syscallFilter = true;
 };
 
 class SandboxExecution;

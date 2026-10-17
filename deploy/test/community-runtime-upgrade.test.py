@@ -228,6 +228,51 @@ class RuntimeUpgradeTests(unittest.TestCase):
         self.assertEqual(self.up.native_rebuild, [])
         self.assertTrue(self.up.sandbox_changed)
 
+    def record_completed_upgrade(self, tree):
+        record = self.root/'backups/upgrade/20261016T000000Z-test/manifest.json'
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(json.dumps({'status': 'complete', 'provenance': {'treeSha256': tree}}))
+
+    def test_runtime_files_an_earlier_upgrade_moved_on_may_change_again(self):
+        self.deployed_reviewed_runtime()
+        relative = 'apps/judge/src/task/index.ts'
+        (self.root/relative).write_bytes(b'deployed by a later upgrade')
+        self.change(relative, b'changed again by this upgrade')
+        # Without a record, the installed bytes could be a local edit
+        with self.assertRaisesRegex(u.UpgradeError, 'supported community baselines'):
+            self.up.compatibility(self.source)
+        # A completed upgrade deployed exactly the installed source
+        self.record_completed_upgrade(u.tree_digest(self.root))
+        self.up.compatibility(self.source)
+        self.assertIn(relative, self.up.runtime_changes)
+        # Edited since: the record no longer matches the installed source
+        self.record_completed_upgrade('0'*64)
+        with self.assertRaisesRegex(u.UpgradeError, 'supported community baselines'):
+            self.up.compatibility(self.source)
+        # Moving back to an older reviewed baseline stays refused
+        self.record_completed_upgrade(u.tree_digest(self.root))
+        entry = next(item for item in self.contract['files'] if item['path'] == relative)
+        previous = b'an older reviewed baseline'
+        entry['oldSha256'].append(hashlib.sha256(previous).hexdigest())
+        self.repin_test_contract()
+        self.change(relative, previous)
+        with self.assertRaisesRegex(u.UpgradeError, 'reverts'):
+            self.up.compatibility(self.source)
+
+    def test_incomplete_or_malformed_upgrade_records_prove_nothing(self):
+        self.deployed_reviewed_runtime()
+        relative = 'apps/judge/src/task/index.ts'
+        (self.root/relative).write_bytes(b'deployed by a later upgrade')
+        self.change(relative, b'changed again by this upgrade')
+        record = self.root/'backups/upgrade/20261016T000000Z-test/manifest.json'
+        record.parent.mkdir(parents=True, exist_ok=True)
+        for content in ('not json', '[]', json.dumps({'status': 'complete', 'provenance': 'x'}),
+                        json.dumps({'status': 'rolledBack', 'provenance': {'treeSha256': u.tree_digest(self.root)}})):
+            with self.subTest(content=content[:30]):
+                record.write_text(content)
+                with self.assertRaisesRegex(u.UpgradeError, 'supported community baselines'):
+                    self.up.compatibility(self.source)
+
     def test_native_changes_select_exactly_the_packages_to_rebuild(self):
         self.deployed_reviewed_runtime()
         self.change('apps/judge/native/builtin_checkers/tokens.h')
@@ -334,6 +379,40 @@ class RuntimeUpgradeTests(unittest.TestCase):
         dumps = [index for index, call in enumerate(self.host.calls) if call and call[0] == 'mariadb-dump']
         self.assertLess(stopped, checks[0])
         self.assertLess(checks[0], dumps[-1])
+
+    def self_test_calls(self):
+        return [call for call in self.host.calls if call and call[0] == 'systemd-run' and '--unit=libreoj-judge-self-test' in call]
+
+    def test_changed_judge_runtime_runs_the_staged_self_test_before_schema_changes(self):
+        self.deployed_reviewed_runtime()
+        self.change('apps/judge/src/rpc.ts')
+        self.prepare()
+        (self.up.stage/'apps/judge/self-test.mjs').parent.mkdir(parents=True, exist_ok=True)
+        (self.up.stage/'apps/judge/self-test.mjs').write_text('// staged self-test')
+        self.up.activate()
+        [check] = self.self_test_calls()
+        self.assertIn('--property=WorkingDirectory='+str(self.up.stage/'apps/judge'), check)
+        self.assertEqual(check[check.index('--config')+1], str(self.up.root/'config/judge.yaml'))
+        self.assertIn('--property=DelegateSubgroup=supervisor', check)
+        stopped = self.host.calls.index(('service', 'stop', 'libreoj-judge.service'))
+        dumps = [index for index, call in enumerate(self.host.calls) if call and call[0] == 'mariadb-dump']
+        self.assertLess(stopped, self.host.calls.index(check))
+        self.assertLess(self.host.calls.index(check), dumps[-1])
+        # Only the sandbox itself is checked by the installer's check
+        self.assertFalse(any('--unit=libreoj-install-sandbox-check' in call for call in self.host.calls if call))
+
+    def test_no_self_test_without_runtime_changes_or_staged_entry(self):
+        self.deployed_reviewed_runtime()
+        self.change('apps/judge/src/rpc.ts')
+        self.prepare()
+        self.up.activate()
+        self.assertEqual(self.self_test_calls(), [], 'targets without self-test.mjs')
+        self.up.runtime_changes = []
+        self.host.calls.clear()
+        (self.up.stage/'apps/judge/self-test.mjs').parent.mkdir(parents=True, exist_ok=True)
+        (self.up.stage/'apps/judge/self-test.mjs').write_text('// staged self-test')
+        self.up.verify_sandbox()
+        self.assertEqual(self.self_test_calls(), [])
 
     def test_an_unchanged_sandbox_is_not_reverified(self):
         self.deployed_reviewed_runtime()

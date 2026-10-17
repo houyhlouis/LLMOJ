@@ -36,6 +36,7 @@
 | `sandbox.hostname` | optional string/null; example `null` | 沙盒 hostname；安装生成 `libreoj-judge`。不是评测机到后端的网络地址。 |
 | `sandbox.immutable` | optional boolean; example omitted | 未设置按 false 路径处理；true 时内部工作路径使用 `/tmp/libreoj`，避免在镜像内建立挂载目录。不是自动将任意 rootfs 变为只读的开关，应与镜像布局成套使用。 |
 | `sandbox.resourceMode` | optional `default` or `arbiter`; example omitted | 安装生成 `default`；只作用于用户程序。default 使用 cgroup CPU 统计；arbiter 使用进程用户态 CPU 时间并附加地址空间限制。编译器/checker/interactor 固定 default。变更会影响判题口径，不能作为提速开关。 |
+| `sandbox.syscallFilter` | optional boolean; example omitted | 默认 `true`：seccomp 过滤器拒绝程序、编译器和运行时用不到的系统调用（创建命名空间或挂载、ptrace、密钥环、io_uring、bpf、内核模块与系统设置），64 位与 32 位程序均适用。只有在诊断某个运行时与它冲突时才设为 `false`；见[沙箱一节](#沙箱系统调用过滤器与自检)。 |
 | `sandbox.user` | string; example `sandbox` | rootfs 内的运行用户名，解析其 UID/GID；安装为 sandbox。不是宿主 systemd 服务的 User；沙盒管理器需要其宿主权限。 |
 | `sandbox.environments` | object of environment variables | 例子为 `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`、`HOME=/sandbox`、`LC_ALL=en_US.UTF-8`；值应写为字符串，按具体任务环境合并。此对象不控制宿主 Node 的线程池。 |
 | `cpuAffinity.compiler` | optional integer array; example `[0,1]` | 编译器允许使用的逻辑 CPU ID；安装生成所选 judge CPU 集合。 |
@@ -80,6 +81,34 @@
 每槽 512 MiB 是 **tmpfs 最大容量**，不是预分配，也不是进程内存上限。编译器、选手程序、页缓存、AI、数据库同时占 RAM。`TasksMax`、父 cgroup、CPU quota 和物理核心共享仍可能形成瓶颈。`lscpu -e=CPU,CORE,SOCKET,ONLINE` 可分辨逻辑 CPU 与物理核；SMT 不等于独占物理核，`cpuAffinity` 与 systemd `AllowedCPUs` 也不会自动给每槽分配独占核心。
 
 容量算法由 [judge_capacity.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/judge_capacity.py) 在安装和扩缩容中共用。该新文件及本节新策略属于待提交修订；发布前须确认部署版本已包含它，不能用旧提交的源码链接冒充已发布实现。
+
+## 沙箱、系统调用过滤器与自检
+
+所有编译器、程序、校验器和交互器都在沙箱中运行：
+- 以无特权的 `sandbox.user` 身份运行，exec 时不能获得特权（`no_new_privs`）；
+- 使用独立的挂载、PID、网络、UTS 与 IPC 命名空间，rootfs 只读，只挂载本任务的目录；
+- 受 cgroup v2 的内存、进程数和 CPU 时间限制。
+
+此外，seccomp 过滤器拒绝评测程序用不到的系统调用（`sandbox.syscallFilter`，默认开启）：
+- 创建或进入命名空间、挂载与更改根目录；
+- ptrace 与读取其他进程的内存；
+- 密钥环、io_uring、bpf、性能事件与 userfaultfd；
+- 内核模块、重启、交换区以及系统时间或主机名。
+
+这些调用返回“不允许的操作”，经由 32 位系统调用表（`-m32` 程序与 `int 0x80`）同样如此；x32 调用一律失败。`clone3` 返回“未实现”，使 C 库回退到 `clone`，由过滤器检查其标志。过滤器无法安装时不运行任何程序。
+
+检查本评测机（用评测端自身的代码编译并运行每种语言，并以 64 位与 32 位程序探测过滤器）：
+
+```bash
+sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh
+```
+
+每项检查输出一行，耗时几秒到一分钟。它使用自己的临时目录，从不使用评测机密钥，因此可以在评测端运行时执行，但会与评测争用 CPU。`--only cpp,java` 只检查部分语言。评测端或沙箱有改动时，升级器会在切换之前用新版本运行它。
+
+**沙箱不能做到的事。** 沙箱中的程序与宿主共享内核，内核漏洞仍可能导致逃逸；过滤器减少了程序可触及的内核范围，但并不能证明隔离。评测端的控制进程以 root 运行。对公开比赛：
+- 在专用机器上运行评测机，不要放在网页服务器上；
+- 及时更新内核；
+- 远程评测机上不要存放平台凭据（数据库、MinIO、AI 密钥），它们只需要评测机密钥。
 
 ## 生成的 systemd 服务与 tmpfs 挂载
 

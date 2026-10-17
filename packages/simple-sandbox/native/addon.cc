@@ -71,6 +71,10 @@ Napi::Value NodeStartSandbox(const Napi::CallbackInfo &info)
         param.cpuAffinity = IntArrayToVector(cpuAffinity.As<Napi::Array>());
     }
 
+    // On unless explicitly false
+    const auto &syscallFilter = jsparam.Get("syscallFilter");
+    param.syscallFilter = !syscallFilter.IsBoolean() || syscallFilter.ToBoolean().Value();
+
 #define SET_REDIRECTION(_name_)                                                                  \
     if (jsparam.Get(#_name_).IsNumber())                                                         \
     {                                                                                            \

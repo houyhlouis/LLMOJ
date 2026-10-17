@@ -39,6 +39,7 @@
 #include "semaphore.h"
 #include "pipe.h"
 #include "io-redirection.h"
+#include "syscall-filter.h"
 
 namespace fs = std::filesystem;
 using std::string;
@@ -194,6 +195,9 @@ static int ChildProcess(void *param_ptr)
         ENSURE(syscall(SYS_setuid, parameter.uid));
         // A full distribution includes setuid executables; disallow all exec-time privilege gains.
         ENSURE(prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0));
+        // Last, so that it covers the program and everything it starts; a failure is reported like any other.
+        if (parameter.syscallFilter)
+            InstallSyscallFilter();
 
         vector<char *> params = StringToPtr(parameter.executableParameters),
                        envi = StringToPtr(parameter.environmentVariables);

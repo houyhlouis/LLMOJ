@@ -15,7 +15,9 @@ export const verificationSource = String.raw`
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cerrno>
 #include <unistd.h>
+#include <sys/syscall.h>
 #include <sys/socket.h>
 #include <sys/statvfs.h>
 #include <netinet/in.h>
@@ -27,7 +29,7 @@ static bool cannot_read(const std::string &name) {
     return false;
 }
 int main(int argc, char **argv) {
-    if (argc != 6) return 10;
+    if (argc != 7) return 10;
     if (getuid() == 0 || getuid() != static_cast<unsigned>(std::strtoul(argv[4], nullptr, 10))) return 11;
     if (getpid() != 1) return 12;
     struct statvfs filesystem;
@@ -49,6 +51,8 @@ int main(int argc, char **argv) {
     const int connected = connect(descriptor, reinterpret_cast<sockaddr *>(&address), sizeof(address));
     close(descriptor);
     if (connected == 0) return 18;
+    // With the syscall filter, keyrings are refused (without it, the session keyring's ID is returned)
+    if (std::string(argv[6]) == "1" && (syscall(SYS_keyctl, 0, -3, 0) >= 0 || errno != EPERM)) return 21;
     long long a = 0, b = 0;
     if (!(std::cin >> a >> b)) return 19;
     std::cout << (a + b) << '\n';
@@ -101,7 +105,8 @@ export async function verifyWithSandbox({ Sandbox, config, workingDirectory, mar
     hostname: config.sandbox.hostname || "libreoj-install-check", user,
     mounts: [{ src: workingDirectory, dst: "/tmp", limit: -1 }],
     redirectBeforeChroot: false, mountProc: true, workingDirectory: "/tmp",
-    environments: Object.entries(environments).map(([key, value]) => `${key}=${value}`)
+    environments: Object.entries(environments).map(([key, value]) => `${key}=${value}`),
+    syscallFilter: config.sandbox.syscallFilter !== false
   };
   const run = async (stage, parameter) => {
     if (interrupted()) throw new VerificationError("Sandbox installation verification was interrupted.");
@@ -139,7 +144,8 @@ export async function verifyWithSandbox({ Sandbox, config, workingDirectory, mar
   const execution = await run("C++ execution/isolation", {
     ...common, time: 3000, memory: 64 * 1024 * 1024, stackSize: 64 * 1024 * 1024,
     cpuAffinity: config.cpuAffinity?.userProgram || [], executable: "/tmp/a.out",
-    parameters: ["/tmp/a.out", markerPath, String(hostPort), hostNetworkNamespace, String(user.uid), hostIpcNamespace],
+    parameters: ["/tmp/a.out", markerPath, String(hostPort), hostNetworkNamespace, String(user.uid), hostIpcNamespace,
+      common.syscallFilter ? "1" : "0"],
     stdin: "input.txt", stdout: "run.out", stderr: "run.err"
   });
   if (await fs.readFile(path.join(workingDirectory, "run.out"), "utf8") !== "43\n") {
@@ -262,7 +268,8 @@ async function main() {
     try { if (temporary) await fs.rm(temporary, { recursive: true, force: true }); } catch { cleanupFailed = true; }
     if (cleanupFailed) throw new VerificationError("Sandbox installation verification failed to clean up all temporary resources; judge was not started by this check.");
   }
-  process.stdout.write("Installed LibreOJ sandbox verified: C++ 42 + 1 = 43; filesystem/PID/network/IPC isolation and default cgroup v2 limits passed.\n");
+  process.stdout.write("Installed LibreOJ sandbox verified: C++ 42 + 1 = 43; filesystem/PID/network/IPC isolation, " +
+    `${config.sandbox.syscallFilter !== false ? "the syscall filter " : ""}and default cgroup v2 limits passed.\n`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

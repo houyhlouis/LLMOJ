@@ -242,7 +242,8 @@ export async function startSandbox(taskId: string, sandboxConfig: SandboxConfig)
     // Stack pages are already included in the memory limits. A separate 8 MiB
     // ceiling rejects valid deep recursion while most of the problem budget is unused.
     stackSize: sandboxConfig.stackSize ?? sandboxConfig.memory,
-    cpuAffinity: resolveSandboxCpuAffinity(sandboxConfig.cpuAffinity)
+    cpuAffinity: resolveSandboxCpuAffinity(sandboxConfig.cpuAffinity),
+    syscallFilter: config.sandbox.syscallFilter !== false
   };
 
   let sandbox: ReturnType<typeof Sandbox.startSandbox>;

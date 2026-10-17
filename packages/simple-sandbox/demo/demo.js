@@ -42,7 +42,7 @@ const prepareFilesystem = () => {
 
   const compilation = childProcess.spawnSync(
     "cc",
-    ["-O2", "-static", path.join(__dirname, "fixture.c"), "-o", path.join(binary, "fixture")],
+    ["-O2", "-static", "-pthread", path.join(__dirname, "fixture.c"), "-o", path.join(binary, "fixture")],
     { encoding: "utf8" }
   );
   if (compilation.status !== 0) throw new Error(`Fixture compilation failed:\n${compilation.stderr}`);
@@ -205,6 +205,37 @@ const runDemo = async () => {
   if (/^ipc=shared$/m.test(ipcFound.stdout))
     childProcess.spawnSync("ipcrm", ["-Q", "0x4c4c4d4a"], { stdio: "ignore" }); // Don't leave it on the host.
   assert.match(ipcFound.stdout, /^ipc=isolated$/m);
+
+  // The syscall filter refuses namespaces, ptrace, keyrings, io_uring, bpf and mounts, also through the 32-bit
+  // table, while threads and processes keep working.
+  const filtered = await run("syscalls", ["syscalls"], { process: 8 });
+  assert.equal(filtered.result.status, SandboxStatus.OK, filtered.stderr);
+  const probes = Object.fromEntries(filtered.stdout.trim().split("\n").map(line => line.split("=")));
+  const expected = {
+    unshare_user: "EPERM",
+    clone_newuser: "EPERM",
+    clone3: "ENOSYS",
+    ptrace: "EPERM",
+    keyctl: "EPERM",
+    io_uring: "EPERM",
+    bpf: "EPERM",
+    mount: "EPERM",
+    thread: "ok",
+    fork: "ok"
+  };
+  if (process.arch === "x64") {
+    expected.x32 = "ENOSYS";
+    // 32-bit system calls, unless this kernel runs no 32-bit code at all
+    if (probes.i386_getpid === "ok") Object.assign(expected, { i386_getpid: "ok", i386_ptrace: "EPERM", i386_clone3: "ENOSYS" });
+    else for (const name of ["i386_getpid", "i386_ptrace", "i386_clone3"]) delete probes[name];
+  }
+  assert.deepEqual(probes, expected);
+  // Without the filter, the same calls reach the kernel
+  const unfiltered = await run("syscalls-unfiltered", ["unfiltered"], { syscallFilter: false });
+  assert.deepEqual(Object.fromEntries(unfiltered.stdout.trim().split("\n").map(line => line.split("="))), {
+    keyctl: "ok",
+    clone3: "EINVAL"
+  });
 
   // Size-limited mounts are not implemented, so they must be refused rather than silently unlimited.
   await assert.rejects(
