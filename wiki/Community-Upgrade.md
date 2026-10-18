@@ -37,6 +37,8 @@ The upgrader accepts only these changes, each in its exact expected form. Anythi
 
 **AI budgets:** the table `ai_reservation`.
 
+**AI runs on judge machines:** the table `ai_execution`.
+
 **Content hashes and judge runtimes:** the table `judge_runtime`, and the nullable `file.sha256`, `judge_job_attempt.judgeRuntimeId`, `submission.judgeRuntimeId` and `submission_result_history.judgeRuntimeId`. Existing files get their hashes in the background after the upgrade.
 
 Existing IDs, replies, accounts, problems and submitted code are never changed. When MariaDB rebuilds an index around a known change, the upgrader checks the index's definition first and never drops anything.

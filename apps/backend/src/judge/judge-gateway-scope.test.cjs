@@ -45,7 +45,7 @@ const judgeRuntimeModule = load("judge-runtime.service.ts", {
   "./judge-client.entity": {},
   "./dto/judge-runtime.dto": {}
 });
-const { JudgeGateway } = load("judge.gateway.ts", {
+const { JudgeGateway, aiExecutionLimit } = load("judge.gateway.ts", {
   "@nestjs/common": { forwardRef: x => x, Inject: decorator, Optional: decorator },
   "@nestjs/websockets": {
     ConnectedSocket: decorator,
@@ -84,6 +84,7 @@ function fixture() {
   const owners = [];
   const stored = [];
   const recorded = [];
+  const signedUploads = [];
   const clients = new Map();
   let fence = 0;
   let waits = 0;
@@ -123,6 +124,10 @@ function fixture() {
       onTaskProgress: async (taskMeta, lease, value) => {
         progress.push([taskMeta.taskId, lease, value]);
         return true;
+      },
+      signTaskUploads: async (taskMeta, files) => {
+        signedUploads.push([taskMeta, files]);
+        return files.map(file => ({ name: file.name, url: "https://storage.invalid/", extraFormData: {}, fileFieldName: "file" }));
       }
     },
     {
@@ -176,6 +181,7 @@ function fixture() {
     owners,
     stored,
     recorded,
+    signedUploads,
     clients,
     connect,
     waits: () => waits,
@@ -435,4 +441,45 @@ test("an invalid runtime is left out of the capabilities, and the judge client's
   queue.push(submissionTask("task-b", []));
   await gateway.onConsumeTask(b.client, 0);
   assert.equal(owners.at(-1).judgeRuntimeId, null);
+});
+
+const aiTask = taskId => ({ taskId, type: "AiExecution", priorityType: 4, priority: 4, extraInfo: { request: {} } });
+
+test("generated files are only signed for a task assigned to the requesting judge client", async () => {
+  const { gateway, queue, signedUploads, connect } = fixture();
+  const a = await connect(1);
+  const b = await connect(2);
+  await gateway.onCapabilities(a.client, capabilities({ protocolVersion: 4, taskTypes: ["Submission", "AiExecution"] }));
+  queue.push(aiTask("ai-1"));
+  await gateway.onConsumeTask(a.client, 0);
+  const files = [{ name: "1.in", size: 4 }];
+  assert.deepEqual(await gateway.onRequestUploads(b.client, { taskId: "ai-1", files }), [], "not its task");
+  for (const invalid of [null, { taskId: "ai-1" }, { taskId: "ai-1", files: [{ name: 1, size: 4 }] }, { taskId: "ai-1", files: [{ name: "1.in", size: 1.5 }] }])
+    assert.deepEqual(await gateway.onRequestUploads(a.client, invalid), []);
+  assert.deepEqual(signedUploads, []);
+  const targets = await gateway.onRequestUploads(a.client, { taskId: "ai-1", files: [{ name: "1.in", size: 4, extra: "dropped" }] });
+  assert.deepEqual(targets.map(target => target.name), ["1.in"]);
+  assert.deepEqual(signedUploads, [[{ taskId: "ai-1", type: "AiExecution" }, files]]);
+});
+
+test("AI runs leave a judge client's other threads to other work", async () => {
+  const { gateway, queue, claims, connect } = fixture();
+  const a = await connect(1);
+  await gateway.onCapabilities(
+    a.client,
+    capabilities({ protocolVersion: 4, taskTypes: ["Submission", "AiExecution"], consumerThreads: 3, aiExecutionSlots: 6 })
+  );
+  for (let i = 0; i < 3; i++) {
+    queue.push(aiTask(`ai-${i}`));
+    await gateway.onConsumeTask(a.client, i);
+  }
+  assert.deepEqual(
+    claims.map(([, taskTypes]) => taskTypes),
+    [["Submission", "AiExecution"], ["Submission", "AiExecution"], ["Submission"]],
+    "two of three threads at most"
+  );
+  assert.equal(aiExecutionLimit(null), 0);
+  assert.equal(aiExecutionLimit(capabilities({ consumerThreads: 1, aiExecutionSlots: 4 })), 0, "a single thread runs none");
+  assert.equal(aiExecutionLimit(capabilities({ consumerThreads: 8, aiExecutionSlots: 2 })), 2, "nor more than its AI slots");
+  assert.equal(aiExecutionLimit(capabilities({ consumerThreads: 3, aiExecutionSlots: 0 })), 1);
 });

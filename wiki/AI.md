@@ -162,7 +162,7 @@ Interactive and communication problems keep their protocol simulation and checks
 
 ## Where AI runs and where keys are kept
 
-Model and search requests are made by the backend. Compiling and running generated programs uses the judge on the **same server**, through a local socket; it can't use a remote judge. So AI data generation needs the `all` role; a `web` site can still use AI for editing, translation and search. See [Distributed judging](Distributed-Judging.md#ai).
+Model and search requests are made by the backend. Compiling and running generated programs uses the judge on the **same server** through a local socket (the `all` role), or, on a `web` site, a remote judge through the judge queue, with the same result. See [Distributed judging](Distributed-Judging.md#ai).
 
 AI configurations are stored in the `ai_configuration` table, each encrypted with AES-256-GCM using the site's master key, `data/ai/master.key` by default (directory mode `0700`, key `0600`, both owned by the backend's user). If saved configurations exist but the key is missing, the backend refuses to start rather than create a new one. **Back up the database and the master key together**: no other key can decrypt them. See [AI environment](AI-Environment.md).
 

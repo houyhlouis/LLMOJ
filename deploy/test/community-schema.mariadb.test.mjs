@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { auditSchema, applySchema, COMMUNITY_TABLES, LEGACY_SUBMISSION_STATUSES, LEGACY_PRIVILEGES, HACK_STANDARD_CONTENT_SQL,
   FILE_SIZE_BIGINT_SQL, TEAM_FILE_SIZE_BIGINT_SQL, TEAM_QUOTA_DEFAULT_SQL, TWO_FACTOR_SQL, TWO_FACTOR_TABLES, JUDGE_QUEUE_SQL, JUDGE_QUEUE_TABLES, JUDGE_CLIENT_DRAINING_SQL, DATA_VERSION_SQL, DATA_VERSION_TABLES, AI_BUDGET_SQL, AI_BUDGET_TABLES,
-  RUNTIME_IDENTITY_SQL, RUNTIME_IDENTITY_TABLES, RUNTIME_IDENTITY_COLUMNS } from '../upgrade-schema.mjs';
+  RUNTIME_IDENTITY_SQL, RUNTIME_IDENTITY_TABLES, RUNTIME_IDENTITY_COLUMNS, AI_EXECUTION_SQL, AI_EXECUTION_TABLES } from '../upgrade-schema.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(path.join(root, 'apps/backend/package.json'));
 const configPath = process.env.HYHOJ_COMMUNITY_SCHEMA_TEST_DB_CONFIG;
@@ -50,6 +50,7 @@ test('real metadata: mature legacy upgrade, new-schema no-op, preserved data, re
     for (const table of DATA_VERSION_TABLES) await ds.query('DROP TABLE `' + table + '`');
     await ds.query('ALTER TABLE `submission` DROP COLUMN `problemDataVersionId`');
     for (const table of AI_BUDGET_TABLES) await ds.query('DROP TABLE `' + table + '`');
+    for (const table of AI_EXECUTION_TABLES) await ds.query('DROP TABLE `' + table + '`');
     await ds.query('ALTER TABLE `file` CHANGE `size` `size` int NOT NULL');
     await ds.query('ALTER TABLE `contest` DROP COLUMN `ruleOptions`');
     await ds.query('ALTER TABLE `contest` CHANGE `rule` `rule` varchar(8) NOT NULL');
@@ -75,15 +76,15 @@ test('real metadata: mature legacy upgrade, new-schema no-op, preserved data, re
       console.error('Rejected legacy schema proposal:', (await ds.driver.createSchemaBuilder().log()).upQueries.map(query => query.query));
       throw error;
     }
-    assert.equal(legacy.queries.length, 42);
+    assert.equal(legacy.queries.length, 43);
     // The judge queue and data version tables are created with their runtime column
     const runtimeAdditions = RUNTIME_IDENTITY_SQL.filter(sql => !/`(judge_job_attempt|submission_result_history)`/.test(sql));
-    for (const sql of [...TWO_FACTOR_SQL, ...JUDGE_QUEUE_SQL, JUDGE_CLIENT_DRAINING_SQL, ...DATA_VERSION_SQL, ...AI_BUDGET_SQL, ...runtimeAdditions]) assert(legacy.queries.includes(sql), sql);
+    for (const sql of [...TWO_FACTOR_SQL, ...JUDGE_QUEUE_SQL, JUDGE_CLIENT_DRAINING_SQL, ...DATA_VERSION_SQL, ...AI_BUDGET_SQL, ...runtimeAdditions, ...AI_EXECUTION_SQL]) assert(legacy.queries.includes(sql), sql);
     assert.equal(runtimeAdditions.length, 3);
     assert.deepEqual(legacy.solutions, { pending: 0, schemaPending: true });
     assert(!legacy.queries.some(query => /DROP|TRUNCATE/.test(query)));
     const applied = await applySchema(ds);
-    assert.equal(applied.queries.length, 42);
+    assert.equal(applied.queries.length, 43);
     assert.equal(applied.solutions.classified, 1); assert.equal(applied.solutions.pending, 0);
     // Existing submissions have no data version, and no recorded runtime
     assert.deepEqual(await ds.query('SELECT * FROM submission ORDER BY id'),

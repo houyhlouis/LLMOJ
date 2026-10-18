@@ -3,7 +3,12 @@ import winston from "winston";
 import lodashDebounce from "lodash.debounce";
 import SocketIOParser from "socket.io-msgpack-parser";
 
-import { JUDGE_PROTOCOL_VERSION, JudgeClientCapabilities } from "@libreoj/judge-protocol";
+import {
+  JUDGE_PROTOCOL_VERSION,
+  JudgeClientCapabilities,
+  JudgeUploadRequest,
+  JudgeUploadTarget
+} from "@libreoj/judge-protocol";
 
 import config, { updateServerSideConfig } from "./config";
 import taskHandler, { supportedTaskTypes, Task } from "./task";
@@ -178,6 +183,16 @@ export class RPC {
     return urls;
   }
 
+  /** Where to upload the files a task generated; the server answers with nothing if it refuses. */
+  async requestUploads(request: JudgeUploadRequest): Promise<JudgeUploadTarget[]> {
+    winston.info(`Requesting uploads of ${request.files.length} files of task ${request.taskId}`);
+    return await this.withTimeout(
+      new Promise<JudgeUploadTarget[]>(resolve => {
+        this.socket.emit("requestUploads", request, (targets: JudgeUploadTarget[]) => resolve(targets));
+      })
+    );
+  }
+
   async startTaskConsumerThread(threadId: number) {
     for (;;) {
       this.socket.emit("consumeTask", threadId);
@@ -210,22 +225,27 @@ export class RPC {
       // Resolved when the server has processed the last progress sent (if it acknowledges progress)
       let lastProgressProcessed: Promise<void> = Promise.resolve();
 
-      // Debounce the onProgress function so we won't send progress too fast to the server
-      const reportProgress = lodashDebounce((progress: unknown) => {
-        winston.verbose(`[Thread ${threadId}] Reporting progress for task ${taskInfo}`);
-        const message = {
-          taskMeta: {
-            taskId: task.taskId,
-            type: task.type
-          },
-          progress
-        };
-        if (this.serverCapabilities.progressAck)
-          lastProgressProcessed = new Promise<void>(resolve => {
-            this.socket.emit("progress", message, () => resolve());
-          });
-        else this.socket.emit("progress", message);
-      }, 100);
+      // Debounce the onProgress function so we won't send progress too fast to the server, but send it at least
+      // every second while it keeps changing
+      const reportProgress = lodashDebounce(
+        (progress: unknown) => {
+          winston.verbose(`[Thread ${threadId}] Reporting progress for task ${taskInfo}`);
+          const message = {
+            taskMeta: {
+              taskId: task.taskId,
+              type: task.type
+            },
+            progress
+          };
+          if (this.serverCapabilities.progressAck)
+            lastProgressProcessed = new Promise<void>(resolve => {
+              this.socket.emit("progress", message, () => resolve());
+            });
+          else this.socket.emit("progress", message);
+        },
+        100,
+        { maxWait: 1000 }
+      );
       task.reportProgressRaw = (progress: unknown) => {
         if (canceled) throw new CanceledError();
         reportProgress(progress);

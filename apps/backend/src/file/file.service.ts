@@ -28,6 +28,9 @@ const MAINTENANCE_BATCH_SIZE = 500;
 const FILE_DOWNLOAD_EXPIRE_TIME = 20 * 60 * 60;
 // Judge clients download a task's files as soon as they receive it; allow for slow links to large test data.
 export const JUDGE_FILE_DOWNLOAD_EXPIRE_TIME = 6 * 60 * 60;
+// Temporary objects of other services under this prefix (e.g. AI runs on judges), which delete them themselves.
+// Maintenance leaves them alone.
+export const TEMPORARY_OBJECT_PREFIX = "temporary/";
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
@@ -412,9 +415,10 @@ export class FileService implements OnModuleInit {
     minSize?: number,
     maxSize?: number,
     objectUuid = UUID(),
-    expiresAt = new Date(Date.now() + FILE_UPLOAD_EXPIRE_TIME * 1000)
+    expiresAt = new Date(Date.now() + FILE_UPLOAD_EXPIRE_TIME * 1000),
+    signFor = MinioSignFor.UserUpload
   ): Promise<SignedFileUploadRequestDto> {
-    const signer = this.minioSigner[MinioSignFor.UserUpload];
+    const signer = this.minioSigner[signFor];
     const uuid = objectUuid;
     const policy = signer.client.newPostPolicy();
     policy.setBucket(this.bucket);
@@ -432,6 +436,55 @@ export class FileService implements OnModuleInit {
       extraFormData: policyResult.formData,
       fileFieldName: "file"
     };
+  }
+
+  /** A form for a judge client to upload exactly `size` bytes as the temporary object `name`. */
+  async signJudgeUpload(name: string, size: number): Promise<SignedFileUploadRequestDto> {
+    if (!name.startsWith(TEMPORARY_OBJECT_PREFIX)) throw new Error("Judges only upload temporary objects");
+    return await this.signUploadRequest(
+      size,
+      size,
+      name,
+      new Date(Date.now() + JUDGE_FILE_DOWNLOAD_EXPIRE_TIME * 1000),
+      MinioSignFor.Judge
+    );
+  }
+
+  /** Stores a temporary object; see `TEMPORARY_OBJECT_PREFIX`. */
+  async putTemporaryObject(name: string, data: Buffer): Promise<void> {
+    if (!name.startsWith(TEMPORARY_OBJECT_PREFIX)) throw new Error("Not a temporary object");
+    await this.minioClient.putObject(this.bucket, name, data, data.length);
+  }
+
+  /** Reads a stored object of at most `maximumBytes`. */
+  async readObject(name: string, maximumBytes: number): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of await this.minioClient.getObject(this.bucket, name)) {
+      size += chunk.length;
+      if (size > maximumBytes) throw new Error("FILE_SIZE_LIMIT");
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
+  }
+
+  /** The temporary objects under `prefix`. */
+  async listTemporaryObjects(prefix: string): Promise<{ name: string; lastModified: Date }[]> {
+    if (!prefix.startsWith(TEMPORARY_OBJECT_PREFIX)) throw new Error("Not a temporary prefix");
+    const objects: { name: string; lastModified: Date }[] = [];
+    for await (const object of this.minioClient.listObjectsV2(this.bucket, prefix, true) as AsyncIterable<{
+      name?: string;
+      lastModified: Date;
+    }>)
+      if (object.name) objects.push({ name: object.name, lastModified: object.lastModified });
+    return objects;
+  }
+
+  async removeTemporaryObjects(names: string[]): Promise<void> {
+    if (names.some(name => !name.startsWith(TEMPORARY_OBJECT_PREFIX))) throw new Error("Not a temporary object");
+    for (let i = 0; i < names.length; i += 1000)
+      // eslint-disable-next-line no-await-in-loop -- One batch at a time
+      await this.minioClient.removeObjects(this.bucket, names.slice(i, i + 1000));
   }
 
   async signTeamUploadPart(uuid: string, size: number, expiresAt: Date): Promise<SignedFileUploadRequestDto> {
@@ -586,7 +639,11 @@ export class FileService implements OnModuleInit {
       checked++;
       // Keep active team chunks and recent signed uploads while their policies can still be used. Expired or
       // cancelled chunks are collected.
-      if (pendingTeamObjects.has(object.name) || +object.lastModified > Date.now() - FILE_UPLOAD_EXPIRE_TIME * 1000)
+      if (
+        pendingTeamObjects.has(object.name) ||
+        object.name.startsWith(TEMPORARY_OBJECT_PREFIX) ||
+        +object.lastModified > Date.now() - FILE_UPLOAD_EXPIRE_TIME * 1000
+      )
         continue;
       batch.push(object.name);
       // eslint-disable-next-line no-await-in-loop -- One batch at a time

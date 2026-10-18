@@ -36,7 +36,7 @@ The judge reads the file named by `LIBREOJ_JUDGE_CONFIG_FILE` and won't start wi
 | `maxConcurrentTasks` | `3` | Number of slots, shared by compiling, running tests and local AI checks. The installer makes it equal to the number of working directories; the smaller of the two counts. |
 | `taskConsumingThreads` | `2` | How many submissions the judge takes from the site at a time (a warning above 3); each can have many tests. The installer writes half the slots, from 1 to 3. This isn't a number of CPUs. |
 | `memoryBudget` | not set | MiB of memory the sandboxes of all running work may reserve together. By default 85% of the server's memory minus 512 MiB, and at least 256. Work starts only when the memory limit it declares fits, so several problems with large limits can't exhaust the server's memory. Lower it on a server shared with other services. |
-| `aiExecutionSlots` | not set | Slots local AI checks may use at once. By default all slots but one (1 if there's only one), so judging always has a slot. |
+| `aiExecutionSlots` | not set | Slots AI checks may use at once, from the local AI worker or from the judge queue. By default all slots but one (1 if there's only one), so judging always has a slot. It also limits how many AI program runs the judge takes from the queue at once. |
 
 ### Local AI worker
 
@@ -82,7 +82,7 @@ The site sends some limits when the judge connects: `limit.compilerMessage`, `li
 
 - The judge takes up to `taskConsumingThreads` submissions from the site at a time.
 - Compiling, running tests and local AI checks share the slots. A test reserves its program's memory limit plus the interactor's (or the checker's, if larger), a compilation 512 MiB, and anything else 256 MiB; work starts, in order of arrival, when both a slot and its memory are free. Work that needs more than the whole budget runs on its own.
-- Local AI checks use at most `aiExecutionSlots` slots and never hold up judging behind them.
+- AI checks, local or from the judge queue, use at most `aiExecutionSlots` slots and never hold up judging behind them.
 - Downloads have their own queue of `maxConcurrentDownloads`.
 - The AI worker also runs at most three AI pipelines at a time and accepts at most eight requests; these aren't extra slots and can't be configured.
 

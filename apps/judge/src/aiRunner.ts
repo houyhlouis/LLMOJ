@@ -74,7 +74,30 @@ const active = new Set<string>();
 // Admit eight backend jobs; three pipelines share the same seven execution slots as submissions.
 const generationQueue = new Queue(3);
 
-type Emit = (event: Record<string, unknown>) => void;
+export type Emit = (event: Record<string, unknown>) => void;
+
+/** Where a generation reads its sample files and writes its output. */
+export interface GenerationLayout {
+  // The directory of the request's sample files
+  sampleDirectory: string;
+  // Each job's output directory is made in it
+  outputRoot: string;
+  // The group allowed to read the output (the local backend); none for a queued task, whose output is uploaded
+  outputGroup?: number;
+}
+
+// The local runner's layout: shared with the backend on this server
+function localLayout(jobId: string): GenerationLayout {
+  return {
+    sampleDirectory: path.join(SAMPLE_DIRECTORY, jobId),
+    outputRoot: config.aiGeneratedDirectory,
+    outputGroup: config.aiRunnerGid
+  };
+}
+
+async function shareWithBackend(filename: string, layout: GenerationLayout) {
+  if (layout.outputGroup != null) await fs.promises.chown(filename, 0, layout.outputGroup);
+}
 
 function referenceError(message: string, candidateFailure: boolean, qualityVerdict?: QualityVerdict): Error {
   return Object.assign(new Error(message), { candidateFailure, qualityVerdict });
@@ -499,7 +522,16 @@ async function executeProtocol(binaryDirectory: string, request: Request, input:
   });
 }
 
-async function generate(request: Request, emit: Emit, checkCanceled: () => void) {
+/**
+ * Compiles and runs a request's programs in the sandbox, and (for "generate") writes the test data to its output
+ * directory. Emits progress, then the result as a "complete" event; throws on failure.
+ */
+export async function generate(
+  request: Request,
+  emit: Emit,
+  checkCanceled: () => void,
+  layout: GenerationLayout = localLayout(request.jobId)
+) {
   // Snapshot backend-owned inputs through O_NOFOLLOW into root-owned storage before using them.
   // The descriptor-based source path pins the UUID directory even if its owner renames it.
   let snapshot: string;
@@ -507,9 +539,9 @@ async function generate(request: Request, emit: Emit, checkCanceled: () => void)
   let totalSampleBytes = 0;
   try {
     if (request.sampleFiles?.length) {
-      snapshot = await fs.promises.mkdtemp(path.join(config.aiGeneratedDirectory, ".samples-"));
+      snapshot = await fs.promises.mkdtemp(path.join(layout.outputRoot, ".samples-"));
       const source = await fs.promises.open(
-        path.join(SAMPLE_DIRECTORY, request.jobId),
+        layout.sampleDirectory,
         fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW
       );
       try {
@@ -528,7 +560,7 @@ async function generate(request: Request, emit: Emit, checkCanceled: () => void)
             if (totalSampleBytes > MAX_TOTAL) throw new Error("Samples exceed 8 GiB");
             const space = await (
               fs.promises as unknown as { statfs: (filename: string) => Promise<{ bavail: number; bsize: number }> }
-            ).statfs(config.aiGeneratedDirectory);
+            ).statfs(layout.outputRoot);
             if (space.bavail * space.bsize < DISK_RESERVE + stat.size)
               throw new Error("Insufficient space for sample validation");
             const hash = crypto.createHash("sha256");
@@ -555,7 +587,7 @@ async function generate(request: Request, emit: Emit, checkCanceled: () => void)
         await source.close();
       }
     }
-    return await generateWithSamples(request, emit, checkCanceled, snapshot, sampleHashes);
+    return await generateWithSamples(request, emit, checkCanceled, snapshot, sampleHashes, layout);
   } finally {
     if (snapshot) await fs.promises.rm(snapshot, { recursive: true, force: true });
   }
@@ -566,14 +598,15 @@ async function generateWithSamples(
   emit: Emit,
   checkCanceled: () => void,
   snapshot: string,
-  sampleHashes: string[]
+  sampleHashes: string[],
+  layout: GenerationLayout
 ) {
   checkCanceled();
   const validating = request.operation === "validate-reference";
   const protocol = request.problemType === "Interaction" || request.problemType === "Communication";
   const directory = validating
-    ? await fs.promises.mkdtemp(path.join(config.aiGeneratedDirectory, ".reference-"))
-    : path.join(config.aiGeneratedDirectory, request.jobId);
+    ? await fs.promises.mkdtemp(path.join(layout.outputRoot, ".reference-"))
+    : path.join(layout.outputRoot, request.jobId);
   // Version the validation contract as well as hashing all supplied source bytes.
   const hash = crypto
     .createHash("sha256")
@@ -592,7 +625,7 @@ async function generateWithSamples(
   }
   await fs.promises.rm(directory, { recursive: true, force: true });
   await fs.promises.mkdir(directory, { mode: 0o750 });
-  await fs.promises.chown(directory, 0, config.aiRunnerGid);
+  await shareWithBackend(directory, layout);
   const binaryDirectory = path.join(directory, "bin");
   await fs.promises.mkdir(binaryDirectory, { mode: 0o755 });
   let totalBytes = 0;
@@ -604,12 +637,12 @@ async function generateWithSamples(
       throw new Error("Generated data exceeds the 16 MiB/file or 8 GiB/job limit");
     const space = await (
       fs.promises as unknown as { statfs: (filename: string) => Promise<{ bavail: number; bsize: number }> }
-    ).statfs(config.aiGeneratedDirectory);
+    ).statfs(layout.outputRoot);
     if (space.bavail * space.bsize < DISK_RESERVE + Buffer.byteLength(contents))
       throw new Error("Insufficient disk space: generation reserves 2 GiB for the server");
     const target = path.join(directory, filename);
     await fs.promises.writeFile(target, contents, { mode: 0o640 });
-    await fs.promises.chown(target, 0, config.aiRunnerGid);
+    await shareWithBackend(target, layout);
     files.push(filename);
   }
   async function replaceCase(index: number, input: Buffer, answer: Buffer) {
@@ -626,7 +659,7 @@ async function generateWithSamples(
       throw new Error("Replacement data exceeds generation size limits");
     const space = await (
       fs.promises as unknown as { statfs: (filename: string) => Promise<{ bavail: number; bsize: number }> }
-    ).statfs(config.aiGeneratedDirectory);
+    ).statfs(layout.outputRoot);
     if (space.bavail * space.bsize < DISK_RESERVE + replacementBytes)
       throw new Error("Insufficient disk space for adversarial case replacement");
     // Nothing is exported before result.json is committed; an interrupted replacement aborts the whole job.
@@ -908,11 +941,61 @@ async function generateWithSamples(
       return;
     }
     await fs.promises.writeFile(resultPath, JSON.stringify(result), { mode: 0o640 });
-    await fs.promises.chown(resultPath, 0, config.aiRunnerGid);
+    await shareWithBackend(resultPath, layout);
     emit(result);
   } catch (error) {
     await fs.promises.rm(directory, { recursive: true, force: true });
     throw error;
+  }
+}
+
+/**
+ * Runs a generation within the runner's limits: at most 8 are admitted at once, 3 run while the others wait, and each
+ * has an execution budget from its number of program runs. `key` names it among the admitted ones (the job ID for the
+ * local runner, the task ID for a queued task).
+ */
+export async function runGeneration(
+  request: Request,
+  emit: Emit,
+  isCanceled: () => boolean,
+  layout?: GenerationLayout,
+  key = request.jobId
+) {
+  if (active.has(key)) throw new Error("Job already running");
+  if (active.size >= 8) throw new Error("AI generation queue is full");
+  active.add(key);
+  try {
+    const baseExecutions =
+      request.cases.length +
+      (request.samples?.length || 0) +
+      (request.sampleFiles?.length || 0) +
+      (request.protocolSamples?.length || 0);
+    const qualityExecutions = request.quality
+      ? (request.quality.fuzzCases.length + request.cases.length + request.quality.extraAttempts) *
+        (3 + request.quality.alternatives.length + request.quality.challenges.length)
+      : 0;
+    const executionBudgetMs = Math.min(
+      4 * 60 * 60 * 1000,
+      180000 +
+        (baseExecutions + qualityExecutions) *
+          Math.max(20000, request.stdTimeLimitMs * (request.problemType === "Communication" ? 2 : 1) + 15000)
+    );
+    const deadline = Date.now() + executionBudgetMs;
+    emit({ type: "progress", phase: "queued", completed: 0, total: request.cases.length });
+    await generationQueue.add(() =>
+      generate(
+        request,
+        emit,
+        () => {
+          if (isCanceled()) throw new Error("Generation canceled");
+          if (Date.now() > deadline)
+            throw new Error(`Generation exceeded its ${Math.ceil(executionBudgetMs / 60000)}-minute execution budget`);
+        },
+        layout
+      )
+    );
+  } finally {
+    active.delete(key);
   }
 }
 
@@ -986,47 +1069,14 @@ export async function startAiRunner() {
         try {
           request = JSON.parse(buffer.slice(0, buffer.indexOf("\n")));
           validate(request);
-          if (active.has(request.jobId)) throw new Error("Job already running");
+          if (request.operation === "cleanup" && active.has(request.jobId)) throw new Error("Job already running");
           if (request.operation === "cleanup") {
             await fs.promises.rm(path.join(config.aiGeneratedDirectory, request.jobId), {
               recursive: true,
               force: true
             });
             emit({ type: "complete", cleaned: true });
-          } else {
-            if (active.size >= 8) throw new Error("AI generation queue is full");
-            active.add(request.jobId);
-            const baseExecutions =
-              request.cases.length +
-              (request.samples?.length || 0) +
-              (request.sampleFiles?.length || 0) +
-              (request.protocolSamples?.length || 0);
-            const qualityExecutions = request.quality
-              ? (request.quality.fuzzCases.length + request.cases.length + request.quality.extraAttempts) *
-                (3 + request.quality.alternatives.length + request.quality.challenges.length)
-              : 0;
-            const executionBudgetMs = Math.min(
-              4 * 60 * 60 * 1000,
-              180000 +
-                (baseExecutions + qualityExecutions) *
-                  Math.max(20000, request.stdTimeLimitMs * (request.problemType === "Communication" ? 2 : 1) + 15000)
-            );
-            const deadline = Date.now() + executionBudgetMs;
-            emit({ type: "progress", phase: "queued", completed: 0, total: request.cases.length });
-            try {
-              await generationQueue.add(() =>
-                generate(request, emit, () => {
-                  if (socket.destroyed) throw new Error("Generation canceled");
-                  if (Date.now() > deadline)
-                    throw new Error(
-                      `Generation exceeded its ${Math.ceil(executionBudgetMs / 60000)}-minute execution budget`
-                    );
-                })
-              );
-            } finally {
-              active.delete(request.jobId);
-            }
-          }
+          } else await runGeneration(request, emit, () => socket.destroyed);
         } catch (error) {
           emit({
             type: "error",

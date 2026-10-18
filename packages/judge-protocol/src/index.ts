@@ -2,12 +2,15 @@ export enum JudgeTaskType {
   Submission = "Submission",
   Hack = "Hack",
   SelfEvalPrepare = "SelfEvalPrepare",
-  SelfEval = "SelfEval"
+  SelfEval = "SelfEval",
+  // Programs an AI job generated (generator, reference solution, validator, checker), run to make or check test data
+  AiExecution = "AiExecution"
 }
 
 // Raised when judge clients announce something new to the server. Judge clients that announce nothing are version 1.
 // Version 3 announces the judge's runtime and checks the files of a task against their SHA-256.
-export const JUDGE_PROTOCOL_VERSION = 3;
+// Version 4 runs AiExecution tasks and uploads the files they generate ("requestUploads").
+export const JUDGE_PROTOCOL_VERSION = 4;
 
 /** What a judge judges with, as recorded with each result. */
 export interface JudgeRuntimeInfo {
@@ -48,6 +51,39 @@ export interface JudgeTaskPayload<ExtraInfo> extends JudgeTaskMeta {
   // The SHA-256 of the stored files the task uses, by UUID, for those whose content hash is recorded. A judge checks
   // each file against it before using it, also a file it has kept from an earlier task.
   fileHashes?: Record<string, string>;
+}
+
+/** The progress of an AiExecution task; the final one has `finished`. */
+export interface AiExecutionProgress {
+  finished: boolean;
+  // While running: the AI runner's phase (e.g. "compile-make", "generate") and its count
+  phase?: string;
+  completed?: number;
+  total?: number;
+  // Once finished
+  status?: "Complete" | "Failed";
+  // Complete: the AI runner's result, without its local directory
+  result?: Record<string, unknown>;
+  // Complete: the files it generated, each uploaded to the target the server gave for its name
+  files?: { name: string; size: number; sha256: string }[];
+  // Failed
+  message?: string;
+  // Failed: the program under test (e.g. a reference solution) failed, not the run itself
+  candidateFailure?: boolean;
+}
+
+/** Sent by a judge client as "requestUploads", to upload the files a task generated. */
+export interface JudgeUploadRequest {
+  taskId: string;
+  files: { name: string; size: number }[];
+}
+
+/** Where to upload one file: an HTML form POST, like a browser upload. */
+export interface JudgeUploadTarget {
+  name: string;
+  url: string;
+  extraFormData: Record<string, string>;
+  fileFieldName: string;
 }
 
 export type OmittableString =

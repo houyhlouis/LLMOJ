@@ -4,8 +4,6 @@ import { promises as fs } from "fs";
 
 import path from "path";
 
-import { createConnection } from "net";
-
 import {
   Inject as AuditInject,
   Optional as AuditOptional,
@@ -46,8 +44,9 @@ import { AiResponseCheckpointEntity } from "./ai-usage.entity";
 
 import { AiUsageService } from "./ai-usage.service";
 import { AiAdmissionService } from "./ai-admission.service";
+import { AiExecutionService } from "./ai-execution.service";
 
-import { withAiRuntime, aiWorkerLockName, currentAiRuntime, aiCancellationError } from "./ai-runtime";
+import { withAiRuntime, aiWorkerLockName } from "./ai-runtime";
 
 import { CALIBRATION, exactCodeforcesRating } from "./codeforces-calibration";
 
@@ -139,6 +138,9 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   @Inject(AiPolicyService) private readonly policies: AiPolicyService;
 
   @AuditOptional() @Inject(MetricsService) private readonly metricsService: MetricsService;
+
+  // Runs the AI programs, locally or on judge machines
+  @AuditOptional() @Inject(AiExecutionService) private readonly execution: AiExecutionService;
 
   private metricWorkerErrors: { inc(labels: { stage: string }): void };
 
@@ -384,6 +386,18 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   ) {
     const pairs = snapshot.judgeInfo.hiddenSamples || [];
     if (!pairs.length) return { files: [], directory: null as string };
+    if (this.execution?.mode(job.id) === "judges") {
+      // A judge machine downloads them itself, checked against their content hashes
+      const stored = new Map(
+        (await this.problems.getProblemFiles(problem, ProblemFileType.TestData)).map(file => [file.filename, file.uuid])
+      );
+      const files = pairs.map((pair, i) => {
+        const [inputUuid, outputUuid] = [stored.get(pair.inputFile), stored.get(pair.outputFile)];
+        if (!inputUuid || !outputUuid) throw new AiError("HIDDEN_SAMPLE_FILE_MISSING");
+        return { inputFile: `${i + 1}.in`, outputFile: `${i + 1}.out`, inputUuid, outputUuid };
+      });
+      return { files, directory: null as string };
+    }
     const base = process.env.HYHOJ_AI_SAMPLE_INPUTS_DIR || "/opt/LLMOJ/data/ai-sample-inputs";
     await fs.mkdir(base, { recursive: true, mode: 0o700 });
     const directory = path.join(base, job.id);
@@ -2559,7 +2573,9 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     }
     const totalSamples = inlineSamples.length + sampleFiles.files.length;
     const validatedSamples = protocolProblem ? protocolSamples.length : totalSamples;
-    const directory = path.join(process.env.HYHOJ_AI_GENERATED_DIR || "/opt/LLMOJ/data/ai-generated", job.id);
+    const directory = this.execution
+      ? this.execution.outputDirectory(job.id)
+      : path.join(process.env.HYHOJ_AI_GENERATED_DIR || "/opt/LLMOJ/data/ai-generated", job.id);
     try {
       user = await this.assertSnapshot(job, snapshot);
       if (
@@ -2990,118 +3006,13 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private cleanupSandbox(jobId: string): Promise<void> {
-    return new Promise(resolve => {
-      const socket = createConnection(process.env.HYHOJ_AI_RUNNER_SOCKET || "/opt/LLMOJ/data/judge/ai-runner.sock");
-      const timer = setTimeout(() => {
-        socket.destroy();
-        resolve();
-      }, 10000);
-      socket.on("connect", () => socket.write(`${JSON.stringify({ operation: "cleanup", jobId })}\n`));
-      socket.on("data", () => socket.end());
-      socket.on("error", () => {
-        clearTimeout(timer);
-        resolve();
-      });
-      socket.on("close", () => {
-        clearTimeout(timer);
-        resolve();
-      });
-    });
+  private async cleanupSandbox(jobId: string): Promise<void> {
+    await this.execution?.cleanup(jobId);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The versioned runner wire payload is checked by the operation-specific consumers below.
   private runSandbox(job: AiJobEntity, request: any, progress: (value: any) => Promise<void>): Promise<any> {
-    const signal = currentAiRuntime()?.signal;
-    return new Promise((resolve, reject) => {
-      if (signal?.aborted) {
-        reject(aiCancellationError(signal));
-        return;
-      }
-      const serialized = `${JSON.stringify(request)}\n`;
-      if (Buffer.byteLength(serialized) > 16 * 1024 * 1024) {
-        reject(new AiError("SAMPLES_TOO_LARGE"));
-        return;
-      }
-      const socket = createConnection(process.env.HYHOJ_AI_RUNNER_SOCKET || "/opt/LLMOJ/data/judge/ai-runner.sock");
-      let buffer = "";
-      let settled = false;
-      let chain = Promise.resolve();
-      const fail = (error: Error) => {
-        if (!settled) {
-          settled = true;
-          socket.destroy();
-          reject(error);
-        }
-      };
-      const timer = setTimeout(
-        () => fail(new AiError("SANDBOX_TIMEOUT")),
-        Math.min(
-          4 * 60 * 60 * 1000,
-          180000 +
-            (request.cases.length +
-              (request.samples?.length || 0) +
-              (request.sampleFiles?.length || 0) +
-              (request.protocolSamples?.length || 0) +
-              (request.quality
-                ? (request.quality.fuzzCases.length + request.cases.length + request.quality.extraAttempts) *
-                  (3 + request.quality.alternatives.length + request.quality.challenges.length)
-                : 0)) *
-              Math.max(
-                20000,
-                (request.stdTimeLimitMs || 5000) * (request.problemType === "Communication" ? 2 : 1) + 15000
-              )
-        )
-      );
-      const cancelTimer = setInterval(() => {
-        this.assertJob(job).catch(fail);
-      }, 2000);
-      const abort = () => fail(aiCancellationError(signal));
-      signal?.addEventListener("abort", abort, { once: true });
-      socket.on("connect", () => socket.write(serialized));
-      socket.on("data", chunk => {
-        buffer += chunk.toString("utf8");
-        if (buffer.length > 1024 * 1024) {
-          fail(new AiError("INVALID_SANDBOX_RESPONSE"));
-          return;
-        }
-        while (buffer.includes("\n")) {
-          const at = buffer.indexOf("\n");
-          const line = buffer.slice(0, at);
-          buffer = buffer.slice(at + 1);
-          chain = chain
-            // eslint-disable-next-line no-loop-func -- This callback runs synchronously or in an awaited serial chain; shared state is intentional.
-            .then(async () => {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The versioned runner wire payload is checked by the operation-specific consumers below.
-              let message: any;
-              try {
-                message = JSON.parse(line);
-              } catch {
-                throw new AiError("INVALID_SANDBOX_RESPONSE");
-              }
-              if (message.type === "progress") await progress(message);
-              else if (message.type === "error") {
-                const error = new AiError("SANDBOX_GENERATION_FAILED", String(message.message || "").slice(0, 2000));
-                error.candidateFailure = message.candidateFailure === true;
-                throw error;
-              } else if (message.type === "complete") {
-                settled = true;
-                socket.end();
-                resolve(message);
-              }
-            })
-            .catch(fail);
-        }
-      });
-      socket.on("error", () => fail(new AiError("SANDBOX_UNAVAILABLE")));
-      socket.on("close", () => {
-        clearTimeout(timer);
-        clearInterval(cancelTimer);
-        signal?.removeEventListener("abort", abort);
-        chain.then(() => {
-          if (!settled) fail(new AiError("SANDBOX_DISCONNECTED"));
-        });
-      });
-    });
+    if (!this.execution) return Promise.reject(new AiError("SANDBOX_UNAVAILABLE"));
+    return this.execution.run(job, request, progress, async () => await this.assertJob(job));
   }
 }

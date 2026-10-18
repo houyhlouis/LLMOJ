@@ -4,8 +4,8 @@
 
 A site can judge on its own server, on separate judge servers, or both.
 
-- **`all` site plus remote judges:** the site keeps its own judge and the local AI worker, and remote judges share ordinary judging. Choose this if you use AI to check reference solutions or generate test data.
-- **`web` site plus remote judges:** the site does no judging and doesn't build a sandbox; remote judges do all judging. AI checks and data generation aren't available (see [AI](#ai)).
+- **`all` site plus remote judges:** the site keeps its own judge and the local AI worker, and remote judges share ordinary judging. AI programs run on the site's own judge.
+- **`web` site plus remote judges:** the site does no judging and doesn't build a sandbox; remote judges do all judging, and also run AI programs (see [AI](#ai)).
 
 ```mermaid
 flowchart LR
@@ -19,6 +19,7 @@ flowchart LR
     Judges --> Sandbox[Each judge's own sandbox]
     Judges -->|Signed /storage/ downloads| Nginx
     Backend -->|all role: local socket| AIWorker[Local AI worker]
+    Judges -->|web role: AI files, signed uploads| Nginx
 ```
 
 Judges connect to the site, so they need no open incoming port. They have no database, Redis or MinIO credentials: they receive tasks from the backend, download and cache test data through signed links, and send back results. There is one backend and one database; this isn't a high-availability cluster.
@@ -60,7 +61,7 @@ Judge tasks are stored in the database (table `judge_job`), not only in Redis: a
 
 These actions are on the **Judge Machine** page for site administrators. Every change is recorded in the audit log (`judge_client.add`, `delete`, `reset_key`, `drain`, `resume`).
 
-- **Drain** (pause icon) stops sending new tasks to a judge; it finishes those it has. Its status shows **Draining** while it's still judging, then **Drained**: you can now stop, upgrade or resize it without interrupting judging, while the other judges take the queue. It stays drained after reconnecting, or after the backend restarts, until you **Resume** it (play icon). Draining doesn't affect local AI checks, which don't use the queue.
+- **Drain** (pause icon) stops sending new tasks to a judge; it finishes those it has. Its status shows **Draining** while it's still judging, then **Drained**: you can now stop, upgrade or resize it without interrupting judging, while the other judges take the queue. It stays drained after reconnecting, or after the backend restarts, until you **Resume** it (play icon). Draining doesn't affect the local AI worker, which doesn't use the queue; AI program runs on judges are queued and drain like other tasks.
 - **Reset key** and **Delete** take effect at once: the judge is disconnected from every backend process, and its unfinished tasks are queued again for other judges. Reset a key that may have leaked, then put the new key on the judge server.
 - **Capacity:** when a judge connects, it reports its protocol version, the task types it can run, its task threads, judge slots, slots for AI checks and memory budget, shown in the **Capacity** column. The backend sends it only the task types it reported. An older judge reports nothing and is marked **Legacy**: it receives only submissions, so hacks and Self Eval runs wait until an updated judge is online.
 - **Runtime:** a judge of protocol version 3 also reports its judge program (a digest of its source files), its sandbox image and its Node.js version, shown with its capacity. Each result records them, with the judge machine ([What judged a result](Submissions.md#what-judged-a-result)). When online judges report different judge programs or sandbox images, the page warns that a submission may get a different result depending on which one judges it: update them to the same version. Judges of protocol version 3 also check test data against its [content hashes](Submissions.md#content-hashes); older ones still judge, without either.
@@ -69,7 +70,14 @@ To change a judge's number of slots, see [Judge configuration](Judge-Configurati
 
 ## AI
 
-AI features that only call a model, such as editing, translation and search, work in every layout. Checking AI reference solutions and generating test data, however, run on the site's own server through a local socket and private directories; there's no way yet to run them on a remote judge. Remote judges don't take over this work, and adding remote judge slots doesn't give the AI worker more capacity. These features need the `all` role and aren't available on a `web` site. Don't replace the local socket with an open TCP port or a shared directory.
+AI features that only call a model, such as editing, translation and search, work in every layout. Checking AI reference solutions and generating test data also compile and run programs: generators, reference solutions, validators and checkers.
+
+- **`all` site:** the site's own judge runs them through its local AI worker, through a local socket and private directories. Remote judges don't take over this work.
+- **`web` site** (no local AI worker): each run is a task in the judge queue, shown as **AI program run**, which any online judge of protocol version 4 takes. The judge downloads the hidden samples through signed links and checks them against their [content hashes](Submissions.md#content-hashes), runs the programs in its sandbox within its AI slots, and uploads what they generate through signed forms. The backend downloads each file and checks its size and SHA-256 before publishing it, as with the local worker. The AI job's result is the same either way.
+
+AI runs wait behind all other judging. A judge with several task threads keeps at least one for other work, and runs at most as many AI runs at once as its AI slots; a judge with a single task thread runs none. If no judge takes a run within 15 minutes, the AI job fails with `SANDBOX_UNAVAILABLE`. To choose where AI programs run, set `LLMOJ_AI_EXECUTION` for the backend (see [AI environment](AI-Environment.md)).
+
+Model and search keys stay on the site: a judge only gets the programs and data to run, as when judging. A judge running AI programs sees the reference solution and hidden samples, just as it sees test data and checkers when judging. Don't replace the local socket with an open TCP port or a shared directory.
 
 ## Troubleshooting
 
@@ -77,7 +85,7 @@ AI features that only call a model, such as editing, translation and search, wor
 - **A judge is online but downloads fail:** check whether the download links point to `127.0.0.1`, port 19000 or an address the judge can't reach, and check how `/storage/` is forwarded.
 - **Judges keep disconnecting each other:** two of them share a key.
 - **cgroup errors:** check systemd delegation, cgroup v2 and the kernel.
-- **AI checks fail although remote judges are online:** the site needs the `all` role and its local worker.
+- **AI checks fail with `SANDBOX_UNAVAILABLE` on a `web` site:** no judge took the run within 15 minutes. Update a judge to the current version (protocol version 4, which lists **AI program run** under **Capacity**), resume it if it's drained, and give it at least two task threads.
 - **Hacks or Self Eval runs keep waiting:** check that an online judge that isn't drained runs the current version (not **Legacy**) and lists them under **Capacity**.
 - **A judge gets no tasks:** check whether it's drained, and resume it.
 - **A submission fails with "doesn't match its recorded content":** the stored file changed after it was accepted (in object storage, or by a second upload with the same upload form). Upload the file again and rejudge. If it happens for many files, check the object storage's disk.

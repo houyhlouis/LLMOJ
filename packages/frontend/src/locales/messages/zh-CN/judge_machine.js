@@ -60,7 +60,13 @@ return {
     state: "状态",
     states: { Queued: "等待中", Leased: "评测中", Failed: "已放弃" },
     type: "类型",
-    types: { Submission: "提交", Hack: "Hack", SelfEvalPrepare: "自测数据", SelfEval: "自测" },
+    types: {
+      Submission: "提交",
+      Hack: "Hack",
+      SelfEvalPrepare: "自测数据",
+      SelfEval: "自测",
+      AiExecution: "AI 程序运行"
+    },
     task: "任务",
     judge_machine: "评测机",
     sent: "发送次数",

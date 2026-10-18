@@ -106,7 +106,7 @@ sudo env HYHOJ_ROOT=/opt/LLMOJ NODE_BINARY=/opt/LLMOJ/runtime/node/bin/node \
 - 密钥文件必须是所有者为 root、权限为 `0600` 的普通文件；其内容不会被输出。
 - `OJ_JUDGE_SLOTS` 必须符合服务器的 CPU 和内存。不设置时使用自动值（见[评测配置](Judge-Configuration.zh-CN.md#如何确定评测槽数量)）。只有一个 CPU 或内存不足 256 MiB 的服务器不能评测。
 
-生成的 `config/judge.yaml` 只有 root 可读。远程评测机没有本机 AI 任务，并使用自己的 `libreoj-judge.target`。再次运行脚本会保留已有配置，并拒绝不同的站点或密钥；要更换密钥，请停止评测机后明确修改。之后要修改评测槽数量，请使用[扩缩容命令](Judge-Configuration.zh-CN.md#修改评测槽数量)。每项设置的说明见[评测配置](Judge-Configuration.zh-CN.md)。
+生成的 `config/judge.yaml` 只有 root 可读。远程评测机没有本机 AI 任务；对于 `web` 站点，它改为从评测队列运行 AI 程序（见[分布式评测](Distributed-Judging.zh-CN.md#ai)）。它使用自己的 `libreoj-judge.target`。再次运行脚本会保留已有配置，并拒绝不同的站点或密钥；要更换密钥，请停止评测机后明确修改。之后要修改评测槽数量，请使用[扩缩容命令](Judge-Configuration.zh-CN.md#修改评测槽数量)。每项设置的说明见[评测配置](Judge-Configuration.zh-CN.md)。
 
 ## 5. 安装服务并检查沙箱
 

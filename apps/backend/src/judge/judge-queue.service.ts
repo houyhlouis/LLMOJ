@@ -7,7 +7,13 @@ import { InjectDataSource } from "@nestjs/typeorm";
 import { DataSource, EntityManager } from "typeorm";
 import { Redis } from "ioredis";
 
-import { JudgeTaskMeta, JudgeTaskPayload, JudgeTaskType, SubmissionProgressType } from "@libreoj/judge-protocol";
+import {
+  JudgeTaskMeta,
+  JudgeTaskPayload,
+  JudgeTaskType,
+  JudgeUploadTarget,
+  SubmissionProgressType
+} from "@libreoj/judge-protocol";
 
 import { JudgeTaskCompletion, JudgeTaskService } from "./judge-task-service.interface";
 import { JudgeTaskProgress } from "./judge-task-progress.interface";
@@ -618,6 +624,16 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
     if (!confirmed)
       await this.connection.transaction("READ COMMITTED", async manager => await completion.confirm(manager));
     return true;
+  }
+
+  /** Upload forms for the files a task generated, from the task's service; none if it doesn't take files. */
+  async signTaskUploads(
+    taskMeta: JudgeTaskMeta,
+    files: { name: string; size: number }[]
+  ): Promise<JudgeUploadTarget[]> {
+    const taskService = this.taskServices.get(taskMeta.type);
+    if (!taskService?.signUploads) return [];
+    return await taskService.signUploads(taskMeta.taskId, files);
   }
 
   /** Cancels a task's job, e.g. when its submission is rejudged or deleted. */

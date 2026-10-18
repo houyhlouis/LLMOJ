@@ -127,6 +127,59 @@ export function merge<K extends Key, V>(baseRecord: OverridableRecord<K, V>, ove
   return result;
 }
 
+// Storage's address as this judge reaches it (`downloadEndpointOverride`), for a URL the server signed
+function storageUrl(originalUrlString: string): string {
+  if (!config.downloadEndpointOverride) return originalUrlString;
+  const originalUrl = new URL(originalUrlString);
+  const overrideUrl = new URL(config.downloadEndpointOverride);
+  overrideUrl.pathname = originalUrl.pathname;
+  overrideUrl.search = originalUrl.search;
+  return overrideUrl.toString();
+}
+
+/** A server-signed upload: an HTML form POST of `fields`, then the file as `fileField`. */
+export interface UploadForm {
+  url: string;
+  extraFormData: Record<string, string>;
+  fileFieldName: string;
+}
+
+/** Uploads `data` with a server-signed form, retrying like downloads. */
+export async function uploadWithForm(form: UploadForm, data: Buffer, description: string): Promise<void> {
+  const safe = (value: string) => typeof value === "string" && !/["\r\n]/.test(value);
+  if (
+    !safe(form.fileFieldName) ||
+    !Object.entries(form.extraFormData).every(([key, value]) => safe(key) && safe(value))
+  )
+    throw new Error(`Invalid upload form for ${description}`);
+  const boundary = `----llmoj-${crypto.randomBytes(16).toString("hex")}`;
+  const body = Buffer.concat([
+    ...Object.entries(form.extraFormData).map(([key, value]) =>
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`)
+    ),
+    Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${form.fileFieldName}"; filename="file"\r\n` +
+        "Content-Type: application/octet-stream\r\n\r\n"
+    ),
+    data,
+    Buffer.from(`\r\n--${boundary}--\r\n`)
+  ]);
+  for (let retry = config.downloadRetry - 1; retry >= 0; retry--) {
+    try {
+      // eslint-disable-next-line no-await-in-loop -- Retried in turn
+      await axios.post(storageUrl(form.url), body, {
+        headers: { "Content-Type": `multipart/form-data; boundary=${boundary}`, "Content-Length": String(body.length) },
+        maxBodyLength: Infinity,
+        maxContentLength: 1024 * 1024,
+        timeout: config.downloadTimeout
+      });
+      return;
+    } catch (e) {
+      if (retry === 0) throw new Error(`Failed to upload ${description}: ${e}`, { cause: e });
+    }
+  }
+}
+
 // TODO: check download speed
 export const download = (() => {
   const agentOptions: AgentKeepAlive.HttpOptions & AgentKeepAlive.HttpsOptions = {
@@ -137,14 +190,7 @@ export const download = (() => {
   const httpsAgent = new AgentKeepAlive.HttpsAgent(agentOptions);
 
   return async (originalUrlString: string, destination: string, description: string) => {
-    let url = originalUrlString;
-    if (config.downloadEndpointOverride) {
-      const originalUrl = new URL(originalUrlString);
-      const overrideUrl = new URL(config.downloadEndpointOverride);
-      overrideUrl.pathname = originalUrl.pathname;
-      overrideUrl.search = originalUrl.search;
-      url = overrideUrl.toString();
-    }
+    const url = storageUrl(originalUrlString);
     for (let retry = config.downloadRetry - 1; retry >= 0; retry--) {
       const fileStream: fs.WriteStream = fs.createWriteStream(destination);
       const abortController = new AbortController();

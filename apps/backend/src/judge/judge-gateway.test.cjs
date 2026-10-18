@@ -41,6 +41,9 @@ vm.runInNewContext(
     },
     JudgeJobAttemptOutcome: { Disconnected: "Disconnected", Abandoned: "Abandoned" },
     LEGACY_TASK_TYPES: ["Submission"],
+    JudgeTaskType: require("@libreoj/judge-protocol").JudgeTaskType,
+    // AI runs are covered by judge-gateway-scope.test.cjs
+    aiExecutionLimit: () => 0,
     CONSUME_TASK_RETRY_DELAY: 0,
     ACKNOWLEDGED_TASK_GRACE_TIME: 10000
   },

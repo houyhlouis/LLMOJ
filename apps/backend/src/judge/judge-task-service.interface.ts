@@ -1,5 +1,7 @@
 import { EntityManager } from "typeorm";
 
+import type { JudgeUploadTarget } from "@libreoj/judge-protocol";
+
 import { JudgeTaskProgress } from "./judge-task-progress.interface";
 import { JudgeTaskExtraInfo, JudgeTask } from "./judge-queue.service";
 
@@ -34,4 +36,7 @@ export interface JudgeTaskService<TaskProgress extends JudgeTaskProgress, ExtraI
 
   /** The queue gave up on the task: if the resource still references it, give the resource a terminal error. */
   onTaskFailed(taskId: string, message: string): Promise<void>;
+
+  /** For a task that generates files: forms to upload them with, or none if they aren't accepted. */
+  signUploads?(taskId: string, files: { name: string; size: number }[]): Promise<JudgeUploadTarget[]>;
 }

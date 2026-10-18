@@ -173,3 +173,16 @@ test('file content hashes and judge runtimes are added exactly once, and only wh
   for (const sql of [JUDGE_JOB_ATTEMPT_CREATE_SQL, SUBMISSION_RESULT_HISTORY_CREATE_SQL]) assert.match(sql, /`judgeRuntimeId` int NULL/);
   assert.equal(RUNTIME_IDENTITY_SQL.length, 5);
 });
+
+test('the AI execution table is added exactly once', async () => {
+  const { validateAiExecutionSchema, AI_EXECUTION_SQL, AI_EXECUTION_CREATE_SQL } = await import('../ai-execution-schema.mjs');
+  assert.deepEqual(validateQueries([...AI_EXECUTION_SQL]), [...AI_EXECUTION_SQL]);
+  assert.throws(() => validateQueries([AI_EXECUTION_CREATE_SQL.replace('`jobId` varchar(36) NOT NULL', '`jobId` varchar(36) NULL')]));
+  assert.throws(() => validateQueries([AI_EXECUTION_CREATE_SQL.replace(', PRIMARY KEY (`taskId`)', '')]));
+  const fixture = present => ({ query: async () => [{ count: present ? 1 : 0 }] });
+  await validateAiExecutionSchema(fixture(false), [...AI_EXECUTION_SQL]);
+  await validateAiExecutionSchema(fixture(true), []);
+  await assert.rejects(() => validateAiExecutionSchema(fixture(false), []), /AI execution table/);
+  await assert.rejects(() => validateAiExecutionSchema(fixture(true), [...AI_EXECUTION_SQL]), /AI execution table/);
+  assert.equal(AI_EXECUTION_SQL.length, 1);
+});

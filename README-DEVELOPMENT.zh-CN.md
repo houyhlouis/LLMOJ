@@ -72,7 +72,8 @@ node --test --test-concurrency=1 apps/backend/src/health/*.test.cjs apps/backend
 # 评测机
 node --test apps/judge/src/aiQuality.test.cjs apps/judge/src/task/hack/hack.test.cjs \
   apps/judge/src/task/self-eval/self-eval.test.cjs apps/judge/src/rpc.test.cjs \
-  apps/judge/src/executionScheduler.test.cjs apps/judge/src/selfTestConfig.test.cjs apps/judge/src/fileContent.test.cjs
+  apps/judge/src/executionScheduler.test.cjs apps/judge/src/selfTestConfig.test.cjs apps/judge/src/fileContent.test.cjs \
+  apps/judge/src/task/ai-execution/ai-execution.test.cjs
 
 # 前端
 node --test packages/frontend/test/*.test.cjs
@@ -138,7 +139,7 @@ node --test deploy/test/bootstrap-admin.test.mjs
 | `LLMOJ_DATA_VERSION_TEST_DB_CONFIG` | `submission/submission-data-version.mariadb.test.cjs` |
 | `LLMOJ_AI_BUDGET_TEST_DB_CONFIG` | `ai/ai-budget.mariadb.test.cjs`（空数据库） |
 | `LLMOJ_ACCESS_MATRIX_TEST_DB_CONFIG` | `access/permission-matrix.mariadb.test.cjs`（空数据库） |
-| `LLMOJ_OPERATIONS_TEST_DB_CONFIG` | `metrics/operational-metrics.mariadb.test.cjs`、`contest/contest-score-revision.mariadb.test.cjs`（会删除其中所有数据表） |
+| `LLMOJ_OPERATIONS_TEST_DB_CONFIG` | `metrics/operational-metrics.mariadb.test.cjs`、`contest/contest-score-revision.mariadb.test.cjs`、`ai/ai-execution.mariadb.test.cjs`（会删除其中所有数据表） |
 | `LLMOJ_SCHEMA_TEST_DB_CONFIG` | `deploy/test/initialize-schema.test.mjs` |
 | `LLMOJ_REGISTRATION_TEST_DATABASE` | `auth/registration-review.mariadb.test.cjs`、`site-management/registration-settings.mariadb.test.cjs` |
 

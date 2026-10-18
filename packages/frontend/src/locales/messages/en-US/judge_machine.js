@@ -62,7 +62,13 @@ return {
     state: "State",
     states: { Queued: "Waiting", Leased: "Being judged", Failed: "Given up" },
     type: "Type",
-    types: { Submission: "Submission", Hack: "Hack", SelfEvalPrepare: "Self Eval data", SelfEval: "Self Eval" },
+    types: {
+      Submission: "Submission",
+      Hack: "Hack",
+      SelfEvalPrepare: "Self Eval data",
+      SelfEval: "Self Eval",
+      AiExecution: "AI program run"
+    },
     task: "Task",
     judge_machine: "Judge machine",
     sent: "Sent",

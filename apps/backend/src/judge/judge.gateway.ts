@@ -14,7 +14,14 @@ import SocketIOParser from "socket.io-msgpack-parser";
 import { Redis } from "ioredis";
 import proxyAddr from "proxy-addr";
 
-import { JudgeClientCapabilities, JudgeClientSystemInfo, JudgeTaskMeta, JudgeTaskType } from "@libreoj/judge-protocol";
+import {
+  JudgeClientCapabilities,
+  JudgeClientSystemInfo,
+  JudgeTaskMeta,
+  JudgeTaskType,
+  JudgeUploadRequest,
+  JudgeUploadTarget
+} from "@libreoj/judge-protocol";
 
 import { JudgeClientChange, JudgeClientService, REDIS_CHANNEL_JUDGE_CLIENT_CHANGED } from "./judge-client.service";
 
@@ -92,6 +99,15 @@ const SERVER_CAPABILITIES = {
 
 // Judge clients older than protocol version 2 announce nothing and are sent only submissions.
 const LEGACY_TASK_TYPES = [JudgeTaskType.Submission];
+
+const MAX_UPLOADS_PER_REQUEST = 20000;
+
+// AI runs take a task thread for long; a judge client keeps one thread for other work, and runs at most as many as
+// its AI slots. One with a single thread runs none.
+export function aiExecutionLimit(capabilities: JudgeClientCapabilities): number {
+  if (!capabilities || capabilities.consumerThreads < 2) return 0;
+  return Math.max(1, Math.min(capabilities.aiExecutionSlots || 1, capabilities.consumerThreads - 1));
+}
 
 const isCount = (value: unknown, maximum: number) =>
   Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= maximum;
@@ -465,6 +481,37 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     );
   }
 
+  @SubscribeMessage("requestUploads")
+  async onRequestUploads(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() request: JudgeUploadRequest
+  ): Promise<JudgeUploadTarget[]> {
+    const state = this.mapSessionIdToJudgeClient.get(client.id);
+    if (!state) {
+      logger.warn(`"requestUploads" emitted from an unknown client ${client.id}, ignoring`);
+      return [];
+    }
+    const assignment = typeof request?.taskId === "string" ? state.assignedTasks.get(request.taskId) : null;
+    if (
+      !assignment ||
+      !Array.isArray(request.files) ||
+      request.files.length > MAX_UPLOADS_PER_REQUEST ||
+      !request.files.every(file => file && typeof file.name === "string" && Number.isSafeInteger(file.size))
+    ) {
+      logger.warn(`Invalid "requestUploads" from judge client ${client.id} (${state.judgeClient.name}), refusing`);
+      return [];
+    }
+    try {
+      return await this.judgeQueueService.signTaskUploads(
+        { taskId: assignment.task.taskId, type: assignment.task.type },
+        request.files.map(({ name, size }) => ({ name, size }))
+      );
+    } catch (e) {
+      logger.error(`Failed to sign uploads of judge task ${assignment.task.taskId}: ${e}`);
+      return [];
+    }
+  }
+
   @SubscribeMessage("consumeTask")
   async onConsumeTask(@ConnectedSocket() client: Socket, @MessageBody() threadId: number): Promise<void> {
     const state = this.mapSessionIdToJudgeClient.get(client.id);
@@ -482,10 +529,16 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
       }
       let leased: LeasedJudgeTask;
       const judgeRuntimeId = await state.judgeRuntimeId;
+      const aiExecutions = [...state.assignedTasks.values()].filter(
+        ({ task }) => task.type === JudgeTaskType.AiExecution
+      ).length;
+      const taskTypes = (state.capabilities?.taskTypes ?? LEGACY_TASK_TYPES).filter(
+        type => type !== JudgeTaskType.AiExecution || aiExecutions < aiExecutionLimit(state.capabilities)
+      );
       try {
         leased = await this.judgeQueueService.claim(
           { connectionId: client.id, judgeClientId: state.judgeClient.id, judgeRuntimeId },
-          state.capabilities?.taskTypes ?? LEGACY_TASK_TYPES
+          taskTypes
         );
       } catch (e) {
         // The client waits for a task for this thread until it reconnects, so never give up on its request.

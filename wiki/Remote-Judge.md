@@ -106,7 +106,7 @@ sudo env HYHOJ_ROOT=/opt/LLMOJ NODE_BINARY=/opt/LLMOJ/runtime/node/bin/node \
 - The key file must be a regular file owned by root with mode `0600`; its contents are never printed.
 - `OJ_JUDGE_SLOTS` must fit the server's CPUs and memory. Leave it out for the automatic number (see [Judge configuration](Judge-Configuration.md#choosing-the-number-of-slots)). A server with one CPU or less than 256 MiB of memory can't judge.
 
-The resulting `config/judge.yaml` is readable only by root. A remote judge has no local AI worker, and gets its own `libreoj-judge.target`. Running the script again keeps the configuration and refuses a different site or key; to change the key, stop the judge and change it deliberately. To change the number of slots later, use the [resize command](Judge-Configuration.md#changing-the-number-of-slots). [Judge configuration](Judge-Configuration.md) describes every setting.
+The resulting `config/judge.yaml` is readable only by root. A remote judge has no local AI worker; for a `web` site it runs AI programs from the judge queue instead ([Distributed judging](Distributed-Judging.md#ai)). It gets its own `libreoj-judge.target`. Running the script again keeps the configuration and refuses a different site or key; to change the key, stop the judge and change it deliberately. To change the number of slots later, use the [resize command](Judge-Configuration.md#changing-the-number-of-slots). [Judge configuration](Judge-Configuration.md) describes every setting.
 
 ## 5. Install the service and check the sandbox
 
