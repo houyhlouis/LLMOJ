@@ -49,7 +49,7 @@ sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_module
 
 ## 开发时生成 API 类型
 
-`packages/frontend/scripts/generate-api.js` 从运行在 `http://127.0.0.1:2002/docs-json` 的后端读取 API 描述。要使用其他后端，把它的 `docs-json` 完整地址作为参数传入。
+`packages/frontend/scripts/generate-api.js --from-backend-build` 从编译好的后端（`nest build` 之后的 `apps/backend/dist`）重新生成前端的 API 类型，无需运行后端。不加该选项时，它从运行在 `http://127.0.0.1:2002/docs-json` 的后端读取 API 描述；要使用其他后端，把它的 `docs-json` 完整地址作为参数传入。类型与后端不一致时会有测试失败，见 [README-DEVELOPMENT](../README-DEVELOPMENT.zh-CN.md)。
 
 ## bootstrap CDN 构建（安装器不使用）
 

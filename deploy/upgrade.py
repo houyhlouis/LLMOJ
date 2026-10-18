@@ -26,6 +26,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -855,16 +856,38 @@ class Upgrade:
             self.save()
 
     def health(self):
+        """Waits until the backend reports that its database, Redis and storage answer (`/api/health/ready`). A
+        backend from before the readiness check (a rollback to it) answers 404 there; its API description is checked
+        instead."""
+        legacy = False
         for _ in range(60):
             try:
-                with urllib.request.urlopen(f'http://127.0.0.1:{self.port}/docs-json', timeout=2) as response:
-                    value = json.load(response)
-                if response.status == 200 and value.get('openapi') and value.get('paths'):
-                    return
+                if legacy:
+                    with urllib.request.urlopen(f'http://127.0.0.1:{self.port}/docs-json', timeout=2) as response:
+                        value = json.load(response)
+                    if response.status == 200 and value.get('openapi') and value.get('paths'):
+                        return
+                else:
+                    with urllib.request.urlopen(f'http://127.0.0.1:{self.port}/api/health/ready', timeout=5) as response:
+                        if response.status == 200 and json.load(response).get('status') == 'ready':
+                            return
+            except urllib.error.HTTPError as error:
+                legacy = legacy or error.code == 404
+                error.close()
             except Exception:
                 pass
             time.sleep(1)
         fail('New backend health check failed')
+
+    def discard_staged_dependencies(self):
+        """The build's copy of the dependencies isn't used after a completed upgrade: the installed ones stay in place
+        and a rollback restores only what `previous/` holds. Without this, every upgrade backup keeps about 1 GiB."""
+        staged = self.stage/'node_modules'
+        try:
+            if staged.is_dir() and not staged.is_symlink():
+                shutil.rmtree(staged)
+        except OSError:
+            print(say('Note: could not delete the build copy of dependencies in ', '提示：未能删除构建用的依赖副本 ')+str(staged), file=sys.stderr)
 
     def restore_states(self, verify=False):
         if self.states['libreoj-backend.service']:
@@ -922,6 +945,7 @@ class Upgrade:
         self.manifest['status'] = 'complete'
         self.save()
         self.paused = False
+        self.discard_staged_dependencies()
 
     def assert_safe_downgrade(self):
         # Old backends only read YAML and would silently ignore a saved website

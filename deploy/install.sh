@@ -265,7 +265,7 @@ if [[ -f "$PROJECT_ROOT/config/install-complete.json" ]]; then
     support verify-network
     "$PYTHON" "$SOURCE_ROOT/deploy/configure-redis-host.py"
     systemctl start libreoj.target
-    wait_http http://127.0.0.1:2002/docs-json
+    wait_http http://127.0.0.1:2002/api/health/ready
     wait_http "http://127.0.0.1:$PUBLIC_PORT/"
     [[ "$INSTALL_ROLE" != all ]] || wait_judge
     "$NODE" "$SOURCE_ROOT/deploy/bootstrap-admin.mjs" --root "$PROJECT_ROOT"
@@ -488,7 +488,7 @@ wait_http http://127.0.0.1:19000/minio/health/ready
 
 step 'Start backend and create admin with all permissions'
 systemctl start libreoj-backend.service
-wait_http http://127.0.0.1:2002/docs-json
+wait_http http://127.0.0.1:2002/api/health/ready
 "$NODE" deploy/bootstrap-admin.mjs --root "$PROJECT_ROOT"
 if [[ "$INSTALL_ROLE" == all ]]; then
 "$NODE" deploy/bootstrap-services.mjs --root "$PROJECT_ROOT" --phase judge

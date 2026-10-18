@@ -76,6 +76,8 @@ import { ProblemService, ProblemPermissionType } from "../problem/problem.servic
 import { ProblemEntity, ProblemType } from "../problem/problem.entity";
 import { ProblemContentSectionType } from "../problem/problem-content.interface";
 import { Locale } from "../common/locale.type";
+import { logger } from "../logger";
+import { MetricsService, sharedReading } from "../metrics/metrics.service";
 import { DiscussionEntity } from "../discussion/discussion.entity";
 import { DiscussionType } from "../discussion/discussion-type.enum";
 import { DiscussionService, DiscussionPermissionType } from "../discussion/discussion.service";
@@ -136,6 +138,12 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
 
   @Inject(AiPolicyService) private readonly policies: AiPolicyService;
 
+  @AuditOptional() @Inject(MetricsService) private readonly metricsService: MetricsService;
+
+  private metricWorkerErrors: { inc(labels: { stage: string }): void };
+
+  private workerErrorLoggedAt = -Infinity;
+
   private key: Buffer;
 
   private timer: ReturnType<typeof setInterval>;
@@ -159,9 +167,10 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit() {
     const directory = process.env.HYHOJ_AI_STATE_DIR || "/opt/LLMOJ/data/ai";
     this.key = await loadAiEncryptionKey(directory, (await this.configurations.count()) > 0);
+    this.registerMetrics();
     // Deployment has one backend process; a DB advisory lock also protects future clustered workers.
     this.timer = setInterval(() => {
-      this.work().catch(() => undefined);
+      this.work().catch(e => this.workerFailed("worker", e));
     }, 2000);
     this.timer.unref();
   }
@@ -182,6 +191,52 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
   async requirePrivilege(user: UserEntity, privilege: UserPrivilegeType, manager?: EntityManager) {
     if (!user || !(await this.privileges.userHasPrivilege(user, privilege, manager)))
       throw new AiError("PERMISSION_DENIED");
+  }
+
+  /** Jobs and provider requests, read when the metrics are read. */
+  private registerMetrics() {
+    if (!this.metricsService) return;
+    this.metricWorkerErrors = this.metricsService.counter("libreoj_ai_worker_errors", ["stage"]);
+    const jobs = sharedReading(async () => {
+      const [row]: Record<string, string | number | null>[] = await this.db.query(
+        `SELECT SUM(status = 'queued') AS queued, SUM(status = 'running') AS running,
+           TIMESTAMPDIFF(MICROSECOND, MIN(IF(status = 'queued', createdAt, NULL)), NOW(6)) / 1000000 AS oldestQueuedSeconds
+         FROM ai_job WHERE status IN ('queued', 'running')`
+      );
+      return Object.fromEntries(Object.entries(row ?? {}).map(([key, value]) => [key, Number(value ?? 0)]));
+    });
+    this.metricsService.gauge("libreoj_ai_jobs", ["state"], async gauge => {
+      const reading = await jobs();
+      gauge.set({ state: "queued" }, reading.queued);
+      gauge.set({ state: "running" }, reading.running);
+    });
+    this.metricsService.gauge("libreoj_ai_oldest_queued_job_seconds", [], async gauge =>
+      gauge.set((await jobs()).oldestQueuedSeconds)
+    );
+    this.metricsService.gauge("libreoj_ai_provider_requests", ["state"], gauge => {
+      const load = this.admission.load();
+      gauge.set({ state: "running" }, load.running);
+      gauge.set({ state: "waiting" }, load.waiting);
+    });
+    this.metricsService.gauge("libreoj_ai_paused", [], async gauge => gauge.set((await this.policy()).paused ? 1 : 0));
+  }
+
+  /**
+   * Errors of the job scheduler or an internal error of a job: counted, and logged at most once a minute by their type
+   * only (an AI error's message may quote provider output).
+   */
+  private workerFailed(stage: "worker" | "job", error: unknown, jobId?: string) {
+    this.metricWorkerErrors?.inc({ stage });
+    if (Date.now() - this.workerErrorLoggedAt < 60 * 1000) return;
+    this.workerErrorLoggedAt = Date.now();
+    const code =
+      (error as { code?: unknown })?.code ?? (error as { driverError?: { code?: unknown } })?.driverError?.code;
+    const type = `${error?.constructor?.name ?? typeof error}${typeof code === "string" ? ` ${code}` : ""}`;
+    logger.error(
+      stage === "job"
+        ? `AI job ${jobId} failed with an internal error (${type}); further errors aren't logged for a minute`
+        : `The AI job scheduler failed (${type}); further errors aren't logged for a minute`
+    );
   }
 
   /** Isolated harnesses construct the service without the site's AI policy. */
@@ -629,7 +684,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       });
     });
     await this.recordAiAudit(user, "job.queue", job);
-    this.work().catch(() => undefined);
+    this.work().catch(e => this.workerFailed("worker", e));
     return { job: this.serialize(job) };
   }
 
@@ -679,7 +734,7 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       if (!updated.affected) throw new AiError("JOB_NOT_FAILED");
     });
     await this.recordAiAudit(user, "job.retry", job, { retryFrom: retryFrom || "default" });
-    this.work().catch(() => undefined);
+    this.work().catch(e => this.workerFailed("worker", e));
     return {};
   }
 
@@ -886,6 +941,8 @@ export class AiService implements OnModuleInit, OnModuleDestroy {
       const cancelled =
         (error instanceof AiError && error.code === "JOB_CANCELLED") ||
         (await this.jobs.findOneBy({ id: job.id }))?.status === "cancelled";
+      // A cancelled job's aborted requests aren't errors
+      if (!(error instanceof AiError) && !cancelled) this.workerFailed("job", error, job.id);
       if (!cancelled && error instanceof AiError && error.code === "AI_PAUSED") {
         // The site paused AI: return the job to the queue. Its checkpoints let it resume where it stopped.
         const requeued = await this.jobs.update(

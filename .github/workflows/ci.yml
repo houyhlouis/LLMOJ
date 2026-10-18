@@ -59,13 +59,16 @@ jobs:
       - name: Run community and moderation regressions
         run: |
           node apps/backend/src/access/access-permissions.test.cjs
-          node --test --test-concurrency=1 apps/backend/src/access/capability-cache.test.cjs apps/backend/src/access/route-access.test.cjs apps/backend/src/access/permission-matrix.mariadb.test.cjs apps/backend/src/discussion/*.test.cjs apps/backend/src/team/*.test.cjs apps/backend/src/hack/*.test.cjs apps/backend/src/self-eval/*.test.cjs apps/backend/src/submission/submission-progress.test.cjs apps/backend/src/submission/submission-fake.mariadb.test.cjs apps/backend/src/submission/submission-delete.mariadb.test.cjs apps/backend/src/submission/submission-data-version.mariadb.test.cjs apps/backend/src/file/file-upload-security.test.cjs apps/backend/src/contest/*.test.cjs apps/backend/src/problem/problem-statement.test.cjs apps/backend/src/problem/problem-mutations.mariadb.test.cjs apps/backend/src/judge/*.test.cjs apps/backend/src/submission/submission-priority.test.cjs apps/backend/src/auth/*.test.cjs apps/backend/src/site-management/*.test.cjs apps/backend/src/database/database-providers.test.cjs apps/backend/src/auth/two-factor/*.test.cjs
+          node --test --test-concurrency=1 apps/backend/src/access/capability-cache.test.cjs apps/backend/src/access/route-access.test.cjs apps/backend/src/access/permission-matrix.mariadb.test.cjs apps/backend/src/discussion/*.test.cjs apps/backend/src/team/*.test.cjs apps/backend/src/hack/*.test.cjs apps/backend/src/self-eval/*.test.cjs apps/backend/src/submission/submission-progress.test.cjs apps/backend/src/submission/submission-fake.mariadb.test.cjs apps/backend/src/submission/submission-delete.mariadb.test.cjs apps/backend/src/submission/submission-data-version.mariadb.test.cjs apps/backend/src/file/file-upload-security.test.cjs apps/backend/src/contest/*.test.cjs apps/backend/src/problem/problem-statement.test.cjs apps/backend/src/problem/problem-mutations.mariadb.test.cjs apps/backend/src/judge/*.test.cjs apps/backend/src/submission/submission-priority.test.cjs apps/backend/src/auth/*.test.cjs apps/backend/src/site-management/*.test.cjs apps/backend/src/database/database-providers.test.cjs apps/backend/src/auth/two-factor/*.test.cjs apps/backend/src/health/*.test.cjs apps/backend/src/common/*.test.cjs apps/backend/src/metrics/*.test.cjs apps/backend/src/redis/*.test.cjs apps/backend/src/file/file-maintenance.test.cjs
           node --test deploy/fake-migration.test.cjs
           node --test packages/frontend/test/*.test.cjs
           node --test deploy/test/upgrade-schema.test.mjs deploy/test/community-schema.test.mjs deploy/test/team-storage.test.mjs deploy/test/upgrade-registration.test.mjs
           node --test deploy/test/community-schema.mariadb.test.mjs deploy/test/initialize-schema.test.mjs
           python3 deploy/test/install-flow.test.py
           python3 deploy/test/backup.test.py
+          python3 deploy/test/doctor.test.py
+          python3 deploy/test/verify-backup.test.py
+          node --test deploy/test/backup-keys.test.mjs
           sudo python3 deploy/test/community-upgrade.test.py
           sudo python3 deploy/test/community-runtime-upgrade.test.py
       - name: Check Wiki export and navigation

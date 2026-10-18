@@ -49,9 +49,9 @@ The upgrader then:
 3. backs up the configuration, the AI master key and the database, loads the backup into a temporary database, and tests every schema and data change there;
 4. stops Nginx, the judge and the backend, makes a fresh database backup and checks it again;
 5. switches to the new files and applies the database changes;
-6. checks the backend and the local judge, then starts the services that were running before, Nginx last.
+6. waits until the new backend is [ready](Operations-Configuration.md#liveness-and-readiness) (it reaches the database, Redis and object storage) and checks the local judge, then starts the services that were running before, Nginx last.
 
-Backups and build logs stay in `<prefix>/backups/upgrade/<UTC time>-<random>/`, and the upgrader prints the path. They contain secrets, so keep them private, and delete old ones yourself when you no longer need them; the upgrader never deletes data or backups.
+Backups and build logs stay in `<prefix>/backups/upgrade/<UTC time>-<random>/`, and the upgrader prints the path. They contain secrets, so keep them private, and delete old ones yourself when you no longer need them; the upgrader never deletes data or backups. After an upgrade completes, it deletes only the build's copy of the dependencies (`staging/node_modules`, about 1 GiB), which nothing uses afterwards, not even a rollback. Upgrade backups from before this version still hold that copy; [doctor](Operations-Configuration.md#doctor) tells you how many. For an upgrade that completed, you can delete it: `sudo rm -rf /opt/LLMOJ/backups/upgrade/<UTC time>-<random>/staging/node_modules`.
 
 The upgrader installs `/etc/systemd/system/libreoj-backend.service.d/90-libreoj-schema-sync.conf`, which sets `LIBREOJ_SCHEMA_SYNC=0` so that the backend never changes the database structure by itself; the upgrader makes those changes explicitly. Your other drop-ins, the Nginx configuration, credentials and judge capacity are left alone.
 

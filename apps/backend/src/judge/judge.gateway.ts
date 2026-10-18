@@ -1,4 +1,4 @@
-import { forwardRef, Inject, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { forwardRef, Inject, OnModuleDestroy, OnModuleInit, Optional } from "@nestjs/common";
 import {
   ConnectedSocket,
   MessageBody,
@@ -36,6 +36,7 @@ import { ConfigService } from "../config/config.service";
 import { EventReportService, EventReportType } from "../event-report/event-report.service";
 import { RedisService } from "../redis/redis.service";
 import { LockService } from "../redis/lock.service";
+import { MetricsService } from "../metrics/metrics.service";
 import { SOCKET_IO_MAX_MESSAGE_SIZE } from "../socket-io.constants";
 
 // A task sent to a judge client connection, under the lease with this fence.
@@ -157,6 +158,8 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
 
   private leaseRenewalTimer: ReturnType<typeof setInterval>;
 
+  @Optional() @Inject(MetricsService) private readonly metricsService: MetricsService;
+
   constructor(
     private readonly judgeClientService: JudgeClientService,
     private readonly judgeQueueService: JudgeQueueService,
@@ -180,6 +183,12 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
   }
 
   onModuleInit(): void {
+    // Judge clients connected to this process
+    this.metricsService?.gauge("libreoj_judge_clients", ["state"], gauge => {
+      const states = [...this.mapSessionIdToJudgeClient.values()];
+      gauge.set({ state: "accepting" }, states.filter(state => !state.judgeClient.draining).length);
+      gauge.set({ state: "draining" }, states.filter(state => state.judgeClient.draining).length);
+    });
     this.leaseRenewalTimer = setInterval(() => {
       this.renewLeases().catch(e => logger.error(`Failed to renew judge task leases: ${e}`));
     }, LEASE_RENEW_INTERVAL);

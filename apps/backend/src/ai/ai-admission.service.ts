@@ -52,6 +52,11 @@ export class AiAdmissionService {
 
   constructor(@InjectDataSource() private readonly db: DataSource, private readonly policies: AiPolicyService) {}
 
+  /** Provider requests running and waiting for a slot in this process. */
+  load(): { running: number; waiting: number } {
+    return { running: this.running, waiting: this.waiting.size };
+  }
+
   async admit(
     ownerId: number,
     jobId: string | undefined,

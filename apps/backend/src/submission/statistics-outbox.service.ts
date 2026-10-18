@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from "@nestjs/common";
+import { Inject, Injectable, OnModuleInit, OnModuleDestroy, Optional } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 
 import { DataSource, EntityManager, IsNull, LessThan } from "typeorm";
@@ -12,6 +12,7 @@ import { logger } from "../logger";
 import { ProblemEntity } from "../problem/problem.entity";
 import { UserEntity } from "../user/user.entity";
 import { RedisService } from "../redis/redis.service";
+import { MetricsService, sharedReading } from "../metrics/metrics.service";
 
 // Records left by a process that stopped before applying them are applied by the others after this long
 const REPLAY_INTERVAL = 60 * 1000;
@@ -31,6 +32,8 @@ export type CountedSubmission = Pick<SubmissionEntity, "problemId" | "submitterI
 export class StatisticsOutboxService implements OnModuleInit, OnModuleDestroy {
   private replayTimer: ReturnType<typeof setInterval>;
 
+  @Optional() @Inject(MetricsService) private readonly metricsService: MetricsService;
+
   constructor(
     @InjectDataSource()
     private readonly connection: DataSource,
@@ -38,6 +41,7 @@ export class StatisticsOutboxService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
+    this.registerMetrics();
     this.replayTimer = setInterval(() => {
       this.replayTurn().catch(e => logger.error(`Failed to apply recorded count changes: ${e}`));
     }, REPLAY_INTERVAL);
@@ -46,6 +50,24 @@ export class StatisticsOutboxService implements OnModuleInit, OnModuleDestroy {
 
   onModuleDestroy(): void {
     clearInterval(this.replayTimer);
+  }
+
+  /** Changes not applied yet, and how old the oldest is: counts lag behind submissions by this much. */
+  private registerMetrics(): void {
+    if (!this.metricsService) return;
+    const pending = sharedReading(async () => {
+      const [row]: { pending: string | number; oldestSeconds: string | number | null }[] = await this.connection.query(
+        `SELECT COUNT(*) AS pending, TIMESTAMPDIFF(MICROSECOND, MIN(createdAt), NOW(3)) / 1000000 AS oldestSeconds
+         FROM statistics_outbox`
+      );
+      return { pending: Number(row?.pending ?? 0), oldestSeconds: Number(row?.oldestSeconds ?? 0) };
+    });
+    this.metricsService.gauge("libreoj_statistics_outbox_pending", [], async gauge =>
+      gauge.set((await pending()).pending)
+    );
+    this.metricsService.gauge("libreoj_statistics_outbox_oldest_seconds", [], async gauge =>
+      gauge.set((await pending()).oldestSeconds)
+    );
   }
 
   /**
@@ -130,10 +152,7 @@ export class StatisticsOutboxService implements OnModuleInit, OnModuleDestroy {
   private async replayTurn(): Promise<void> {
     let turn = true;
     try {
-      turn =
-        (await this.redisService
-          .getClient()
-          .set(REDIS_KEY_REPLAY_TURN, String(process.pid), "PX", REPLAY_INTERVAL - 1000, "NX")) === "OK";
+      turn = await this.redisService.takeTurn(REDIS_KEY_REPLAY_TURN, REPLAY_INTERVAL - 1000);
     } catch {
       /* replay anyway */
     }

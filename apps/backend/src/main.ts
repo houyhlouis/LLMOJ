@@ -22,6 +22,7 @@ import { ConfigService } from "./config/config.service";
 import { MigrationService } from "./migration/migration.service";
 import { ErrorFilter } from "./error.filter";
 import { ClusterService } from "./cluster/cluster.service";
+import { RequestLogger } from "./common/request-logger";
 
 // eslint-disable-next-line no-extend-native
 String.prototype.format = function format(...args) {
@@ -48,7 +49,9 @@ async function initialize(): Promise<[packageInfo: any, configService: ConfigSer
 
   // Create nestjs app
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
-    ...(process.env.NODE_ENV === "production" ? { logger: ["warn", "error"] } : {})
+    logger: new RequestLogger(undefined, {
+      ...(process.env.NODE_ENV === "production" ? { logLevels: ["warn", "error"] } : {})
+    })
   });
   const configService = app.get(ConfigService);
   app.setGlobalPrefix("api");

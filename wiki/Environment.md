@@ -84,6 +84,8 @@ Variables used only by tests are listed in the [development guide](../README-DEV
 | `deploy/sandbox/self-test.sh` | Judge a few fixed programs with the installed judge to check the sandbox: `--prefix`, `--only cpp,java,…`. The upgrader runs it when the judge changes. |
 | `deploy/sandbox/verify-installed.mjs` | Run real sandbox checks against the installation (`--root`, default `/opt/LLMOJ`) |
 | `deploy/backup.sh` | Back up the site (`--prefix`); see [Operations](Operations-Configuration.md#backups) |
+| `deploy/verify-backup.sh`, `deploy/verify-backup.zh-CN.sh` | Check that a backup can be restored, without touching the site: `BACKUP`, `--prefix`, `--work-dir` (default `/var/tmp`), `--keep`. See [Operations](Operations-Configuration.md#verifying-a-backup). |
+| `deploy/doctor.sh`, `deploy/doctor.zh-CN.sh` | Read-only health report of the installation: `--prefix`, `--json`. See [Operations](Operations-Configuration.md#doctor). |
 | `deploy/bootstrap-admin.mjs` | Create the first administrator: `--root`, `--config`, `--email` (default `admin@localhost.invalid`), `--show-credentials`. It isn't a way to reset a password. |
 | `deploy/bootstrap-services.mjs` | Used by the installer: `--root` and `--phase storage\|judge\|verify-judge` create the storage bucket, register the local judge, or check its connection |
 | `deploy/initialize-mariadb.py` | Used by the installer to create the database (`--root`); see [Installation](Installation.md#mariadb-initialization-failures-and-safe-retries) |

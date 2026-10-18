@@ -2,7 +2,7 @@
 
 [简体中文](Operations-Configuration.zh-CN.md) | English | [Wiki home](Home.en.md) | [Configuration overview](Configuration.md)
 
-This page lists the settings the installer writes for Nginx, Redis, MariaDB, MinIO and systemd, explains which settings must change together, and covers statistics and backups. `<root>` is the installation directory, `/opt/LLMOJ` by default. For settings not listed here, see the documentation of that program's version.
+This page lists the settings the installer writes for Nginx, Redis, MariaDB, MinIO and systemd, explains which settings must change together, and covers health checks, statistics and backups. `<root>` is the installation directory, `/opt/LLMOJ` by default. For settings not listed here, see the documentation of that program's version.
 
 Before changing anything, back up the file and note the original values. Plan a quiet period for database or storage changes.
 
@@ -79,11 +79,67 @@ The installer also sets `vm.overcommit_memory=1` for Redis in `/etc/sysctl.d/99-
 
 ### Server errors
 
-When a page reports a server error, the message ends with an error ID. The backend's log has the details under the same ID, in brackets at the start of the line. For AI pages, the log names only the kind of error, never its details. Every API response also carries its ID in the `X-Request-Id` header.
+When a page reports a server error, the message ends with an error ID. The backend's log has the details under the same ID, in brackets at the start of the line. For AI pages, the log names only the kind of error, never its details. Every API response also carries its ID in the `X-Request-Id` header, and every other line the backend logs while answering that request is marked `[request <ID>]`, so one search finds them all.
 
 ```bash
 sudo journalctl -u libreoj-backend --since today | grep 'ERROR-ID-FROM-THE-MESSAGE'
 ```
+
+## Health checks
+
+### Doctor
+
+```bash
+sudo bash /opt/LLMOJ/deploy/doctor.sh
+```
+
+`doctor.zh-CN.sh` prints the same in Chinese. Doctor only reads: it starts, stops and writes nothing, and prints no password, key or token. It checks:
+
+| Area | What it checks |
+| --- | --- |
+| Installation | The version and the last upgrade; an upgrade that stopped halfway |
+| Services | Each service runs and hasn't been restarting after failures; `libreoj.target` starts at boot |
+| Backend | The backend answers and reaches the database, Redis and object storage; Nginx passes requests to it; HTTPS certificates set in `nginx.conf` are valid for at least 14 more days |
+| Redis | It saves its data to disk; how full it is (writes fail when it's full); that it never evicts keys; its number of connections |
+| Database, object storage | MariaDB and MinIO answer; the size of the site's data |
+| Judging on this server | The sandbox image is the configured one; the judge can limit CPU, memory and processes; its workspaces are mounted; the AI runner socket exists |
+| Work queues | Connected judge machines, waiting submissions and how long the oldest has waited, tasks that lost their judge machine, failed tasks, how far the problem and user counts are behind, waiting AI jobs. Needs the backend's [metrics](#metrics), which the installer turns on. |
+| This server | Free disk space and file entries, available memory, whether the clock is synchronized |
+| Files and permissions | Configuration, keys, data directories and backups have the owners the installer gives them, and other users can't read them |
+| Backups | The age of the latest `backup.sh` backup; the space upgrade backups use |
+
+Each line is **OK**, **INFO**, **WARN** or **FAIL**, and the command exits with 1 if anything failed, otherwise 0. `--json` prints the result as JSON, for monitoring; `--prefix` checks another installation directory. Doctor doesn't run programs in the sandbox, because that competes with judging: for an in-depth check of the sandbox and every language, run `sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh`.
+
+### Liveness and readiness
+
+The backend answers two addresses without a session, also on sites that visitors can't view:
+
+| Address | Answer |
+| --- | --- |
+| `/api/health/live` | `200` and `{"status":"ok"}` while the process answers requests |
+| `/api/health/ready` | `200` when the database, Redis and object storage each answer within 2 seconds; otherwise `503`, with `"failed"` for each one that didn't. Probes within one second share a check. |
+
+The installer and the upgrader wait for `/api/health/ready` before they open the site. A monitor can use `http://<your site>/api/health/ready` through Nginx. The answers name only which dependency failed; the backend logs the reason, at most once a minute.
+
+### Metrics
+
+With `metrics` set in `backend.yaml` (the installer sets `127.0.0.1:2020`), `http://127.0.0.1:2020/metrics` serves Prometheus metrics. Besides request times and Node.js figures, these describe the work queues. They're read from the database when the metrics are read:
+
+| Metric | Meaning | Look into it when |
+| --- | --- | --- |
+| `libreoj_judge_clients{state}` | Judge machines connected to this backend process, `accepting` or `draining` | none is accepting |
+| `libreoj_judge_jobs{state}` | Judging tasks waiting (`Queued`) or being judged (`Leased`) | |
+| `libreoj_judge_oldest_queued_job_seconds` | How long the oldest waiting task has waited | it keeps growing |
+| `libreoj_judge_expired_leases` | Tasks whose judge machine stopped answering and that aren't queued again yet | it stays above 0 for more than a minute |
+| `libreoj_judge_failed_jobs_last_day` | Tasks that failed in the last 24 hours | above 0: see **Judge queue** on the **Judge Machine** page |
+| `libreoj_statistics_outbox_pending`, `libreoj_statistics_outbox_oldest_seconds` | [Count changes](#submission-and-accepted-counts) not applied yet, and the age of the oldest | the age passes a few minutes |
+| `libreoj_ai_jobs{state}`, `libreoj_ai_oldest_queued_job_seconds` | AI jobs `queued` and `running`, and how long the oldest has waited | |
+| `libreoj_ai_provider_requests{state}` | Model requests `running`, and `waiting` for a free slot under the AI limits in **Site management** | many wait for long |
+| `libreoj_ai_paused` | 1 while AI is paused | |
+| `libreoj_ai_worker_errors{stage}` | Errors of the AI job scheduler (`worker`) and internal errors of jobs (`job`) since the backend started | it grows: see the backend log |
+| `libreoj_error_count{error}` | Server errors by type, including lost database or Redis connections | it grows |
+
+A value that couldn't be read is `NaN`, with the reason in the backend's log, never an old number. No metric carries a user, source code or key.
 
 ## Settings that change together
 
@@ -142,4 +198,64 @@ It backs up `/opt/LLMOJ`, or the directory given with `--prefix` (or `HYHOJ_ROOT
 
 The backup doesn't include the sandbox image, the installed runtimes, systemd drop-ins in `/etc/systemd/system`, unpublished AI results in `data/ai-generated` or remote judges. Keep copies of anything else you need, store backups on another machine, and practise restoring one.
 
-Sources: [configure-local.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-local.py), [nginx.conf.example](https://github.com/houyhlouis/LLMOJ/blob/main/config/nginx.conf.example), [configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-judge.py), [backup.sh](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/backup.sh).
+A backup holds every secret of the site. To keep a copy elsewhere encrypted, for example with GnuPG and a key whose private part isn't on the server: `gpg --encrypt --recipient YOUR-KEY-ID libreoj-<UTC time>.tar.gz`, then copy the `.gpg` file and the `.sha256` file.
+
+### Verifying a backup
+
+```bash
+sudo bash /opt/LLMOJ/deploy/verify-backup.sh /opt/LLMOJ/backups/libreoj-<UTC time>.tar.gz
+```
+
+`verify-backup.zh-CN.sh` prints the same in Chinese. It checks that the backup can be restored, while the site keeps running:
+
+1. the archive matches its `.sha256` file and holds only what `backup.sh` writes: no paths or links that leave it, no device files;
+2. it unpacks the archive into a private temporary directory in `/var/tmp`. Use `--work-dir` for another directory with room for the unpacked backup; it must be under `/var/tmp` or `/tmp`, the only places outside its own where AppArmor lets MariaDB work;
+3. it starts a separate MariaDB on that copy of the database, without network access and on its own socket, and runs `CHECK TABLE` on every table;
+4. it checks that each file the database lists is in the backup's object storage;
+5. it tries `data/ai/master.key` and `data/ai/two-factor.key` on the saved AI settings and authenticator secrets they protect;
+6. it stops that MariaDB and deletes the copy. `--keep` keeps the copy for inspection; delete it afterwards, because it holds secrets.
+
+It prints counts, never contents or secrets, and exits with 1 if the backup can't be restored as it is. While it runs, it needs disk space for the unpacked copy and some memory for the temporary MariaDB, which gets a 64 MB buffer pool. It can't show that a restored site judges submissions: for that, practise a restore on a spare machine.
+
+### Restoring a backup
+
+Restore into an installation of the same LLMOJ version, with the same role (site and judge, or site only) and installation directory. On a new machine, install that version first. These steps replace the site's configuration and data with the backup's; the current ones are moved aside, not deleted. The site is down while you do this:
+
+```bash
+sudo bash /opt/LLMOJ/deploy/verify-backup.sh /path/to/libreoj-<UTC time>.tar.gz
+sudo systemctl stop libreoj.target
+sudo systemctl stop libreoj-nginx libreoj-judge libreoj-backend libreoj-minio libreoj-redis libreoj-mariadb
+findmnt -rn -o TARGET | grep '^/opt/LLMOJ/data/'
+```
+
+On a site-only installation, leave `libreoj-judge` out. Continue only when the last command prints nothing: the judge's workspaces must be unmounted. If it lists some, stop them with `sudo systemctl stop 'opt-LLMOJ-data-judge-work-*.mount'` and check again.
+
+```bash
+cd /opt/LLMOJ
+sudo mv config config.before-restore
+sudo mv data data.before-restore
+sudo tar --numeric-owner -xzf /path/to/libreoj-<UTC time>.tar.gz config data
+for name in judge tmp nginx ai-generated; do if [ -e "data.before-restore/$name" ]; then sudo mv "data.before-restore/$name" data/; fi; done
+```
+
+The last line brings back what backups leave out: the judge's directories, temporary files and Nginx's working directories. On another machine, the system users may have other IDs, so give the restored files their owners:
+
+```bash
+sudo chown -R mysql:mysql data/mariadb data/mariadb-init
+sudo chown -R redis:redis data/redis
+sudo chown -R libreoj:libreoj data/minio data/ai data/ai-sample-inputs data/backend-archives
+sudo chgrp libreoj config/backend.yaml
+sudo chgrp mysql config/mariadb.cnf
+sudo chgrp redis config/redis.conf
+```
+
+Then start the site and check it:
+
+```bash
+sudo systemctl start libreoj.target
+sudo bash /opt/LLMOJ/deploy/doctor.sh
+```
+
+Sign in, upload and download a small file, and judge a submission. Sessions from the time of the backup still work; to sign everyone out, put a new random `security.sessionSecret` (for example from `openssl rand -hex 32`) in `config/backend.yaml` before starting. If the new machine has different CPUs, fit the judge to them with the [resize command](Judge-Configuration.md). Once the site works, delete `config.before-restore` and `data.before-restore` yourself.
+
+Sources: [configure-local.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-local.py), [nginx.conf.example](https://github.com/houyhlouis/LLMOJ/blob/main/config/nginx.conf.example), [configure-judge.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/configure-judge.py), [backup.sh](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/backup.sh), [doctor.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/doctor.py), [verify-backup.py](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/verify-backup.py).

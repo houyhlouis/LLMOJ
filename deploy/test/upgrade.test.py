@@ -284,6 +284,9 @@ class UpgradeTests(unittest.TestCase):
         self.assertTrue(all(self.host.states.values())); self.assertEqual(self.up.guard.read_text(),u.GUARD)
         self.assertEqual(stat.S_IMODE(self.up.backup.stat().st_mode),0o700)
         self.assertEqual(stat.S_IMODE((self.up.backup/'database.sql').stat().st_mode),0o600)
+        # The build's copy of the dependencies is gone; what a rollback needs stays
+        self.assertFalse((self.up.stage/'node_modules').exists()); self.assertTrue((self.root/'node_modules').is_dir())
+        self.assertTrue((self.up.backup/'previous/apps').is_dir())
     def test_web_inactive_backend_and_nginx_remain_stopped(self):
         for name in ('install-state.json','install-complete.json'):
             p=self.root/'config'/name; value=json.loads(p.read_text()); value['role']='web'; p.write_text(json.dumps(value))
@@ -533,6 +536,47 @@ class UpgradeTests(unittest.TestCase):
             output=self.base/'extracted'
             with self.assertRaises(u.UpgradeError): u.extract_archive(data.getvalue(),output)
             self.assertFalse(output.exists())
+
+
+class HealthTests(unittest.TestCase):
+    """The backend counts as started once /api/health/ready reports ready; one without that endpoint (a rollback to an
+    older release) once its API description is served."""
+    class Response(io.BytesIO):
+        def __init__(self, status, value):
+            super().__init__(json.dumps(value).encode()); self.status=status
+        def __enter__(self): return self
+        def __exit__(self, *args): self.close()
+
+    def run_health(self, answers):
+        up=u.Upgrade.__new__(u.Upgrade); up.port=2002; urls=[]
+        def urlopen(url, timeout):
+            urls.append(url.removeprefix('http://127.0.0.1:2002'))
+            answer=answers.pop(0) if answers else ConnectionRefusedError()
+            if isinstance(answer, BaseException): raise answer
+            return self.Response(*answer)
+        with patch.object(u.urllib.request,'urlopen',urlopen), patch.object(u.time,'sleep'):
+            try:
+                up.health(); return urls, None
+            except u.UpgradeError as error:
+                return urls, error
+
+    @staticmethod
+    def http_error(code):
+        return u.urllib.error.HTTPError('http://127.0.0.1:2002/api/health/ready', code, 'status', {}, None)
+
+    def test_ready_backend(self):
+        urls, error=self.run_health([ConnectionRefusedError(), self.http_error(503), (200, {'status': 'ready'})])
+        self.assertIsNone(error); self.assertEqual(urls, ['/api/health/ready']*3)
+
+    def test_backend_that_never_gets_ready_fails(self):
+        urls, error=self.run_health([self.http_error(503)]*60)
+        self.assertIsNotNone(error); self.assertEqual(len(urls), 60); self.assertNotIn('/docs-json', urls)
+
+    def test_older_backend_without_readiness_is_checked_by_its_api_description(self):
+        urls, error=self.run_health([self.http_error(404), ConnectionRefusedError(), (200, {'openapi': '3.0.0', 'paths': {'/api/x': {}}})])
+        self.assertIsNone(error); self.assertEqual(urls, ['/api/health/ready', '/docs-json', '/docs-json'])
+        urls, error=self.run_health([self.http_error(404)]+[(200, {'openapi': '3.0.0', 'paths': {}})]*59)
+        self.assertIsNotNone(error)
 
 
 if __name__=='__main__': unittest.main(verbosity=2)

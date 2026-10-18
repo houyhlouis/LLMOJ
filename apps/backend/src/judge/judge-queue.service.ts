@@ -15,7 +15,7 @@ import { JudgeJobAttemptEntity, JudgeJobAttemptOutcome, JudgeJobEntity, JudgeJob
 
 import { logger } from "../logger";
 import { RedisService } from "../redis/redis.service";
-import { MetricsService } from "../metrics/metrics.service";
+import { MetricsService, sharedReading } from "../metrics/metrics.service";
 
 // Smaller means higher priority
 // With the same priority value, the smaller ID means higher priority
@@ -171,7 +171,48 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
     ["type", "priority_type"]
   );
 
-  private readonly metricJudgeJobs = this.metricsService.gauge("libreoj_judge_jobs", ["state"]);
+  // Read when the metrics are read, by one query for all of them
+  private readonly queueReading = sharedReading(async () => {
+    const [row]: Record<string, string | number | null>[] = await this.connection.query(
+      `SELECT SUM(state = ?) AS queued, SUM(state = ?) AS leased, SUM(state = ? AND leaseUntil < NOW(3)) AS expiredLeases,
+         TIMESTAMPDIFF(MICROSECOND, MIN(IF(state = ?, createdAt, NULL)), NOW(3)) / 1000000 AS oldestQueuedSeconds,
+         SUM(state = ? AND finishedAt >= NOW(3) - INTERVAL 1 DAY) AS failedLastDay
+       FROM judge_job WHERE state IN (?, ?, ?)`,
+      [
+        JudgeJobState.Queued,
+        JudgeJobState.Leased,
+        JudgeJobState.Leased,
+        JudgeJobState.Queued,
+        JudgeJobState.Failed,
+        JudgeJobState.Queued,
+        JudgeJobState.Leased,
+        JudgeJobState.Failed
+      ]
+    );
+    return Object.fromEntries(Object.entries(row ?? {}).map(([key, value]) => [key, Number(value ?? 0)]));
+  });
+
+  private readonly metricJudgeJobs = this.metricsService.gauge("libreoj_judge_jobs", ["state"], async gauge => {
+    const reading = await this.queueReading();
+    gauge.set({ state: JudgeJobState.Queued }, reading.queued);
+    gauge.set({ state: JudgeJobState.Leased }, reading.leased);
+  });
+
+  // How long the oldest waiting job has waited (0 when none waits)
+  private readonly metricOldestQueuedJob = this.metricsService.gauge(
+    "libreoj_judge_oldest_queued_job_seconds",
+    [],
+    async gauge => gauge.set((await this.queueReading()).oldestQueuedSeconds)
+  );
+
+  // Leases that ran out but weren't recovered yet; recovery runs every 15 seconds, so this should stay near 0
+  private readonly metricExpiredLeases = this.metricsService.gauge("libreoj_judge_expired_leases", [], async gauge =>
+    gauge.set((await this.queueReading()).expiredLeases)
+  );
+
+  private readonly metricFailedJobs = this.metricsService.gauge("libreoj_judge_failed_jobs_last_day", [], async gauge =>
+    gauge.set((await this.queueReading()).failedLastDay)
+  );
 
   async onModuleInit(): Promise<void> {
     this.redisForSubscribe.on("message", () => this.jobsAvailable.emit("available"));
@@ -619,7 +660,6 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
       await this.recoverActiveTasks(force);
       await this.deleteOldJobs();
     }
-    await this.updateMetrics();
   }
 
   /**
@@ -676,15 +716,6 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
     await this.connection.query(
       `DELETE FROM judge_job_attempt WHERE startedAt < NOW(3) - INTERVAL ${FINISHED_JOB_RETENTION_DAYS} DAY LIMIT 1000`
     );
-  }
-
-  private async updateMetrics(): Promise<void> {
-    const counts: { state: JudgeJobState; count: number }[] = await this.connection.query(
-      "SELECT state, COUNT(*) AS count FROM judge_job WHERE state IN (?, ?) GROUP BY state",
-      [JudgeJobState.Queued, JudgeJobState.Leased]
-    );
-    for (const state of [JudgeJobState.Queued, JudgeJobState.Leased])
-      this.metricJudgeJobs.set({ state }, Number(counts.find(row => row.state === state)?.count ?? 0));
   }
 
   /** Moves the tasks of the old Redis queue (a backend upgraded while tasks were queued) to the durable queue. */

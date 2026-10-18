@@ -12,6 +12,8 @@ import { isAiRequest, AI_ERROR_REPORT_MESSAGE } from "./ai/ai-security";
 
 const logger = new Logger("ErrorFilter");
 
+const CONNECTION_ERROR_LOG_INTERVAL = 60 * 1000;
+
 @Catch()
 export class ErrorFilter implements ExceptionFilter {
   constructor(
@@ -20,6 +22,8 @@ export class ErrorFilter implements ExceptionFilter {
   ) {}
 
   private readonly metricErrorCount = this.metricsService.counter("libreoj_error_count", ["error"]);
+
+  private connectionErrorLoggedAt = -Infinity;
 
   catch(error: Error, host: ArgumentsHost) {
     const contextType = host.getType();
@@ -36,7 +40,17 @@ export class ErrorFilter implements ExceptionFilter {
 
     if (!(error instanceof HttpException)) {
       if (error instanceof Error) {
-        if (this.isignoredError(error)) return;
+        // Lost or refused connections (a dependency restarting or overloaded) are counted and logged at most once a
+        // minute, without event reports.
+        if (this.isignoredError(error)) {
+          this.metricErrorCount.inc({ error: error.constructor.name });
+          if (Date.now() - this.connectionErrorLoggedAt >= CONNECTION_ERROR_LOG_INTERVAL) {
+            this.connectionErrorLoggedAt = Date.now();
+            const description = isAiRequest(request?.originalUrl) ? error.constructor.name : error.message;
+            logger.warn(`[${requestId}] Connection error, not logged again for a minute: ${description}`);
+          }
+          return;
+        }
 
         // The error's class (never its message) is safe to log for AI requests.
         if (isAiRequest(request?.originalUrl))

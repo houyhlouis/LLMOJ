@@ -21,6 +21,8 @@ import { ConfigService } from "../config/config.service";
 
 // 10 minutes upload expire time
 const FILE_UPLOAD_EXPIRE_TIME = 10 * 60;
+// Stored objects checked by one query of maintenance
+const MAINTENANCE_BATCH_SIZE = 500;
 // Default download links last 20 hours; private team files explicitly request 60 seconds.
 const FILE_DOWNLOAD_EXPIRE_TIME = 20 * 60 * 60;
 // Judge clients download a task's files as soon as they receive it; allow for slow links to large test data.
@@ -214,6 +216,11 @@ export class FileService implements OnModuleInit {
       throw new Error(
         `MinIO bucket ${this.bucket} doesn't exist. Please check your configuration file and MinIO server.`
       );
+  }
+
+  /** Whether object storage answers and has the site's bucket. */
+  async storageAvailable(): Promise<boolean> {
+    return await this.minioClient.bucketExists(this.bucket);
   }
 
   /**
@@ -425,33 +432,48 @@ export class FileService implements OnModuleInit {
     else return url;
   }
 
-  async runMaintainceTasks(): Promise<void> {
+  /**
+   * Deletes stored objects that no file refers to, except recent uploads and the parts of active team uploads.
+   * Objects are checked in batches, one batch at a time with one query, so a large bucket never means many
+   * concurrent queries.
+   *
+   * @return How many objects were checked and how many deleted.
+   */
+  async runMaintainceTasks(batchSize = MAINTENANCE_BATCH_SIZE): Promise<{ checked: number; deleted: number }> {
     const activeUploads = await this.fileRepository.manager.findBy(TeamFileUploadEntity, {
       expiresAt: MoreThan(new Date())
     });
     const pendingTeamObjects = new Set(activeUploads.flatMap(upload => [upload.uuid, ...upload.parts]));
-    // Delete unused files
-    const stream = this.minioClient.listObjectsV2(this.bucket);
-    const deleteList: string[] = [];
-    await new Promise((resolve, reject) => {
-      const promises: Promise<void>[] = [];
-      stream.on("data", object => {
-        promises.push(
-          (async () => {
-            const uuid = object.name;
-            // Keep active team chunks and recent signed uploads while their
-            // policies can still be used. Expired/cancelled chunks are collected.
-            if (pendingTeamObjects.has(uuid) || +object.lastModified > Date.now() - FILE_UPLOAD_EXPIRE_TIME * 1000)
-              return;
-            if (!(await this.fileRepository.countBy({ uuid }))) {
-              deleteList.push(uuid);
-            }
-          })()
-        );
-      });
-      stream.on("end", () => Promise.all(promises).then(resolve).catch(reject));
-      stream.on("error", reject);
-    });
-    await this.minioClient.removeObjects(this.bucket, deleteList);
+    let checked = 0;
+    let deleted = 0;
+    let batch: string[] = [];
+    const deleteUnused = async () => {
+      const names = batch;
+      batch = [];
+      if (!names.length) return;
+      const used = new Set(
+        (await this.fileRepository.find({ select: ["uuid"], where: { uuid: In(names) } })).map(file => file.uuid)
+      );
+      const unused = names.filter(name => !used.has(name));
+      if (unused.length) await this.minioClient.removeObjects(this.bucket, unused);
+      deleted += unused.length;
+    };
+    // The listing waits while a batch is checked.
+    for await (const object of this.minioClient.listObjectsV2(this.bucket) as AsyncIterable<{
+      name?: string;
+      lastModified: Date;
+    }>) {
+      if (!object.name) continue;
+      checked++;
+      // Keep active team chunks and recent signed uploads while their policies can still be used. Expired or
+      // cancelled chunks are collected.
+      if (pendingTeamObjects.has(object.name) || +object.lastModified > Date.now() - FILE_UPLOAD_EXPIRE_TIME * 1000)
+        continue;
+      batch.push(object.name);
+      // eslint-disable-next-line no-await-in-loop -- One batch at a time
+      if (batch.length >= batchSize) await deleteUnused();
+    }
+    await deleteUnused();
+    return { checked, deleted };
   }
 }

@@ -84,6 +84,8 @@ AI 相关变量 `HYHOJ_AI_STATE_DIR`、`HYHOJ_AI_GENERATED_DIR`、`HYHOJ_AI_SAMP
 | `deploy/sandbox/self-test.sh` | 用已安装的评测机评测几份固定程序以检查沙箱：`--prefix`、`--only cpp,java,…`。评测机有变化时升级器会运行它 |
 | `deploy/sandbox/verify-installed.mjs` | 对安装（`--root`，默认 `/opt/LLMOJ`）运行真实的沙箱检查 |
 | `deploy/backup.sh` | 备份站点（`--prefix`），见[安装后运维](Operations-Configuration.zh-CN.md#备份) |
+| `deploy/verify-backup.sh`、`deploy/verify-backup.zh-CN.sh` | 检查备份能否恢复，不影响网站：`BACKUP`、`--prefix`、`--work-dir`（默认 `/var/tmp`）、`--keep`。见[安装后运维](Operations-Configuration.zh-CN.md#检查备份) |
+| `deploy/doctor.sh`、`deploy/doctor.zh-CN.sh` | 只读检查安装的健康状况：`--prefix`、`--json`。见[安装后运维](Operations-Configuration.zh-CN.md#运行-doctor) |
 | `deploy/bootstrap-admin.mjs` | 创建第一个管理员：`--root`、`--config`、`--email`（默认 `admin@localhost.invalid`）、`--show-credentials`。它不能用来重置密码 |
 | `deploy/bootstrap-services.mjs` | 由安装器使用：`--root` 和 `--phase storage\|judge\|verify-judge` 分别创建存储桶、注册本机评测机或检查其连接 |
 | `deploy/initialize-mariadb.py` | 由安装器用于创建数据库（`--root`），见[安装](Installation.zh-CN.md#mariadb-初始化失败与安全重试) |

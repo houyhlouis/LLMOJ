@@ -159,7 +159,8 @@ test("object maintenance keeps active team chunks and recent uploads while colle
     bucket: "test",
     fileRepository: {
       manager: { findBy: async () => [{ uuid: "active-final", parts: ["active-chunk"] }] },
-      countBy: async ({ uuid }) => (uuid === "registered" ? 1 : 0)
+      // One query per batch of object names (TypeORM's In() keeps them in `value`)
+      find: async ({ where }) => where.uuid.value.filter(uuid => uuid === "registered").map(uuid => ({ uuid }))
     },
     minioClient: {
       listObjectsV2: () =>

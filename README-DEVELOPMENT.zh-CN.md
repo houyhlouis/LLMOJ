@@ -66,6 +66,8 @@ node --test --test-concurrency=1 apps/backend/src/discussion/*.test.cjs apps/bac
   apps/backend/src/judge/*.test.cjs apps/backend/src/auth/*.test.cjs apps/backend/src/auth/two-factor/*.test.cjs \
   apps/backend/src/submission/*.test.cjs apps/backend/src/problem/*.test.cjs apps/backend/src/file/*.test.cjs \
   apps/backend/src/database/database-providers.test.cjs
+node --test --test-concurrency=1 apps/backend/src/health/*.test.cjs apps/backend/src/common/*.test.cjs \
+  apps/backend/src/metrics/*.test.cjs apps/backend/src/redis/*.test.cjs
 
 # 评测机
 node --test apps/judge/src/aiQuality.test.cjs apps/judge/src/task/hack/hack.test.cjs \
@@ -84,6 +86,9 @@ node --test deploy/fake-migration.test.cjs
 # 安装器、升级器和 Wiki
 python3 deploy/test/install-flow.test.py
 python3 deploy/test/backup.test.py
+python3 deploy/test/doctor.test.py
+python3 deploy/test/verify-backup.test.py
+node --test deploy/test/backup-keys.test.mjs
 sudo python3 deploy/test/community-upgrade.test.py
 sudo python3 deploy/test/community-runtime-upgrade.test.py
 python3 deploy/test/wiki-export.test.py
@@ -100,6 +105,7 @@ sudo python3 deploy/test/resize-judge.test.py
 sudo python3 deploy/test/admin-output.test.py
 sudo python3 deploy/test/redis-host.test.py
 sudo python3 deploy/test/sandbox-staging.test.py
+sudo python3 deploy/test/verify-backup.test.py     # 全部检查需要 MariaDB 服务器、Node.js 和 python3-cryptography
 python3 deploy/test/judge-capacity.test.py
 python3 deploy/test/judge-prompt.test.py
 python3 deploy/test/github-entry.test.py
@@ -130,8 +136,9 @@ node --test deploy/test/bootstrap-admin.test.mjs
 | `LLMOJ_TWO_FACTOR_TEST_DB_CONFIG` | `auth/two-factor/two-factor.mariadb.test.cjs` |
 | `LLMOJ_JUDGE_QUEUE_TEST_DB_CONFIG` | `judge/judge-queue.test.cjs` |
 | `LLMOJ_DATA_VERSION_TEST_DB_CONFIG` | `submission/submission-data-version.mariadb.test.cjs` |
-| `LLMOJ_AI_BUDGET_TEST_DB_CONFIG` | `ai/ai-budget.mariadb.test.cjs` (empty database) |
-| `LLMOJ_ACCESS_MATRIX_TEST_DB_CONFIG` | `access/permission-matrix.mariadb.test.cjs` (empty database) |
+| `LLMOJ_AI_BUDGET_TEST_DB_CONFIG` | `ai/ai-budget.mariadb.test.cjs`（空数据库） |
+| `LLMOJ_ACCESS_MATRIX_TEST_DB_CONFIG` | `access/permission-matrix.mariadb.test.cjs`（空数据库） |
+| `LLMOJ_OPERATIONS_TEST_DB_CONFIG` | `metrics/operational-metrics.mariadb.test.cjs`（会删除其中所有数据表） |
 | `LLMOJ_SCHEMA_TEST_DB_CONFIG` | `deploy/test/initialize-schema.test.mjs` |
 | `LLMOJ_REGISTRATION_TEST_DATABASE` | `auth/registration-review.mariadb.test.cjs`、`site-management/registration-settings.mariadb.test.cjs` |
 

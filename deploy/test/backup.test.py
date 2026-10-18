@@ -78,6 +78,7 @@ tar() { if [[ "$FLOW_FAIL" == tar ]]; then return 2; fi; command tar "$@"; }
             f"systemctl start {services}",
         ])
         self.assertEqual(len(backups), 2)
+        self.assertIn('/deploy/verify-backup.sh ', result.stdout)
         self.assertTrue(backups[0].endswith(".tar.gz") and backups[1].endswith(".tar.gz.sha256"))
 
     def test_a_stopped_instance_stays_stopped(self):

@@ -55,3 +55,4 @@ tar --numeric-owner -czf "$libreoj_backup_file.partial" \
 mv "$libreoj_backup_file.partial" "$libreoj_backup_file"
 sha256sum "$libreoj_backup_file" > "$libreoj_backup_file.sha256"
 printf 'Backup: %s\n' "$libreoj_backup_file"
+printf 'To check that it can be restored: sudo bash %s/deploy/verify-backup.sh %s\n' "$libreoj_backup_root" "$libreoj_backup_file"

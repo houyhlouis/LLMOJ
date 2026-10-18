@@ -15,11 +15,13 @@ import { UserModule } from "../user/user.module";
 import { FileModule } from "../file/file.module";
 import { DiscussionModule } from "../discussion/discussion.module";
 import { SettingsModule } from "../settings/settings.module";
+import { MetricsModule } from "../metrics/metrics.module";
 
 @Module({
   imports: [
     AuditModule,
     SettingsModule,
+    MetricsModule,
     TypeOrmModule.forFeature([
       AiConfigurationEntity,
       AiJobEntity,

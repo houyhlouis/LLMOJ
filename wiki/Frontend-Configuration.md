@@ -49,7 +49,7 @@ Clicking an entry in the submission or hack list opens a preview window, 1100 ×
 
 ## Generating API types for development
 
-`packages/frontend/scripts/generate-api.js` reads the API description from a backend running at `http://127.0.0.1:2002/docs-json`. To use another backend, pass the full address of its `docs-json` as an argument.
+`packages/frontend/scripts/generate-api.js --from-backend-build` regenerates the frontend's API types from the compiled backend (`apps/backend/dist`, after `nest build`), without running it. Without that option, it reads the API description from a backend running at `http://127.0.0.1:2002/docs-json`; to use another backend, pass the full address of its `docs-json` as an argument. A test fails when the types and the backend differ; see [README-DEVELOPMENT](../README-DEVELOPMENT.md).
 
 ## The bootstrap CDN build (not used by the installer)
 

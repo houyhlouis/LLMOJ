@@ -22,7 +22,8 @@ const fixtures = [
   ['judge_queue', 'llmoj_test_judge_queue', 'LLMOJ_JUDGE_QUEUE_TEST_DB_CONFIG'],
   ['data_version', 'llmoj_test_data_version', 'LLMOJ_DATA_VERSION_TEST_DB_CONFIG'],
   ['ai_budget', 'llmoj_test_ai_budget', 'LLMOJ_AI_BUDGET_TEST_DB_CONFIG'],
-  ['access_matrix', 'llmoj_test_access_matrix', 'LLMOJ_ACCESS_MATRIX_TEST_DB_CONFIG']
+  ['access_matrix', 'llmoj_test_access_matrix', 'LLMOJ_ACCESS_MATRIX_TEST_DB_CONFIG'],
+  ['operations', 'llmoj_test_operations', 'LLMOJ_OPERATIONS_TEST_DB_CONFIG']
 ];
 
 async function main() {

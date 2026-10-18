@@ -17,7 +17,8 @@ export class AccessGuard implements CanActivate {
       .replace(/^\/?api\//i, "")
       .replace(/^\/+|\/+$/g, "")
       .toLowerCase();
-    if (/^(auth|proofofwork|captcha|judge)\//.test(path)) return true;
+    // Health checks answer monitors on private sites too.
+    if (/^(auth|proofofwork|captcha|judge|health)\//.test(path)) return true;
     if (!(await this.privileges.userHasPrivilege(user, P.ViewSite))) throw new ForbiddenException();
     const [area, action] = path.split("/");
     const map: Record<string, P> = {

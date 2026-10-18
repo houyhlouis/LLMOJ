@@ -13,7 +13,7 @@ LLMOJ is an online judge based on LibreOJ, with AI tools for problem setting. Ne
 | [Feature upgrades](Community-Upgrade.md) | The database changes of LLMOJ's features, and applying them to a custom installation |
 | [HTTPS](HTTPS.md) | Domains, TLS certificates and external reverse proxies |
 | [Docker sources](Docker-Sources.md) | Docker package sources and registry mirrors |
-| [Operations](Operations-Configuration.md) | Nginx, MariaDB, Redis, MinIO and systemd after installation; backups and counts |
+| [Operations](Operations-Configuration.md) | Nginx, MariaDB, Redis, MinIO and systemd after installation; health checks, backups and counts |
 
 ## Using LLMOJ
 

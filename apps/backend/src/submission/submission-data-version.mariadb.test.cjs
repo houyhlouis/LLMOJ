@@ -138,7 +138,7 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
     problemService,
     fileService,
     configService,
-    redisService: { getClient: () => ({ set: async () => "OK" }) }
+    redisService: { takeTurn: async () => true }
   });
   const outbox = Object.assign(Object.create(StatisticsOutboxService.prototype), { connection: ds });
   const svc = Object.create(SubmissionService.prototype);

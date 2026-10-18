@@ -7,6 +7,22 @@ import PromClient from "prom-client";
 
 import { ConfigService } from "../config/config.service";
 
+/** A reading shared by the metrics that use it: read at most once per `milliseconds`. */
+export function sharedReading<T>(read: () => Promise<T>, milliseconds = 1000): () => Promise<T> {
+  let last: { at: number; value: Promise<T> } = null;
+  return () => {
+    if (!last || Date.now() - last.at >= milliseconds) {
+      const reading = { at: Date.now(), value: read() };
+      last = reading;
+      // A failed reading is retried by the next metric
+      reading.value.catch(() => {
+        if (last === reading) last = null;
+      });
+    }
+    return last.value;
+  };
+}
+
 @Injectable()
 export class MetricsService {
   private readonly registry = new PromClient.Registry();
@@ -60,13 +76,42 @@ export class MetricsService {
       registers: [this.registry]
     });
 
-  gauge = <T extends string>(name: string, labelNames: readonly T[] = []) =>
+  /**
+   * @param collect Sets the gauge's values when the metrics are read (only then). If it fails, the gauge is unknown in
+   * that reading (no values, or NaN without labels), and the failure is logged at most once a minute.
+   */
+  gauge = <T extends string>(
+    name: string,
+    labelNames: readonly T[] = [],
+    collect: (gauge: PromClient.Gauge<T>) => void | Promise<void> = null
+  ) =>
     new PromClient.Gauge({
       name,
       help: name,
       labelNames,
-      registers: [this.registry]
+      registers: [this.registry],
+      ...(collect ? { collect: this.collector(name, collect) } : {})
     });
+
+  private collectionFailureLoggedAt = new Map<string, number>();
+
+  private collector<T extends string>(name: string, collect: (gauge: PromClient.Gauge<T>) => void | Promise<void>) {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- prom-client calls `collect` with the gauge as `this`
+    const service = this;
+    return async function collectGauge(this: PromClient.Gauge<T>) {
+      try {
+        await collect(this);
+      } catch (e) {
+        // Unknown: no values, or NaN for a gauge without labels (which would otherwise read 0)
+        this.reset();
+        if (!(this as unknown as { labelNames: string[] }).labelNames.length) this.set(NaN);
+        if (Date.now() - (service.collectionFailureLoggedAt.get(name) ?? -Infinity) >= 60 * 1000) {
+          service.collectionFailureLoggedAt.set(name, Date.now());
+          service.logger.warn(`Failed to read metric ${name}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+    };
+  }
 
   histogram = Object.assign(
     <T extends string>(name: string, buckets: number[], labelNames: readonly T[] = []) =>

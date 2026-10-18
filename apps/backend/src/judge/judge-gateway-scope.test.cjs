@@ -37,7 +37,7 @@ function load(file, overrides) {
 
 const warnings = [];
 const { JudgeGateway } = load("judge.gateway.ts", {
-  "@nestjs/common": { forwardRef: x => x, Inject: decorator },
+  "@nestjs/common": { forwardRef: x => x, Inject: decorator, Optional: decorator },
   "@nestjs/websockets": {
     ConnectedSocket: decorator,
     MessageBody: decorator,
@@ -56,7 +56,8 @@ const { JudgeGateway } = load("judge.gateway.ts", {
   "../logger": { logger: { log: noop, verbose: noop, error: noop, warn: message => warnings.push(message) } },
   "../file/file.service": { MinioSignFor: { Judge: "Judge" }, JUDGE_FILE_DOWNLOAD_EXPIRE_TIME: 21600 },
   "../event-report/event-report.service": { EventReportType: { Success: "Success", Warning: "Warning" } },
-  "../socket-io.constants": { SOCKET_IO_MAX_MESSAGE_SIZE: 64 * 1024 * 1024 }
+  "../socket-io.constants": { SOCKET_IO_MAX_MESSAGE_SIZE: 64 * 1024 * 1024 },
+  "../metrics/metrics.service": { MetricsService: class MetricsService {} }
 });
 
 const uuid = n => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;

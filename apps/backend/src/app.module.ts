@@ -35,6 +35,7 @@ import { SiteManagementModule } from "./site-management/site-management.module";
 import { TeamModule } from "./team/team.module";
 import { HackModule } from "./hack/hack.module";
 import { SelfEvalModule } from "./self-eval/self-eval.module";
+import { HealthModule } from "./health/health.module";
 
 @Module({
   imports: [
@@ -64,7 +65,8 @@ import { SelfEvalModule } from "./self-eval/self-eval.module";
     SiteManagementModule,
     TeamModule,
     HackModule,
-    SelfEvalModule
+    SelfEvalModule,
+    HealthModule
   ],
   controllers: [AppController],
   providers: [AppService, ErrorFilter]

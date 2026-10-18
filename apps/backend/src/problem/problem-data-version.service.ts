@@ -151,10 +151,7 @@ export class ProblemDataVersionService implements OnModuleInit, OnModuleDestroy 
   private async sweepTurn(): Promise<void> {
     let turn = true;
     try {
-      turn =
-        (await this.redisService
-          .getClient()
-          .set(REDIS_KEY_SWEEP_TURN, String(process.pid), "PX", SWEEP_INTERVAL - 1000, "NX")) === "OK";
+      turn = await this.redisService.takeTurn(REDIS_KEY_SWEEP_TURN, SWEEP_INTERVAL - 1000);
     } catch {
       /* delete anyway */
     }
