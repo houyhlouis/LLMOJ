@@ -17,7 +17,7 @@ import * as Interaction from "./interaction";
 import * as SubmitAnswer from "./submit-answer";
 
 import { Task } from "..";
-import { ensureFiles } from "../../file";
+import { ensureFiles, FileContentError } from "../../file";
 import { ConfigurationError, CanceledError } from "../../error";
 import { OmittableString } from "../../omittableString";
 
@@ -159,11 +159,11 @@ export default async function onSubmission<JudgeInfo, SubmissionContent, Testcas
 
     // Download testdata files
     const requiredFiles = Object.values(task.extraInfo.testData);
-    await ensureFiles(requiredFiles);
+    await ensureFiles(requiredFiles, task.fileHashes);
 
     // Downlaod submission file
     if (task.extraInfo.file) {
-      task.file = new SubmissionFile(task.extraInfo.file);
+      task.file = new SubmissionFile(task.extraInfo.file, task.fileHashes?.[task.extraInfo.file.uuid]);
     }
 
     const problemTypeHandler = problemTypeHandlers[task.extraInfo.problemType];
@@ -289,11 +289,11 @@ export default async function onSubmission<JudgeInfo, SubmissionContent, Testcas
     }
 
     const isConfigurationError = e instanceof ConfigurationError;
-    finish(
-      isConfigurationError ? SubmissionStatus.ConfigurationError : SubmissionStatus.SystemError,
-      0,
-      isConfigurationError ? e.originalMessage : e.stack || String(e)
-    );
+    let systemMessage: OmittableString = e.stack || String(e);
+    if (isConfigurationError) systemMessage = e.originalMessage;
+    // Not a bug of the judge: no stack
+    else if (e instanceof FileContentError) systemMessage = e.message;
+    finish(isConfigurationError ? SubmissionStatus.ConfigurationError : SubmissionStatus.SystemError, 0, systemMessage);
     if (!isConfigurationError) winston.error(`Error on submission task ${task.taskId}, ${e.stack || e}`);
   } finally {
     // Remove downloaded submission file

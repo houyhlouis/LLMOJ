@@ -10,6 +10,7 @@ import taskHandler, { supportedTaskTypes, Task } from "./task";
 import { executionScheduler } from "./taskQueue";
 
 import getSystemInfo from "./systemInfo";
+import getRuntimeInfo from "./runtimeIdentity";
 import { CanceledError } from "./error";
 
 // Storing a result may first wait for the problem's and submission's locks (up to about 30 seconds).
@@ -89,7 +90,8 @@ export class RPC {
             consumerThreads: config.taskConsumingThreads,
             executionSlots: executionScheduler.slots,
             memoryBudget: executionScheduler.memoryBudget,
-            aiExecutionSlots: executionScheduler.aiSlots
+            aiExecutionSlots: executionScheduler.aiSlots,
+            runtime: await getRuntimeInfo()
           };
           this.socket.emit("capabilities", announced);
 

@@ -101,6 +101,10 @@ export class JudgeJobAttemptEntity {
   @Column({ type: "integer", nullable: true })
   judgeClientId: number;
 
+  // What the judge client judges with (see `JudgeRuntimeEntity`); null if it announced nothing
+  @Column({ type: "integer", nullable: true })
+  judgeRuntimeId: number;
+
   @Column({ type: "varchar", length: 40 })
   leaseOwner: string;
 

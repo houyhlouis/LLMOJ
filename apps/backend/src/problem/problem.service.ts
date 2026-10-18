@@ -858,13 +858,14 @@ export class ProblemService {
     }
     if (files.reduce((sum, file) => sum + file.size, 0) > ZIP_LIMITS.totalBytes)
       throw new ArchiveError("ZIP_TOTAL_SIZE_LIMIT");
-    const prepared: { filename: string; size: number; uuid: string }[] = [];
+    const prepared: { filename: string; size: number; uuid: string; sha256?: string }[] = [];
     let committed = false;
     try {
       await options.authorize();
       for (const file of files) {
         const uuid = archiveUuid();
-        prepared.push({ filename: file.filename, size: file.size, uuid });
+        const entry: typeof prepared[number] = { filename: file.filename, size: file.size, uuid };
+        prepared.push(entry);
         // eslint-disable-next-line no-await-in-loop, no-bitwise -- Keep file handles, imports, and transaction operations ordered. Combine filesystem flags without weakening NOFOLLOW protections.
         const input = await fs.promises.open(file.path, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
         try {
@@ -872,7 +873,7 @@ export class ProblemService {
           const stat = await input.stat();
           if (!stat.isFile() || stat.size !== file.size) throw new ArchiveError("ZIP_INTEGRITY_ERROR");
           // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
-          await this.fileService.uploadFile(uuid, input.createReadStream({ autoClose: false }), 1);
+          entry.sha256 = await this.fileService.uploadFile(uuid, input.createReadStream({ autoClose: false }), 1);
         } finally {
           // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
           await input.close();
@@ -933,7 +934,12 @@ export class ProblemService {
             }
             for (const file of prepared) {
               // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
-              await manager.save(FileEntity, { uuid: file.uuid, size: file.size, uploadTime: new Date() });
+              await manager.save(FileEntity, {
+                uuid: file.uuid,
+                size: file.size,
+                uploadTime: new Date(),
+                sha256: file.sha256
+              });
               // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
               await manager.save(ProblemFileEntity, {
                 problemId: problem.id,
@@ -1223,9 +1229,11 @@ export class ProblemService {
           problemFiles.map(problemFile => problemFile.uuid),
           transcationalEntityManager
         );
+        const hashes = await this.fileService.getContentHashes(problemFiles.map(problemFile => problemFile.uuid));
         return problemFiles.map((problemFile, i) => ({
           ...problemFile,
-          size: fileSizes[i]
+          size: fileSizes[i],
+          ...(hashes[problemFile.uuid] ? { sha256: hashes[problemFile.uuid] } : {})
         }));
       }
 

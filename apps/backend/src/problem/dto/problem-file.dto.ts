@@ -4,4 +4,7 @@ export class ProblemFileDto {
   filename: string;
 
   size?: number;
+
+  // The content's SHA-256, if recorded
+  sha256?: string;
 }

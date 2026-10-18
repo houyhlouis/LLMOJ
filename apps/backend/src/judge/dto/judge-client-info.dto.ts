@@ -2,6 +2,8 @@ import { ApiProperty } from "@nestjs/swagger";
 
 import { JudgeClientSystemInfo } from "@libreoj/judge-protocol";
 
+import { JudgeRuntimeDto } from "./judge-runtime.dto";
+
 export class JudgeClientCapabilitiesDto {
   @ApiProperty()
   protocolVersion: number;
@@ -20,6 +22,13 @@ export class JudgeClientCapabilitiesDto {
 
   @ApiProperty()
   aiExecutionSlots: number;
+
+  @ApiProperty({
+    type: JudgeRuntimeDto,
+    required: false,
+    description: "What it judges with; absent for judge clients older than protocol version 3"
+  })
+  runtime?: JudgeRuntimeDto;
 }
 
 export class JudgeClientInfoDto {

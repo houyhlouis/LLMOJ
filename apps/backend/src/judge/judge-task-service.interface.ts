@@ -10,6 +10,9 @@ import { JudgeTaskExtraInfo, JudgeTask } from "./judge-queue.service";
 export interface JudgeTaskCompletion {
   /** Marks the job finished; `false` if the reporting connection no longer holds the job (store nothing). */
   confirm(manager: EntityManager): Promise<boolean>;
+
+  /** The runtime the result was judged with, if the judge client announced one. */
+  judgeRuntimeId?: number;
 }
 
 export interface JudgeTaskService<TaskProgress extends JudgeTaskProgress, ExtraInfo extends JudgeTaskExtraInfo> {

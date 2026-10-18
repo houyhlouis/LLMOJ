@@ -53,7 +53,15 @@ return {
     time: "时间",
     memory: "内存",
     data_version_column: "数据版本",
-    not_recorded: "未记录"
+    not_recorded: "未记录",
+    judged_with: "评测机 {machine} · 评测程序 {program} · 沙箱镜像 {image}",
+    judged_with_column: "评测环境",
+    deleted_judge_machine: "已删除的评测机",
+    judge_machine: "评测机",
+    judge_program: "评测程序",
+    sandbox_image: "沙箱镜像",
+    host: "系统",
+    cpu: "CPU"
   },
   testcase: {
     title: "测试点",

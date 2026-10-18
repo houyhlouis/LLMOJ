@@ -35,7 +35,11 @@ function fixture(root) {
         };
       }
     },
-    "../../file": { ensureFiles: async ids => downloads.push(...ids), getFile: name => sources[name] },
+    "../../file": {
+      ensureFiles: async ids => downloads.push(...ids),
+      FileContentError: class FileContentError extends Error {},
+      getFile: name => sources[name]
+    },
     "../../error": { ConfigurationError, CanceledError },
     "../../compile": {},
     "../submission/common": { getExtraSourceFiles: () => ({}) },

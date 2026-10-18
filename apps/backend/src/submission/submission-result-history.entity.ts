@@ -23,6 +23,10 @@ export class SubmissionResultHistoryEntity {
   @Column({ type: "integer", nullable: true })
   problemDataVersionId: number;
 
+  // What it was judged with; null if not recorded
+  @Column({ type: "integer", nullable: true })
+  judgeRuntimeId: number;
+
   @Column({ type: "varchar", length: 32 })
   status: string;
 

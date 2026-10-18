@@ -42,8 +42,9 @@ export function canonicalJson(value: unknown): string {
 }
 
 export function dataVersionDigest(content: ProblemDataVersionContent): string {
+  const testData = content.testData.map(({ filename, uuid }) => ({ filename, uuid }));
   return createHash("sha256")
-    .update(canonicalJson([content.problemType, content.judgeInfo, content.testData, content.samples]))
+    .update(canonicalJson([content.problemType, content.judgeInfo, testData, content.samples]))
     .digest("hex");
 }
 
@@ -81,10 +82,10 @@ export class ProblemDataVersionService implements OnModuleInit, OnModuleDestroy 
   /** What the problem is judged with now. */
   async currentContent(problem: ProblemEntity): Promise<ProblemDataVersionContent> {
     const [judgeInfo] = await this.problemService.getProblemPreprocessedJudgeInfo(problem);
-    const testData: ProblemDataVersionFile[] = (
-      await this.problemService.getProblemFiles(problem, ProblemFileType.TestData)
-    )
-      .map(({ filename, uuid }) => ({ filename, uuid }))
+    const files = await this.problemService.getProblemFiles(problem, ProblemFileType.TestData);
+    const hashes = await this.fileService.getContentHashes(files.map(file => file.uuid));
+    const testData: ProblemDataVersionFile[] = files
+      .map(({ filename, uuid }) => (hashes[uuid] ? { filename, uuid, sha256: hashes[uuid] } : { filename, uuid }))
       .sort((a, b) => (a.filename < b.filename ? -1 : a.filename > b.filename ? 1 : 0));
     const runSamples = !!(judgeInfo as { runSamples?: boolean })?.runSamples;
     const samples = runSamples

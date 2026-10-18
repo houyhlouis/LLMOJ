@@ -16,14 +16,20 @@ require.extensions[".ts"] = (module, filename) =>
     }).outputText,
     filename
   );
+const crypto = require("node:crypto");
+const { Readable } = require("node:stream");
 const { FileService, MinioSignFor, JUDGE_FILE_DOWNLOAD_EXPIRE_TIME } = require("./file.service.ts");
-function fixture({ registered = false, actualSize = 10, statError } = {}) {
+function fixture({ registered = false, actualSize = 10, statError, content = Buffer.alloc(10, "x") } = {}) {
   const service = Object.create(FileService.prototype),
-    calls = { deletes: [], saved: [], expiry: [], checks: [] };
+    calls = { deletes: [], saved: [], expiry: [], checks: [], reads: [] };
   const minio = {
     statObject: async () => {
       if (statError) throw statError;
       return { size: actualSize };
+    },
+    getObject: async (_bucket, uuid) => {
+      calls.reads.push(uuid);
+      return Readable.from([content]);
     },
     removeObject: async (...args) => calls.deletes.push(args),
     presignedGetObject: async (...args) => {
@@ -85,7 +91,9 @@ test("valid uploads persist their verified size and missing objects remain unreg
   const file = await service.processUploadRequest({ uuid: "valid-object", size: 10 }, check, manager);
   assert.equal(file.uuid, "valid-object");
   assert.equal(file.size, 10);
+  assert.equal(file.sha256, crypto.createHash("sha256").update(Buffer.alloc(10, "x")).digest("hex"));
   assert.deepEqual(calls.checks, [10]);
+  assert.deepEqual(calls.reads, ["valid-object"], "its content is read once, to record its hash");
   const missing = fixture({ statError: Error("The specified key does not exist.") });
   assert.equal(
     await missing.service.processUploadRequest({ uuid: "missing", size: 10 }, missing.check, missing.manager),
@@ -200,4 +208,20 @@ test("composing missing team chunks reports a client error for real MinIO HEAD r
   }
   const { service } = fixture({ statError: Object.assign(Error("backend unavailable"), { code: "InternalError" }) });
   await assert.rejects(service.composeTeamUpload("target", [{ uuid: "part", size: 10 }]), /backend unavailable/);
+});
+
+test("the content hash is of what's stored when the file is accepted; a file judges don't use may skip it", async () => {
+  // Replaced in storage between the size check and the read
+  const replaced = fixture({ content: Buffer.alloc(11, "y") });
+  await assert.rejects(
+    replaced.service.processUploadRequest({ uuid: "replaced", size: 10 }, replaced.check, replaced.manager),
+    /FILE_SIZE_MISMATCH/
+  );
+  assert.deepEqual(replaced.calls.saved, []);
+
+  // Not read while the caller holds its locks; hashed in the background
+  const team = fixture();
+  const file = await team.service.processUploadRequest({ uuid: "team-file", size: 10 }, team.check, team.manager, false);
+  assert.equal(file.sha256, null);
+  assert.deepEqual(team.calls.reads, []);
 });

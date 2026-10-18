@@ -665,6 +665,31 @@ declare namespace ApiTypes {
       current: boolean;
     };
     /**
+     * With rejudge permission: what its result was judged with; absent if not recorded
+     */
+    judgeRuntime?: {
+      /**
+       * SHA-256 of the judge program's source files
+       */
+      judgeProgram: string;
+      /**
+       * The sandbox image (rootfs) ID, which identifies its compilers and interpreters
+       */
+      sandboxImage: string;
+      /**
+       * The Node.js version
+       */
+      node: string;
+      os: string;
+      kernel: string;
+      arch: string;
+      cpu: string;
+      /**
+       * The judge machine's name now; null if it was deleted
+       */
+      judgeMachine?: string;
+    };
+    /**
      * With rejudge permission: results rejudges replaced, the most recent first
      */
     earlierResults?: ApiTypes.SubmissionEarlierResultDto[];
@@ -930,6 +955,27 @@ declare namespace ApiTypes {
      */
     memoryBudget: number;
     aiExecutionSlots: number;
+    /**
+     * What it judges with; absent for judge clients older than protocol version 3
+     */
+    runtime?: {
+      /**
+       * SHA-256 of the judge program's source files
+       */
+      judgeProgram: string;
+      /**
+       * The sandbox image (rootfs) ID, which identifies its compilers and interpreters
+       */
+      sandboxImage: string;
+      /**
+       * The Node.js version
+       */
+      node: string;
+      os: string;
+      kernel: string;
+      arch: string;
+      cpu: string;
+    };
   }
   export interface JudgeClientInfoDto {
     id: number;
@@ -962,6 +1008,27 @@ declare namespace ApiTypes {
        */
       memoryBudget: number;
       aiExecutionSlots: number;
+      /**
+       * What it judges with; absent for judge clients older than protocol version 3
+       */
+      runtime?: {
+        /**
+         * SHA-256 of the judge program's source files
+         */
+        judgeProgram: string;
+        /**
+         * The sandbox image (rootfs) ID, which identifies its compilers and interpreters
+         */
+        sandboxImage: string;
+        /**
+         * The Node.js version
+         */
+        node: string;
+        os: string;
+        kernel: string;
+        arch: string;
+        cpu: string;
+      };
     };
   }
   export interface JudgeJobInfoDto {
@@ -1003,6 +1070,24 @@ declare namespace ApiTypes {
      * Up to 100: being judged, queued, then failed
      */
     jobs: ApiTypes.JudgeJobInfoDto[];
+  }
+  export interface JudgeRuntimeDto {
+    /**
+     * SHA-256 of the judge program's source files
+     */
+    judgeProgram: string;
+    /**
+     * The sandbox image (rootfs) ID, which identifies its compilers and interpreters
+     */
+    sandboxImage: string;
+    /**
+     * The Node.js version
+     */
+    node: string;
+    os: string;
+    kernel: string;
+    arch: string;
+    cpu: string;
   }
   export interface ListJudgeClientsResponseDto {
     judgeClients: ApiTypes.JudgeClientInfoDto[];
@@ -1196,6 +1281,7 @@ declare namespace ApiTypes {
     uuid: string;
     filename: string;
     size?: number;
+    sha256?: string;
   }
   export interface ProblemGroupPermissionDto {
     group: ApiTypes.GroupMetaDto;
@@ -1907,9 +1993,56 @@ declare namespace ApiTypes {
      */
     dataVersion?: number;
     /**
+     * What it was judged with; null if not recorded
+     */
+    judgeRuntime?: {
+      /**
+       * SHA-256 of the judge program's source files
+       */
+      judgeProgram: string;
+      /**
+       * The sandbox image (rootfs) ID, which identifies its compilers and interpreters
+       */
+      sandboxImage: string;
+      /**
+       * The Node.js version
+       */
+      node: string;
+      os: string;
+      kernel: string;
+      arch: string;
+      cpu: string;
+      /**
+       * The judge machine's name now; null if it was deleted
+       */
+      judgeMachine?: string;
+    };
+    /**
      * When a rejudge replaced it
      */
     replacedAt: string; // date-time
+  }
+  export interface SubmissionJudgeRuntimeDto {
+    /**
+     * SHA-256 of the judge program's source files
+     */
+    judgeProgram: string;
+    /**
+     * The sandbox image (rootfs) ID, which identifies its compilers and interpreters
+     */
+    sandboxImage: string;
+    /**
+     * The Node.js version
+     */
+    node: string;
+    os: string;
+    kernel: string;
+    arch: string;
+    cpu: string;
+    /**
+     * The judge machine's name now; null if it was deleted
+     */
+    judgeMachine?: string;
   }
   export interface SubmissionMetaDto {
     id: number;

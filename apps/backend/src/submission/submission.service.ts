@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 
-import { Injectable, Inject, forwardRef, ForbiddenException } from "@nestjs/common";
+import { Injectable, Inject, forwardRef, ForbiddenException, Optional } from "@nestjs/common";
 import { InjectRepository, InjectDataSource } from "@nestjs/typeorm";
 
 import { Repository, DataSource, QueryBuilder, IsNull, EntityManager } from "typeorm";
@@ -30,7 +30,12 @@ import { SubmissionDetailEntity } from "./submission-detail.entity";
 import { SubmissionResultHistoryEntity } from "./submission-result-history.entity";
 import { StatisticsOutboxService } from "./statistics-outbox.service";
 
-import { SubmissionBasicMetaDto, SubmissionDataVersionDto, SubmissionEarlierResultDto } from "./dto";
+import {
+  SubmissionBasicMetaDto,
+  SubmissionDataVersionDto,
+  SubmissionEarlierResultDto,
+  SubmissionJudgeRuntimeDto
+} from "./dto";
 
 import type { ProblemJudgeInfoTraditional } from "../problem-type/types/traditional/problem-judge-info.interface";
 
@@ -47,6 +52,7 @@ import { ProblemJudgeInfo } from "../problem/problem-judge-info.interface";
 import { ProblemSampleData } from "../problem/problem-sample-data.interface";
 import { LockService } from "../redis/lock.service";
 import { JudgeGateway } from "../judge/judge.gateway";
+import { JudgeRuntimeService } from "../judge/judge-runtime.service";
 import { ProblemTypeFactoryService } from "../problem-type/problem-type-factory.service";
 import { AuditLogObjectType, AuditService } from "../audit/audit.service";
 import { MinioSignFor, FileService, JUDGE_FILE_DOWNLOAD_EXPIRE_TIME } from "../file/file.service";
@@ -90,6 +96,8 @@ const RESULT_HISTORY_KEPT = 5;
 
 @Injectable()
 export class SubmissionService implements JudgeTaskService<SubmissionProgress, SubmissionTaskExtraInfo> {
+  @Optional() @Inject(JudgeRuntimeService) private readonly judgeRuntimeService: JudgeRuntimeService;
+
   constructor(
     @InjectDataSource()
     private connection: DataSource,
@@ -638,6 +646,7 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
       await manager.insert(SubmissionResultHistoryEntity, {
         submissionId: submission.id,
         problemDataVersionId: submission.problemDataVersionId ?? null,
+        judgeRuntimeId: submission.judgeRuntimeId ?? null,
         status: submission.status,
         score: submission.score,
         timeUsed: submission.timeUsed,
@@ -681,6 +690,7 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
     submission.status = SubmissionStatus.Pending;
     submission.timeUsed = null;
     submission.memoryUsed = null;
+    submission.judgeRuntimeId = null;
     await transactionalEntityManager.save(submission);
 
     const [
@@ -942,6 +952,7 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
     submission.status = progress.status;
     submission.score = progress.score;
     submission.totalOccupiedTime = progress.totalOccupiedTime;
+    submission.judgeRuntimeId = completion?.judgeRuntimeId ?? null;
 
     const timeAndMemory = this.problemTypeFactoryService
       .type(problem.type)
@@ -1054,7 +1065,7 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
 
       const problemTypeService = this.problemTypeFactoryService.type(problemType);
 
-      return new JudgeTask<SubmissionTaskExtraInfo>(
+      const task = new JudgeTask<SubmissionTaskExtraInfo>(
         submission.taskId,
         JudgeTaskType.Submission,
         JudgeTaskPriorityType.High,
@@ -1096,6 +1107,10 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
             : null
         }
       );
+      // The content its data version recorded; the queue adds the recorded hashes of the other files
+      const pinnedHashes = testData.filter(file => file.sha256).map(file => [file.uuid, file.sha256]);
+      if (pinnedHashes.length !== 0) task.fileHashes = Object.fromEntries(pinnedHashes);
+      return task;
     } catch (e) {
       logger.error(`Error in getTaskById("${taskId}"): ${e}`);
       throw e;
@@ -1118,21 +1133,31 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
     return { version: dataVersion.version, current };
   }
 
+  /** What the submission's result was judged with, or `null` if it isn't recorded. */
+  async getSubmissionJudgeRuntime(submission: SubmissionEntity): Promise<SubmissionJudgeRuntimeDto> {
+    if (!submission.judgeRuntimeId || !this.judgeRuntimeService) return null;
+    return (
+      (await this.judgeRuntimeService.describe([submission.judgeRuntimeId])).get(submission.judgeRuntimeId) ?? null
+    );
+  }
+
   /** The results rejudges replaced, the most recent first. */
   async getEarlierResults(submission: SubmissionEntity): Promise<SubmissionEarlierResultDto[]> {
     const history = await this.connection.getRepository(SubmissionResultHistoryEntity).find({
       where: { submissionId: submission.id },
       order: { id: "DESC" }
     });
-    const versions = await this.problemDataVersionService.findVersionNumbers(
-      history.map(result => result.problemDataVersionId)
-    );
+    const [versions, runtimes] = await Promise.all([
+      this.problemDataVersionService.findVersionNumbers(history.map(result => result.problemDataVersionId)),
+      this.judgeRuntimeService?.describe(history.map(result => result.judgeRuntimeId)) ?? new Map()
+    ]);
     return history.map(result => ({
       status: result.status as SubmissionStatus,
       score: result.score,
       timeUsed: result.timeUsed,
       memoryUsed: result.memoryUsed,
       dataVersion: versions.get(result.problemDataVersionId) ?? null,
+      judgeRuntime: runtimes.get(result.judgeRuntimeId) ?? null,
       replacedAt: result.replacedAt
     }));
   }
@@ -1174,6 +1199,7 @@ export class SubmissionService implements JudgeTaskService<SubmissionProgress, S
       submission.totalOccupiedTime = 0;
       submission.timeUsed = null;
       submission.memoryUsed = null;
+      submission.judgeRuntimeId = null;
       let countChanges: number[] = [];
       await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
         await transactionalEntityManager.save(submission);

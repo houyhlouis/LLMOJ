@@ -54,7 +54,15 @@ return {
     time: "Time",
     memory: "Memory",
     data_version_column: "Data version",
-    not_recorded: "not recorded"
+    not_recorded: "not recorded",
+    judged_with: "Judged by {machine} · judge program {program} · sandbox image {image}",
+    judged_with_column: "Judged with",
+    deleted_judge_machine: "a deleted judge machine",
+    judge_machine: "Judge machine",
+    judge_program: "Judge program",
+    sandbox_image: "Sandbox image",
+    host: "System",
+    cpu: "CPU"
   },
   testcase: {
     title: "Testcase",

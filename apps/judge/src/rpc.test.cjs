@@ -8,6 +8,15 @@ const lodashDebounce = require("lodash.debounce");
 
 class CanceledError extends Error {}
 const noop = () => {};
+const runtime = {
+  judgeProgram: "a".repeat(64),
+  sandboxImage: "b".repeat(64),
+  node: "v24.0.0",
+  os: "Ubuntu 26.04",
+  kernel: "Linux 7.0.0",
+  arch: "x64",
+  cpu: "Intel Core i7"
+};
 
 function loadRpc(taskHandler) {
   const source = ts.transpileModule(fs.readFileSync(path.join(__dirname, "rpc.ts"), "utf8"), {
@@ -46,8 +55,9 @@ function loadRpc(taskHandler) {
     },
     "./task": { __esModule: true, default: taskHandler, supportedTaskTypes: ["Submission", "Hack"] },
     "./taskQueue": { executionScheduler: { slots: 7, memoryBudget: 2374, aiSlots: 6 } },
-    "@libreoj/judge-protocol": { JUDGE_PROTOCOL_VERSION: 2 },
+    "@libreoj/judge-protocol": { JUDGE_PROTOCOL_VERSION: 3 },
     "./systemInfo": { __esModule: true, default: async () => ({}) },
+    "./runtimeIdentity": { __esModule: true, default: async () => runtime },
     "./error": { CanceledError }
   };
   const loaded = { exports: {} };
@@ -110,7 +120,7 @@ test("with a server that does not acknowledge progress, the final progress is fl
   }
 });
 
-test("after connecting, the judge client announces what it can judge and its capacity", async () => {
+test("after connecting, the judge client announces what it can judge, its capacity and its runtime", async () => {
   const { socket, isAcknowledged } = await runOneTask({ progressAck: true });
   // Finish the task, so nothing waits for the server afterwards
   await until(() => socket.sent.some(([event]) => event === "progress"));
@@ -121,12 +131,13 @@ test("after connecting, the judge client announces what it can judge and its cap
     [
       "capabilities",
       {
-        protocolVersion: 2,
+        protocolVersion: 3,
         taskTypes: ["Submission", "Hack"],
         consumerThreads: 3,
         executionSlots: 7,
         memoryBudget: 2374,
-        aiExecutionSlots: 6
+        aiExecutionSlots: 6,
+        runtime
       }
     ]
   ]);

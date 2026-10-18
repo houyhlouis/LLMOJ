@@ -77,6 +77,7 @@ class FakeHost(d.Host):
                       'maxmemory': str(192 * 1024 ** 2), 'maxmemory_policy': 'noeviction', 'connected_clients': '20',
                       'rejected_connections': '0'}
         self.database = '11.8.6-MariaDB-5ubuntu0.1\t60\t6\t3250000'
+        self.hashes = '120\t0'
         self.certificate_end = None
         self.disk = SimpleNamespace(f_bavail=400 * GIB // 4096, f_frsize=4096, f_bsize=4096, f_blocks=500 * GIB // 4096,
                                     f_files=10 ** 7, f_favail=9 * 10 ** 6)
@@ -98,6 +99,8 @@ class FakeHost(d.Host):
         if args[0] == 'redis-cli':
             ok = env == {'REDISCLI_AUTH': 'redis-password-55d0'}
             return subprocess.CompletedProcess(args, 0 if ok else 1, '# Server\r\n' + ''.join(f'{k}:{v}\r\n' for k, v in self.redis.items()) if ok else '', '')
+        if args[0] == 'mariadb' and 'sha256' in args[-1]:
+            return subprocess.CompletedProcess(args, *((0, self.hashes + '\n', '') if self.hashes else (1, '', 'ERROR 1054')))
         if args[0] == 'mariadb':
             return subprocess.CompletedProcess(args, 0, self.database + '\n', '')
         if args[0] == 'openssl' and '-enddate' in args:
@@ -289,6 +292,18 @@ class DoctorTests(unittest.TestCase):
         self.assertReported(report, d.WARN, r'no readiness check \(an older version\)')
         self.assertReported(report, d.INFO, r'reports no queue details')
         self.assertFalse(self.found(report, d.FAIL, '.'))
+
+    def test_content_hashes(self):
+        report, _ = self.run_doctor()
+        self.assertReported(report, d.OK, r'All 120 stored files have a content hash')
+        self.host.hashes = '120\t35'
+        report, _ = self.run_doctor()
+        self.assertReported(report, d.INFO, r'35 of 120 stored files have no content hash yet; the backend computes them')
+        # A site without files, and an older release without content hashes, say nothing about them
+        for hashes in ('0\t0', None):
+            self.host.hashes = hashes
+            report, _ = self.run_doctor()
+            self.assertFalse([item for item in report.items if item['check'] == 'content hashes'])
 
     def test_judging_and_queues(self):
         self.host.answers['http://127.0.0.1:2020/metrics'] = (200, metrics(**{

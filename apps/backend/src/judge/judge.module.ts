@@ -7,6 +7,8 @@ import { JudgeClientController } from "./judge-client.controller";
 import { JudgeClientService } from "./judge-client.service";
 import { JudgeClientEntity } from "./judge-client.entity";
 import { JudgeJobAttemptEntity, JudgeJobEntity } from "./judge-job.entity";
+import { JudgeRuntimeEntity } from "./judge-runtime.entity";
+import { JudgeRuntimeService } from "./judge-runtime.service";
 
 import { MetricsModule } from "../metrics/metrics.module";
 import { EventReportModule } from "../event-report/event-report.module";
@@ -17,7 +19,7 @@ import { AuthModule } from "../auth/auth.module";
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([JudgeClientEntity, JudgeJobEntity, JudgeJobAttemptEntity]),
+    TypeOrmModule.forFeature([JudgeClientEntity, JudgeJobEntity, JudgeJobAttemptEntity, JudgeRuntimeEntity]),
     forwardRef(() => RedisModule),
     forwardRef(() => FileModule),
     forwardRef(() => EventReportModule),
@@ -26,7 +28,7 @@ import { AuthModule } from "../auth/auth.module";
     forwardRef(() => AuthModule)
   ],
   controllers: [JudgeClientController],
-  providers: [JudgeGateway, JudgeClientService, JudgeQueueService],
-  exports: [JudgeGateway, JudgeQueueService]
+  providers: [JudgeGateway, JudgeClientService, JudgeQueueService, JudgeRuntimeService],
+  exports: [JudgeGateway, JudgeQueueService, JudgeRuntimeService]
 })
 export class JudgeModule {}

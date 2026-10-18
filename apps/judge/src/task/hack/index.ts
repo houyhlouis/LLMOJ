@@ -1,5 +1,6 @@
 import fs from "fs";
 
+import winston from "winston";
 import { HackProgress, HackStatus, SubmissionStatus } from "@libreoj/judge-protocol";
 import { SandboxStatus } from "simple-sandbox";
 
@@ -7,7 +8,7 @@ import { Task } from "..";
 
 import { compile, CompileResultSuccess } from "../../compile";
 import { ConfigurationError, CanceledError } from "../../error";
-import { ensureFiles, getFile } from "../../file";
+import { ensureFiles, FileContentError, getFile } from "../../file";
 import { serverSideConfig } from "../../config";
 import { getExtraSourceFiles } from "../submission/common";
 import { JudgeInfoTraditional, SubmissionContentTraditional } from "../submission/traditional";
@@ -152,7 +153,7 @@ export default async function onHack(task: Task<HackExtraInfo, HackProgress>) {
       ...Object.values(getExtraSourceFiles(judgeInfo, testData, reference.language) || {}),
       ...(judgeInfo.checker.type === "custom" ? [testData[judgeInfo.checker.filename]] : [])
     ];
-    await ensureFiles([...new Set(required)]);
+    await ensureFiles([...new Set(required)], task.fileHashes);
     const validatorCompiled = await checkedCompile(validator, undefined, validator.language === "cpp");
     compiled.push(validatorCompiled);
     // Validators consume stdin and must terminate normally with exit code zero for valid input.
@@ -291,6 +292,7 @@ export default async function onHack(task: Task<HackExtraInfo, HackProgress>) {
       status = HackStatus.Canceled;
       message = "Hack task canceled";
     }
+    if (error instanceof FileContentError) winston.error(`Hack task ${task.taskId}: ${error.message}`);
     finish(status, message);
   } finally {
     for (const result of compiled) {

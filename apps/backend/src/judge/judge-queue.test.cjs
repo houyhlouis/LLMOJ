@@ -212,6 +212,47 @@ test(
     assert.equal(await report(a, sooner, claimed, 1, result("WrongAnswer")), false);
     assert.deepEqual(await results(sooner), ["Accepted"]);
 
+    // The runtime the judge client announced is recorded with its lease and passed on with the result. A task is
+    // sent with the recorded content hashes of the files it uses; the hashes its service gives are kept.
+    const hashedTask = await newTask(a, 0.1);
+    const [pinned, recorded, unrecorded] = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    const prepare = tasks.prepare;
+    tasks.prepare = taskId => ({
+      ...prepare(taskId),
+      extraInfo: { taskId, testData: { "1.in": pinned, "2.in": recorded, "3.in": unrecorded } },
+      fileHashes: { [pinned]: "a".repeat(64) }
+    });
+    const lookups = [];
+    a.fileService = {
+      getContentHashes: async uuids => {
+        lookups.push(uuids);
+        return { [pinned]: "f".repeat(64), [recorded]: "b".repeat(64) };
+      }
+    };
+    const hashedClaim = await a.claim({ ...owner(5), judgeRuntimeId: 9 });
+    tasks.prepare = prepare;
+    delete a.fileService;
+    assert.equal(hashedClaim.task.taskId, hashedTask);
+    assert.deepEqual(hashedClaim.task.fileHashes, { [pinned]: "a".repeat(64), [recorded]: "b".repeat(64) });
+    assert.deepEqual(new Set(lookups[0]), new Set([hashedTask, pinned, recorded, unrecorded]));
+    const [hashedAttempt] = await ds.query("SELECT judgeRuntimeId FROM judge_job_attempt WHERE taskId = ?", [hashedTask]);
+    assert.equal(Number(hashedAttempt.judgeRuntimeId), 9);
+    const onTaskProgress = tasks.onTaskProgress;
+    let completionRuntime;
+    tasks.onTaskProgress = async (taskId, progress, completion) => {
+      completionRuntime = completion?.judgeRuntimeId;
+      return await onTaskProgress(taskId, progress, completion);
+    };
+    assert.equal(
+      await a.onTaskProgress(meta(hashedTask), { ...lease(hashedClaim, 5), judgeRuntimeId: 9 }, result("Accepted")),
+      true
+    );
+    tasks.onTaskProgress = onTaskProgress;
+    assert.equal(completionRuntime, 9);
+    assert.equal((await job(hashedTask)).state, "Finished");
+    // Without an announced runtime, none is recorded
+    assert.equal((await ds.query("SELECT judgeRuntimeId FROM judge_job_attempt WHERE taskId = ?", [sooner]))[0].judgeRuntimeId, null);
+
     // A judge client disconnects: its job is queued again. A second backend judges it with fence 2, and the old
     // connection's result is refused.
     claimed = await a.claim(owner(1));

@@ -132,3 +132,44 @@ test('the AI budget reservation table is added exactly once', async () => {
   await assert.rejects(() => validateAiBudgetSchema(fixture(false), [...AI_BUDGET_SQL, ...AI_BUDGET_SQL]), /AI budget table/);
   assert.equal(AI_BUDGET_SQL.length, 1);
 });
+
+test('file content hashes and judge runtimes are added exactly once, and only when absent', async () => {
+  const { validateRuntimeIdentitySchema, RUNTIME_IDENTITY_SQL, RUNTIME_IDENTITY_COLUMNS, JUDGE_RUNTIME_CREATE_SQL,
+    FILE_SHA256_SQL, SUBMISSION_RUNTIME_SQL } = await import('../runtime-identity-schema.mjs');
+  assert.deepEqual(validateQueries([...RUNTIME_IDENTITY_SQL]), [...RUNTIME_IDENTITY_SQL]);
+  assert.throws(() => validateQueries([FILE_SHA256_SQL.replace('char(64)', 'varchar(64)')]));
+  assert.throws(() => validateQueries([SUBMISSION_RUNTIME_SQL.replace('NULL', 'NOT NULL')]));
+  assert.throws(() => validateQueries([JUDGE_RUNTIME_CREATE_SQL.replace('`judgeClientId` int NOT NULL', '`judgeClientId` int NULL')]));
+  const column = (tableName, columnName) => ({ tableName, columnName, columnType: columnName === 'sha256' ? 'char(64)' : 'int(11)',
+    isNullable: 'YES', defaultValue: 'NULL', extra: '', comment: '' });
+  const present = RUNTIME_IDENTITY_COLUMNS.map(([table, name]) => column(table, name));
+  const existing = ['file', 'judge_job_attempt', 'submission', 'submission_result_history'];
+  const fixture = (table, columns, tables = existing) => ({
+    query: async sql => (sql.includes('information_schema.TABLES')
+      ? [...tables, ...(table ? ['judge_runtime'] : [])].map(name => ({ name })) : columns)
+  });
+  await validateRuntimeIdentitySchema(fixture(false, []), [...RUNTIME_IDENTITY_SQL]);
+  await validateRuntimeIdentitySchema(fixture(true, present), []);
+  await validateRuntimeIdentitySchema(fixture(true, present.map(row => ({ ...row, defaultValue: null }))), []);
+  // Partially applied: each remaining statement exactly once
+  await validateRuntimeIdentitySchema(fixture(true, present.slice(0, 2)), RUNTIME_IDENTITY_SQL.slice(3));
+  await assert.rejects(() => validateRuntimeIdentitySchema(fixture(false, []), RUNTIME_IDENTITY_SQL.slice(1)), /Judge runtime table/);
+  await assert.rejects(() => validateRuntimeIdentitySchema(fixture(true, present), [FILE_SHA256_SQL]), /file sha256/);
+  await assert.rejects(() => validateRuntimeIdentitySchema(fixture(true, present.slice(1)), []), /file sha256/);
+  await assert.rejects(() => validateRuntimeIdentitySchema(fixture(false, []), [...RUNTIME_IDENTITY_SQL, SUBMISSION_RUNTIME_SQL]),
+    /submission judgeRuntimeId/);
+  for (const changed of [{ isNullable: 'NO' }, { defaultValue: '0' }, { columnType: 'bigint(20)' }, { extra: 'auto_increment' }, { comment: 'x' }])
+    await assert.rejects(() => validateRuntimeIdentitySchema(fixture(true, present.map((row, i) => i === 2 ? { ...row, ...changed } : row)), []),
+      /Unsupported existing submission judgeRuntimeId/);
+  await assert.rejects(() => validateRuntimeIdentitySchema(fixture(true, [{ ...present[0], columnType: 'char(40)' }, ...present.slice(1)]), []),
+    /Unsupported existing file sha256/);
+  // From a release before the judge queue and data versions: those tables are created with the column
+  const created = RUNTIME_IDENTITY_SQL.filter(sql => !/`(judge_job_attempt|submission_result_history)`/.test(sql));
+  await validateRuntimeIdentitySchema(fixture(false, [], ['file', 'submission']), created);
+  await assert.rejects(() => validateRuntimeIdentitySchema(fixture(false, [], ['file', 'submission']), [...RUNTIME_IDENTITY_SQL]),
+    /judge_job_attempt judgeRuntimeId/);
+  const { JUDGE_JOB_ATTEMPT_CREATE_SQL } = await import('../judge-queue-schema.mjs');
+  const { SUBMISSION_RESULT_HISTORY_CREATE_SQL } = await import('../data-version-schema.mjs');
+  for (const sql of [JUDGE_JOB_ATTEMPT_CREATE_SQL, SUBMISSION_RESULT_HISTORY_CREATE_SQL]) assert.match(sql, /`judgeRuntimeId` int NULL/);
+  assert.equal(RUNTIME_IDENTITY_SQL.length, 5);
+});

@@ -5,6 +5,9 @@ import { ProblemEntity } from "./problem.entity";
 export interface ProblemDataVersionFile {
   filename: string;
   uuid: string;
+  // The file's content hash when the version was taken, if it was recorded. Not part of the version's digest: a file
+  // UUID always has the same content, and versions from before content hashes keep their identity.
+  sha256?: string;
 }
 
 /**

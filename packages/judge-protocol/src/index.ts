@@ -6,7 +6,21 @@ export enum JudgeTaskType {
 }
 
 // Raised when judge clients announce something new to the server. Judge clients that announce nothing are version 1.
-export const JUDGE_PROTOCOL_VERSION = 2;
+// Version 3 announces the judge's runtime and checks the files of a task against their SHA-256.
+export const JUDGE_PROTOCOL_VERSION = 3;
+
+/** What a judge judges with, as recorded with each result. */
+export interface JudgeRuntimeInfo {
+  // SHA-256 of the judge program's source files
+  judgeProgram: string;
+  // The sandbox image (rootfs) ID, which identifies its compilers and interpreters
+  sandboxImage: string;
+  node: string;
+  os: string;
+  kernel: string;
+  arch: string;
+  cpu: string;
+}
 
 /** Sent by a judge client after "ready", as the "capabilities" event. */
 export interface JudgeClientCapabilities {
@@ -18,6 +32,8 @@ export interface JudgeClientCapabilities {
   // MiB the sandboxes of concurrent work may reserve together
   memoryBudget: number;
   aiExecutionSlots: number;
+  // Since protocol version 3
+  runtime?: JudgeRuntimeInfo;
 }
 
 export interface JudgeTaskMeta {
@@ -29,6 +45,9 @@ export interface JudgeTaskPayload<ExtraInfo> extends JudgeTaskMeta {
   priorityType: number;
   priority: number;
   extraInfo: ExtraInfo;
+  // The SHA-256 of the stored files the task uses, by UUID, for those whose content hash is recorded. A judge checks
+  // each file against it before using it, also a file it has kept from an earlier task.
+  fileHashes?: Record<string, string>;
 }
 
 export type OmittableString =

@@ -28,6 +28,7 @@ import {
   LeasedJudgeTask
 } from "./judge-queue.service";
 import { JudgeJobAttemptOutcome } from "./judge-job.entity";
+import { JudgeRuntimeService, parseJudgeRuntime } from "./judge-runtime.service";
 
 import { logger } from "../logger";
 import { MinioSignFor, FileService, JUDGE_FILE_DOWNLOAD_EXPIRE_TIME } from "../file/file.service";
@@ -43,6 +44,8 @@ import { SOCKET_IO_MAX_MESSAGE_SIZE } from "../socket-io.constants";
 interface JudgeTaskAssignment {
   task: JudgeTask<JudgeTaskExtraInfo>;
   fence: number;
+  // What it's judged with, recorded with its result
+  judgeRuntimeId: number;
 }
 
 interface JudgeClientState {
@@ -50,6 +53,8 @@ interface JudgeClientState {
   judgeClient: JudgeClientEntity;
   // As announced by the judge client; null for one that announces nothing (protocol version 1)
   capabilities: JudgeClientCapabilities;
+  // The record of the runtime it announced (protocol version 3), once recorded; null for none
+  judgeRuntimeId: Promise<number>;
   // Tasks sent to this client, by task ID: until it acknowledges them, plus a grace time.
   // A client may only report progress for, and download files of, its own assigned tasks.
   assignedTasks: Map<string, JudgeTaskAssignment>;
@@ -91,9 +96,10 @@ const LEGACY_TASK_TYPES = [JudgeTaskType.Submission];
 const isCount = (value: unknown, maximum: number) =>
   Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= maximum;
 
-// The announced capabilities, or null if they aren't valid
+// The announced capabilities, or null if they aren't valid. An invalid runtime is left out.
 function parseCapabilities(value: unknown): JudgeClientCapabilities {
   const capabilities = value as JudgeClientCapabilities;
+  const runtime = capabilities && typeof capabilities === "object" ? parseJudgeRuntime(capabilities.runtime) : null;
   const taskTypes = Object.values(JudgeTaskType) as unknown[];
   if (
     !capabilities ||
@@ -115,7 +121,8 @@ function parseCapabilities(value: unknown): JudgeClientCapabilities {
     consumerThreads: capabilities.consumerThreads,
     executionSlots: capabilities.executionSlots,
     memoryBudget: capabilities.memoryBudget,
-    aiExecutionSlots: capabilities.aiExecutionSlots
+    aiExecutionSlots: capabilities.aiExecutionSlots,
+    ...(runtime ? { runtime } : {})
   };
 }
 
@@ -159,6 +166,8 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
   private leaseRenewalTimer: ReturnType<typeof setInterval>;
 
   @Optional() @Inject(MetricsService) private readonly metricsService: MetricsService;
+
+  @Optional() @Inject(JudgeRuntimeService) private readonly judgeRuntimeService: JudgeRuntimeService;
 
   constructor(
     private readonly judgeClientService: JudgeClientService,
@@ -285,6 +294,7 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
         socket: client,
         judgeClient,
         capabilities: null,
+        judgeRuntimeId: Promise.resolve(null),
         assignedTasks: new Map()
       });
     });
@@ -392,12 +402,26 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
       return;
     }
     state.capabilities = capabilities;
+    // Before anything is awaited, so that the tasks this connection is sent next are recorded with it
+    if (capabilities.runtime) state.judgeRuntimeId = this.recordRuntime(state, capabilities.runtime);
     logger.log(
       `Judge client ${client.id} (${state.judgeClient.name}) judges ${capabilities.taskTypes.join(", ")} (protocol ${
         capabilities.protocolVersion
       })`
     );
     await this.judgeClientService.updateJudgeClientCapabilities(state.judgeClient, capabilities);
+    await state.judgeRuntimeId;
+  }
+
+  private async recordRuntime(state: JudgeClientState, runtime: JudgeClientCapabilities["runtime"]): Promise<number> {
+    if (!this.judgeRuntimeService) return null;
+    try {
+      return await this.judgeRuntimeService.record(state.judgeClient.id, runtime);
+    } catch (e) {
+      // Its results are then recorded without their runtime
+      logger.error(`Failed to record the runtime of judge client ${state.socket.id} (${state.judgeClient.name}): ${e}`);
+      return null;
+    }
   }
 
   @SubscribeMessage("requestFiles")
@@ -457,9 +481,10 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
         continue;
       }
       let leased: LeasedJudgeTask;
+      const judgeRuntimeId = await state.judgeRuntimeId;
       try {
         leased = await this.judgeQueueService.claim(
-          { connectionId: client.id, judgeClientId: state.judgeClient.id },
+          { connectionId: client.id, judgeClientId: state.judgeClient.id, judgeRuntimeId },
           state.capabilities?.taskTypes ?? LEGACY_TASK_TYPES
         );
       } catch (e) {
@@ -482,7 +507,7 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
         return;
       }
 
-      const assignment: JudgeTaskAssignment = { task, fence };
+      const assignment: JudgeTaskAssignment = { task, fence, judgeRuntimeId };
       state.assignedTasks.set(task.taskId, assignment);
       this.mapTaskIdToSocket.set(task.taskId, client);
       client.emit("task", threadId, task, () => this.onTaskAcknowledged(client, state, assignment));
@@ -540,7 +565,7 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
 
     const notCanceled = await this.judgeQueueService.onTaskProgress(
       message.taskMeta,
-      { fence: assignment.fence, connectionId: client.id },
+      { fence: assignment.fence, connectionId: client.id, judgeRuntimeId: assignment.judgeRuntimeId },
       message.progress
     );
     if (!notCanceled) {

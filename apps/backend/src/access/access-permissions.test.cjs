@@ -23,6 +23,7 @@ function load(relative, overrides = {}) {
           ...decorators,
           Injectable: decorator,
           Inject: decorator,
+          Optional: decorator,
           forwardRef: x => x,
           ForbiddenException: class extends Error {},
           BadRequestException: class extends Error {}

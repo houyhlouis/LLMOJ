@@ -192,6 +192,7 @@ interface SubmissionPageProps {
   permissionDelete: boolean;
   permissionFake: boolean;
   dataVersion?: ApiTypes.SubmissionDataVersionDto;
+  judgeRuntime?: ApiTypes.SubmissionJudgeRuntimeDto;
   earlierResults?: ApiTypes.SubmissionEarlierResultDto[];
   ProblemTypeSubmissionView: ProblemTypeSubmissionView;
   embedded?: boolean;
@@ -1023,7 +1024,11 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
         <HackAction submissionId={meta.id} />
         <SubmissionReferenceButton submissionId={meta.id} status={progressMeta.status} />
       </div>
-      <SubmissionJudgingRecord dataVersion={props.dataVersion} earlierResults={props.earlierResults} />
+      <SubmissionJudgingRecord
+        dataVersion={props.dataVersion}
+        judgeRuntime={props.judgeRuntime}
+        earlierResults={props.earlierResults}
+      />
       <props.ProblemTypeSubmissionView
         progress={progress}
         progressMeta={progressMeta}

@@ -35,6 +35,10 @@ LLMOJ 在原版 LibreOJ 之外增加的功能，例如团队、题解、Fake 处
 
 **测试数据版本：** `problem_data_version`、`deferred_file_deletion`、`submission_result_history` 和 `statistics_outbox` 四张表，以及可空的 `submission.problemDataVersionId`。
 
+**AI 预算：** `ai_reservation` 表。
+
+**内容哈希与评测环境：** `judge_runtime` 表，以及可空的 `file.sha256`、`judge_job_attempt.judgeRuntimeId`、`submission.judgeRuntimeId` 和 `submission_result_history.judgeRuntimeId`。升级后，已有文件的哈希在后台计算。
+
 已有的编号、回复、账号、题目和提交的代码永远不会被修改。MariaDB 在已知修改前后重建索引时，升级器会先检查索引定义，并且从不删除任何内容。
 
 ### 评测机的修改

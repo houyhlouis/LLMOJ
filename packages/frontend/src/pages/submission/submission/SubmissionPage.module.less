@@ -179,3 +179,28 @@
   border: 1px solid #f2711c;
   cursor: help;
 }
+
+.judgeRuntimeTrigger {
+  cursor: pointer;
+  border-bottom: 1px dotted currentColor;
+}
+
+.judgeRuntimeDetails {
+  border-collapse: collapse;
+
+  td {
+    padding: 0.15em 0;
+    vertical-align: top;
+  }
+
+  td:first-child {
+    padding-right: 1em;
+    white-space: nowrap;
+    color: var(--theme-description-message-foreground);
+  }
+
+  td:last-child {
+    font-family: monospace;
+    word-break: break-all;
+  }
+}

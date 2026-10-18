@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Table, Header, Button, Segment, Label, Popup, Icon, Form } from "semantic-ui-react";
+import { Table, Header, Button, Segment, Label, Popup, Icon, Form, Message } from "semantic-ui-react";
 import { observer } from "mobx-react";
 
 import style from "./JudgeMachinePage.module.less";
@@ -144,6 +144,19 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
       [_(".capabilities.memory_budget"), capabilities.memoryBudget + " MiB"],
       [_(".capabilities.protocol_version"), capabilities.protocolVersion]
     ];
+    const { runtime } = capabilities;
+    if (runtime)
+      rows.push(
+        [
+          _(".capabilities.judge_program"),
+          <code title={runtime.judgeProgram}>{runtime.judgeProgram.slice(0, 12)}</code>
+        ],
+        [
+          _(".capabilities.sandbox_image"),
+          <code title={runtime.sandboxImage}>{runtime.sandboxImage.slice(0, 12)}</code>
+        ],
+        ["Node.js", runtime.node]
+      );
     return (
       <Popup
         trigger={
@@ -245,6 +258,14 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
     setAddNewName("");
   });
 
+  // Judge machines with different judge programs or sandbox images may judge the same submission differently
+  const onlineRuntimes = props.judgeClients
+    .filter(judgeClient => judgeClient.online && judgeClient.capabilities?.runtime)
+    .map(judgeClient => judgeClient.capabilities.runtime);
+  const runtimesDiffer =
+    new Set(onlineRuntimes.map(runtime => runtime.judgeProgram)).size > 1 ||
+    new Set(onlineRuntimes.map(runtime => runtime.sandboxImage)).size > 1;
+
   return (
     <>
       <div className={style.headerWrapper}>
@@ -277,6 +298,14 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
           />
         )}
       </div>
+      {runtimesDiffer && (
+        <Message
+          warning
+          icon="exclamation triangle"
+          header={_(".runtime_mismatch")}
+          content={_(".runtime_mismatch_notes")}
+        />
+      )}
       {!props.judgeClients.length ? (
         <Segment placeholder>
           <Header icon>

@@ -680,7 +680,7 @@ export class TeamService {
     if (!source || !(await this.problems.userHasPermission(user, source, ProblemPermissionType.Modify)))
       throw new ForbiddenException("Copying judge data requires permission to modify the source problem");
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), "llmoj-team-copy-"));
-    const clonedFiles: { source: ProblemFileEntity; uuid: string; size: number }[] = [];
+    const clonedFiles: { source: ProblemFileEntity; uuid: string; size: number; sha256: string }[] = [];
     let committed = false;
     try {
       const sourceFiles = await this.db.getRepository(ProblemFileEntity).findBy({ problemId: source.id });
@@ -690,9 +690,10 @@ export class TeamService {
         // eslint-disable-next-line no-await-in-loop
         const size = await this.files.downloadFileToPath(file.uuid, local, 2147483647);
         const copiedUuid = uuid();
-        clonedFiles.push({ source: file, uuid: copiedUuid, size });
+        const clone = { source: file, uuid: copiedUuid, size, sha256: null as string };
+        clonedFiles.push(clone);
         // eslint-disable-next-line no-await-in-loop
-        await this.files.uploadFile(copiedUuid, local);
+        clone.sha256 = await this.files.uploadFile(copiedUuid, local);
         // eslint-disable-next-line no-await-in-loop
         await fs.unlink(local);
       }
@@ -788,7 +789,12 @@ export class TeamService {
           // eslint-disable-next-line no-await-in-loop
           await manager.save(
             FileEntity,
-            manager.create(FileEntity, { uuid: clone.uuid, size: clone.size, uploadTime: new Date() })
+            manager.create(FileEntity, {
+              uuid: clone.uuid,
+              size: clone.size,
+              uploadTime: new Date(),
+              sha256: clone.sha256
+            })
           );
           // eslint-disable-next-line no-await-in-loop
           await manager.save(
@@ -1227,7 +1233,9 @@ export class TeamService {
             : size + Number(team.quotaUsed) > Math.min(Number(team.quotaLimit), TEAM_FILE_QUOTA)
             ? "TEAM_QUOTA_EXCEEDED"
             : null,
-        manager
+        manager,
+        // Team files aren't judged, and can be large: hashed in the background, not while the team is locked
+        false
       );
       if (typeof result === "string") throw new BadRequestException(result);
       if (!(result instanceof FileEntity)) return { signedUploadRequest: result };

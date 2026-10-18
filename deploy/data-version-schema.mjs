@@ -11,9 +11,10 @@ export const PROBLEM_DATA_VERSION_FOREIGN_KEY_SQL = "ALTER TABLE `problem_data_v
   "ON UPDATE NO ACTION";
 export const DEFERRED_FILE_DELETION_CREATE_SQL = "CREATE TABLE `deferred_file_deletion` (`uuid` char(36) NOT NULL, " +
   "`requestedAt` datetime NOT NULL, PRIMARY KEY (`uuid`)) ENGINE=InnoDB";
+// Created with its judge runtime column (runtime-identity-schema.mjs adds it to an existing table)
 export const SUBMISSION_RESULT_HISTORY_CREATE_SQL = "CREATE TABLE `submission_result_history` (" +
   "`id` int NOT NULL AUTO_INCREMENT, `submissionId` int NOT NULL, `problemDataVersionId` int NULL, " +
-  "`status` varchar(32) NOT NULL, `score` int NULL, `timeUsed` int NULL, `memoryUsed` int NULL, " +
+  "`judgeRuntimeId` int NULL, `status` varchar(32) NOT NULL, `score` int NULL, `timeUsed` int NULL, `memoryUsed` int NULL, " +
   "`totalOccupiedTime` int NULL, `result` longtext NULL, `replacedAt` datetime NOT NULL, `replacedBy` int NULL, " +
   "INDEX `IDX_a3609d25edf881ba0e109380f6` (`submissionId`), PRIMARY KEY (`id`)) ENGINE=InnoDB";
 export const SUBMISSION_RESULT_HISTORY_FOREIGN_KEY_SQL = "ALTER TABLE `submission_result_history` ADD CONSTRAINT " +

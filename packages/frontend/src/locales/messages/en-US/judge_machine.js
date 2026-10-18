@@ -46,6 +46,8 @@ return {
     ai_execution_slots: "Slots for AI validation",
     memory_budget: "Memory budget",
     protocol_version: "Protocol version",
+    judge_program: "Judge program",
+    sandbox_image: "Sandbox image",
     legacy: "Legacy",
     legacy_notes:
       "This judge machine runs an older version that doesn't announce what it can do, so it is sent only submissions. Update it to judge Hacks and Self Evals."
@@ -77,5 +79,8 @@ return {
     NO_SUCH_JUDGE_CLIENT: "No such judge machine.",
     REAUTHENTICATION_REQUIRED: "Confirm your password to see or change judge machine keys."
   },
-  no_judge_machine: "No judge machine"
+  no_judge_machine: "No judge machine",
+  runtime_mismatch: "Online judge machines judge with different judge programs or sandbox images",
+  runtime_mismatch_notes:
+    "A submission may then get a different result depending on which one judges it. Update them all to the same release. Each result records which judge machine judged it and with what."
 };

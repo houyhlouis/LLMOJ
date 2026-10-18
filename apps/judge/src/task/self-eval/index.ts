@@ -8,7 +8,7 @@ import winston from "winston";
 import { Task } from "..";
 import { checkedCompile, runProgram } from "../hack";
 import { CompileResultSuccess } from "../../compile";
-import { ensureFiles, getFile } from "../../file";
+import { ensureFiles, FileContentError, getFile } from "../../file";
 import { ConfigurationError, CanceledError } from "../../error";
 import { JudgeInfoTraditional, SubmissionContentTraditional } from "../submission/traditional";
 import { getExtraSourceFiles } from "../submission/common";
@@ -51,7 +51,8 @@ export async function onSelfEvalPrepare(task: Task<ExtraInfo, SelfEvalProgress>)
       throw new ConfigurationError("A valid formal-data recipe is required");
     stage = "download-profile";
     await ensureFiles(
-      [recipe.generatorFile, recipe.standardFile, recipe.validatorFile].filter(Boolean).map(name => testData[name])
+      [recipe.generatorFile, recipe.standardFile, recipe.validatorFile].filter(Boolean).map(name => testData[name]),
+      task.fileHashes
     );
     const programs: CompileResultSuccess[] = [];
     for (const key of ["generator", "standard", "validator"] as const) {
@@ -137,7 +138,9 @@ export async function onSelfEvalPrepare(task: Task<ExtraInfo, SelfEvalProgress>)
   } catch (error) {
     winston.error(
       `Self-evaluation preparation ${task.taskId} failed at ${stage}: ${
-        error instanceof ConfigurationError ? error.message : "Unexpected judge error"
+        error instanceof ConfigurationError || error instanceof FileContentError
+          ? error.message
+          : "Unexpected judge error"
       }`
     );
     task.reportProgressRaw({
@@ -165,12 +168,15 @@ export async function onSelfEval(task: Task<ExtraInfo, SelfEvalProgress>) {
       Buffer.byteLength(JSON.stringify(cases)) > 16 * 1024 * 1024
     )
       throw new ConfigurationError("Missing fixed prediction set");
-    await ensureFiles([
-      ...new Set([
-        ...Object.values(getExtraSourceFiles(judgeInfo, testData, content.language) || {}),
-        ...(judgeInfo.checker.type === "custom" ? [testData[judgeInfo.checker.filename]] : [])
-      ])
-    ]);
+    await ensureFiles(
+      [
+        ...new Set([
+          ...Object.values(getExtraSourceFiles(judgeInfo, testData, content.language) || {}),
+          ...(judgeInfo.checker.type === "custom" ? [testData[judgeInfo.checker.filename]] : [])
+        ])
+      ],
+      task.fileHashes
+    );
     let target: CompileResultSuccess;
     try {
       target = await checkedCompile(content, getExtraSourceFiles(judgeInfo, testData, content.language));
@@ -286,6 +292,7 @@ export async function onSelfEval(task: Task<ExtraInfo, SelfEvalProgress>) {
     let status = SubmissionStatus.SystemError;
     if (error instanceof ConfigurationError) status = SubmissionStatus.ConfigurationError;
     if (error instanceof CanceledError) status = SubmissionStatus.Canceled;
+    if (error instanceof FileContentError) winston.error(`Self-evaluation ${task.taskId}: ${error.message}`);
     task.reportProgressRaw({
       status,
       finished: true,

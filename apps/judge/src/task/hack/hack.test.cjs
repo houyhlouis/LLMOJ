@@ -69,7 +69,11 @@ const dependencies = {
       state.compile ? new Compiled(content.code) : { success: false, message: "SECRET compiler output" }
   },
   "../../error": { ConfigurationError, CanceledError },
-  "../../file": { ensureFiles: async ids => state.downloaded.push(...ids), getFile: id => state.files[id] },
+  "../../file": {
+    ensureFiles: async ids => state.downloaded.push(...ids),
+    FileContentError: class FileContentError extends Error {},
+    getFile: id => state.files[id]
+  },
   "../../config": { serverSideConfig: { limit: { outputSize: 4 * 1024 * 1024 } } },
   "../submission/common": { getExtraSourceFiles: () => ({}) },
   "../../languages": {

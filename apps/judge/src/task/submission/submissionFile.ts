@@ -7,6 +7,7 @@ import unzipper from "unzipper";
 import { serverSideConfig } from "../../config";
 import { safelyJoinPath, ensureDirectoryEmpty, download } from "../../utils";
 import * as fsNative from "../../fsNative";
+import { fileContentMismatch, hashFileAtPath } from "../../file";
 
 export interface SubmissionFileInfo {
   uuid: string;
@@ -32,12 +33,20 @@ export class SubmissionFile {
 
   private readonly downloadPromise: Promise<void>;
 
-  constructor(fileInfo: SubmissionFileInfo) {
+  // With `expectedHash` (the SHA-256 recorded when it was uploaded), a file with other content fails the task.
+  constructor(fileInfo: SubmissionFileInfo, expectedHash?: string) {
     // It's fine to use the uuid as filename since every submission has a different file uuid
     this.path = safelyJoinPath(tmpdir(), fileInfo.uuid);
     this.unzippedPath = safelyJoinPath(tmpdir(), `${fileInfo.uuid}_unzipped`);
 
-    this.downloadPromise = download(fileInfo.url, this.path, "answer file");
+    this.downloadPromise = (async () => {
+      await download(fileInfo.url, this.path, "answer file");
+      if (!expectedHash) return;
+      const actualHash = await hashFileAtPath(this.path);
+      if (actualHash !== expectedHash) throw fileContentMismatch("The submitted file", expectedHash, actualHash);
+    })();
+    // Reported when it's waited for
+    this.downloadPromise.catch(() => null);
   }
 
   async waitForDownload() {

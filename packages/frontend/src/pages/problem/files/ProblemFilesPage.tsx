@@ -191,6 +191,8 @@ interface FileTableItem {
   uuid: string;
   filename: string;
   size: number;
+  // The content's SHA-256, if recorded
+  sha256?: string;
   upload?: FileUploadInfo;
 }
 
@@ -337,7 +339,11 @@ let FileTableRow: React.FC<FileTableRowProps> = props => {
             </div>
           </EmojiRenderer>
         </Table.Cell>
-        {!isMobile && <Table.Cell textAlign="center">{formatFileSize(props.file.size, 1)}</Table.Cell>}
+        {!isMobile && (
+          <Table.Cell textAlign="center" title={props.file.sha256 ? `SHA-256 ${props.file.sha256}` : undefined}>
+            {formatFileSize(props.file.size, 1)}
+          </Table.Cell>
+        )}
         <Table.Cell className={style.fileTableColumnOperations} textAlign="center">
           {props.file.upload ? (
             getUploadStatus()
@@ -712,7 +718,8 @@ let ProblemFilesPage: React.FC<ProblemFilesPageProps> = props => {
     return fileList.map(file => ({
       uuid: uuid(),
       filename: file.filename,
-      size: file.size
+      size: file.size,
+      sha256: file.sha256
     }));
   }
 

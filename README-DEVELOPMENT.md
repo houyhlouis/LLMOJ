@@ -72,7 +72,7 @@ node --test --test-concurrency=1 apps/backend/src/health/*.test.cjs apps/backend
 # judge
 node --test apps/judge/src/aiQuality.test.cjs apps/judge/src/task/hack/hack.test.cjs \
   apps/judge/src/task/self-eval/self-eval.test.cjs apps/judge/src/rpc.test.cjs \
-  apps/judge/src/executionScheduler.test.cjs apps/judge/src/selfTestConfig.test.cjs
+  apps/judge/src/executionScheduler.test.cjs apps/judge/src/selfTestConfig.test.cjs apps/judge/src/fileContent.test.cjs
 
 # frontend
 node --test packages/frontend/test/*.test.cjs

@@ -1,12 +1,13 @@
 import { URL } from "url";
-import { Readable, Transform } from "stream";
+import { Readable, Transform, Writable } from "stream";
 import fs from "fs";
+import { createHash, Hash } from "crypto";
 import { pipeline } from "stream/promises";
 
 import { BadRequestException, Injectable, OnModuleInit } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 
-import { Repository, EntityManager, In, MoreThan } from "typeorm";
+import { Repository, EntityManager, In, IsNull, MoreThan } from "typeorm";
 import { v4 as UUID } from "uuid";
 import { Client as MinioClient, ClientOptions } from "minio";
 import * as minioHelpers from "minio/dist/main/helpers";
@@ -27,6 +28,26 @@ const MAINTENANCE_BATCH_SIZE = 500;
 const FILE_DOWNLOAD_EXPIRE_TIME = 20 * 60 * 60;
 // Judge clients download a task's files as soon as they receive it; allow for slow links to large test data.
 export const JUDGE_FILE_DOWNLOAD_EXPIRE_TIME = 6 * 60 * 60;
+
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+
+const isMissingObject = (error: { code?: string; message?: string }) =>
+  error?.code === "NoSuchKey" || error?.code === "NotFound" || error?.message === "The specified key does not exist.";
+
+// Passes a stream through, updating `hash` with its content
+const hashing = (hash: Hash) =>
+  new Transform({
+    transform(chunk: Buffer, encoding, callback) {
+      hash.update(chunk);
+      callback(null, chunk);
+    }
+  });
+
+async function hashLocalFile(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  await pipeline(fs.createReadStream(path), hashing(hash), new Writable({ write: (chunk, encoding, done) => done() }));
+  return hash.digest("hex");
+}
 
 // MinIO 7 exposes these constructors from its helpers module, while its public
 // declarations expose their types from minio. Composition copies on the server.
@@ -158,15 +179,28 @@ export class FileService implements OnModuleInit {
     );
   }
 
-  async uploadFile(uuid: string, streamOrBufferOrFile: string | Buffer | Readable, retryCount = 10): Promise<void> {
+  /**
+   * Stores an object from the backend itself.
+   *
+   * @return The SHA-256 of what was stored.
+   */
+  async uploadFile(uuid: string, streamOrBufferOrFile: string | Buffer | Readable, retryCount = 10): Promise<string> {
     for (let i = 0; i < retryCount; i++) {
       try {
         /* eslint-disable no-await-in-loop */
-        if (typeof streamOrBufferOrFile === "string")
+        if (typeof streamOrBufferOrFile === "string") {
+          const sha256 = await hashLocalFile(streamOrBufferOrFile);
           await this.minioClient.fPutObject(this.bucket, uuid, streamOrBufferOrFile, {});
-        else await this.minioClient.putObject(this.bucket, uuid, streamOrBufferOrFile, {});
+          return sha256;
+        }
+        if (Buffer.isBuffer(streamOrBufferOrFile)) {
+          await this.minioClient.putObject(this.bucket, uuid, streamOrBufferOrFile, {});
+          return createHash("sha256").update(streamOrBufferOrFile).digest("hex");
+        }
+        const hash = createHash("sha256");
+        await this.minioClient.putObject(this.bucket, uuid, streamOrBufferOrFile.pipe(hashing(hash)), {});
+        return hash.digest("hex");
         /* eslint-enable no-await-in-loop */
-        return;
       } catch (e) {
         if (i === retryCount - 1) throw e;
         else {
@@ -176,6 +210,83 @@ export class FileService implements OnModuleInit {
         }
       }
     }
+    throw new Error("No attempt to store the file was made");
+  }
+
+  /** Reads a stored object to compute its SHA-256. */
+  async hashStoredObject(uuid: string): Promise<{ sha256: string; size: number }> {
+    const hash = createHash("sha256");
+    let size = 0;
+    await pipeline(
+      await this.minioClient.getObject(this.bucket, uuid),
+      new Writable({
+        write(chunk: Buffer, encoding, callback) {
+          hash.update(chunk);
+          size += chunk.length;
+          callback();
+        }
+      })
+    );
+    return { sha256: hash.digest("hex"), size };
+  }
+
+  /** The recorded SHA-256 of the given files, by UUID; files without one are left out. */
+  async getContentHashes(uuids: string[]): Promise<Record<string, string>> {
+    const unique = [...new Set(uuids.filter(uuid => typeof uuid === "string"))];
+    if (unique.length === 0) return {};
+    const files = await this.fileRepository.find({ select: ["uuid", "sha256"], where: { uuid: In(unique) } });
+    return Object.fromEntries(
+      files.filter(file => SHA256_PATTERN.test(file.sha256 ?? "")).map(file => [file.uuid, file.sha256])
+    );
+  }
+
+  /**
+   * Computes the content hashes that aren't recorded yet (files from before content hashes, or added another way),
+   * in the order the files were added, from the file after `afterId`. A file whose object is missing, or whose size
+   * isn't the recorded one, is left without.
+   *
+   * @return The ID of the last file looked at (`null` when there were no more), and how many hashes were recorded.
+   */
+  async recordMissingContentHashes(
+    afterId: number,
+    maximumFiles: number,
+    maximumBytes: number
+  ): Promise<{ lastId: number; recorded: number; skipped: number }> {
+    const files = await this.fileRepository.find({
+      select: ["id", "uuid", "size"],
+      where: { sha256: IsNull(), id: MoreThan(afterId) },
+      order: { id: "ASC" },
+      take: maximumFiles
+    });
+    let lastId: number = null;
+    let recorded = 0;
+    let skipped = 0;
+    let bytes = 0;
+    for (const file of files) {
+      if (lastId !== null && bytes + file.size > maximumBytes) break;
+      lastId = file.id;
+      bytes += file.size;
+      let content: { sha256: string; size: number };
+      try {
+        // eslint-disable-next-line no-await-in-loop -- One file at a time
+        content = await this.hashStoredObject(file.uuid);
+      } catch (e) {
+        if (!isMissingObject(e)) throw e;
+        skipped++;
+        continue;
+      }
+      if (content.size !== file.size) {
+        logger.error(
+          `Stored file ${file.uuid} has ${content.size} bytes, but ${file.size} were recorded; its content hash is not recorded`
+        );
+        skipped++;
+        continue;
+      }
+      // eslint-disable-next-line no-await-in-loop -- One file at a time
+      await this.fileRepository.update({ id: file.id, sha256: IsNull() }, { sha256: content.sha256 });
+      recorded++;
+    }
+    return { lastId, recorded, skipped };
   }
 
   async downloadFileToPath(uuid: string, destination: string, maximumBytes: number): Promise<number> {
@@ -245,7 +356,8 @@ export class FileService implements OnModuleInit {
   async processUploadRequest<LimitCheckErrorType extends string>(
     uploadInfo: FileUploadInfoDto,
     checkLimit: (size: number) => Promise<LimitCheckErrorType> | LimitCheckErrorType,
-    transactionalEntityManager: EntityManager
+    transactionalEntityManager: EntityManager,
+    recordContentHash = true
   ): Promise<FileEntity | SignedFileUploadRequestDto | LimitCheckErrorType | "FILE_UUID_EXISTS" | "FILE_NOT_UPLOADED"> {
     if (!uploadInfo.uuid) return await this.prepareUploadRequest(uploadInfo.size, checkLimit);
 
@@ -267,10 +379,17 @@ export class FileService implements OnModuleInit {
     const limitCheckError = await checkLimit(actualSize);
     if (limitCheckError) return limitCheckError;
 
+    // Judges check the file against what's stored now; its upload form stays valid for a while, so the file could
+    // still be replaced in storage, but not without that being noticed. A file judges don't use may leave its hash to
+    // the background (FileContentHashService), so that a large one isn't read while the caller holds its locks.
+    const content = recordContentHash ? await this.hashStoredObject(uploadInfo.uuid) : null;
+    if (content && content.size !== actualSize) throw new BadRequestException("FILE_SIZE_MISMATCH");
+
     const file = new FileEntity();
     file.uuid = uploadInfo.uuid;
     file.size = actualSize;
     file.uploadTime = new Date();
+    file.sha256 = content?.sha256 ?? null;
 
     await transactionalEntityManager.save(FileEntity, file);
 

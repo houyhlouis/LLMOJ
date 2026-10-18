@@ -414,6 +414,18 @@ class Doctor:
         share = int(connected) / max(1, int(maximum))
         if share >= 0.8:
             r.add(WARN, 'connections', say(f'MariaDB has {connected} of {maximum} connections in use', f'MariaDB 已使用 {connected}/{maximum} 个连接'))
+        # Judges check test data against these hashes; files from before them are hashed in the background
+        result = self.host.run(['mariadb', '--protocol=socket', f'--socket={socket}', '--user=root', '--batch',
+                                '--skip-column-names', '-e', f'SELECT COUNT(*), COALESCE(SUM(sha256 IS NULL), 0) FROM `{name}`.`file`'])
+        counts = result.stdout.strip().split('\t')
+        if result.returncode == 0 and len(counts) == 2 and all(count.isdigit() for count in counts):
+            total, missing = map(int, counts)
+            if missing:
+                r.add(INFO, 'content hashes', say(f'{missing} of {total} stored files have no content hash yet; the backend '
+                                                  'computes them in the background, up to 1 GiB a minute',
+                                                  f'{total} 个已存文件中有 {missing} 个尚无内容哈希；后端在后台计算，每分钟最多 1 GiB'))
+            elif total:
+                r.add(OK, 'content hashes', say(f'All {total} stored files have a content hash', f'全部 {total} 个已存文件都有内容哈希'))
 
     def storage(self):
         r = self.report

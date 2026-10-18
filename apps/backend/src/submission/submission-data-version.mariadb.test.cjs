@@ -42,6 +42,7 @@ const { ProblemSampleEntity } = require("../problem/problem-sample.entity.ts");
 const { ProblemJudgeInfoEntity } = require("../problem/problem-judge-info.entity.ts");
 const { ProblemEntity } = require("../problem/problem.entity.ts");
 const { FileEntity } = require("../file/file.entity.ts");
+const { FileService } = require("../file/file.service.ts");
 const { UserEntity } = require("../user/user.entity.ts");
 const { UserAuthEntity } = require("../auth/user-auth.entity.ts");
 
@@ -123,7 +124,9 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
       if (list.length) await manager.delete(FileEntity, { uuid: In(list) });
       return () => removedObjects.push(...list);
     },
-    signDownloadLink: async () => "signed"
+    signDownloadLink: async () => "signed",
+    getContentHashes: uuids =>
+      FileService.prototype.getContentHashes.call({ fileRepository: ds.getRepository(FileEntity) }, uuids)
   };
   const configService = {
     config: {
@@ -195,7 +198,15 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
   }
   const submit = async (submitter, p, contest) => (await svc.createSubmission(submitter, p, code, null, contest))[1];
   const load = async id => await ds.getRepository(SubmissionEntity).findOneBy({ id });
-  const finish = async (id, status) => assert.equal(await svc.onTaskProgress((await load(id)).taskId, finished(status)), true);
+  const finish = async (id, status, judgeRuntimeId) =>
+    assert.equal(
+      await svc.onTaskProgress(
+        (await load(id)).taskId,
+        finished(status),
+        judgeRuntimeId === undefined ? undefined : { judgeRuntimeId, confirm: async () => true }
+      ),
+      true
+    );
   const counts = async (p, u) => [
     plain(await ds.query("SELECT submissionCount, acceptedSubmissionCount FROM problem WHERE id = ?", [p.id]))[0],
     plain(await ds.query("SELECT submissionCount, acceptedProblemCount FROM user WHERE id = ?", [u.id]))[0]
@@ -305,6 +316,68 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
     // Deleting the submission deletes its history
     await svc.deleteSubmission(await load(s.id));
     assert.equal(await ds.getRepository(SubmissionResultHistoryEntity).countBy({ submissionId: s.id }), 0);
+  });
+
+  await t.test("data versions record content hashes, sent with the task; a result records what judged it", async () => {
+    const sha256 = text => crypto.createHash("sha256").update(text).digest("hex");
+    const submitter = await user();
+    const p = await problem();
+    const older = await file(p.id, "1.in");
+    const first = await versions.current(p);
+    assert.deepEqual(plain(first.testData), [{ filename: "1.in", uuid: older }]);
+    // Its hash is recorded later (in the background): the version stays the same
+    await ds.getRepository(FileEntity).update({ uuid: older }, { sha256: sha256("one") });
+    assert.equal((await versions.current(p)).id, first.id, "recording a hash doesn't make a new version");
+    assert.equal(await versions.isCurrent(p, first), true);
+    const newer = crypto.randomUUID();
+    await ds.getRepository(FileEntity).insert({ uuid: newer, size: 3, uploadTime: new Date(), sha256: sha256("two") });
+    await ds.getRepository(ProblemFileEntity).save({ problemId: p.id, type: ProblemFileType.TestData, filename: "2.in", uuid: newer });
+    const second = await versions.current(p);
+    assert.equal(second.version, first.version + 1);
+    assert.deepEqual(plain(second.testData), [
+      { filename: "1.in", uuid: older, sha256: sha256("one") },
+      { filename: "2.in", uuid: newer, sha256: sha256("two") }
+    ]);
+
+    const s = await submit(submitter, p);
+    assert.equal(s.problemDataVersionId, second.id);
+    const task = await svc.getTaskToBeSentToJudgeByTaskId(s.taskId, 1);
+    assert.deepEqual(plain(task.fileHashes), { [older]: sha256("one"), [newer]: sha256("two") });
+
+    // The result records the runtime its judge client announced; a rejudge keeps it with the replaced result
+    const runtime = {
+      judgeMachine: "judge-1",
+      judgeProgram: "a".repeat(64),
+      sandboxImage: "b".repeat(64),
+      node: "v24.21.0",
+      os: "Ubuntu 26.04",
+      kernel: "Linux 7.0.0",
+      arch: "x64",
+      cpu: "Intel Core i7"
+    };
+    svc.judgeRuntimeService = {
+      describe: async ids => new Map(ids.filter(id => id === 7).map(id => [id, runtime]))
+    };
+    try {
+      await finish(s.id, "Accepted", 7);
+      assert.equal((await load(s.id)).judgeRuntimeId, 7);
+      assert.deepEqual(plain(await svc.getSubmissionJudgeRuntime(await load(s.id))), runtime);
+      await svc.rejudgeSubmission(await load(s.id), admin);
+      assert.equal((await load(s.id)).judgeRuntimeId, null, "none while it's judged again");
+      // A judge client that announces no runtime
+      await finish(s.id, "WrongAnswer");
+      assert.equal((await load(s.id)).judgeRuntimeId, null);
+      assert.equal(await svc.getSubmissionJudgeRuntime(await load(s.id)), null);
+      const [earlier] = plain(await svc.getEarlierResults(await load(s.id)));
+      assert.equal(earlier.status, "Accepted");
+      assert.deepEqual(earlier.judgeRuntime, runtime);
+      assert.equal(
+        (await ds.getRepository(SubmissionResultHistoryEntity).findOneBy({ submissionId: s.id })).judgeRuntimeId,
+        7
+      );
+    } finally {
+      delete svc.judgeRuntimeService;
+    }
   });
 
   await t.test("removed test data stays until no waiting submission needs it", async () => {

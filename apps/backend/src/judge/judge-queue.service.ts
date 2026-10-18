@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { EventEmitter } from "events";
 
-import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 
 import { DataSource, EntityManager } from "typeorm";
@@ -16,6 +16,7 @@ import { JudgeJobAttemptEntity, JudgeJobAttemptOutcome, JudgeJobEntity, JudgeJob
 import { logger } from "../logger";
 import { RedisService } from "../redis/redis.service";
 import { MetricsService, sharedReading } from "../metrics/metrics.service";
+import { FileService } from "../file/file.service";
 
 // Smaller means higher priority
 // With the same priority value, the smaller ID means higher priority
@@ -31,6 +32,9 @@ export interface JudgeTaskExtraInfo {}
 
 // Extra info is also send to judge client while ONLY meta is used to identity the task
 export class JudgeTask<ExtraInfo extends JudgeTaskExtraInfo> implements JudgeTaskPayload<ExtraInfo> {
+  // The recorded SHA-256 of the files it uses, by UUID (see `JudgeTaskPayload`)
+  fileHashes?: Record<string, string>;
+
   constructor(
     public taskId: string, // Passed by the task creator, to indentify the task
     public type: JudgeTaskType,
@@ -51,6 +55,18 @@ export class JudgeTask<ExtraInfo extends JudgeTaskExtraInfo> implements JudgeTas
 export interface JudgeJobOwner {
   connectionId: string;
   judgeClientId: number;
+  // The runtime it announced, if recorded
+  judgeRuntimeId?: number;
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// The file UUIDs referenced anywhere in a task's payload
+function collectUuids(value: unknown, result: Set<string>): void {
+  if (typeof value === "string") {
+    if (UUID_PATTERN.test(value)) result.add(value);
+  } else if (Array.isArray(value)) value.forEach(item => collectUuids(item, result));
+  else if (value && typeof value === "object") Object.values(value).forEach(item => collectUuids(item, result));
 }
 
 /** A task leased to a judge client connection. */
@@ -153,6 +169,8 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
 
   // Active task IDs without a queued or leased job in the previous recovery scan: recovered if still so.
   private tasksMissingJobs = new Set<string>();
+
+  @Optional() @Inject(FileService) private readonly fileService: FileService;
 
   constructor(
     @InjectDataSource()
@@ -345,6 +363,7 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
           taskId: job.taskId,
           fence,
           judgeClientId: owner.judgeClientId,
+          judgeRuntimeId: owner.judgeRuntimeId ?? null,
           leaseOwner: owner.connectionId,
           startedAt: () => "NOW(3)"
         })
@@ -360,6 +379,7 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
       const taskService = this.taskServices.get(job.type as JudgeTaskType);
       if (!taskService) throw new Error(`Unknown judge task type ${job.type}`);
       task = await taskService.getTaskToBeSentToJudgeByTaskId(job.taskId, Number(job.priority));
+      if (task) await this.attachFileHashes(task);
     } catch (e) {
       await this.retryPreparation(job, fence, owner, e);
       return null;
@@ -381,6 +401,17 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
       })`
     );
     return task;
+  }
+
+  // The judge checks each file the task uses against its recorded content hash. Hashes the task's service gives (e.g.
+  // those of its data version) are kept.
+  private async attachFileHashes(task: JudgeTask<JudgeTaskExtraInfo>): Promise<void> {
+    if (!this.fileService) return;
+    const uuids = new Set<string>();
+    collectUuids(task.extraInfo, uuids);
+    if (uuids.size === 0) return;
+    const fileHashes = { ...(await this.fileService.getContentHashes([...uuids])), ...task.fileHashes };
+    if (Object.keys(fileHashes).length !== 0) task.fileHashes = fileHashes;
   }
 
   private async retryPreparation(job: JudgeJobRow, fence: number, owner: JudgeJobOwner, error: unknown) {
@@ -532,7 +563,7 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
    */
   async onTaskProgress(
     taskMeta: JudgeTaskMeta,
-    lease: { fence: number; connectionId: string },
+    lease: { fence: number; connectionId: string; judgeRuntimeId?: number },
     progress: JudgeTaskProgress
   ): Promise<boolean> {
     const { taskId, type } = taskMeta;
@@ -562,6 +593,7 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
 
     let confirmed = false;
     const completion: JudgeTaskCompletion = {
+      judgeRuntimeId: lease.judgeRuntimeId ?? null,
       confirm: async manager => {
         confirmed = await this.endLease(
           manager,

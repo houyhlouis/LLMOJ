@@ -1,7 +1,11 @@
 import { ApiProperty } from "@nestjs/swagger";
 
 import { SubmissionMetaDto } from "./submission-meta.dto";
-import { SubmissionDataVersionDto, SubmissionEarlierResultDto } from "./submission-judging-data.dto";
+import {
+  SubmissionDataVersionDto,
+  SubmissionEarlierResultDto,
+  SubmissionJudgeRuntimeDto
+} from "./submission-judging-data.dto";
 
 import { SubmissionContent } from "../submission-content.interface";
 import { SubmissionProgress } from "../submission-progress.interface";
@@ -48,6 +52,13 @@ export class GetSubmissionDetailResponseDto {
     description: "With rejudge permission; absent for submissions from before data versions"
   })
   dataVersion?: SubmissionDataVersionDto;
+
+  @ApiProperty({
+    type: SubmissionJudgeRuntimeDto,
+    required: false,
+    description: "With rejudge permission: what its result was judged with; absent if not recorded"
+  })
+  judgeRuntime?: SubmissionJudgeRuntimeDto;
 
   @ApiProperty({
     type: [SubmissionEarlierResultDto],

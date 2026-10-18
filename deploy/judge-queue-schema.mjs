@@ -7,8 +7,9 @@ export const JUDGE_JOB_CREATE_SQL = "CREATE TABLE `judge_job` (`taskId` char(36)
   "`preparationFailures` smallint UNSIGNED NOT NULL, `lastError` varchar(255) NULL, `resultHash` char(64) NULL, " +
   "`finishedAt` datetime(3) NULL, INDEX `IDX_d78633726d8ce6f8afb263b595` (`state`, `leaseUntil`), " +
   "INDEX `IDX_0c3cfd47a2e867e8b2854b43f6` (`state`, `priority`, `createdAt`), PRIMARY KEY (`taskId`)) ENGINE=InnoDB";
+// Created with its judge runtime column (runtime-identity-schema.mjs adds it to an existing table)
 export const JUDGE_JOB_ATTEMPT_CREATE_SQL = "CREATE TABLE `judge_job_attempt` (`id` int NOT NULL AUTO_INCREMENT, " +
-  "`taskId` char(36) NOT NULL, `fence` int UNSIGNED NOT NULL, `judgeClientId` int NULL, " +
+  "`taskId` char(36) NOT NULL, `fence` int UNSIGNED NOT NULL, `judgeClientId` int NULL, `judgeRuntimeId` int NULL, " +
   "`leaseOwner` varchar(40) NOT NULL, `startedAt` datetime(3) NOT NULL, `endedAt` datetime(3) NULL, " +
   "`outcome` varchar(16) NULL, INDEX `IDX_9bac82304b143c893faecffcdf` (`startedAt`), " +
   "UNIQUE INDEX `IDX_4a6ad01ae52602fbc78c82bba4` (`taskId`, `fence`), PRIMARY KEY (`id`)) ENGINE=InnoDB";

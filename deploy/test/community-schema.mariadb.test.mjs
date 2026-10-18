@@ -5,7 +5,8 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { auditSchema, applySchema, COMMUNITY_TABLES, LEGACY_SUBMISSION_STATUSES, LEGACY_PRIVILEGES, HACK_STANDARD_CONTENT_SQL,
-  FILE_SIZE_BIGINT_SQL, TEAM_FILE_SIZE_BIGINT_SQL, TEAM_QUOTA_DEFAULT_SQL, TWO_FACTOR_SQL, TWO_FACTOR_TABLES, JUDGE_QUEUE_SQL, JUDGE_QUEUE_TABLES, JUDGE_CLIENT_DRAINING_SQL, DATA_VERSION_SQL, DATA_VERSION_TABLES, AI_BUDGET_SQL, AI_BUDGET_TABLES } from '../upgrade-schema.mjs';
+  FILE_SIZE_BIGINT_SQL, TEAM_FILE_SIZE_BIGINT_SQL, TEAM_QUOTA_DEFAULT_SQL, TWO_FACTOR_SQL, TWO_FACTOR_TABLES, JUDGE_QUEUE_SQL, JUDGE_QUEUE_TABLES, JUDGE_CLIENT_DRAINING_SQL, DATA_VERSION_SQL, DATA_VERSION_TABLES, AI_BUDGET_SQL, AI_BUDGET_TABLES,
+  RUNTIME_IDENTITY_SQL, RUNTIME_IDENTITY_TABLES, RUNTIME_IDENTITY_COLUMNS } from '../upgrade-schema.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(path.join(root, 'apps/backend/package.json'));
 const configPath = process.env.HYHOJ_COMMUNITY_SCHEMA_TEST_DB_CONFIG;
@@ -37,6 +38,11 @@ test('real metadata: mature legacy upgrade, new-schema no-op, preserved data, re
     assert.deepEqual(fresh.queries, []); assert.deepEqual(fresh.solutions, { pending: 0, schemaPending: false });
     const noop = await applySchema(ds);
     assert.deepEqual(noop.queries, []); assert.equal(noop.solutions.classified, 0);
+    const dropRuntimeIdentity = async () => {
+      for (const table of RUNTIME_IDENTITY_TABLES) await ds.query('DROP TABLE `' + table + '`');
+      for (const [table, column] of RUNTIME_IDENTITY_COLUMNS) await ds.query('ALTER TABLE `' + table + '` DROP COLUMN `' + column + '`');
+    };
+    await dropRuntimeIdentity();
     for (const table of COMMUNITY_TABLES) await ds.query('DROP TABLE `' + table + '`');
     for (const table of [...TWO_FACTOR_TABLES].reverse()) await ds.query('DROP TABLE `' + table + '`');
     for (const table of JUDGE_QUEUE_TABLES) await ds.query('DROP TABLE `' + table + '`');
@@ -69,22 +75,46 @@ test('real metadata: mature legacy upgrade, new-schema no-op, preserved data, re
       console.error('Rejected legacy schema proposal:', (await ds.driver.createSchemaBuilder().log()).upQueries.map(query => query.query));
       throw error;
     }
-    assert.equal(legacy.queries.length, 39);
-    for (const sql of [...TWO_FACTOR_SQL, ...JUDGE_QUEUE_SQL, JUDGE_CLIENT_DRAINING_SQL, ...DATA_VERSION_SQL, ...AI_BUDGET_SQL]) assert(legacy.queries.includes(sql), sql);
+    assert.equal(legacy.queries.length, 42);
+    // The judge queue and data version tables are created with their runtime column
+    const runtimeAdditions = RUNTIME_IDENTITY_SQL.filter(sql => !/`(judge_job_attempt|submission_result_history)`/.test(sql));
+    for (const sql of [...TWO_FACTOR_SQL, ...JUDGE_QUEUE_SQL, JUDGE_CLIENT_DRAINING_SQL, ...DATA_VERSION_SQL, ...AI_BUDGET_SQL, ...runtimeAdditions]) assert(legacy.queries.includes(sql), sql);
+    assert.equal(runtimeAdditions.length, 3);
     assert.deepEqual(legacy.solutions, { pending: 0, schemaPending: true });
     assert(!legacy.queries.some(query => /DROP|TRUNCATE/.test(query)));
     const applied = await applySchema(ds);
-    assert.equal(applied.queries.length, 39);
+    assert.equal(applied.queries.length, 42);
     assert.equal(applied.solutions.classified, 1); assert.equal(applied.solutions.pending, 0);
-    // Existing submissions have no data version
+    // Existing submissions have no data version, and no recorded runtime
     assert.deepEqual(await ds.query('SELECT * FROM submission ORDER BY id'),
-      submissions.map(submission => ({ ...submission, problemDataVersionId: null })));
+      submissions.map(submission => ({ ...submission, problemDataVersionId: null, judgeRuntimeId: null })));
     assert.deepEqual(await ds.query('SELECT * FROM user ORDER BY id'), accounts);
     assert.deepEqual(await ds.query('SELECT id,title,rule,startTime,endTime FROM contest ORDER BY id'), contests);
     assert.deepEqual((await ds.query('SELECT id,type FROM discussion ORDER BY id')).map(row => [row.id, row.type]), [[101, 'Discussion'], [102, 'Solution']]);
     const repeat = await applySchema(ds);
     assert.deepEqual(repeat.queries, []); assert.equal(repeat.solutions.classified, 0);
     assert.equal((await ds.driver.createSchemaBuilder().log()).upQueries.length, 0);
+    // From the previous release: only the content hashes and runtimes are added, and every row is kept
+    await ds.query("INSERT INTO file(id,uuid,size,uploadTime) VALUES (800,'00000000-0000-4000-8000-000000000800',64,'2026-10-10')");
+    await ds.query("INSERT INTO judge_job_attempt(taskId,fence,judgeClientId,leaseOwner,startedAt,endedAt,outcome) VALUES ('00000000-0000-4000-8000-000000000801',1,3,'socket','2026-10-10','2026-10-10','Finished')");
+    await ds.query("INSERT INTO submission_result_history(submissionId,status,score,replacedAt) VALUES (501,'WrongAnswer',0,'2026-10-10')");
+    await dropRuntimeIdentity();
+    const kept = async () => [await ds.query('SELECT * FROM file ORDER BY id'), await ds.query('SELECT * FROM judge_job_attempt ORDER BY id'),
+      await ds.query('SELECT * FROM submission ORDER BY id'), await ds.query('SELECT * FROM submission_result_history ORDER BY id')];
+    const before = await kept();
+    assert.deepEqual([...(await auditSchema(ds)).queries].sort(), [...RUNTIME_IDENTITY_SQL].sort());
+    assert.deepEqual([...(await applySchema(ds)).queries].sort(), [...RUNTIME_IDENTITY_SQL].sort());
+    const [files, attempts, submissionRows, history] = await kept();
+    assert.deepEqual(files, before[0].map(row => ({ ...row, sha256: null })));
+    assert.deepEqual(attempts, before[1].map(row => ({ ...row, judgeRuntimeId: null })));
+    assert.deepEqual(submissionRows, before[2].map(row => ({ ...row, judgeRuntimeId: null })));
+    assert.deepEqual(history, before[3].map(row => ({ ...row, judgeRuntimeId: null })));
+    assert.deepEqual((await applySchema(ds)).queries, []);
+    await ds.query('ALTER TABLE `submission` CHANGE `judgeRuntimeId` `judgeRuntimeId` bigint NULL');
+    await assert.rejects(() => auditSchema(ds), /Unsupported schema change|submission judgeRuntimeId/);
+    await ds.query('ALTER TABLE `submission` CHANGE `judgeRuntimeId` `judgeRuntimeId` int NULL');
+    await ds.query('DELETE FROM file WHERE id = 800');
+    assert.deepEqual((await auditSchema(ds)).queries, []);
     // Upgrade the already-deployed reference-ID schema without changing its data.
     await ds.query('ALTER TABLE `hack_problem` DROP COLUMN `standardContent`');
     await ds.query("INSERT INTO hack_problem(problemId,referenceSubmissionId,validatorLanguage,validatorCode,configuredById,updateTime) VALUES (20,501,'cpp','int main(){return 0;}',1,'2026-10-10')");

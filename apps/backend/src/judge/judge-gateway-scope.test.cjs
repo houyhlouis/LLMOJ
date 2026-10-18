@@ -36,6 +36,15 @@ function load(file, overrides) {
 }
 
 const warnings = [];
+const judgeRuntimeModule = load("judge-runtime.service.ts", {
+  crypto: require("node:crypto"),
+  "@nestjs/common": { Injectable: decorator },
+  "@nestjs/typeorm": { InjectRepository: decorator },
+  typeorm: { In: values => values },
+  "./judge-runtime.entity": {},
+  "./judge-client.entity": {},
+  "./dto/judge-runtime.dto": {}
+});
 const { JudgeGateway } = load("judge.gateway.ts", {
   "@nestjs/common": { forwardRef: x => x, Inject: decorator, Optional: decorator },
   "@nestjs/websockets": {
@@ -53,6 +62,7 @@ const { JudgeGateway } = load("judge.gateway.ts", {
   "./judge-job.entity": {
     JudgeJobAttemptOutcome: { Disconnected: "Disconnected", Abandoned: "Abandoned", Expired: "Expired" }
   },
+  "./judge-runtime.service": judgeRuntimeModule,
   "../logger": { logger: { log: noop, verbose: noop, error: noop, warn: message => warnings.push(message) } },
   "../file/file.service": { MinioSignFor: { Judge: "Judge" }, JUDGE_FILE_DOWNLOAD_EXPIRE_TIME: 21600 },
   "../event-report/event-report.service": { EventReportType: { Success: "Success", Warning: "Warning" } },
@@ -71,7 +81,9 @@ function fixture() {
   const renewed = [];
   const canceled = [];
   const claims = [];
+  const owners = [];
   const stored = [];
+  const recorded = [];
   const clients = new Map();
   let fence = 0;
   let waits = 0;
@@ -94,6 +106,7 @@ function fixture() {
     {
       claim: async (owner, taskTypes) => {
         claims.push([owner.connectionId, taskTypes]);
+        owners.push(owner);
         const next = queue.shift();
         if (next instanceof Error) throw next;
         return next ? { task: next, fence: ++fence } : null;
@@ -123,6 +136,17 @@ function fixture() {
     { getClient: () => redis },
     { lock: async (name, callback) => await callback() }
   );
+  // Each runtime announced is recorded once; the next ID for a new one
+  const runtimeIds = new Map();
+  gateway.judgeRuntimeService = {
+    record: async (judgeClientId, runtime) => {
+      await new Promise(resolve => setTimeout(resolve, 5));
+      const key = JSON.stringify([judgeClientId, runtime]);
+      recorded.push([judgeClientId, runtime]);
+      if (!runtimeIds.has(key)) runtimeIds.set(key, 40 + runtimeIds.size + 1);
+      return runtimeIds.get(key);
+    }
+  };
   async function connect(key) {
     const emitted = [];
     const client = {
@@ -149,7 +173,9 @@ function fixture() {
     renewed,
     canceled,
     claims,
+    owners,
     stored,
+    recorded,
     clients,
     connect,
     waits: () => waits,
@@ -193,7 +219,7 @@ test("progress is only accepted from the client the task was leased to, with tha
 
   // The returned value is the Socket.IO acknowledgement, sent once the progress has been processed.
   assert.equal(await gateway.onProgress(a.client, { taskMeta: meta, progress: { done: true } }), true);
-  assert.deepEqual(progress, [["task-a", { fence: 1, connectionId: "socket-1" }, { done: true }]]);
+  assert.deepEqual(progress, [["task-a", { fence: 1, connectionId: "socket-1", judgeRuntimeId: null }, { done: true }]]);
 });
 
 test("an acknowledged task stays assigned for late progress from older clients, then its lease is released", async t => {
@@ -349,4 +375,64 @@ test("resetting a judge client's key disconnects it at once, releasing its tasks
   assert.deepEqual(released, [["task-a", 1, "socket-1", "Disconnected"]]);
   await gateway.onJudgeClientChanged("not json");
   await gateway.onJudgeClientChanged(JSON.stringify({ id: 99, revoked: true }));
+});
+
+const runtime = (overrides = {}) => ({
+  judgeProgram: "a".repeat(64),
+  sandboxImage: "b".repeat(64),
+  node: "v24.21.0",
+  os: "Ubuntu 26.04",
+  kernel: "Linux 7.0.0-38-generic",
+  arch: "x64",
+  cpu: "Intel Core i7-11370H @ 4x 4.8GHz",
+  ...overrides
+});
+
+test("a judge client's announced runtime is recorded, and its leases and results refer to it", async () => {
+  const { gateway, queue, progress, owners, stored, recorded, connect } = fixture();
+  const a = await connect(1);
+  // Announced just before the consumer asks for a task: the claim waits for the runtime to be recorded
+  const announced = gateway.onCapabilities(a.client, capabilities({ protocolVersion: 3, runtime: runtime() }));
+  queue.push(submissionTask("task-a", []));
+  await gateway.onConsumeTask(a.client, 0);
+  await announced;
+  assert.deepEqual(recorded, [[1, runtime()]]);
+  assert.deepEqual(stored.at(-1), [1, capabilities({ protocolVersion: 3, runtime: runtime() })]);
+  assert.equal(owners.at(-1).judgeRuntimeId, 41);
+  assert.equal(await gateway.onProgress(a.client, { taskMeta: { taskId: "task-a", type: "Submission" }, progress: {} }), true);
+  assert.deepEqual(progress.at(-1)[1], { fence: 1, connectionId: "socket-1", judgeRuntimeId: 41 });
+
+  // Another judge machine with the same software is another runtime
+  const b = await connect(2);
+  await gateway.onCapabilities(b.client, capabilities({ protocolVersion: 3, runtime: runtime() }));
+  queue.push(submissionTask("task-b", []));
+  await gateway.onConsumeTask(b.client, 0);
+  assert.equal(owners.at(-1).judgeRuntimeId, 42);
+});
+
+test("an invalid runtime is left out of the capabilities, and the judge client's results have none", async () => {
+  const { gateway, queue, owners, stored, recorded, connect } = fixture();
+  const a = await connect(1);
+  for (const invalid of [
+    "x",
+    runtime({ judgeProgram: "not a digest" }),
+    runtime({ sandboxImage: "B".repeat(64) }),
+    runtime({ kernel: 7 }),
+    runtime({ cpu: "x".repeat(201) })
+  ]) {
+    await gateway.onCapabilities(a.client, capabilities({ protocolVersion: 3, runtime: invalid }));
+    assert.deepEqual(stored.at(-1), [1, capabilities({ protocolVersion: 3 })]);
+  }
+  // Extra fields aren't kept
+  await gateway.onCapabilities(a.client, capabilities({ protocolVersion: 3, runtime: { ...runtime(), secret: "x" } }));
+  assert.deepEqual(stored.at(-1)[1].runtime, runtime());
+  assert.deepEqual(recorded, [[1, runtime()]]);
+
+  // If recording fails, judging goes on without
+  const b = await connect(2);
+  gateway.judgeRuntimeService = { record: async () => Promise.reject(new Error("database unavailable")) };
+  await gateway.onCapabilities(b.client, capabilities({ protocolVersion: 3, runtime: runtime() }));
+  queue.push(submissionTask("task-b", []));
+  await gateway.onConsumeTask(b.client, 0);
+  assert.equal(owners.at(-1).judgeRuntimeId, null);
 });

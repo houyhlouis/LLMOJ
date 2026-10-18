@@ -16,4 +16,9 @@ export class FileEntity {
 
   @Column({ type: "datetime" })
   uploadTime: Date;
+
+  // SHA-256 of the content, recorded when the file is accepted; judges check the files they use against it. Null for
+  // a file from before content hashes until the backend has computed it.
+  @Column({ type: "char", length: 64, nullable: true })
+  sha256: string;
 }

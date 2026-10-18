@@ -100,6 +100,11 @@ export class SubmissionEntity {
   @Column({ type: "integer", nullable: true })
   problemDataVersionId: number;
 
+  // What its result was judged with (see `JudgeRuntimeEntity`); null while it's judged, for a result from before
+  // runtimes were recorded, or from a judge client that announces none
+  @Column({ type: "integer", nullable: true })
+  judgeRuntimeId: number;
+
   @OneToOne(() => SubmissionDetailEntity, submissionDetail => submissionDetail.submission)
   detail: Promise<SubmissionDetailEntity>;
 }

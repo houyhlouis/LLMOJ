@@ -84,7 +84,7 @@ NATIVE_PACKAGES = {
 }
 JUDGE_REGRESSIONS = ('apps/judge/src/task/hack/hack.test.cjs', 'apps/judge/src/task/self-eval/self-eval.test.cjs',
                      'apps/judge/src/rpc.test.cjs', 'apps/judge/src/executionScheduler.test.cjs',
-                     'apps/judge/src/selfTestConfig.test.cjs')
+                     'apps/judge/src/selfTestConfig.test.cjs', 'apps/judge/src/fileContent.test.cjs')
 COMMUNITY_PERMISSIONS = (
     'ViewTeam', 'CreateTeam', 'ManageTeams', 'FakeSubmission',
     'ViewHack', 'CreateHack', 'ManageHack', 'CreateSelfEval'
