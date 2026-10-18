@@ -12,7 +12,15 @@ new Function("require", "module", "exports", "__dirname", source)(
   name =>
     ({
       "@nestjs/typeorm": { TypeOrmModule: { forRootAsync: options => options } },
-      "../config/config.service": { ConfigService: class ConfigService {} }
+      "../config/config.service": { ConfigService: class ConfigService {} },
+      "./query-metrics": {
+        QueryMetricsLogger: class QueryMetricsLogger {
+          constructor(printAll) {
+            this.printAll = printAll;
+          }
+        },
+        QUERY_TIMING_THRESHOLD_MS: 1
+      }
     }[name]),
   loaded,
   loaded.exports,
@@ -44,6 +52,9 @@ test("the TypeORM options follow the process environment", () => {
     assert.equal(options().synchronize, false);
     process.env.LIBREOJ_SCHEMA_SYNC = "1";
     assert.equal(options().synchronize, true);
+    // Every query goes through the query counter (database/query-metrics.ts), which times those over 1 ms
+    assert.equal(options().logger.constructor.name, "QueryMetricsLogger");
+    assert.equal(options().maxQueryExecutionTime, 1);
   } finally {
     for (const [key, value] of Object.entries(previous))
       if (value === undefined) delete process.env[key];

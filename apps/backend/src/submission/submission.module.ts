@@ -14,6 +14,7 @@ import { SubmissionProgressService } from "./submission-progress.service";
 import { SubmissionProgressGateway } from "./submission-progress.gateway";
 
 import { StatisticsOutboxService } from "./statistics-outbox.service";
+import { ContestScoreRevisionService } from "./contest-score-revision.service";
 import { SubmissionStatisticsService } from "./submission-statistics.service";
 
 import { AuthModule } from "../auth/auth.module";
@@ -46,9 +47,10 @@ import { MetricsModule } from "../metrics/metrics.module";
     SubmissionProgressService,
     SubmissionProgressGateway,
     SubmissionStatisticsService,
-    StatisticsOutboxService
+    StatisticsOutboxService,
+    ContestScoreRevisionService
   ],
   controllers: [SubmissionController],
-  exports: [SubmissionService]
+  exports: [SubmissionService, ContestScoreRevisionService]
 })
 export class SubmissionModule {}

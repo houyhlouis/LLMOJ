@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 
-import { Repository, EntityManager, FindOptionsWhere } from "typeorm";
+import { Repository, EntityManager, FindOptionsWhere, In } from "typeorm";
 
 import { LocalizedContentEntity, LocalizedContentType } from "./localized-content.entity";
 
@@ -84,6 +84,37 @@ export class LocalizedContentService {
 
     await this.redisService.cacheSet(key, localizedContent.data);
     return localizedContent.data;
+  }
+
+  /** `get` of each item, with one cache round trip and one query per type and locale for the items not cached. */
+  async getMany(items: { objectId: number; type: LocalizedContentType; locale: Locale }[]): Promise<string[]> {
+    const keys = items.map(item => REDIS_KEY_LOCALIZED_CONTENT.format(item.type, item.objectId, item.locale));
+    const results = await this.redisService.cacheGetMany(keys);
+    // As `get`, an empty cached value counts as not cached
+    const missing = new Map<string, number[]>();
+    items.forEach((item, index) => {
+      if (results[index]) return;
+      const group = `${item.type}:${item.locale}`;
+      if (!missing.has(group)) missing.set(group, []);
+      missing.get(group).push(index);
+    });
+    const found: [key: string, value: string][] = [];
+    for (const indexes of missing.values()) {
+      const { type, locale } = items[indexes[0]];
+      // eslint-disable-next-line no-await-in-loop -- One query per type and locale, usually one or two
+      const rows = await this.localizedContentRepository.findBy({
+        type,
+        locale,
+        objectId: In([...new Set(indexes.map(index => items[index].objectId))])
+      });
+      const data = new Map(rows.map(row => [row.objectId, row.data]));
+      for (const index of indexes) {
+        results[index] = data.get(items[index].objectId) ?? null;
+        if (data.has(items[index].objectId)) found.push([keys[index], results[index]]);
+      }
+    }
+    await this.redisService.cacheSetMany(found);
+    return results;
   }
 
   async getOfAllLocales(objectId: number, type: LocalizedContentType): Promise<Partial<Record<Locale, string>>> {

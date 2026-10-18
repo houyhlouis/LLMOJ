@@ -666,6 +666,17 @@ export class ProblemService {
     return await this.localizedContentService.get(problem.id, LocalizedContentType.ProblemTitle, locale);
   }
 
+  /** `getProblemLocalizedTitle` of each problem in its locale, read together. */
+  async getProblemLocalizedTitles(problems: ProblemEntity[], locales: Locale[]): Promise<string[]> {
+    return await this.localizedContentService.getMany(
+      problems.map((problem, index) => ({
+        objectId: problem.id,
+        type: LocalizedContentType.ProblemTitle,
+        locale: locales[index]
+      }))
+    );
+  }
+
   async getProblemLocalizedContent(problem: ProblemEntity, locale: Locale): Promise<ProblemContentSection[]> {
     const data = await this.localizedContentService.get(problem.id, LocalizedContentType.ProblemContent, locale);
     if (data != null) return JSON.parse(data);
@@ -1427,6 +1438,36 @@ export class ProblemService {
 
   async getProblemTagsByProblem(problem: ProblemEntity): Promise<ProblemTagEntity[]> {
     return await this.findProblemTagsByExistingIds(await this.getProblemTagIdsByProblem(problem));
+  }
+
+  /** `getProblemTagsByProblem` of each problem, in two queries. */
+  async getProblemTagsByProblems(problems: ProblemEntity[]): Promise<Map<number, ProblemTagEntity[]>> {
+    const result = new Map(problems.map(problem => [problem.id, [] as ProblemTagEntity[]]));
+    if (!problems.length) return result;
+    const maps = await this.problemTagMapRepository.findBy({ problemId: In(problems.map(problem => problem.id)) });
+    const tags = await this.findProblemTagsByExistingIds([...new Set(maps.map(map => map.problemTagId))]);
+    const tagById = new Map(tags.filter(tag => tag).map(tag => [tag.id, tag]));
+    for (const map of maps)
+      if (tagById.has(map.problemTagId)) result.get(map.problemId).push(tagById.get(map.problemTagId));
+    return result;
+  }
+
+  /** `getProblemTagLocalized` of each tag, with the names read together. */
+  async getProblemTagsLocalized(problemTags: ProblemTagEntity[], locale: Locale): Promise<LocalizedProblemTagDto[]> {
+    const nameLocales = problemTags.map(tag => (tag.locales.includes(locale) ? locale : tag.locales[0]));
+    const names = await this.localizedContentService.getMany(
+      problemTags.map((tag, index) => ({
+        objectId: tag.id,
+        type: LocalizedContentType.ProblemTagName,
+        locale: nameLocales[index]
+      }))
+    );
+    return problemTags.map((tag, index) => ({
+      id: tag.id,
+      color: tag.color,
+      name: names[index],
+      nameLocale: nameLocales[index]
+    }));
   }
 
   /**

@@ -27,7 +27,7 @@ function fixture(rule = "strictioi") {
   service.privileges = { userHasPrivilege: async (who, privilege) => !!who?.allowed.includes(privilege) };
   service.db = { getRepository: entity => {
     if (entity.name === "SubmissionEntity") return {
-      createQueryBuilder: () => { const q = { where: () => q, andWhere: () => q, getMany: async () => runs }; return q; },
+      createQueryBuilder: () => { const q = { select: () => q, where: () => q, andWhere: () => q, getMany: async () => runs }; return q; },
       findOneBy: async query => runs.find(run => run.id === query.id && run.contestId === query.contestId)
     };
     if (entity.name === "SubmissionDetailEntity") return { findBy: async () => details };

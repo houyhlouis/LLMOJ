@@ -7,6 +7,7 @@ import { SubmissionStatus } from "@libreoj/judge-protocol";
 
 import { StatisticsOutboxEntity, StatisticsOutboxKind } from "./statistics-outbox.entity";
 import { SubmissionEntity } from "./submission.entity";
+import { ContestScoreRevisionService } from "./contest-score-revision.service";
 
 import { logger } from "../logger";
 import { ProblemEntity } from "../problem/problem.entity";
@@ -33,6 +34,8 @@ export class StatisticsOutboxService implements OnModuleInit, OnModuleDestroy {
   private replayTimer: ReturnType<typeof setInterval>;
 
   @Optional() @Inject(MetricsService) private readonly metricsService: MetricsService;
+
+  @Optional() @Inject(ContestScoreRevisionService) private readonly contestScores: ContestScoreRevisionService;
 
   constructor(
     @InjectDataSource()
@@ -79,7 +82,11 @@ export class StatisticsOutboxService implements OnModuleInit, OnModuleDestroy {
    */
   async record(manager: EntityManager, before: CountedSubmission, after: CountedSubmission): Promise<number[]> {
     const { problemId, submitterId, contestId } = after ?? before;
-    if (contestId != null) return [];
+    // Contest submissions aren't counted, but what's computed from them is kept for each revision of the contest
+    if (contestId != null) {
+      this.contestScores?.noteChange(manager, contestId);
+      return [];
+    }
     const submissions = Number(!!after) - Number(!!before);
     const accepted =
       Number(after?.status === SubmissionStatus.Accepted) - Number(before?.status === SubmissionStatus.Accepted);

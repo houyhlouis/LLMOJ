@@ -15,6 +15,7 @@
 | `LIBREOJ_JUDGE_LOG_LEVEL` | 评测机日志级别：`error`、`warn`、`info`（默认）或 `debug` |
 | `LIBREOJ_SCHEMA_SYNC` | 后端启动时是否可以修改数据库结构。安装的服务只有在它恰好为 `1` 时才会这样做；`0` 在所有环境中都关闭。安装时用 `deploy/initialize-schema.mjs` 创建数据库，[升级器](Upgrade.zh-CN.md)执行经过检查的修改并把它设为 `0`。不要为了绕过升级器的检查而打开它 |
 | `LIBREOJ_LOG_SQL` | 记录每条 SQL 查询。任何非空值都会开启，包括 `0` 或 `false`；删除该变量即可关闭 |
+| `LIBREOJ_SLOW_QUERY_MS` | 记录耗时达到该毫秒数的 SQL 查询（不含参数）；默认 `1000`。每分钟最多记录 10 条；[指标](Operations-Configuration.zh-CN.md#指标)统计全部 |
 | `NODE_ENV` | 安装的服务中为 `production`，此时后端只记录警告和错误 |
 | `NODE_OPTIONS` | 安装的服务中为 `--max-old-space-size=512`，构建时为 `2300`：Node.js 堆内存大小（MiB），不是进程或其运行的程序的总内存 |
 | `UV_THREADPOOL_SIZE` | 评测机线程池，至少为评测槽数的两倍加二；由评测配置设置。见[评测配置](Judge-Configuration.zh-CN.md) |

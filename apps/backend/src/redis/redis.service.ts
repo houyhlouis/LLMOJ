@@ -40,6 +40,24 @@ export class RedisService implements OnModuleInit {
     return await this.client.get(key);
   }
 
+  /** Adds 1 to the number at `key` and keeps it for `expireSeconds` from now. */
+  async increment(key: string, expireSeconds: number): Promise<void> {
+    await this.client.pipeline().incr(key).expire(key, expireSeconds).exec();
+  }
+
+  /** `cacheGet` of each key, in one round trip. */
+  async cacheGetMany(keys: string[]): Promise<string[]> {
+    return keys.length ? await this.client.mget(keys) : [];
+  }
+
+  /** `cacheSet` of each entry, in one round trip. */
+  async cacheSetMany(entries: [key: string, value: string][]): Promise<void> {
+    if (!entries.length) return;
+    const pipeline = this.client.pipeline();
+    for (const [key, value] of entries) pipeline.setex(key, REDIS_CACHE_EXPIRE_TIME, value);
+    await pipeline.exec();
+  }
+
   async cacheDelete(key: string): Promise<void> {
     await this.client.del(key);
   }

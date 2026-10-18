@@ -1,11 +1,13 @@
 import { ConflictException } from "@nestjs/common";
 
-import { DataSource, EntityManager } from "typeorm";
+import { DataSource, EntityManager, In } from "typeorm";
 
 import { TeamEntity, TeamMemberEntity, TeamPermission, TeamResourceEntity, TeamResourceKind } from "./team.entity";
 
 import { UserPrivilegeEntity, UserPrivilegeType } from "../user/user-privilege.entity";
 import { UserPermissionRuleEntity } from "../access/user-permission-rule.entity";
+
+import { requestContext } from "../common/request-context";
 
 import type { UserEntity } from "../user/user.entity";
 
@@ -53,6 +55,38 @@ async function teamCapability(
   );
 }
 
+const REQUEST_TEAM_RESOURCES = Symbol("request team resources");
+
+interface RequestWithTeamResources {
+  // By kind: the IDs looked up, and which of them are team resources
+  [REQUEST_TEAM_RESOURCES]?: Map<TeamResourceKind, { checked: Set<number>; owned: Set<number> }>;
+  res?: { writableEnded?: boolean };
+}
+
+/** The request being answered; work it started that runs on after the response reads the database again. */
+function answeringRequest(): RequestWithTeamResources {
+  const request = requestContext.getStore() as RequestWithTeamResources;
+  return request && !request.res?.writableEnded ? request : null;
+}
+
+/**
+ * Reads, in one query, which of the resources belong to a team, so that access checks of the others in the same
+ * request need no query of their own. Checks in a transaction always read the database.
+ */
+export async function prefetchTeamResources(db: DataSource, kind: TeamResourceKind, resourceIds: number[]) {
+  const request = answeringRequest();
+  if (!request || !resourceIds.length) return;
+  const ids = [...new Set(resourceIds)];
+  const rows = await db
+    .getRepository(TeamResourceEntity)
+    .find({ select: ["resourceId"], where: { kind, resourceId: In(ids) } });
+  if (!request[REQUEST_TEAM_RESOURCES]) request[REQUEST_TEAM_RESOURCES] = new Map();
+  const known = request[REQUEST_TEAM_RESOURCES].get(kind) ?? { checked: new Set<number>(), owned: new Set<number>() };
+  for (const id of ids) known.checked.add(id);
+  for (const row of rows) known.owned.add(row.resourceId);
+  request[REQUEST_TEAM_RESOURCES].set(kind, known);
+}
+
 /** A team ACL takes precedence over the resource's old public/owner/ACL fields. null identifies ordinary resources. */
 async function evaluateTeamResourceAccess(
   db: DataSource | EntityManager,
@@ -62,6 +96,10 @@ async function evaluateTeamResourceAccess(
   permission: TeamPermission | "read" | "post" = "read"
 ): Promise<boolean | null> {
   const lock = db instanceof EntityManager ? { lock: { mode: "pessimistic_read" as const } } : {};
+  if (!(db instanceof EntityManager)) {
+    const known = answeringRequest()?.[REQUEST_TEAM_RESOURCES]?.get(kind);
+    if (known?.checked.has(resourceId) && !known.owned.has(resourceId)) return null;
+  }
   let resource = await db.getRepository(TeamResourceEntity).findOne({ where: { kind, resourceId } });
   if (!resource) return null;
   if (!(await teamCapability(db, user, UserPrivilegeType.ViewTeam, true))) return false;

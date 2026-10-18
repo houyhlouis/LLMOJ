@@ -138,8 +138,11 @@ With `metrics` set in `backend.yaml` (the installer sets `127.0.0.1:2020`), `htt
 | `libreoj_ai_paused` | 1 while AI is paused | |
 | `libreoj_ai_worker_errors{stage}` | Errors of the AI job scheduler (`worker`) and internal errors of jobs (`job`) since the backend started | it grows: see the backend log |
 | `libreoj_error_count{error}` | Server errors by type, including lost database or Redis connections | it grows |
+| `libreoj_request_sql_queries{api}` | SQL queries per request, by address | a page's average grows with the amount of data (a query per item) |
+| `libreoj_request_sql_seconds{api}` | Time of a request's SQL queries over 1 ms, added up (queries that run at the same time can add up to more than the request took) | |
+| `libreoj_sql_slow_queries` | SQL queries that took over 1 second (`LIBREOJ_SLOW_QUERY_MS`) since the backend started; each is logged without its parameters | it grows |
 
-A value that couldn't be read is `NaN`, with the reason in the backend's log, never an old number. No metric carries a user, source code or key.
+A value that couldn't be read is `NaN`, with the reason in the backend's log, never an old number. No metric carries a user, source code or key. For what a small site handles, see [Capacity](Capacity.md).
 
 ## Settings that change together
 

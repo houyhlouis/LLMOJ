@@ -186,28 +186,34 @@ export class ProblemController {
         this.submissionService.getUserLatestSubmissionByProblems(currentUser, problems)
     ]);
 
+    // Titles, tags and their names are read for the whole page at once
+    const titleLocales = problems.map(problem =>
+      problem.locales.includes(request.locale) ? request.locale : problem.locales[0]
+    );
+    const [titles, problemTags] = await Promise.all([
+      this.problemService.getProblemLocalizedTitles(problems, titleLocales),
+      !request.titleOnly && this.problemService.getProblemTagsByProblems(problems)
+    ]);
+    const tagList = problemTags
+      ? [...new Map([...problemTags.values()].flat().map(tag => [tag.id, tag])).values()]
+      : [];
+    const localizedTags = new Map(
+      (await this.problemService.getProblemTagsLocalized(tagList, request.locale)).map(tag => [tag.id, tag])
+    );
+
     return {
       count,
       result: await Promise.all(
-        problems.map(async problem => {
-          const titleLocale = problem.locales.includes(request.locale) ? request.locale : problem.locales[0];
-          const title = await this.problemService.getProblemLocalizedTitle(problem, titleLocale);
-          const problemTags = !request.titleOnly && (await this.problemService.getProblemTagsByProblem(problem));
-          return {
-            meta: await this.problemService.getProblemMeta(problem, true),
-            title,
-            tags:
-              !request.titleOnly &&
-              (await Promise.all(
-                problemTags.map(problemTag => this.problemService.getProblemTagLocalized(problemTag, request.locale))
-              )),
-            resultLocale: titleLocale,
-            submission:
-              !request.titleOnly &&
-              currentUser &&
-              (acceptedSubmissions.get(problem.id) || nonAcceptedSubmissions.get(problem.id))
-          };
-        })
+        problems.map(async (problem, index) => ({
+          meta: await this.problemService.getProblemMeta(problem, true),
+          title: titles[index],
+          tags: !request.titleOnly && problemTags.get(problem.id).map(tag => localizedTags.get(tag.id)),
+          resultLocale: titleLocales[index],
+          submission:
+            !request.titleOnly &&
+            currentUser &&
+            (acceptedSubmissions.get(problem.id) || nonAcceptedSubmissions.get(problem.id))
+        }))
       ),
       permissions: !request.titleOnly && {
         createProblem: await this.problemService.userHasCreateProblemPermission(currentUser),

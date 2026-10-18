@@ -29,7 +29,7 @@ import { ProblemEntity } from "../problem/problem.entity";
 import { LockService } from "../redis/lock.service";
 import { escapeLike } from "../database/database.utils";
 import { ProblemPermissionType, ProblemService } from "../problem/problem.service";
-import { teamResourceAccess } from "../team/team-access";
+import { prefetchTeamResources, teamResourceAccess } from "../team/team-access";
 
 export enum DiscussionReactionType {
   Discussion = "Discussion",
@@ -270,15 +270,21 @@ export class DiscussionService {
     return result;
   }
 
+  /** @param loaded The reply's discussion (and its problem) if already loaded in this request. */
   async userHasModifyDiscussionReplyPermission(
     user: UserEntity,
     discussionReply: DiscussionReplyEntity,
-    hasPrivilege?: boolean
+    hasPrivilege?: boolean,
+    loaded?: { discussion: DiscussionEntity; problem?: ProblemEntity }
   ): Promise<boolean> {
     if (!user || !(await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ViewDiscussion)))
       return false;
-    const discussion = await this.findDiscussionById(discussionReply.discussionId);
-    if (!(await this.userHasPermission(user, discussion, DiscussionPermissionType.View))) return false;
+    const discussion =
+      loaded?.discussion.id === discussionReply.discussionId
+        ? loaded.discussion
+        : await this.findDiscussionById(discussionReply.discussionId);
+    const problem = loaded?.discussion === discussion ? loaded.problem : undefined;
+    if (!(await this.userHasPermission(user, discussion, DiscussionPermissionType.View, problem))) return false;
     const teamPost = await teamResourceAccess(this.connection, user, "discussion", discussion.id, "post");
     if (teamPost === false) return false;
     const teamModerator = await teamResourceAccess(this.connection, user, "discussion", discussion.id, "discussions");
@@ -314,14 +320,38 @@ export class DiscussionService {
     discussionReply: DiscussionReplyEntity,
     hasPrivilege?: boolean
   ): Promise<DiscussionReplyPermissionType[]> {
-    const result = (await this.userHasModifyDiscussionReplyPermission(user, discussionReply, hasPrivilege))
-      ? [DiscussionReplyPermissionType.Modify, DiscussionReplyPermissionType.Delete]
-      : [];
     const discussion = await this.findDiscussionById(discussionReply.discussionId);
-    if (await this.userHasPermission(user, discussion, DiscussionPermissionType.ManagePublicness)) {
-      result.push(DiscussionReplyPermissionType.ManagePublicness);
-    }
-    return result;
+    return (await this.getUserPermissionsOfReplies(user, discussion, [discussionReply], hasPrivilege))[0];
+  }
+
+  /**
+   * `getUserPermissionsOfReply` of replies of one discussion, already loaded with its problem: the discussion's own
+   * permission is checked once, and whether it belongs to a team is read once.
+   */
+  async getUserPermissionsOfReplies(
+    user: UserEntity,
+    discussion: DiscussionEntity,
+    discussionReplies: DiscussionReplyEntity[],
+    hasPrivilege?: boolean,
+    discussionProblem?: ProblemEntity
+  ): Promise<DiscussionReplyPermissionType[][]> {
+    await prefetchTeamResources(this.connection, "discussion", [discussion.id]);
+    if (discussionProblem) await prefetchTeamResources(this.connection, "problem", [discussionProblem.id]);
+    const managePublicness = await this.userHasPermission(
+      user,
+      discussion,
+      DiscussionPermissionType.ManagePublicness,
+      discussionProblem
+    );
+    const loaded = { discussion, problem: discussionProblem };
+    return await Promise.all(
+      discussionReplies.map(async reply => [
+        ...((await this.userHasModifyDiscussionReplyPermission(user, reply, hasPrivilege, loaded))
+          ? [DiscussionReplyPermissionType.Modify, DiscussionReplyPermissionType.Delete]
+          : []),
+        ...(managePublicness ? [DiscussionReplyPermissionType.ManagePublicness] : [])
+      ])
+    );
   }
 
   async userHasCreateDiscussionPermission(

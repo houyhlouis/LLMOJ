@@ -15,6 +15,7 @@ Setting a variable in your shell doesn't affect a running service. To change a s
 | `LIBREOJ_JUDGE_LOG_LEVEL` | Judge log level: `error`, `warn`, `info` (default) or `debug` |
 | `LIBREOJ_SCHEMA_SYNC` | Whether the backend may change the database structure when it starts. Installed services never do this unless it's exactly `1`; `0` turns it off everywhere. Installations create the database with `deploy/initialize-schema.mjs`, and the [upgrader](Upgrade.md) applies checked changes and sets this to `0`. Don't turn it on to get round the upgrader's checks. |
 | `LIBREOJ_LOG_SQL` | Log every SQL query. Any non-empty value turns it on, even `0` or `false`; remove the variable to turn it off. |
+| `LIBREOJ_SLOW_QUERY_MS` | Log SQL queries that take at least this many milliseconds, without their parameters; `1000` by default. At most 10 are logged a minute; [metrics](Operations-Configuration.md#metrics) count all of them. |
 | `NODE_ENV` | `production` in the installed services, which also makes the backend log only warnings and errors |
 | `NODE_OPTIONS` | `--max-old-space-size=512` in the installed services and `2300` for builds: the Node.js heap size in MiB, not the total memory of the process or of programs it runs |
 | `UV_THREADPOOL_SIZE` | Judge thread pool, at least twice the number of judge slots plus two; the judge configuration sets it. See [Judge configuration](Judge-Configuration.md). |

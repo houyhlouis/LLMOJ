@@ -138,8 +138,11 @@ sudo bash /opt/LLMOJ/deploy/doctor.sh
 | `libreoj_ai_paused` | AI 暂停时为 1 | |
 | `libreoj_ai_worker_errors{stage}` | 后端启动以来 AI 任务调度（`worker`）的错误和任务内部错误（`job`） | 持续增长：查看后端日志 |
 | `libreoj_error_count{error}` | 按类型统计的服务器错误，包括数据库或 Redis 连接中断 | 持续增长 |
+| `libreoj_request_sql_queries{api}` | 每个请求的 SQL 查询数，按地址统计 | 某页面的平均值随数据量增长（每项一次查询） |
+| `libreoj_request_sql_seconds{api}` | 一个请求中耗时超过 1 毫秒的 SQL 查询的时间之和（同时进行的查询加起来可能超过请求本身的时长） | |
+| `libreoj_sql_slow_queries` | 后端启动以来耗时超过 1 秒（`LIBREOJ_SLOW_QUERY_MS`）的 SQL 查询；每条都会记录，但不含参数 | 持续增长 |
 
-无法读取的值为 `NaN`，原因记录在后端日志中，绝不会给出旧的数值。指标中不含用户、源代码或密钥。
+无法读取的值为 `NaN`，原因记录在后端日志中，绝不会给出旧的数值。指标中不含用户、源代码或密钥。小型网站能承受的负载见[容量](Capacity.zh-CN.md)。
 
 ## 需要一起修改的设置
 

@@ -481,10 +481,12 @@ export class DiscussionController {
               currentUser
             ),
             // permissions
-            Promise.all(
-              replyEntities.map(
-                async reply => await this.discussionService.getUserPermissionsOfReply(currentUser, reply, hasPrivilege)
-              )
+            this.discussionService.getUserPermissionsOfReplies(
+              currentUser,
+              discussion,
+              replyEntities,
+              hasPrivilege,
+              discussionProblem || undefined
             )
           ]);
 

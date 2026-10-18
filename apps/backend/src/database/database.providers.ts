@@ -1,5 +1,7 @@
 import { TypeOrmModule } from "@nestjs/typeorm";
 
+import { QueryMetricsLogger, QUERY_TIMING_THRESHOLD_MS } from "./query-metrics";
+
 import { ConfigService } from "../config/config.service";
 
 /**
@@ -24,7 +26,8 @@ export const databaseProviders = [
       password: configService.config.services.database.password,
       database: configService.config.services.database.database,
       entities: [`${__dirname}/../**/*.entity{.ts,.js}`],
-      logging: !!process.env.LIBREOJ_LOG_SQL,
+      logger: new QueryMetricsLogger(!!process.env.LIBREOJ_LOG_SQL),
+      maxQueryExecutionTime: QUERY_TIMING_THRESHOLD_MS,
       synchronize: isSchemaSyncEnabled()
     }),
     inject: [ConfigService]

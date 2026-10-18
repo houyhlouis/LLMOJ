@@ -5,6 +5,8 @@ import responseTime from "response-time";
 
 import { MetricsService } from "./metrics.service";
 
+import { RequestQueries, queryTotals } from "../database/query-metrics";
+
 @Injectable()
 export class MetricsMiddleware implements NestMiddleware {
   constructor(private readonly metricsSerivce: MetricsService) {}
@@ -15,7 +17,25 @@ export class MetricsMiddleware implements NestMiddleware {
     ["api"]
   );
 
-  private readonly responseTimeMiddleware = responseTime((req, res, time) => {
+  // Queries each request made, and the time of those over 1 ms
+  private readonly metricRequestQueries = this.metricsSerivce.histogram(
+    "libreoj_request_sql_queries",
+    [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000],
+    ["api"]
+  );
+
+  private readonly metricRequestQueryTime = this.metricsSerivce.histogram(
+    "libreoj_request_sql_seconds",
+    this.metricsSerivce.histogram.BUCKETS_TIME_5S_10,
+    ["api"]
+  );
+
+  // Queries that took longer than LIBREOJ_SLOW_QUERY_MS (1 second), since the process started; each is logged
+  private readonly metricSlowQueries = this.metricsSerivce.gauge("libreoj_sql_slow_queries", [], gauge =>
+    gauge.set(queryTotals.slow)
+  );
+
+  private readonly responseTimeMiddleware = responseTime((req: Request & RequestQueries, res, time) => {
     if (!req.url || !(res.statusCode >= 200 && res.statusCode < 400)) return;
     let pathname: string;
     try {
@@ -30,6 +50,8 @@ export class MetricsMiddleware implements NestMiddleware {
       return;
     }
     this.metricRequestLatency.observe({ api: pathname }, time / 1000);
+    this.metricRequestQueries.observe({ api: pathname }, req.sqlQueries ?? 0);
+    this.metricRequestQueryTime.observe({ api: pathname }, (req.sqlMilliseconds ?? 0) / 1000);
   });
 
   async use(req: Request, res: Response, next: () => void) {

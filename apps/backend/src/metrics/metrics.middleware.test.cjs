@@ -24,16 +24,18 @@ const { MetricsMiddleware } = require("./metrics.middleware.ts");
 
 async function fixture(run) {
   const observations = [];
+  const queryObservations = [];
   const histogram = Object.assign(
     (name, buckets, labels) => {
-      assert.equal(name, "libreoj_request_latency_seconds");
-      assert.deepEqual(buckets, [0.01, 0.1, 1]);
       assert.deepEqual(labels, ["api"]);
+      if (name !== "libreoj_request_latency_seconds")
+        return { observe: (labels, value) => queryObservations.push({ name, labels, value }) };
+      assert.deepEqual(buckets, [0.01, 0.1, 1]);
       return { observe: (labels, seconds) => observations.push({ labels, seconds }) };
     },
     { BUCKETS_TIME_5S_10: [0.01, 0.1, 1] }
   );
-  const middleware = new MetricsMiddleware({ histogram });
+  const middleware = new MetricsMiddleware({ histogram, gauge: () => ({}) });
   const errors = [];
   const warnings = [];
   const onWarning = warning => warnings.push(warning);
@@ -43,6 +45,8 @@ async function fixture(run) {
     middleware
       .use(req, res, () => {
         res.statusCode = Number(req.headers["x-fixture-status"] || 200);
+        // What the query logger notes on a request (database/query-metrics.ts)
+        if (req.url.includes("queries")) Object.assign(req, { sqlQueries: 12, sqlMilliseconds: 34 });
         res.end("fixture-response");
       })
       .catch(error => {
@@ -79,7 +83,7 @@ async function fixture(run) {
       req.end();
     });
   try {
-    await run({ request, observations, errors });
+    await run({ request, observations, queryObservations, errors });
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(errors, [], "Metrics must not interrupt a real response");
     assert.deepEqual(
@@ -145,5 +149,20 @@ test("only successful and redirect response statuses are observed", () =>
     assert.deepEqual(
       f.observations.map(x => x.labels.api),
       ["/api/status/200", "/api/status/201", "/api/status/302", "/api/status/399"]
+    );
+  }));
+
+test("each request's queries and their time are observed under its route", () =>
+  fixture(async f => {
+    await f.request("/api/problem/queryProblemSet?queries=1");
+    await f.request("/api/homepage/getHomepage");
+    assert.deepEqual(
+      f.queryObservations.map(x => [x.name, x.labels.api, x.value]),
+      [
+        ["libreoj_request_sql_queries", "/api/problem/queryProblemSet", 12],
+        ["libreoj_request_sql_seconds", "/api/problem/queryProblemSet", 0.034],
+        ["libreoj_request_sql_queries", "/api/homepage/getHomepage", 0],
+        ["libreoj_request_sql_seconds", "/api/homepage/getHomepage", 0]
+      ]
     );
   }));

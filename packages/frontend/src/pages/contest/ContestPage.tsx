@@ -27,9 +27,10 @@ function ContestPage({ initial, tab }: { initial: any; tab: string }) {
   const [userId, setUserId] = useState(""),
     [problemId, setProblemId] = useState("");
   const id = detail.contest.id;
-  async function refresh() {
+  // `withDetail` false: only the tab's data, when the contest's detail was just loaded
+  async function refresh(withDetail = true) {
     try {
-      setDetail(await callContest("detail", { id }));
+      if (withDetail) setDetail(await callContest("detail", { id }));
       if (tab !== "overview")
         setData(
           await callContest(tab, {
@@ -45,13 +46,19 @@ function ContestPage({ initial, tab }: { initial: any; tab: string }) {
   }
   useEffect(() => {
     let live = true;
-    refresh();
+    refresh(false);
+    // Every open contest page refreshes; one in a background tab waits until it's shown again
     const interval = setInterval(() => {
-      if (live) refresh();
+      if (live && !document.hidden) refresh();
     }, 10000);
+    const shown = () => {
+      if (live && !document.hidden) refresh();
+    };
+    document.addEventListener("visibilitychange", shown);
     return () => {
       live = false;
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", shown);
     };
   }, [id, tab, page, userId, problemId]);
   async function exportCsv() {

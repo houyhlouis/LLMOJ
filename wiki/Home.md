@@ -14,6 +14,7 @@ LLMOJ 是基于 LibreOJ 的在线评测系统，提供 AI 辅助出题功能。�
 | [HTTPS](HTTPS.zh-CN.md) | 域名、TLS 证书和外部反向代理 |
 | [Docker 源](Docker-Sources.zh-CN.md) | Docker 软件包源和镜像加速源 |
 | [运维配置](Operations-Configuration.zh-CN.md) | 安装后的 Nginx、MariaDB、Redis、MinIO 与 systemd；健康检查、备份与计数修正 |
+| [容量](Capacity.zh-CN.md) | 小型网站在实测负载下的表现，以及本版本前后的对比 |
 
 ## 使用
 
