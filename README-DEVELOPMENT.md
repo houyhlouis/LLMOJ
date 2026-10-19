@@ -187,6 +187,14 @@ Default AI tests use simulated models, databases and sandboxes, and need no cred
 
 Check pages you change at desktop and mobile widths, in both languages, including empty lists, long content and horizontal scrolling of wide tables.
 
+Every control must also work with the keyboard alone (see [Keyboard and screen readers](wiki/Accessibility.md)):
+
+- **Clickable items:** Semantic UI renders a `Menu.Item`, `Label` or `Icon` that only has an `onClick` as an element that Tab never reaches. Spread `actsAsButton` from `@/utils/keyboard` on it, and give an icon an `aria-label`.
+- **Dropdowns built from `Dropdown.Item` children** (instead of `options`) need `keyboardMenu`, so the arrow keys and Enter can choose their items.
+- **Messages for screen readers:** `announce()` from `@/utils/announce` reads one out. Toasts already are.
+
+`packages/frontend/test/keyboard-access.test.cjs` fails on clickable elements that have neither. `locale-parity.test.cjs` fails on a message missing from one language, or a translation that drops a placeholder.
+
 ## Source archives
 
 ```bash

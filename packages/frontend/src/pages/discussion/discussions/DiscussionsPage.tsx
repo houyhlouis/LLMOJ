@@ -19,6 +19,7 @@ import formatDateTime from "@/utils/formatDateTime";
 import { Localizer, makeToBeLocalizedText } from "@/locales";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
 import { DiscussionSearch } from "@/components/DiscussionSearch";
+import { actsAsButton } from "@/utils/keyboard";
 
 export function getNewDiscussionUrl(
   problemId: number,
@@ -312,6 +313,7 @@ let DiscussionsPage: React.FC<DiscussionsPageProps> = props => {
       )}
       <Menu className={style.searchMenu} secondary>
         <Menu.Item
+          {...actsAsButton}
           className={style.searchMenuItem}
           icon="user"
           active={searchMode === "user"}
@@ -321,6 +323,7 @@ let DiscussionsPage: React.FC<DiscussionsPageProps> = props => {
         {(props.response.permissions.filterNonpublic ||
           (appState.currentUser && props.searchQuery.publisherId === appState.currentUser.id)) && (
           <Menu.Item
+            {...actsAsButton}
             className={style.searchMenuItem}
             icon="eye slash"
             active={false}
@@ -341,21 +344,36 @@ let DiscussionsPage: React.FC<DiscussionsPageProps> = props => {
         <Label size="small" color="grey">
           <Icon name="file alternate" />
           {props.searchQuery.keyword}
-          <Icon name="delete" onClick={() => onDelFilterKeyword()} />
+          <Icon
+            {...actsAsButton}
+            aria-label={_("common.controls.remove_filter")}
+            name="delete"
+            onClick={() => onDelFilterKeyword()}
+          />
         </Label>
       )}
       {props.response.filterPublisher && (
         <Label size="small" color="pink">
           <Icon name="user" />
           {props.response.filterPublisher.username}
-          <Icon name="delete" onClick={() => onDelFilterPublisher()} />
+          <Icon
+            {...actsAsButton}
+            aria-label={_("common.controls.remove_filter")}
+            name="delete"
+            onClick={() => onDelFilterPublisher()}
+          />
         </Label>
       )}
       {props.searchQuery.nonpublic && (
         <Label size="small" color="red" basic>
           <Icon name="eye slash" />
           {_(".non_public")}
-          <Icon name="delete" onClick={() => onDelFilterNonpublic()} />
+          <Icon
+            {...actsAsButton}
+            aria-label={_("common.controls.remove_filter")}
+            name="delete"
+            onClick={() => onDelFilterNonpublic()}
+          />
         </Label>
       )}
     </>
@@ -506,6 +524,7 @@ let DiscussionsPage: React.FC<DiscussionsPageProps> = props => {
                       </EmojiRenderer>
                       {!discussion.meta.isPublic && (
                         <Label
+                          {...actsAsButton}
                           className={style.labelNonPublic}
                           icon="eye slash"
                           size="small"

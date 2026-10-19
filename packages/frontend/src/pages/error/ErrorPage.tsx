@@ -8,6 +8,7 @@ import { useLocalizer, useNavigationChecked } from "@/utils/hooks";
 import { appState } from "@/appState";
 import { isToBeLocalizedText, ToBeLocalizedText } from "@/locales";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
+import PseudoLink from "@/components/PseudoLink";
 
 export interface ErrorPageProps {
   uncaughtError?: Error;
@@ -30,7 +31,7 @@ let ErrorPage: React.FC<ErrorPageProps> = props => {
   if (props.uncaughtError) console.error(props.uncaughtError);
 
   return (
-    <Message className={style.message} icon error>
+    <Message className={style.message} icon error role="alert">
       <Icon name="remove" />
       <EmojiRenderer>
         <Message.Content>
@@ -40,7 +41,7 @@ let ErrorPage: React.FC<ErrorPageProps> = props => {
               <p>{_(".unexpected_error_description")}</p>
               <p>
                 {/* These errors could not be recovered. The page must be reloaded. */}
-                <a onClick={() => location.reload()}>{_(".refresh")}</a>
+                <PseudoLink onClick={() => location.reload()}>{_(".refresh")}</PseudoLink>
               </p>
             </>
           ) : (
@@ -48,24 +49,24 @@ let ErrorPage: React.FC<ErrorPageProps> = props => {
               <p>{isToBeLocalizedText(props.message) ? props.message(_) : props.message}</p>
               <p>
                 {props.options.showBack && (
-                  <a
+                  <PseudoLink
                     onClick={() => {
                       if (props.onRecover) props.onRecover();
                       navigation.goBack();
                     }}
                   >
                     {_(".back")}
-                  </a>
+                  </PseudoLink>
                 )}
                 {props.options.showRefresh && (
-                  <a
+                  <PseudoLink
                     onClick={() => {
                       if (props.onRecover) props.onRecover();
                       navigation.refresh();
                     }}
                   >
                     {_(".refresh")}
-                  </a>
+                  </PseudoLink>
                 )}
               </p>
             </>

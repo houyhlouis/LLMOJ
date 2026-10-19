@@ -26,9 +26,31 @@ return {
       preference: "偏好设置",
       site_management: "网站管理",
       registration_reviews: "注册审核",
-      logout: "注销"
-    }
+      summaries: "我的总结",
+      permissions: "权限管理",
+      ai_configuration: "AI API 配置",
+      logout: "注销",
+      menu: "{username} 的账户菜单"
+    },
+    open_menu: "打开菜单"
   },
+  skip_to_content: "跳到主要内容",
+  pagination: {
+    previous: "上一页",
+    next: "下一页"
+  },
+  controls: {
+    remove: "移除",
+    remove_filter: "移除此筛选条件",
+    download: "下载",
+    rename: "重命名",
+    delete: "删除",
+    add_reaction: "添加表情回应",
+    more_actions: "更多操作",
+    add: "添加"
+  },
+  main_navigation: "主导航",
+  site_menu: "网站菜单",
   toast: {
     success: "成功",
     info: "提示",
@@ -59,5 +81,11 @@ return {
     message: "登录会话已结束，你已退出登录。请重新登录后继续。",
     sign_in: "登录"
   },
-  confirm_navigation: "确定要离开当前页面吗？您的修改将不被保存。"
+  confirm_navigation: "确定要离开当前页面吗？您的修改将不被保存。",
+  live_updates: {
+    reconnecting: "实时更新已中断，正在重新连接……",
+    offline: "实时更新无法连接到服务器，页面内容可能不是最新的。",
+    reload: "刷新页面",
+    resumed: "实时更新已恢复。"
+  }
 };

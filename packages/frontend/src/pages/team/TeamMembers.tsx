@@ -20,6 +20,7 @@ import copyToClipboard from "@/utils/copyToClipboard";
 import { dateText, teamApi, tr } from "./api";
 import style from "./TeamPage.module.less";
 import membersStyle from "./TeamMembers.module.less";
+import { keyboardMenu } from "@/utils/keyboard";
 
 interface TeamMembersProps {
   teamId: number;
@@ -449,7 +450,7 @@ export default observer(function TeamMembers({
                 )}
                 {editable && (
                   <Table.Cell>
-                    <Dropdown text={tr("管理", "Manage")} button basic compact disabled={busy}>
+                    <Dropdown {...keyboardMenu} text={tr("管理", "Manage")} button basic compact disabled={busy}>
                       <Dropdown.Menu>
                         {memberStatus(member) === "active" && (
                           <>

@@ -23,7 +23,6 @@ return {
     no_result: "没有符合条件的讨论。"
   },
   search_icon: {
-    tag: "标签",
     user: "题目拥有者",
     nonpublic: "未公开"
   },

@@ -22,10 +22,11 @@ const App: React.FC = () => {
   return (
     <>
       <HelmetProvider>
-        <Helmet>
+        <Helmet htmlAttributes={{ lang: appState.locale.replace("_", "-") }}>
+          {/* Zooming stays allowed: people who need larger text pinch to zoom. */}
           <meta
             name="viewport"
-            content={appState.responsiveLayout ? "width=device-width, initial-scale=1, maximum-scale=1" : "width=1024"}
+            content={appState.responsiveLayout ? "width=device-width, initial-scale=1" : "width=1024"}
           />
           <title>
             {appState.title && `${appState.title} - `}

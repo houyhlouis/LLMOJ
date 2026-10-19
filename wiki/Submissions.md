@@ -13,6 +13,10 @@ The preview shows the submission's normal page (1100 × 720 pixels, smaller on s
 - Links in the preview open inside it; lists opened there use ordinary links, so previews never nest.
 - If you can't access the submission or it was deleted, the preview shows the page's usual error instead of the code. The preview never grants more access than the page itself.
 
+## Live updates
+
+A submission's page and the submission list update while the submission is judged. If the connection drops, the page says so and retries, and offers to reload when it can't reconnect. Screen readers hear the result when judging finishes. See [Keyboard and screen readers](Accessibility.md#live-updates).
+
 ## Test data versions and earlier results
 
 A submission is judged with the problem's judging data as it was when it was submitted: the judge settings, the test data files and the samples it runs form a **data version**, numbered per problem (#1, #2, …). Editing the problem afterwards doesn't change how a waiting submission is judged; submissions made after the edit use the new version. **Rejudge** always uses the problem's current data.

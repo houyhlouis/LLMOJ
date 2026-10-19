@@ -218,7 +218,7 @@ let ForgetPage: React.FC = () => {
   return (
     <>
       <div className={style.wrapper}>
-        <Header as="h2" className={style.header + (logo ? " " + style.withLogo : "")} textAlign="center">
+        <Header as="h1" className={style.header + (logo ? " " + style.withLogo : "")} textAlign="center">
           {logo}
           {_(".reset_your_password")}
         </Header>
@@ -256,6 +256,7 @@ let ForgetPage: React.FC = () => {
               {/* email */}
               <Ref innerRef={field => field && (refEmailInput.current = field.querySelector("input"))}>
                 <Form.Field
+                  id="forgot-email"
                   control={Input}
                   error={
                     getEmailUIValidateStatus() === "error" && {
@@ -268,6 +269,7 @@ let ForgetPage: React.FC = () => {
                   icon="envelope"
                   iconPosition="left"
                   placeholder={_(".email")}
+                  aria-label={_(".email")}
                   value={email}
                   autoComplete="email"
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
@@ -282,6 +284,7 @@ let ForgetPage: React.FC = () => {
               {/* email verification code */}
               <Ref innerRef={field => field && (refEmailVerificationCodeInput.current = field.querySelector("input"))}>
                 <Form.Field
+                  id="forgot-email-verification-code"
                   control={Input}
                   error={
                     emailVerificationCodeError && {
@@ -293,13 +296,13 @@ let ForgetPage: React.FC = () => {
                   icon="shield"
                   iconPosition="left"
                   placeholder={_(".email_verification_code")}
+                  aria-label={_(".email_verification_code")}
                   value={emailVerificationCode}
                   autoComplete="off"
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChangeVerificationCode(e.target.value)}
                   onKeyPress={onEnterPress(() => refPasswordInput.current.focus())}
                   action={
                     <Button
-                      tabIndex={-1}
                       disabled={sendEmailVerificationCodeTimeout !== 0}
                       loading={sendEmailVerificationCodePending}
                       content={
@@ -316,6 +319,7 @@ let ForgetPage: React.FC = () => {
               {/* password */}
               <Ref innerRef={field => field && (refPasswordInput.current = field.querySelector("input"))}>
                 <Form.Field
+                  id="forgot-password"
                   control={Input}
                   error={
                     getPasswordUIValidateStatus() === "error" && {
@@ -328,6 +332,7 @@ let ForgetPage: React.FC = () => {
                   icon="lock"
                   iconPosition="left"
                   placeholder={_(".password")}
+                  aria-label={_(".password")}
                   value={password}
                   type="password"
                   autoComplete="new-password"
@@ -338,6 +343,7 @@ let ForgetPage: React.FC = () => {
               </Ref>
               <Ref innerRef={field => field && (refRetypePasswordInput.current = field.querySelector("input"))}>
                 <Form.Field
+                  id="forgot-retype-password"
                   control={Input}
                   error={
                     getRetypePasswordUIValidateStatus() === "error" && {
@@ -350,6 +356,7 @@ let ForgetPage: React.FC = () => {
                   icon="lock"
                   iconPosition="left"
                   placeholder={_(".retype_password")}
+                  aria-label={_(".retype_password")}
                   value={retypePassword}
                   type="password"
                   autoComplete="new-password"

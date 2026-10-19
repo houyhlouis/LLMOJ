@@ -30,6 +30,7 @@ import { SimplePagination } from "@/components/Pagination";
 import { defineRoute, RouteError } from "@/AppRouter";
 import { SubmissionProgressMessageMetaOnly, SubmissionProgressType } from "../common";
 import { SubmissionPreviewProvider } from "../SubmissionPreview";
+import LiveUpdateStatus from "@/components/LiveUpdateStatus";
 
 const SUBMISSIONS_PER_PAGE = appState.serverPreference.pagination.submissions;
 
@@ -135,7 +136,7 @@ let SubmissionsPage: React.FC<SubmissionsPageProps> = props => {
   const subscriptionKey = props.queryResult.progressSubscriptionKey;
   // Save the messages to a map, since we receive message delta each time
   const messagesMapRef = useRef<Map<number, SubmissionProgressMessageMetaOnly>>();
-  useSocket(
+  const liveUpdates = useSocket(
     "submission-progress",
     {
       subscriptionKey: subscriptionKey
@@ -205,6 +206,11 @@ let SubmissionsPage: React.FC<SubmissionsPageProps> = props => {
 
   return (
     <>
+      <LiveUpdateStatus
+        state={liveUpdates}
+        live={submissions.some(submission => submission.status === "Pending")}
+        onReload={() => navigation.refresh()}
+      />
       <Form className={style.queryForm}>
         <Form.Group inline unstackable>
           <Form.Input
@@ -212,6 +218,7 @@ let SubmissionsPage: React.FC<SubmissionsPageProps> = props => {
             icon="hashtag"
             iconPosition="left"
             placeholder={_(".query.problem_id")}
+            aria-label={_(".query.problem_id")}
             value={queryProblemId}
             onChange={(e, { value }) => setQueryProblemId(value)}
             onBlur={checkQueryProblemId}
@@ -222,6 +229,7 @@ let SubmissionsPage: React.FC<SubmissionsPageProps> = props => {
             icon="user"
             iconPosition="left"
             placeholder={_(".query.submitter")}
+            aria-label={_(".query.submitter")}
             value={querySubmitter}
             onChange={(e, { value }) => setQuerySubmitter(value)}
             onBlur={checkQuerySubmitter}
@@ -231,6 +239,7 @@ let SubmissionsPage: React.FC<SubmissionsPageProps> = props => {
             className={
               style.queryInputCodeLanguage + " " + style.select + (!queryCodeLanguage ? " " + style.selectedAll : "")
             }
+            aria-label={_(".query.code_language")}
             value={queryCodeLanguage || "ALL"}
             onChange={(e, { value }) => setQueryCodeLanguage(value === "ALL" ? null : (value as CodeLanguage))}
             options={[
@@ -259,6 +268,7 @@ let SubmissionsPage: React.FC<SubmissionsPageProps> = props => {
           />
           <Form.Select
             className={style.queryInputStatus + " " + style.select + (!queryStatus ? " " + style.selectedAll : "")}
+            aria-label={_(".query.status")}
             value={queryStatus || "ALL"}
             onChange={(e, { value }) => setQueryStatus(value === "ALL" ? null : (value as SubmissionStatus))}
             options={[
@@ -283,6 +293,7 @@ let SubmissionsPage: React.FC<SubmissionsPageProps> = props => {
           <Button
             className={style.queryButton + (isWideScreen ? " labeled icon" : "")}
             icon="search"
+            aria-label={_(".query.filter")}
             content={isWideScreen ? _(".query.filter") : null}
             onClick={() => onFilter(false)}
           />
@@ -291,6 +302,7 @@ let SubmissionsPage: React.FC<SubmissionsPageProps> = props => {
               className={(isWideScreen ? "labeled icon " : "") + style.mySubmissions}
               primary
               icon="user"
+              aria-label={_(".query.my_submissions")}
               content={isWideScreen ? _(".query.my_submissions") : null}
               onClick={() => onFilter(true)}
             />

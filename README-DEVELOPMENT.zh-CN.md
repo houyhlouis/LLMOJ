@@ -187,6 +187,14 @@ sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh
 
 修改页面后，请在桌面和手机宽度、中英文两种语言下检查，包括空列表、长内容和宽表格的横向滚动。
 
+每个控件还必须只用键盘就能操作（见[键盘与读屏软件](wiki/Accessibility.zh-CN.md)）：
+
+- **可点击的元素：** Semantic UI 会把只有 `onClick` 的 `Menu.Item`、`Label` 或 `Icon` 渲染成 Tab 无法到达的元素。请在其上展开 `@/utils/keyboard` 中的 `actsAsButton`，并给图标加上 `aria-label`。
+- **由 `Dropdown.Item` 子元素组成的下拉菜单**（而不是 `options`）需要 `keyboardMenu`，这样才能用方向键和 Enter 选择其中的选项。
+- **给读屏软件的消息：** 用 `@/utils/announce` 中的 `announce()` 读出。通知（toast）已经会被读出。
+
+`packages/frontend/test/keyboard-access.test.cjs` 会对既没有 `actsAsButton` 也没有 `keyboardMenu` 的可点击元素报错。`locale-parity.test.cjs` 会对只存在于一种语言的消息、或丢失了占位符的翻译报错。
+
 ## 源码包
 
 ```bash

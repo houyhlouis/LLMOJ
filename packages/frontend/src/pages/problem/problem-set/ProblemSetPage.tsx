@@ -19,6 +19,8 @@ import ProblemSearch from "@/components/ProblemSearch";
 import { getProblemDisplayName, getProblemIdString, getProblemUrl } from "../utils";
 import { makeToBeLocalizedText } from "@/locales";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
+import { actsAsButton } from "@/utils/keyboard";
+import { problemSetPreferences } from "./problemSetPreferences";
 
 // Parsed from querystring, without pagination
 interface ProblemSetPageSearchQuery {
@@ -360,6 +362,7 @@ let ProblemSetPage: React.FC<ProblemSetPageProps> = props => {
       )}
       <Menu className={style.searchMenu} secondary>
         <Menu.Item
+          {...actsAsButton}
           className={style.searchMenuItem}
           icon="sliders horizontal"
           active={searchMode === "difficulty"}
@@ -368,6 +371,7 @@ let ProblemSetPage: React.FC<ProblemSetPageProps> = props => {
           onClick={() => changeSearchMode(searchMode === "difficulty" ? "title" : "difficulty")}
         />
         <Menu.Item
+          {...actsAsButton}
           className={style.searchMenuItem}
           icon="tag"
           active={searchMode === "tag"}
@@ -376,6 +380,7 @@ let ProblemSetPage: React.FC<ProblemSetPageProps> = props => {
         />
         {props.response.permissions.filterByOwner && (
           <Menu.Item
+            {...actsAsButton}
             className={style.searchMenuItem}
             icon="user"
             active={searchMode === "user"}
@@ -386,6 +391,7 @@ let ProblemSetPage: React.FC<ProblemSetPageProps> = props => {
         {(props.response.permissions.filterNonpublic ||
           (appState.currentUser && props.searchQuery.ownerId === appState.currentUser.id)) && (
           <Menu.Item
+            {...actsAsButton}
             className={style.searchMenuItem}
             icon="eye slash"
             active={false}
@@ -429,7 +435,12 @@ let ProblemSetPage: React.FC<ProblemSetPageProps> = props => {
           <Label size="small" color="grey">
             <Icon name="file alternate" />
             {props.searchQuery.keyword}
-            <Icon name="delete" onClick={() => onDelFilterKeyword()} />
+            <Icon
+              {...actsAsButton}
+              aria-label={_("common.controls.remove_filter")}
+              name="delete"
+              onClick={() => onDelFilterKeyword()}
+            />
           </Label>
         </EmojiRenderer>
       )}
@@ -437,14 +448,24 @@ let ProblemSetPage: React.FC<ProblemSetPageProps> = props => {
         <Label size="small" color="pink">
           <Icon name="user" />
           {props.response.filterOwner.username}
-          <Icon name="delete" onClick={() => onDelFilterOwner()} />
+          <Icon
+            {...actsAsButton}
+            aria-label={_("common.controls.remove_filter")}
+            name="delete"
+            onClick={() => onDelFilterOwner()}
+          />
         </Label>
       )}
       {props.searchQuery.nonpublic && (
         <Label size="small" color="red" basic>
           <Icon name="eye slash" />
           {_(".non_public")}
-          <Icon name="delete" onClick={() => onDelFilterNonpublic()} />
+          <Icon
+            {...actsAsButton}
+            aria-label={_("common.controls.remove_filter")}
+            name="delete"
+            onClick={() => onDelFilterNonpublic()}
+          />
         </Label>
       )}
       {props.response.filterTags && sortTags(props.response.filterTags).map(tag => getTagLabel(tag, "del"))}
@@ -453,6 +474,8 @@ let ProblemSetPage: React.FC<ProblemSetPageProps> = props => {
           <Icon name="sliders horizontal" />
           {_(".difficulty.range")}: {props.searchQuery.difficultyMin ?? 0}–{props.searchQuery.difficultyMax ?? 4000}
           <Icon
+            {...actsAsButton}
+            aria-label={_("common.controls.remove_filter")}
             name="delete"
             onClick={() => redirectWithFilter({ difficultyMin: undefined, difficultyMax: undefined })}
           />
@@ -464,10 +487,11 @@ let ProblemSetPage: React.FC<ProblemSetPageProps> = props => {
   const headerShowTagsCheckbox = (
     <>
       <Checkbox
+        id="problem-set-show-tags"
         className={style.showTagsCheckbox}
         toggle
-        checked={appState.showTagsInProblemSet}
-        onChange={() => (appState.showTagsInProblemSet = !appState.showTagsInProblemSet)}
+        checked={problemSetPreferences.showTags}
+        onChange={() => problemSetPreferences.setShowTags(!problemSetPreferences.showTags)}
         label={_(".show_tags")}
       />
     </>
@@ -595,6 +619,7 @@ let ProblemSetPage: React.FC<ProblemSetPageProps> = props => {
                     </EmojiRenderer>
                     {!problem.meta.isPublic && (
                       <Label
+                        {...actsAsButton}
                         className={style.labelNonPublic}
                         icon="eye slash"
                         size="small"
@@ -607,7 +632,7 @@ let ProblemSetPage: React.FC<ProblemSetPageProps> = props => {
                         onClick={() => onAddFilterNonpublic()}
                       />
                     )}
-                    <div className={style.tags} style={{ display: appState.showTagsInProblemSet ? null : "none" }}>
+                    <div className={style.tags} style={{ display: problemSetPreferences.showTags ? null : "none" }}>
                       {problem.tags.map(tag => getTagLabel(tag))}
                     </div>
                   </Table.Cell>

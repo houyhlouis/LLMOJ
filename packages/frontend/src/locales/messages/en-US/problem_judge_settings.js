@@ -35,7 +35,7 @@ return {
       SUBTASK_HAS_NO_TESTCASES: "Subtask {1} has no testcases.",
       INVALID_SCORING_TYPE: "Unknown error.",
       INVALID_POINTS_SUBTASK: "Subtask {1}'s percentage points {2} is invalid.",
-      INVALID_POINTS_TESTCASE: "Subtask {1}'s testcase {2}'s percentage points {2} is invalid.",
+      INVALID_POINTS_TESTCASE: "Subtask {1}'s testcase {2}'s percentage points {3} is invalid.",
       POINTS_SUM_UP_TO_LARGER_THAN_100_SUBTASKS:
         "The sum of all subtasks' points is {1}, exceeding the full points 100.",
       POINTS_SUM_UP_TO_LARGER_THAN_100_TESTCASES:
@@ -43,6 +43,9 @@ return {
       INVALID_DEPENDENCY: "Subtask {1}'s dependency subtask ID {2} is invalid",
       NO_SUCH_INPUT_FILE: "Input file {3} referenced by subtask {1}'s testcase {2} doesn't exist.",
       NO_SUCH_OUTPUT_FILE: "Output file {3} referenced by subtask {1}'s testcase {2} doesn't exist.",
+      INVALID_USER_OUTPUT_FILENAME: "The user output file {3} required by subtask {1}'s testcase {2} is invalid.",
+      DUPLICATE_USER_OUTPUT_FILENAME:
+        "The user output file {3} required by subtask {1}'s testcase {2} is also required by subtask {4}'s testcase {5}.",
       INVALID_CHECKER_TYPE: "Unknown error.",
       INVALID_CHECKER_OPTIONS: "Unknown error.",
       INVALID_CHECKER_INTERFACE: "Unknown error.",
@@ -204,8 +207,10 @@ return {
     no_testcases: "No testcases",
     testcase: {
       input_file: "Input file",
+      input_file_not_needed: "Input file is not needed",
       output_file: "Output file",
-      output_file_not_needed: "Output file is not needed"
+      output_file_not_needed: "Output file is not needed",
+      user_output_filename: "User output filename"
     },
     testcase_add: {
       before: "Before this testcase",
@@ -221,7 +226,8 @@ return {
   },
   file_selector: {
     no_matching_files: "No matching files.",
-    file_not_found_warning: "File not found."
+    file_not_found_warning: "File not found.",
+    empty: "Empty"
   },
   extra_source_files: {
     option: "Add extra source files when compiling",

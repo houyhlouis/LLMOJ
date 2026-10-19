@@ -87,6 +87,8 @@ const TwoFactorPrompt: React.FC<TwoFactorPromptProps> = props => {
               icon={method === "totp" ? "mobile alternate" : "life ring"}
               iconPosition="left"
               placeholder={method === "totp" ? _(".prompt.totp_placeholder") : _(".prompt.recovery_code_placeholder")}
+              aria-label={method === "totp" ? _(".prompt.totp_placeholder") : _(".prompt.recovery_code_placeholder")}
+              aria-invalid={!!props.error || undefined}
               value={code}
               readOnly={props.pending}
               error={!!props.error}
@@ -113,7 +115,7 @@ const TwoFactorPrompt: React.FC<TwoFactorPromptProps> = props => {
           />
         </>
       )}
-      {error && <Message error visible size="small" content={error} />}
+      {error && <Message error visible size="small" role="alert" content={error} />}
       {methods
         .filter(other => other !== method)
         .map(other => (

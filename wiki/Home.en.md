@@ -29,6 +29,7 @@ LLMOJ is an online judge based on LibreOJ, with AI tools for problem setting. Ne
 | [Fake moderation](Submission-Moderation.md) | Voiding cheating submissions while keeping the evidence |
 | [Registration approval](Registration-Approval.md) | Registration settings and delegated reviews |
 | [Two-factor sign-in](Two-Factor-Sign-In.md) | Authenticator apps, passkeys, recovery codes and confirming sensitive changes |
+| [Keyboard and screen readers](Accessibility.md) | Using the site without a mouse, live updates, zooming on phones |
 
 The member list (`/u`) opens from **View all** in the **Top Users** panel on the home page, for users with the `ViewUsers` privilege.
 
@@ -57,6 +58,6 @@ The member list (`/u`) opens from **View all** in the **Top Users** panel on the
 | [Environment](Environment.md) | Environment variables for running, installing and building; maintenance scripts |
 | [Publishing](Publishing.md) | Applying updates with GitHub Desktop, publishing this wiki, and releases |
 
-A full installation (`--role all`) runs the website, storage and a local judge, and can use remote judge machines too. A website-only installation (`--role web`) builds no local judging environment; remote judges handle submissions, but AI validation and test data generation need the local environment of a full installation.
+A full installation (`--role all`) runs the website, storage and a local judge, and can use remote judge machines too. A website-only installation (`--role web`) builds no local judging environment: remote judges handle submissions, and up-to-date ones (protocol version 4) also run AI validation and test data generation (see [Distributed judging](Distributed-Judging.md)).
 
 LLMOJ is tested on Ubuntu 24.04 amd64. Its own code is under the MIT license; upstream components keep their licenses.

@@ -6,6 +6,7 @@ import { Locale } from "@/interfaces/Locale";
 import { Dropdown, Flag, Menu, Tab } from "semantic-ui-react";
 import localeMeta from "@/locales/meta";
 import { useLocalizer } from "@/utils/hooks";
+import { keyboardMenu } from "@/utils/keyboard";
 
 interface LocalizeTabProps {
   className?: string;
@@ -44,6 +45,8 @@ export const LocalizeTab: React.FC<LocalizeTabProps> = props => {
         {
           menuItem: (
             <Dropdown
+              {...keyboardMenu}
+              aria-label={_("common.controls.add")}
               key="add"
               item
               icon="add"

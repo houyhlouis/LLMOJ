@@ -44,6 +44,7 @@ import { onEnterPress } from "@/utils/onEnterPress";
 import { isValidFilename } from "@/utils/validators";
 import { Localizer, makeToBeLocalizedText } from "@/locales";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
+import { actsAsButton, keyboardMenu } from "@/utils/keyboard";
 
 // Firefox have no WritableStream
 if (!window.WritableStream || true) {
@@ -349,12 +350,24 @@ let FileTableRow: React.FC<FileTableRowProps> = props => {
             getUploadStatus()
           ) : (
             <>
-              <Icon className={style.fileTableOperationIcon} name="download" onClick={() => props.onDownload()} />
+              <Icon
+                {...actsAsButton}
+                aria-label={_("common.controls.download")}
+                className={style.fileTableOperationIcon}
+                name="download"
+                onClick={() => props.onDownload()}
+              />
               {props.hasPermission && (
                 <>
                   <Popup
                     trigger={
-                      <Icon disabled={props.pending} className={style.fileTableOperationIcon} name="pencil alternate" />
+                      <Icon
+                        {...actsAsButton}
+                        aria-label={_("common.controls.rename")}
+                        disabled={props.pending}
+                        className={style.fileTableOperationIcon}
+                        name="pencil alternate"
+                      />
                     }
                     disabled={props.pending}
                     open={renameOpen}
@@ -378,7 +391,15 @@ let FileTableRow: React.FC<FileTableRowProps> = props => {
                     position="top center"
                   />
                   <Popup
-                    trigger={<Icon disabled={props.pending} className={style.fileTableOperationIcon} name="delete" />}
+                    trigger={
+                      <Icon
+                        {...actsAsButton}
+                        aria-label={_("common.controls.delete")}
+                        disabled={props.pending}
+                        className={style.fileTableOperationIcon}
+                        name="delete"
+                      />
+                    }
                     disabled={props.pending}
                     open={deleteOpen}
                     onOpen={() => setDeleteOpen(true)}
@@ -574,6 +595,7 @@ let FileTable: React.FC<FileTableProps> = props => {
                   {selectedFilesArray.length > 0 ? (
                     <Ref innerRef={setRefSelectedInfoDropdown}>
                       <Dropdown
+                        {...keyboardMenu}
                         open={selectedInfoDropdownOpen}
                         onOpen={() => !popupDeleteSelectedOpen && setSelectedInfoDropdownOpen(true)}
                         onClose={() => setSelectedInfoDropdownOpen(false)}

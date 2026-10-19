@@ -64,6 +64,7 @@ let CodeLanguageAndOptions: React.FC<CodeLanguageAndOptionsProps> = props => {
       <Form.Select
         className={props.classNameForLanguage}
         label={props.headerForLanguage || _(".code_language")}
+        aria-label={props.headerForLanguage || _(".code_language")}
         value={props.language}
         options={Object.keys(compileAndRunOptions)
           .filter(language => !props.allowedLanguages || props.allowedLanguages.includes(language as CodeLanguage))
@@ -83,6 +84,7 @@ let CodeLanguageAndOptions: React.FC<CodeLanguageAndOptionsProps> = props => {
                 className={props.classNameForCompileAndRunOptions}
                 key={option.name}
                 label={_(`.${props.language}.options.${option.name}.name`)}
+                aria-label={_(`.${props.language}.options.${option.name}.name`)}
                 value={props.compileAndRunOptions[option.name] as string}
                 options={permittedValues(props.language, option.name, option.values).map(value => ({
                   key: value,

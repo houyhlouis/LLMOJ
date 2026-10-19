@@ -15,6 +15,7 @@ import UserSearch from "@/components/UserSearch";
 import { onEnterPress } from "@/utils/onEnterPress";
 import { makeToBeLocalizedText } from "@/locales";
 import { isValidGroupName } from "@/utils/validators";
+import { actsAsButton } from "@/utils/keyboard";
 
 async function fetchData(): Promise<ApiTypes.GetGroupListResponseDto> {
   if (!appState.currentUser) throw new RouteError(makeToBeLocalizedText("groups.not_logged_in"));
@@ -272,6 +273,8 @@ let GroupItem: React.FC<GroupItemProps> = props => {
                           disabled={pending || !(props.hasPermission && !isGroupAdmin)}
                           trigger={
                             <Icon
+                              {...actsAsButton}
+                              aria-label={_(".remove_member")}
                               name="delete"
                               disabled={!(props.hasPermission && !isGroupAdmin)}
                               label={_(".remove_member")}

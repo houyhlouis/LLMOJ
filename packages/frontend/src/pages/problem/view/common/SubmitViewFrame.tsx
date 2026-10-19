@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { Header, Menu, Button, Checkbox } from "semantic-ui-react";
 import { observer } from "mobx-react";
 
@@ -7,6 +7,7 @@ import style from "./SubmitViewFrame.module.less";
 import { useLocalizer, Link } from "@/utils/hooks";
 import StatusText from "@/components/StatusText";
 import ScoreText from "@/components/ScoreText";
+import { actsAsButton } from "@/utils/keyboard";
 
 interface SubmitViewFrameProps {
   showSkipSamples: boolean;
@@ -27,12 +28,37 @@ interface SubmitViewFrameProps {
 let SubmitViewFrame: React.FC<SubmitViewFrameProps> = props => {
   const _ = useLocalizer("problem");
 
+  // Opening the submit view continues in its editor (with a keyboard; a touch screen would only show its keyboard),
+  // or else at its first control.
+  const refView = useRef<HTMLDivElement>();
+  useEffect(() => {
+    if (!props.inSubmitView || !refView.current) return;
+    const view = refView.current;
+    const editor =
+      window.matchMedia?.("(pointer: fine)").matches && view.querySelector<HTMLElement>(".monaco-editor textarea");
+    (
+      editor ||
+      view.querySelector<HTMLElement>('a[href], button:not([disabled]), input:not([type="hidden"]), [tabindex="0"]')
+    )?.focus();
+  }, [props.inSubmitView]);
+
   return (
-    <div className={style.submitView} style={{ display: props.inSubmitView ? null : "none" }}>
+    <div
+      ref={refView}
+      className={style.submitView}
+      style={{ display: props.inSubmitView ? null : "none" }}
+      role="region"
+      aria-label={_(".submit.submit")}
+    >
       <div className={style.leftContainer}>{props.mainContent}</div>
       <div className={style.rightContainer}>
         <Menu pointing secondary vertical className={style.actionMenu}>
-          <Menu.Item name={_(".submit.back_to_statement")} icon="arrow left" onClick={props.onCloseSubmitView} />
+          <Menu.Item
+            {...actsAsButton}
+            name={_(".submit.back_to_statement")}
+            icon="arrow left"
+            onClick={props.onCloseSubmitView}
+          />
           <div />
         </Menu>
         {props.sidebarContent}

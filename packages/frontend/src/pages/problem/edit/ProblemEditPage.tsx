@@ -40,6 +40,7 @@ import { makeToBeLocalizedText } from "@/locales";
 import { LocalizeTab } from "@/components/LocalizeTab";
 import { getMarkdownEditorFontClass } from "@/misc/fonts";
 import defaultSections from "./defaultSections";
+import { actsAsButton, keyboardMenu } from "@/utils/keyboard";
 
 type Problem = ApiTypes.GetProblemResponseDto;
 
@@ -194,7 +195,14 @@ const LocalizedContentEditorSection: React.FC<LocalizedContentEditorSectionProps
               }
             ]}
           />
-          <Dropdown item closeOnChange icon="add" className={`icon ${style.toolbarMenuIconItem}`}>
+          <Dropdown
+            {...keyboardMenu}
+            aria-label={_("common.controls.add")}
+            item
+            closeOnChange
+            icon="add"
+            className={`icon ${style.toolbarMenuIconItem}`}
+          >
             <Dropdown.Menu>
               <Dropdown.Item
                 icon="arrow up"
@@ -209,7 +217,13 @@ const LocalizedContentEditorSection: React.FC<LocalizedContentEditorSectionProps
             </Dropdown.Menu>
           </Dropdown>
           <Ref innerRef={setRefOptionsButton}>
-            <Dropdown item icon="bars" className={`icon ${style.toolbarMenuIconItem}`}>
+            <Dropdown
+              {...keyboardMenu}
+              aria-label={_("common.controls.more_actions")}
+              item
+              icon="bars"
+              className={`icon ${style.toolbarMenuIconItem}`}
+            >
               <Dropdown.Menu>
                 <Dropdown.Item
                   disabled={props.isFirst}
@@ -379,7 +393,9 @@ const LocalizedContentEditor: React.FC<LocalizedContentEditorProps> = props => {
             </>
           )}
           <Popup
-            trigger={<Menu.Item as="a" icon="file alternate outline" className={style.toolbarMenuIconItem} />}
+            trigger={
+              <Menu.Item {...actsAsButton} as="a" icon="file alternate outline" className={style.toolbarMenuIconItem} />
+            }
             open={addDefaultSectionsPopupOpen}
             onOpen={() => setAddDefaultSectionsPopupOpen(true)}
             onClose={() => setAddDefaultSectionsPopupOpen(false)}
@@ -399,7 +415,7 @@ const LocalizedContentEditor: React.FC<LocalizedContentEditorProps> = props => {
           {!props.isOnly && (
             <>
               <Popup
-                trigger={<Menu.Item as="a" icon="delete" className={style.toolbarMenuIconItem} />}
+                trigger={<Menu.Item {...actsAsButton} as="a" icon="delete" className={style.toolbarMenuIconItem} />}
                 content={
                   <Button color="red" content={_(".content_editor.confirm_delete")} onClick={() => props.onDelete()} />
                 }
@@ -494,7 +510,14 @@ const SampleEditor: React.FC<SampleEditorProps> = props => {
               }
             />
           )}
-          <Dropdown item closeOnChange icon="add" className={`icon ${style.toolbarMenuIconItem}`}>
+          <Dropdown
+            {...keyboardMenu}
+            aria-label={_("common.controls.add")}
+            item
+            closeOnChange
+            icon="add"
+            className={`icon ${style.toolbarMenuIconItem}`}
+          >
             <Dropdown.Menu>
               <Dropdown.Item
                 icon="arrow up"
@@ -509,7 +532,13 @@ const SampleEditor: React.FC<SampleEditorProps> = props => {
             </Dropdown.Menu>
           </Dropdown>
           <Ref innerRef={refOptionsButton}>
-            <Dropdown item icon="bars" className={`icon ${style.toolbarMenuIconItem}`}>
+            <Dropdown
+              {...keyboardMenu}
+              aria-label={_("common.controls.more_actions")}
+              item
+              icon="bars"
+              className={`icon ${style.toolbarMenuIconItem}`}
+            >
               <Dropdown.Menu>
                 <Dropdown.Item
                   disabled={props.isFirst}

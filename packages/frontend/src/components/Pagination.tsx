@@ -4,7 +4,7 @@ import { observer } from "mobx-react";
 import { URLDescriptor } from "navi";
 
 import style from "./Pagination.module.less";
-import { Link, useScreenWidthWithin } from "@/utils/hooks";
+import { Link, useLocalizer, useScreenWidthWithin } from "@/utils/hooks";
 
 interface PatchedUIPaginationProps extends UIPaginationProps {
   pageUrl: (newPage: number) => Partial<URLDescriptor>;
@@ -36,6 +36,7 @@ interface PaginationProps {
 }
 
 export const Pagination: React.FC<PaginationProps> = observer(props => {
+  const _ = useLocalizer("common.pagination");
   const totalPages = Math.ceil(props.totalCount / props.itemsPerPage);
 
   const screenWidthLessThan376 = useScreenWidthWithin(0, 376);
@@ -75,8 +76,18 @@ export const Pagination: React.FC<PaginationProps> = observer(props => {
       ellipsisItem={{ content: "...", disabled: true, icon: true }}
       firstItem={null}
       lastItem={null}
-      prevItem={{ content: <Icon name="chevron left" />, icon: true, disabled: props.currentPage === 1 }}
-      nextItem={{ content: <Icon name="chevron right" />, icon: true, disabled: props.currentPage === totalPages }}
+      prevItem={{
+        content: <Icon name="chevron left" />,
+        icon: true,
+        disabled: props.currentPage === 1,
+        "aria-label": _(".previous")
+      }}
+      nextItem={{
+        content: <Icon name="chevron right" />,
+        icon: true,
+        disabled: props.currentPage === totalPages,
+        "aria-label": _(".next")
+      }}
       totalPages={totalPages}
       pageUrl={props.pageUrl}
     />
@@ -93,6 +104,7 @@ interface SimplePaginationProps {
 }
 
 export const SimplePagination: React.FC<SimplePaginationProps> = observer(props => {
+  const _ = useLocalizer("common.pagination");
   return (
     <div className={style.wrapper + (props.className ? " " + props.className : "")}>
       <PatchedUIPagination
@@ -101,8 +113,18 @@ export const SimplePagination: React.FC<SimplePaginationProps> = observer(props 
         siblingRange={0}
         firstItem={null}
         lastItem={null}
-        prevItem={{ content: <Icon name="chevron left" />, icon: true, disabled: !props.hasPrevPage }}
-        nextItem={{ content: <Icon name="chevron right" />, icon: true, disabled: !props.hasNextPage }}
+        prevItem={{
+          content: <Icon name="chevron left" />,
+          icon: true,
+          disabled: !props.hasPrevPage,
+          "aria-label": _(".previous")
+        }}
+        nextItem={{
+          content: <Icon name="chevron right" />,
+          icon: true,
+          disabled: !props.hasNextPage,
+          "aria-label": _(".next")
+        }}
         totalPages={3}
         pageUrl={(page: unknown) => props.pageUrl((Number(page) - 2) as 1 | -1)}
       />

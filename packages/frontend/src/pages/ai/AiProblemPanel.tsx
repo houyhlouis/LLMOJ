@@ -6,6 +6,7 @@ import { Link } from "@/utils/hooks";
 import { aiCall, aiText, actionName } from "./api";
 import AiJobs from "./AiJobs";
 import style from "./Ai.module.less";
+import { keyboardMenu } from "@/utils/keyboard";
 export { startAiAfterSave } from "./api";
 
 export const AiProblemPanel = observer(function AiProblemPanel({
@@ -86,6 +87,7 @@ export const AiProblemPanel = observer(function AiProblemPanel({
           </>
         )}
         <Dropdown
+          {...keyboardMenu}
           button
           className="small"
           text={aiText("单步执行", "Run a step")}

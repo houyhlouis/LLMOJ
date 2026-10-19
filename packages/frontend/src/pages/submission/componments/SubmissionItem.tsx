@@ -13,6 +13,7 @@ import { CodeLanguage } from "@/interfaces/CodeLanguage";
 import { getProblemDisplayName, getProblemIdString, getProblemUrl } from "@/pages/problem/utils";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
 import { SubmissionPreviewLink } from "../SubmissionPreview";
+import { actsAsButton } from "@/utils/keyboard";
 
 function parseSubmissionMeta(submission: ApiTypes.SubmissionMetaDto) {
   return {
@@ -147,7 +148,13 @@ export const SubmissionItem: React.FC<SubmissionItemProps> = props => {
               )}
               <span title={submission.answerSize + " B"}>{formatFileSize(submission.answerSize, 1)}</span>
               {props.onDownloadAnswer && (
-                <Icon className={style.downloadIcon} name="download" onClick={props.onDownloadAnswer} />
+                <Icon
+                  {...actsAsButton}
+                  aria-label={_("common.controls.download")}
+                  className={style.downloadIcon}
+                  name="download"
+                  onClick={props.onDownloadAnswer}
+                />
               )}
             </span>
           }
@@ -355,7 +362,13 @@ export const SubmissionItemExtraRows: React.FC<SubmissionItemExtraRowsProps> = p
             <span title={submission.answerSize + " B"}>{formatFileSize(submission.answerSize, 1)}</span>
           </span>
           {props.onDownloadAnswer && (
-            <Icon className={style.downloadIcon} name="download" onClick={props.onDownloadAnswer} />
+            <Icon
+              {...actsAsButton}
+              aria-label={_("common.controls.download")}
+              className={style.downloadIcon}
+              name="download"
+              onClick={props.onDownloadAnswer}
+            />
           )}
         </div>
       }

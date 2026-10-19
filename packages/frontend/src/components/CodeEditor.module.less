@@ -8,6 +8,22 @@
     border-color: var(--theme-input-border-focus);
   }
 
+  .keyboardHint {
+    position: absolute;
+    right: 18px;
+    bottom: 4px;
+    z-index: 10;
+    max-width: calc(100% - 36px);
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--theme-message-info-foreground);
+    background: var(--theme-message-info-background);
+    border: 1px solid var(--theme-message-info-border);
+    pointer-events: none;
+  }
+
   // Semantic forms style every textarea, including Monaco's hidden keyboard
   // input. Preserve Monaco's own text rendering and cursor inside forms.
   :global(.monaco-editor textarea.inputarea) {

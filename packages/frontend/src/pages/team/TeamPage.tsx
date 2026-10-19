@@ -23,6 +23,7 @@ import TeamMembers from "./TeamMembers";
 import ResourceEditor from "./ResourceEditor";
 import { dateText, downloadCsv, joinPolicyText, policyOptions, teamApi, tr } from "./api";
 import style from "./TeamPage.module.less";
+import { actsAsButton } from "@/utils/keyboard";
 
 const bytes = (value: number) =>
   Number(value) >= 1073741824
@@ -358,6 +359,7 @@ export default observer(function TeamPage({
             .filter(([key]) => member || key === "overview")
             .map(([key, text]) => (
               <Menu.Item
+                {...actsAsButton}
                 key={key}
                 active={activeTab === key}
                 onClick={() => {

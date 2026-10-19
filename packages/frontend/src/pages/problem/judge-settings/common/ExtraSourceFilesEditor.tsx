@@ -10,6 +10,7 @@ import { useLocalizer } from "@/utils/hooks";
 import { CodeLanguage } from "@/interfaces/CodeLanguage";
 import TestDataFileSelector from "./TestDataFileSelector";
 import { JudgeInfoProcessor, EditorComponentProps } from "./interface";
+import { actsAsButton, keyboardMenu } from "@/utils/keyboard";
 
 export interface JudgeInfoWithExtraSourceFiles {
   // language => dst => src
@@ -122,7 +123,13 @@ let ExtraSourceFilesEditor: React.FC<ExtraSourceFilesEditorProps> = props => {
                 <strong>{_(".extra_source_files.title")}</strong>
               </Menu.Item>
               <Menu.Menu position="right">
-                <Dropdown item icon="plus" className={`icon ${style.itemWithIcon}`}>
+                <Dropdown
+                  {...keyboardMenu}
+                  aria-label={_("common.controls.add")}
+                  item
+                  icon="plus"
+                  className={`icon ${style.itemWithIcon}`}
+                >
                   <Dropdown.Menu>
                     {Object.values(CodeLanguage).map(codeLanguage => (
                       <Dropdown.Item
@@ -181,6 +188,7 @@ let ExtraSourceFilesEditor: React.FC<ExtraSourceFilesEditorProps> = props => {
                       <Popup
                         trigger={
                           <Menu.Item
+                            {...actsAsButton}
                             className={`icon ${style.itemWithIcon}`}
                             icon="delete"
                             title={_(".extra_source_files.delete")}

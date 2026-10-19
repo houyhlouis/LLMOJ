@@ -48,6 +48,7 @@ import { makeToBeLocalizedText } from "@/locales";
 import { EmojiRenderer, getTwemojiOptions } from "@/components/EmojiRenderer";
 import TimeAgo from "@/components/TimeAgo";
 import { getMarkdownEditorFontClass } from "@/misc/fonts";
+import { actsAsButton, keyboardMenu } from "@/utils/keyboard";
 
 async function fetchData(discussionId: number) {
   const pagination = appState.serverPreference.pagination;
@@ -359,7 +360,9 @@ let DiscussionItem: React.FC<DiscussionItemProps> = props => {
                 <div className={style.actionIcon + (emojiPopupOpen ? " " + style.active : "")}>
                   <Popup
                     className={style.emojiPickerPopup}
-                    trigger={<Icon name="smile outline" />}
+                    trigger={
+                      <Icon {...actsAsButton} aria-label={_("common.controls.add_reaction")} name="smile outline" />
+                    }
                     content={
                       <ReactionEmojiPicker
                         currentUserReactions={props.reactions.currentUserReactions}
@@ -380,6 +383,8 @@ let DiscussionItem: React.FC<DiscussionItemProps> = props => {
               {actions.length > 0 && (
                 <Ref innerRef={setRefActionsMenuIcon}>
                   <Dropdown
+                    {...keyboardMenu}
+                    aria-label={_("common.controls.more_actions")}
                     direction={isMobile ? "left" : "right"}
                     className={style.actionIcon + (actionDropdownOpen ? " " + style.active : "")}
                     icon="ellipsis horizontal"
@@ -511,10 +516,10 @@ export let DiscussionEditor = observer<DiscussionEditorProps, HTMLDivElement>(
             )}
             <div className={style.headerContents}>
               <Menu attached="top" className={style.editTab} tabular>
-                <Menu.Item active={!preview} onClick={() => setPreview(false)}>
+                <Menu.Item {...actsAsButton} active={!preview} onClick={() => setPreview(false)}>
                   {_(".tabs.edit")}
                 </Menu.Item>
-                <Menu.Item active={preview} onClick={() => setPreview(true)}>
+                <Menu.Item {...actsAsButton} active={preview} onClick={() => setPreview(true)}>
                   {_(".tabs.preview")}
                 </Menu.Item>
               </Menu>

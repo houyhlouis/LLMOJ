@@ -1,5 +1,8 @@
 return {
   close_preview: "关闭评测记录预览",
+  live: {
+    finished: "评测完成：{status}，得分 {score}。"
+  },
   close_hack_preview: "关闭 Hack 预览",
   retry_preview: "重试",
   title: "提交记录",

@@ -25,6 +25,7 @@ import { Locale } from "@/interfaces/Locale";
 import localeMeta from "@/locales/meta";
 import { tagColors, sortTagColors } from "../problemTag";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
+import { actsAsButton, keyboardMenu } from "@/utils/keyboard";
 
 interface TagProps {
   disabled: boolean;
@@ -56,6 +57,7 @@ const Tag: React.FC<TagProps> = props => {
       trigger={
         <EmojiRenderer>
           <Label
+            {...actsAsButton}
             as="a"
             className={style.tag}
             content={props.name}
@@ -71,6 +73,8 @@ const Tag: React.FC<TagProps> = props => {
                 ]}
                 trigger={
                   <Icon
+                    {...actsAsButton}
+                    aria-label={_("common.controls.delete")}
                     name="delete"
                     disabled={props.disabled}
                     onClick={() => {
@@ -439,7 +443,9 @@ let ProblemTagManager: React.FC<ProblemTagManagerProps> = props => {
                 />
               </Menu.Item>
               <Popup
-                trigger={<Menu.Item as="a" icon="delete" className={style.itemIcon} disabled={pending} />}
+                trigger={
+                  <Menu.Item {...actsAsButton} as="a" icon="delete" className={style.itemIcon} disabled={pending} />
+                }
                 disabled={pending}
                 content={
                   <Button negative content={_(".confirm_delete_language")} onClick={() => onDeleteLocale(locale)} />
@@ -452,7 +458,11 @@ let ProblemTagManager: React.FC<ProblemTagManagerProps> = props => {
         </Menu>
       ))}
       <div className={style.divAddLanguageAndSubmit}>
-        <Dropdown disabled={existingLocales.length === Object.keys(localeMeta).length} text={_(".add_language")}>
+        <Dropdown
+          {...keyboardMenu}
+          disabled={existingLocales.length === Object.keys(localeMeta).length}
+          text={_(".add_language")}
+        >
           <Dropdown.Menu>
             {Object.values(Locale)
               .filter(locale => !existingLocales.includes(locale))

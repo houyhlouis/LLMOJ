@@ -154,8 +154,9 @@ body[data-theme=far] {
   --theme-discussion-load-more: #474747;
 
   --theme-footer: #bbb;
-  --theme-footer-version: #666;
+  --theme-footer-version: #949494;
   --theme-footer-icons: #a7a7a7;
+  --theme-focus-ring: #97cbff;
 
   --theme-login-error-message: #c54f4d;
 

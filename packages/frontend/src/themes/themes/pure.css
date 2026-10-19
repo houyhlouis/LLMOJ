@@ -153,9 +153,10 @@ body[data-theme=pure] {
   --theme-discussion-load-more-text: #555;
   --theme-discussion-load-more: #e8e8e8;
 
-  --theme-footer: #888;
-  --theme-footer-version: #c7c7c7;
-  --theme-footer-icons: #999;
+  --theme-footer: #737373;
+  --theme-footer-version: #767676;
+  --theme-footer-icons: #737373;
+  --theme-focus-ring: #1e70bf;
 
   --theme-login-error-message: #9F3A38;
 

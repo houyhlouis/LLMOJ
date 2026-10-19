@@ -116,11 +116,6 @@ export class AppState {
 
   /* End theme info */
 
-  // TODO: move it out of global app state
-  @persist
-  @observable
-  showTagsInProblemSet: boolean = false;
-
   /* Begin session info */
 
   @persist
@@ -175,4 +170,32 @@ const hydrate = create({
 export const appState = new AppState();
 (window as any)._appState = appState;
 
-export const initAppStateStore = async () => await hydrate("appState", appState);
+// Feature settings that earlier versions kept in the app state, moved to their feature's own key in this browser
+// ("problemSetPreferences": pages/problem/problem-set/problemSetPreferences.ts)
+const retiredSettings: Record<string, (value: unknown) => void> = {
+  showTagsInProblemSet: value => {
+    if (localStorage.getItem("problemSetPreferences") === null)
+      localStorage.setItem("problemSetPreferences", JSON.stringify({ showTags: value === true }));
+  }
+};
+
+function moveRetiredSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("appState"));
+    if (!saved || typeof saved !== "object") return;
+    const retired = Object.keys(retiredSettings).filter(name => name in saved);
+    if (retired.length === 0) return;
+    for (const name of retired) {
+      retiredSettings[name](saved[name]);
+      delete saved[name];
+    }
+    localStorage.setItem("appState", JSON.stringify(saved));
+  } catch {
+    // Unreadable or blocked storage: nothing to move
+  }
+}
+
+export const initAppStateStore = async () => {
+  moveRetiredSettings();
+  await hydrate("appState", appState);
+};

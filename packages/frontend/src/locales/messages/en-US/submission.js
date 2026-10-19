@@ -1,5 +1,8 @@
 return {
   title: "Submission",
+  live: {
+    finished: "Judging finished: {status}, score {score}."
+  },
   close_preview: "Close submission preview",
   close_hack_preview: "Close hack preview",
   retry_preview: "Retry",

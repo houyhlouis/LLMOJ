@@ -26,9 +26,31 @@ return {
       preference: "Preference",
       site_management: "Site management",
       registration_reviews: "Registration reviews",
-      logout: "Logout"
-    }
+      summaries: "My Summaries",
+      permissions: "Permissions",
+      ai_configuration: "AI API Configuration",
+      logout: "Logout",
+      menu: "Account menu of {username}"
+    },
+    open_menu: "Open menu"
   },
+  skip_to_content: "Skip to main content",
+  pagination: {
+    previous: "Previous page",
+    next: "Next page"
+  },
+  controls: {
+    remove: "Remove",
+    remove_filter: "Remove this filter",
+    download: "Download",
+    rename: "Rename",
+    delete: "Delete",
+    add_reaction: "Add a reaction",
+    more_actions: "More actions",
+    add: "Add"
+  },
+  main_navigation: "Main",
+  site_menu: "Site menu",
   toast: {
     success: "Success",
     info: "Info",
@@ -61,5 +83,11 @@ return {
     message: "Your session has ended, so you're now signed out. Sign in again to continue.",
     sign_in: "Sign in"
   },
-  confirm_navigation: "Be sure to leave this page? Your changes will not be saved."
+  confirm_navigation: "Be sure to leave this page? Your changes will not be saved.",
+  live_updates: {
+    reconnecting: "Live updates are interrupted. Reconnecting…",
+    offline: "Live updates can't reach the server, so this page may be out of date.",
+    reload: "Reload page",
+    resumed: "Live updates resumed."
+  }
 };

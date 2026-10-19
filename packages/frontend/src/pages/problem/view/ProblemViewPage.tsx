@@ -58,6 +58,8 @@ import { onEnterPress } from "@/utils/onEnterPress";
 import { downloadProblemFile, downloadProblemFilesAsArchive } from "../files/ProblemFilesPage";
 import { makeToBeLocalizedText } from "@/locales";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
+import { actsAsButton, keyboardMenu } from "@/utils/keyboard";
+import { problemSetPreferences } from "../problem-set/problemSetPreferences";
 import ProblemSolutions from "./ProblemSolutions";
 
 export function useProblemViewMarkdownContentPatcher(problemId: number): MarkdownContentPatcher {
@@ -178,7 +180,7 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
   const captcha = useCaptcha(CaptchaAction.SubmitProblem);
 
   // Begin toggle tags
-  const [showTags, setShowTags] = useState(appState.showTagsInProblemSet);
+  const [showTags, setShowTags] = useState(problemSetPreferences.showTags);
   function toggleTags() {
     setShowTags(!showTags);
   }
@@ -378,6 +380,8 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
     // Restore scroll top if we're not on a mobile view
     window.requestAnimationFrame(() => {
       scrollElement.scrollTop = isMobile ? 0 : refScrollTopBackup.current;
+      // Back where the submit view was opened, for the keyboard
+      document.querySelector<HTMLElement>("[data-problem-action=submit]")?.focus({ preventScroll: true });
     });
     setInSubmitView(false);
   }
@@ -466,7 +470,12 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
               </span>
             </EmojiRenderer>
             {props.problem.meta.locales.length > 1 && (
-              <Dropdown icon="globe" className={style.languageSelectIcon}>
+              <Dropdown
+                {...keyboardMenu}
+                icon="globe"
+                className={style.languageSelectIcon}
+                aria-label={_("common.footer.locale")}
+              >
                 <Dropdown.Menu>
                   {props.problem.meta.locales.map((locale: Locale) => (
                     <Dropdown.Item
@@ -528,6 +537,8 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
             {props.problem.tagsOfLocale.length > 0 && (
               <>
                 <Label
+                  {...actsAsButton}
+                  aria-expanded={showTags}
                   size={isMobile ? "small" : null}
                   color="grey"
                   as="a"
@@ -616,6 +627,7 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
                               <Header size="small" className={style.sampleHeader}>
                                 {_(".sample.input")}
                                 <Label
+                                  {...actsAsButton}
                                   size="small"
                                   as="a"
                                   pointing="below"
@@ -652,6 +664,7 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
                               <Header size="small" className={style.sampleHeader}>
                                 {_(".sample.output")}
                                 <Label
+                                  {...actsAsButton}
                                   size="small"
                                   as="a"
                                   pointing="below"
@@ -722,6 +735,8 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
                 <Popup
                   trigger={
                     <Menu.Item
+                      {...actsAsButton}
+                      data-problem-action="submit"
                       className={style.menuItemImportant}
                       name={_(".action.submit")}
                       icon="paper plane"
@@ -729,7 +744,14 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
                     />
                   }
                   disabled={!!appState.currentUser}
-                  content={<Button primary content={_(".action.login_to_submit")} onClick={() => navigateToLogin()} />}
+                  content={
+                    <Button
+                      primary
+                      autoFocus
+                      content={_(".action.login_to_submit")}
+                      onClick={() => navigateToLogin()}
+                    />
+                  }
                   on="click"
                   position="top left"
                 />
@@ -839,7 +861,7 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
                 />
               )}
               {props.problem.permissionOfCurrentUser.includes("ManagePermission") && (
-                <Menu.Item onClick={onClickPermissionManage}>
+                <Menu.Item {...actsAsButton} onClick={onClickPermissionManage}>
                   <Icon name="key" />
                   {_(".action.permission_manage")}
                   <Loader size="tiny" active={permissionManagerLoading} />
@@ -847,12 +869,14 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
               )}
               {props.problem.permissionOfCurrentUser.includes("ManagePublicness") && (
                 <Popup
-                  trigger={<Menu.Item name={_(".action.set_display_id")} icon="hashtag" />}
+                  trigger={<Menu.Item {...actsAsButton} name={_(".action.set_display_id")} icon="hashtag" />}
                   content={
                     <Form>
                       <Form.Input
                         style={{ width: 230 }}
                         placeholder={_(".action.set_display_id_new")}
+                        aria-label={_(".action.set_display_id_new")}
+                        autoFocus
                         value={setDisplayIdInputValue}
                         autoComplete="username"
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSetDisplayIdInputValue(e.target.value)}
@@ -871,12 +895,14 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
                 <Popup
                   trigger={
                     <Menu.Item
+                      {...actsAsButton}
                       name={props.problem.meta.isPublic ? _(".action.set_non_public") : _(".action.set_public")}
                       icon={props.problem.meta.isPublic ? "eye slash" : "eye"}
                     />
                   }
                   content={
                     <Button
+                      autoFocus
                       loading={setPublicPending}
                       color={props.problem.meta.isPublic ? null : "green"}
                       content={
@@ -893,6 +919,7 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
               )}
               {props.problem.permissionOfCurrentUser.includes("Delete") && (
                 <Menu.Item
+                  {...actsAsButton}
                   className={style.menuItemDangerous}
                   name={_(".action.delete")}
                   icon="delete"

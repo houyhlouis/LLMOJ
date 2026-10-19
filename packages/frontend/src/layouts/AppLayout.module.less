@@ -29,6 +29,28 @@
   font-weight: 500 !important;
 }
 
+// The first thing Tab reaches: shown only while it has the focus
+.skipLink {
+  position: absolute;
+  left: 8px;
+  top: -100px;
+  z-index: 2000;
+  padding: 8px 14px;
+  border-radius: 4px;
+  background: var(--theme-background);
+  color: var(--theme-hyperlink) !important;
+  border: 2px solid var(--theme-focus-ring, #1e70bf);
+
+  &:focus {
+    top: 8px;
+  }
+}
+
+// The page content takes the focus after a page change; it isn't a control, so it shows no focus ring
+#mainUiContainer:focus {
+  outline: none;
+}
+
 .userContainer {
   margin-left: auto;
   display: flex;
@@ -66,10 +88,16 @@
   box-shadow: none !important;
   transition: transform 0.5s ease, box-shadow 0.5s ease !important;
 
+  // Hidden once it has slid away, so its links aren't reached with Tab while it's off the screen
+  visibility: hidden;
+  transition: transform 0.5s ease, box-shadow 0.5s ease, visibility 0s linear 0.5s !important;
+
   &.sidebarOpen {
     transform: translateX(0) !important;
     right: 0 !important;
     box-shadow: 0 0 20px var(--theme-shadow) !important;
+    visibility: visible;
+    transition: transform 0.5s ease, box-shadow 0.5s ease, visibility 0s !important;
   }
 
   .userMenu {
@@ -211,6 +239,11 @@ body {
   }
 }
 
+// A link inside the footer's text is underlined: its color alone doesn't set it apart from the gray text
+:global(#root) .footer a {
+  text-decoration: underline;
+}
+
 #footerVersion {
   color: var(--theme-footer-version);
   font-size: 12px !important;
@@ -222,6 +255,7 @@ body {
 
   a {
     color: inherit !important;
+    text-decoration: none !important;
   }
 
   :global(.icon) {

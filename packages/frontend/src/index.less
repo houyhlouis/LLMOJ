@@ -488,3 +488,59 @@ html, body {
     background: var(--theme-scrollbar-thumb-hover) !important;
   }
 }
+
+/* Keyboard and screen reader support */
+
+// Text for screen readers only
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+// A visible focus indicator for keyboard users, on controls whose Semantic UI style has none
+a:focus-visible,
+[role="button"]:focus-visible,
+.ui.menu .item:focus-visible,
+.ui.dropdown:focus-visible,
+.ui.label:focus-visible,
+i.icon:focus-visible {
+  outline: 2px solid var(--theme-focus-ring, #1e70bf) !important;
+  outline-offset: 1px;
+}
+
+// The item the arrow keys picked in a dropdown made of child items (see utils/keyboard.ts)
+.ui.dropdown .menu > .item[data-keyboard-highlight] {
+  background: var(--theme-dropdown-item-hover-background) !important;
+  outline: 2px solid var(--theme-focus-ring, #1e70bf);
+  outline-offset: -2px;
+}
+
+// A hover menu (the user menu) also opens while the keyboard focus is in it
+.ui.simple.dropdown:focus-within > .menu {
+  overflow: visible;
+  width: auto;
+  height: auto;
+  top: 100%;
+  opacity: 1;
+}
+
+// Icons that act as buttons
+i.icon[role="button"] {
+  cursor: pointer;
+}
+
+// Pinch-zoom is allowed, so iOS would zoom into any text field under 16px that gets the focus: use 16px on phones.
+@media only screen and (max-width: 767px) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea:not(.inputarea) {
+    font-size: 16px !important;
+  }
+}

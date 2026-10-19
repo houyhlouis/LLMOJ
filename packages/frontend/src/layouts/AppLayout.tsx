@@ -1,7 +1,19 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { reaction } from "mobx";
 import { observer } from "mobx-react";
 import { useLoadingRoute } from "react-navi";
-import { Menu, Button, Dropdown, Container, Icon, Message, Segment, Sidebar, SemanticICONS } from "semantic-ui-react";
+import {
+  Menu,
+  Button,
+  Dropdown,
+  Container,
+  Icon,
+  Message,
+  Ref,
+  Segment,
+  Sidebar,
+  SemanticICONS
+} from "semantic-ui-react";
 
 import "fomantic-ui-css/components/site.css";
 import "noty/src/themes/semanticui.scss";
@@ -27,6 +39,8 @@ import api from "@/api";
 import formatDateTime from "@/utils/formatDateTime";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
 import { detailPreviewCloseMessage, detailPreviewFocusMessage, embeddedDetailMode } from "@/utils/embeddedDetail";
+import { actsAsButton, installKeyboardMenus, keyboardMenu } from "@/utils/keyboard";
+import { announce, initAnnouncer } from "@/utils/announce";
 
 export type NavButtonName =
   | "home"
@@ -46,6 +60,59 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
   const _ = useLocalizer("common");
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const refMain = useRef<HTMLElement>();
+  const refMenuButton = useRef<HTMLElement>();
+  const refSidebar = useRef<HTMLElement>();
+
+  useEffect(() => {
+    initAnnouncer();
+    installKeyboardMenus();
+  }, []);
+
+  // After moving to another page without reloading, start reading and tabbing from the new page's content, as a
+  // full page load would, and say which page it is once the page has set its title.
+  useEffect(() => {
+    let lastPathname = location.pathname;
+    let titlePending = false,
+      fallback: ReturnType<typeof setTimeout>;
+    const announceTitle = () => {
+      if (!titlePending) return;
+      titlePending = false;
+      clearTimeout(fallback);
+      // As App.tsx sets it; document.title itself is only updated a little later
+      announce((appState.title ? appState.title + " - " : "") + appState.serverPreference.siteName);
+    };
+    const disposeReaction = reaction(
+      () => appState.title,
+      () => setTimeout(announceTitle, 0)
+    );
+    const subscription = navigation.subscribe(route => {
+      if (route.type !== "ready" || embeddedDetailMode || route.url.pathname === lastPathname) return;
+      lastPathname = route.url.pathname;
+      refMain.current?.focus({ preventScroll: true });
+      titlePending = true;
+      clearTimeout(fallback);
+      fallback = setTimeout(announceTitle, 1000);
+    });
+    return () => {
+      subscription.unsubscribe();
+      disposeReaction();
+      clearTimeout(fallback);
+    };
+  }, []);
+
+  // The narrow-screen menu: focus its first item when it opens, Escape closes it and returns to its button
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    refSidebar.current?.querySelector<HTMLElement>("a[href], button, [tabindex='0']")?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setSidebarOpen(false);
+      refMenuButton.current?.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [sidebarOpen]);
 
   useEffect(() => {
     if (!embeddedDetailMode) return;
@@ -197,7 +264,7 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
         {appState.currentUserHasPrivilege("ManageSummaries") && (
           <Dropdown.Item as={Link} href="/summaries">
             <Icon name="file alternate outline" />
-            {appState.locale === "zh_CN" ? "我的总结" : "My Summaries"}
+            {_(".header.user.summaries")}
           </Dropdown.Item>
         )}
         {appState.currentUserJoinedGroupsCount > 0 && (
@@ -224,7 +291,7 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
         {appState.currentUser.isAdmin && (
           <Dropdown.Item as={Link} href="/permissions">
             <Icon name="shield alternate" />
-            {appState.locale === "zh_CN" ? "权限管理" : "Permissions"}
+            {_(".header.user.permissions")}
           </Dropdown.Item>
         )}
         {appState.currentUserHasPrivilege("ViewSite") && appState.currentUserHasPrivilege("ManageRegistrationReviews") && (
@@ -236,10 +303,10 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
         {appState.currentUserHasPrivilege("ManageAiConfiguration") && (
           <Dropdown.Item as={Link} href="/ai/configuration">
             <Icon name="settings" />
-            {appState.locale === "zh_CN" ? "AI API 配置" : "AI API Configuration"}
+            {_(".header.user.ai_configuration")}
           </Dropdown.Item>
         )}
-        <Dropdown.Item onClick={onLogoutClick}>
+        <Dropdown.Item {...actsAsButton} onClick={onLogoutClick}>
           <Icon name="power" />
           {_(".header.user.logout")}
         </Dropdown.Item>
@@ -262,9 +329,14 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
     </Menu.Item>
   );
 
-  const getFooter = (className: string) => (
+  const getFooter = (className: string, placeholder = false) => (
     <>
-      <Segment vertical className={className}>
+      <Segment
+        as={placeholder ? "div" : "footer"}
+        vertical
+        className={className}
+        aria-hidden={placeholder || undefined}
+      >
         <Container textAlign="center">
           <EmojiRenderer>
             <SiteFooterBranding
@@ -285,7 +357,7 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
             <Link href="/judge-machine" title={_(".footer.judge_machine")}>
               <Icon name="server" />
             </Link>
-            <Dropdown icon="language" title={_(".footer.locale")}>
+            <Dropdown {...keyboardMenu} icon="language" title={_(".footer.locale")} aria-label={_(".footer.locale")}>
               <Dropdown.Menu className={style.languageSwitchMenu}>
                 {Object.keys(localeMeta).map((locale: Locale) => (
                   <Dropdown.Item
@@ -324,6 +396,7 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
         open={false}
         icon={icon && <i className="dropdown icon"></i>}
         text={appState.currentUser.username}
+        aria-label={_(".header.user.menu", { username: appState.currentUser.username })}
       >
         {userMenu()}
       </Dropdown>
@@ -344,7 +417,15 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
   const topBarItemsForNarrowScreen = (
     <Menu.Menu position="right">
       {appState.currentUser && userDropdown(false)}
-      <Menu.Item icon="bars" onClick={() => setSidebarOpen(true)} />
+      <Ref innerRef={refMenuButton}>
+        <Menu.Item
+          {...actsAsButton}
+          icon="bars"
+          aria-label={_(".header.open_menu")}
+          aria-expanded={sidebarOpen}
+          onClick={() => setSidebarOpen(true)}
+        />
+      </Ref>
     </Menu.Menu>
   );
 
@@ -354,50 +435,67 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
 
   return (
     <>
+      {!embeddedDetailMode && (
+        <a
+          href={"#" + style.mainUiContainer}
+          className={style.skipLink}
+          onClick={event => {
+            event.preventDefault();
+            refMain.current?.focus();
+          }}
+        >
+          {_(".skip_to_content")}
+        </a>
+      )}
       <GlobalProgressBar isAnimating={!!loadingRoute} />
       {!embeddedDetailMode && (
-        <Menu borderless fixed="top" className={style.menu}>
+        <Menu as="nav" borderless fixed="top" className={style.menu} aria-label={_(".main_navigation")}>
           <Container id={style.mainMenuContainer}>
             {logo}
             {wide ? topBarItemsForWideScreen : topBarItemsForNarrowScreen}
           </Container>
         </Menu>
       )}
-      {getFooter(style.footer + " " + style.real)}
-      <Container id={style.mainUiContainer}>
-        {appState.sessionEnded && !appState.token && (
-          <Message warning onDismiss={() => (appState.sessionEnded = false)}>
-            {_(".session_ended.message")}{" "}
-            <Button size="mini" primary compact onClick={() => onLoginOrRegisterClick("login")}>
-              {_(".session_ended.sign_in")}
-            </Button>
-          </Message>
-        )}
-        {props.children}
-      </Container>
+      <Ref innerRef={refMain}>
+        <Container as="main" id={style.mainUiContainer} tabIndex={-1} aria-busy={!!loadingRoute}>
+          {appState.sessionEnded && !appState.token && (
+            <Message warning role="status" onDismiss={() => (appState.sessionEnded = false)}>
+              {_(".session_ended.message")}{" "}
+              <Button size="mini" primary compact onClick={() => onLoginOrRegisterClick("login")}>
+                {_(".session_ended.sign_in")}
+              </Button>
+            </Message>
+          )}
+          {props.children}
+        </Container>
+      </Ref>
       <ReauthenticationHost />
-      {getFooter(style.footer + " " + style.placeholder)}
+      {getFooter(style.footer + " " + style.placeholder, true)}
+      {getFooter(style.footer + " " + style.real)}
       {!wide && !embeddedDetailMode && (
         <>
           <div className={style.sidebarDimmer + sidebarOpenStatusClassName} onClick={() => setSidebarOpen(false)}></div>
-          <Sidebar
-            as={Menu}
-            className={style.sidebarMenu + sidebarOpenStatusClassName}
-            animation="push"
-            direction="right"
-            vertical
-            visible
-          >
-            <Menu.Item className={style.siteName} as={Link} href="/">
-              {appState.serverPreference.siteName}
-            </Menu.Item>
-            {!appState.currentUser && (
-              <Menu.Item>
-                <Button.Group fluid>{loginAndRegisterButtons}</Button.Group>
+          <Ref innerRef={refSidebar}>
+            <Sidebar
+              as={Menu}
+              className={style.sidebarMenu + sidebarOpenStatusClassName}
+              animation="push"
+              direction="right"
+              vertical
+              visible
+              aria-label={_(".site_menu")}
+            >
+              <Menu.Item className={style.siteName} as={Link} href="/">
+                {appState.serverPreference.siteName}
               </Menu.Item>
-            )}
-            {navMenuItems}
-          </Sidebar>
+              {!appState.currentUser && (
+                <Menu.Item>
+                  <Button.Group fluid>{loginAndRegisterButtons}</Button.Group>
+                </Menu.Item>
+              )}
+              {navMenuItems}
+            </Sidebar>
+          </Ref>
         </>
       )}
     </>

@@ -18,6 +18,7 @@ import api from "@/api";
 import toast from "@/utils/toast";
 import TableCellSearchDropdown from "./TableCellSearchDropdown";
 import UserAvatar from "./UserAvatar";
+import { actsAsButton } from "@/utils/keyboard";
 
 type PermissionLevelDetails = Record<number, { title: string /* description: string; */ }>;
 
@@ -327,7 +328,13 @@ let PermissionManager: React.FC<PermissionManagerProps> = props => {
                   />
                 </Table.Cell>
                 <Table.Cell textAlign="right">
-                  <Icon name="delete" disabled={!permissions.haveSubmitPermission} onClick={() => deleteUser(index)} />
+                  <Icon
+                    {...actsAsButton}
+                    aria-label={_("common.controls.remove")}
+                    name="delete"
+                    disabled={!permissions.haveSubmitPermission}
+                    onClick={() => deleteUser(index)}
+                  />
                 </Table.Cell>
               </Table.Row>
             ))}
@@ -379,6 +386,8 @@ let PermissionManager: React.FC<PermissionManagerProps> = props => {
                   </Table.Cell>
                   <Table.Cell width={5} textAlign="right">
                     <Icon
+                      {...actsAsButton}
+                      aria-label={_("common.controls.remove")}
                       name="delete"
                       disabled={!permissions.haveSubmitPermission}
                       onClick={() => deleteGroup(index)}

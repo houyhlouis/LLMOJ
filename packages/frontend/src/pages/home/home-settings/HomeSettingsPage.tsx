@@ -18,6 +18,7 @@ import formatDateTime from "@/utils/formatDateTime";
 import { DiscussionSearch } from "@/components/DiscussionSearch";
 import LazyCodeEditor from "@/components/LazyCodeEditor";
 import toast from "@/utils/toast";
+import { actsAsButton } from "@/utils/keyboard";
 
 async function fetchData() {
   const { requestError, response } = await api.homepage.getHomepageSettings();
@@ -243,6 +244,8 @@ let HomeSettingsPage: React.FC<HomeSettingsPageProps> = props => {
                     </Table.Cell>
                     <Table.Cell className={style.noWrap} textAlign="center">
                       <Icon
+                        {...actsAsButton}
+                        aria-label={_("common.controls.delete")}
                         className={style.operation}
                         name="delete"
                         onClick={() => {

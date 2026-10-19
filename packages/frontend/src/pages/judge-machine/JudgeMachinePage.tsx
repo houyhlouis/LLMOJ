@@ -13,6 +13,7 @@ import { onEnterPress } from "@/utils/onEnterPress";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
 
 import JudgeQueuePanel from "./JudgeQueuePanel";
+import { actsAsButton } from "@/utils/keyboard";
 
 interface JudgeClientSystemInfo {
   os: string;
@@ -356,7 +357,7 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
                       open={shownKey?.id === judgeClient.id}
                       onOpen={() => onShowKey(judgeClient.id)}
                       onClose={() => setShownKey(null)}
-                      trigger={<Icon name="key" title={_(".key")} />}
+                      trigger={<Icon {...actsAsButton} aria-label={_(".key")} name="key" title={_(".key")} />}
                       content={<code>{shownKey?.key}</code>}
                       on="click"
                       position="left center"
@@ -365,7 +366,9 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
                       open={resetPopupOpened === judgeClient.id}
                       onOpen={() => setResetPopupOpened(judgeClient.id)}
                       onClose={() => setResetPopupOpened(null)}
-                      trigger={<Icon name="refresh" title={_(".reset_key")} />}
+                      trigger={
+                        <Icon {...actsAsButton} aria-label={_(".reset_key")} name="refresh" title={_(".reset_key")} />
+                      }
                       content={
                         <>
                           <p className={style.confirmNotes}>{_(".reset_key_notes")}</p>
@@ -410,7 +413,7 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
                       open={deletePopupOpened === judgeClient.id}
                       onOpen={() => setDeletePopupOpened(judgeClient.id)}
                       onClose={() => setDeletePopupOpened(null)}
-                      trigger={<Icon name="delete" title={_(".delete")} />}
+                      trigger={<Icon {...actsAsButton} aria-label={_(".delete")} name="delete" title={_(".delete")} />}
                       content={
                         <Button negative content={_(".confirm_delete")} onClick={() => onDelete(judgeClient.id)} />
                       }

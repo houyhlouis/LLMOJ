@@ -25,6 +25,9 @@ import { makeToBeLocalizedText } from "@/locales";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
 import HackAction from "@/pages/hack/HackAction";
 import SubmissionReferenceButton from "@/pages/hack/SubmissionReferenceButton";
+import LiveUpdateStatus from "@/components/LiveUpdateStatus";
+import { announce } from "@/utils/announce";
+import { actsAsButton } from "@/utils/keyboard";
 
 async function fetchData(submissionId: number) {
   const { requestError, response } = await api.submission.getSubmissionDetail({
@@ -228,7 +231,7 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
   const subscriptionKey = props.progressSubscriptionKey;
   // Save the previous message, since we receive message delta each time
   const messageRef = useRef<SubmissionProgressMessage>();
-  useSocket(
+  const liveUpdates = useSocket(
     "submission-progress",
     {
       subscriptionKey: subscriptionKey
@@ -250,6 +253,19 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
     },
     !!subscriptionKey
   );
+
+  // Say the result when judging finishes while the page is open (it shows only as a changed icon and text)
+  const refWasPending = useRef(progressMeta.pending);
+  useEffect(() => {
+    if (refWasPending.current && !progressMeta.pending)
+      announce(
+        _(".live.finished", {
+          status: progressMeta.status.replace(/([A-Z])/g, " $1").trimStart(),
+          score: progressMeta.score
+        })
+      );
+    refWasPending.current = progressMeta.pending;
+  }, [progressMeta.pending]);
 
   // displayMeta contains fields parsed from the progress
   const displayMeta: ApiTypes.SubmissionMetaDto = {
@@ -846,6 +862,7 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
               <Menu vertical className={style.operations}>
                 {showCancel && (
                   <Menu.Item
+                    {...actsAsButton}
                     content={
                       <>
                         <Icon name="ban" />
@@ -857,6 +874,7 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
                 )}
                 {showRejudge && (
                   <Menu.Item
+                    {...actsAsButton}
                     content={
                       <>
                         <Icon name="refresh" />
@@ -868,6 +886,7 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
                 )}
                 {showTogglePublic && (
                   <Menu.Item
+                    {...actsAsButton}
                     content={
                       <>
                         <Icon name={meta.isPublic ? "eye slash" : "eye"} />
@@ -879,6 +898,7 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
                 )}
                 {showDelete && (
                   <Menu.Item
+                    {...actsAsButton}
                     content={
                       <>
                         <Icon name="delete" />
@@ -890,6 +910,7 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
                 )}
                 {showFake && (
                   <Menu.Item
+                    {...actsAsButton}
                     content={
                       <>
                         <Icon name="ban" />
@@ -971,6 +992,7 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
 
   return (
     <>
+      <LiveUpdateStatus state={liveUpdates} live={progressMeta.pending} onReload={refreshDetail} />
       {progressMeta.status === "Fake" && <Message negative icon="ban" content={_(".fake_notice")} />}
       {progressMeta.status === "Hacked" && (
         <Message

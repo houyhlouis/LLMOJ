@@ -23,6 +23,7 @@ function componentHarness(file, options = {}) {
     timers = [],
     calls = [],
     toasts = [],
+    announcements = [],
     confirmations = [];
   const state = {
     currentUser: options.admin ? { isAdmin: true } : options.user ? { isAdmin: false } : null,
@@ -163,6 +164,11 @@ function componentHarness(file, options = {}) {
       }
     },
     "@/utils/onEnterPress": { onEnterPress: callback => callback },
+    "@/utils/keyboard": {
+      actsAsButton: { tabIndex: 0, role: "button", onKeyDown() {} },
+      keyboardMenu: { "data-keyboard-menu": "" }
+    },
+    "@/utils/announce": { announce: value => announcements.push(value), initAnnouncer() {} },
     "class-validator": { isEmail: value => value.includes("@") },
     ...options.deps
   };
@@ -242,6 +248,20 @@ function componentHarness(file, options = {}) {
   function unmount() {
     for (const slot of slots) if (slot?.cleanup) slot.cleanup();
   }
-  return { state, calls, timers, toasts, confirmations, find, all, settle, click, render, unmount, widgets };
+  return {
+    state,
+    calls,
+    timers,
+    toasts,
+    announcements,
+    confirmations,
+    find,
+    all,
+    settle,
+    click,
+    render,
+    unmount,
+    widgets
+  };
 }
 module.exports = { componentHarness, frontendCatalog };

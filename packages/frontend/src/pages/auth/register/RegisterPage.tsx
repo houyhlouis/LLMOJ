@@ -252,7 +252,7 @@ let RegisterPage: React.FC = () => {
   return (
     <>
       <div className={style.wrapper}>
-        <Header as="h2" className={style.header + (logo ? " " + style.withLogo : "")} textAlign="center">
+        <Header as="h1" className={style.header + (logo ? " " + style.withLogo : "")} textAlign="center">
           {logo}
           {_(".register_new_account")}
         </Header>
@@ -268,6 +268,7 @@ let RegisterPage: React.FC = () => {
                 {/* username */}
                 <Ref innerRef={field => field && (refUsernameInput.current = field.querySelector("input"))}>
                   <Form.Field
+                    id="register-username"
                     control={Input}
                     error={
                       getUsernameUIValidateStatus() === "error" && {
@@ -280,6 +281,7 @@ let RegisterPage: React.FC = () => {
                     icon="user"
                     iconPosition="left"
                     placeholder={_(".username")}
+                    aria-label={_(".username")}
                     value={username}
                     autoComplete="username"
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUsername(e.target.value)}
@@ -291,6 +293,7 @@ let RegisterPage: React.FC = () => {
                 {/* email */}
                 <Ref innerRef={field => field && (refEmailInput.current = field.querySelector("input"))}>
                   <Form.Field
+                    id="register-email"
                     control={Input}
                     error={
                       getEmailUIValidateStatus() === "error" && {
@@ -303,6 +306,7 @@ let RegisterPage: React.FC = () => {
                     icon="envelope"
                     iconPosition="left"
                     placeholder={_(".email")}
+                    aria-label={_(".email")}
                     value={email}
                     autoComplete="email"
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
@@ -325,6 +329,7 @@ let RegisterPage: React.FC = () => {
                       }
                     >
                       <Form.Field
+                        id="register-email-verification-code"
                         control={Input}
                         error={
                           emailVerificationCodeError && {
@@ -336,13 +341,13 @@ let RegisterPage: React.FC = () => {
                         icon="shield"
                         iconPosition="left"
                         placeholder={_(".email_verification_code")}
+                        aria-label={_(".email_verification_code")}
                         value={emailVerificationCode}
                         autoComplete="off"
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChangeVerificationCode(e.target.value)}
                         onKeyPress={onEnterPress(() => refPasswordInput.current.focus())}
                         action={
                           <Button
-                            tabIndex={-1}
                             disabled={sendEmailVerificationCodeTimeout !== 0}
                             loading={sendEmailVerificationCodePending}
                             content={
@@ -361,6 +366,7 @@ let RegisterPage: React.FC = () => {
                 {/* password */}
                 <Ref innerRef={field => field && (refPasswordInput.current = field.querySelector("input"))}>
                   <Form.Field
+                    id="register-password"
                     control={Input}
                     error={
                       getPasswordUIValidateStatus() === "error" && {
@@ -373,6 +379,7 @@ let RegisterPage: React.FC = () => {
                     icon="lock"
                     iconPosition="left"
                     placeholder={_(".password")}
+                    aria-label={_(".password")}
                     value={password}
                     type="password"
                     autoComplete="new-password"
@@ -383,6 +390,7 @@ let RegisterPage: React.FC = () => {
                 </Ref>
                 <Ref innerRef={field => field && (refRetypePasswordInput.current = field.querySelector("input"))}>
                   <Form.Field
+                    id="register-retype-password"
                     control={Input}
                     error={
                       getRetypePasswordUIValidateStatus() === "error" && {
@@ -395,6 +403,7 @@ let RegisterPage: React.FC = () => {
                     icon="lock"
                     iconPosition="left"
                     placeholder={_(".retype_password")}
+                    aria-label={_(".retype_password")}
                     value={retypePassword}
                     type="password"
                     autoComplete="new-password"

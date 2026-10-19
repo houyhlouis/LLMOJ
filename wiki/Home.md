@@ -29,6 +29,7 @@ LLMOJ 是基于 LibreOJ 的在线评测系统，提供 AI 辅助出题功能。�
 | [Fake 处罚](Submission-Moderation.zh-CN.md) | 作废作弊提交并保留证据 |
 | [注册审核](Registration-Approval.zh-CN.md) | 注册设置与委派审核 |
 | [两步验证](Two-Factor-Sign-In.zh-CN.md) | 验证器应用、通行密钥、恢复码与敏感操作确认 |
+| [键盘与读屏软件](Accessibility.zh-CN.md) | 不用鼠标使用网站、实时更新、手机上的缩放 |
 
 用户列表（`/u`）从网站首页“排名”面板的“查看全部”进入，需要 `ViewUsers` 权限。
 
@@ -57,6 +58,6 @@ LLMOJ 是基于 LibreOJ 的在线评测系统，提供 AI 辅助出题功能。�
 | [环境变量](Environment.zh-CN.md) | 运行、安装和构建用的环境变量；维护脚本 |
 | [发布](Publishing.zh-CN.md) | 用 GitHub Desktop 应用更新、发布本 Wiki 和创建版本 |
 
-完整安装（`--role all`）包含网站、存储和本机评测，也可以再接入远程评测机。仅网页安装（`--role web`）不构建本机评测环境，提交由远程评测机评测；但 AI 验证标程和生成测试数据需要完整安装的本机环境。
+完整安装（`--role all`）包含网站、存储和本机评测，也可以再接入远程评测机。仅网页安装（`--role web`）不构建本机评测环境：提交由远程评测机评测，已更新的评测机（协议版本 4）也负责 AI 验证标程和生成测试数据（见[分布式评测](Distributed-Judging.zh-CN.md)）。
 
 LLMOJ 在 Ubuntu 24.04 amd64 上经过测试。本项目代码采用 MIT 许可，上游组件保留各自的许可。

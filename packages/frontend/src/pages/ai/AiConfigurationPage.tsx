@@ -7,6 +7,7 @@ import { defineRoute } from "@/AppRouter";
 import { aiCall, aiText } from "./api";
 import preferenceStyle from "../user/edit/UserEdit.module.less";
 import style from "./Ai.module.less";
+import { actsAsButton } from "@/utils/keyboard";
 
 export const AiConfigurationPage = observer(function AiConfigurationPage() {
   const [config, setConfig] = useState<any>(null),
@@ -118,13 +119,14 @@ export const AiConfigurationPage = observer(function AiConfigurationPage() {
     <div className={`${preferenceStyle.container} ${style.configuration}`}>
       <div className={`${preferenceStyle.menu} ${style.configurationMenu}`}>
         <Menu vertical secondary>
-          <Menu.Item active={tab === "llm"} onClick={() => setTab("llm")}>
+          <Menu.Item {...actsAsButton} active={tab === "llm"} onClick={() => setTab("llm")}>
             {aiText("语言模型", "Language model")}
           </Menu.Item>
-          <Menu.Item active={tab === "search"} onClick={() => setTab("search")}>
+          <Menu.Item {...actsAsButton} active={tab === "search"} onClick={() => setTab("search")}>
             {aiText("搜索 / MCP", "Search / MCP")}
           </Menu.Item>
           <Menu.Item
+            {...actsAsButton}
             active={tab === "usage"}
             onClick={() => {
               setTab("usage");

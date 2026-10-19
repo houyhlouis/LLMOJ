@@ -23,6 +23,10 @@ import PseudoLink from "@/components/PseudoLink";
 import TwoFactorPrompt, { TwoFactorProof } from "@/components/TwoFactorPrompt";
 import { onEnterPress } from "@/utils/onEnterPress";
 import { isEmail } from "class-validator";
+import { announce } from "@/utils/announce";
+
+// Start typing at once with a keyboard; on a touch screen that would only cover the page with the keyboard.
+const focusFirstField = () => window.matchMedia?.("(pointer: fine)").matches;
 
 let LoginPage: React.FC = () => {
   const _ = useLocalizer("login");
@@ -53,6 +57,7 @@ let LoginPage: React.FC = () => {
   const setSuccess = (message: string) => {
     setError(null, null);
     setSuccessMessage(message);
+    announce(message);
   };
 
   const [usernameOrEmail, setUsernameOrEmail] = useState("");
@@ -269,7 +274,7 @@ let LoginPage: React.FC = () => {
     <>
       {migrationDialog.element}
       <div className={style.wrapper}>
-        <Header as="h2" className={style.header + (logo ? " " + style.withLogo : "")} textAlign="center">
+        <Header as="h1" className={style.header + (logo ? " " + style.withLogo : "")} textAlign="center">
           {logo}
           {_(".login_to_your_account")}
         </Header>
@@ -306,6 +311,7 @@ let LoginPage: React.FC = () => {
             <Segment>
               <Ref innerRef={field => field && (refUsernameInput.current = field.querySelector("input"))}>
                 <Form.Field
+                  id="login-username"
                   control={Input}
                   error={
                     formError.type === "usernameOrEmail" && {
@@ -317,6 +323,8 @@ let LoginPage: React.FC = () => {
                   icon="user"
                   iconPosition="left"
                   placeholder={_(".username_or_email")}
+                  aria-label={_(".username_or_email")}
+                  autoFocus={focusFirstField()}
                   value={usernameOrEmail}
                   autoComplete="username"
                   readOnly={pending}
@@ -324,11 +332,9 @@ let LoginPage: React.FC = () => {
                   onKeyPress={onEnterPress(() => refPasswordInput.current.focus())}
                 />
               </Ref>
-              <PseudoLink onClick={() => navigateTo("forgot")} tabIndex={-1} className={style.inputAction}>
-                {_(".forgot_password")}
-              </PseudoLink>
               <Ref innerRef={field => field && (refPasswordInput.current = field.querySelector("input"))}>
                 <Form.Field
+                  id="login-password"
                   control={Input}
                   error={
                     formError.type === "password" && {
@@ -340,6 +346,7 @@ let LoginPage: React.FC = () => {
                   icon="lock"
                   iconPosition="left"
                   placeholder={_(".password")}
+                  aria-label={_(".password")}
                   value={password}
                   type="password"
                   autoComplete="current-password"
@@ -347,6 +354,10 @@ let LoginPage: React.FC = () => {
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
                 />
               </Ref>
+              {/* After the password field, so Tab goes from the name to the password */}
+              <PseudoLink onClick={() => navigateTo("forgot")} className={style.inputAction}>
+                {_(".forgot_password")}
+              </PseudoLink>
 
               <Button
                 className={successMessage && style.successButton}

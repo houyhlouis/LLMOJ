@@ -10,6 +10,7 @@ import { useLocalizer, useDialog, useScreenWidthWithin } from "@/utils/hooks";
 import TestDataFileSelector from "./TestDataFileSelector";
 import { JudgeInfoProcessor, EditorComponentProps } from "./interface";
 import { detectTestcasesByMatchingInputToOutput, detectTestcasesByMatchingOutputToInput } from "./detect-testcases";
+import { actsAsButton, keyboardMenu } from "@/utils/keyboard";
 
 interface Testcase {
   uuid: string;
@@ -136,7 +137,13 @@ let SubtaskEditorTastcaseItem: React.FC<SubtaskEditorTastcaseItemProps> = props 
               <Menu.Item className={style.itemLabel}>ms</Menu.Item>
             </>
           )}
-          <Dropdown item icon="plus" className={`icon ${style.itemWithIcon}`}>
+          <Dropdown
+            {...keyboardMenu}
+            aria-label={_("common.controls.add")}
+            item
+            icon="plus"
+            className={`icon ${style.itemWithIcon}`}
+          >
             <Dropdown.Menu>
               <Dropdown.Item
                 icon="angle double up"
@@ -222,7 +229,13 @@ let SubtaskEditorTastcaseItem: React.FC<SubtaskEditorTastcaseItemProps> = props 
             </>
           )}
           <Ref innerRef={setRefOptionsButton}>
-            <Dropdown item icon="bars" className={`icon ${style.itemWithIcon}`}>
+            <Dropdown
+              {...keyboardMenu}
+              aria-label={_("common.controls.more_actions")}
+              item
+              icon="bars"
+              className={`icon ${style.itemWithIcon}`}
+            >
               <Dropdown.Menu>
                 <Dropdown.Item
                   icon="angle double up"
@@ -725,7 +738,13 @@ let SubtaskEditor: React.FC<SubtaskEditorProps> = props => {
             </Menu.Item>
           )}
           <Ref innerRef={refOptionsButton}>
-            <Dropdown item icon="bars" className={`icon ${style.itemWithIcon}`}>
+            <Dropdown
+              {...keyboardMenu}
+              aria-label={_("common.controls.more_actions")}
+              item
+              icon="bars"
+              className={`icon ${style.itemWithIcon}`}
+            >
               <Dropdown.Menu>
                 <Dropdown.Item
                   icon="sort numeric down"
@@ -775,7 +794,13 @@ let SubtaskEditor: React.FC<SubtaskEditorProps> = props => {
               </Dropdown.Menu>
             </Dropdown>
           </Ref>
-          <Menu.Item as="a" icon="magic" className={style.itemWithIcon} onClick={openAutoAddTestcasesDialog} />
+          <Menu.Item
+            {...actsAsButton}
+            as="a"
+            icon="magic"
+            className={style.itemWithIcon}
+            onClick={openAutoAddTestcasesDialog}
+          />
         </Menu.Menu>
       </Menu>
       <Menu attached className={style.menu}>
@@ -795,6 +820,7 @@ let SubtaskEditor: React.FC<SubtaskEditorProps> = props => {
             <Menu.Item icon="circle outline" content={_(".subtasks.no_testcases")} />
           ) : (
             <Menu.Item
+              {...actsAsButton}
               as="a"
               icon={testcasesExpanded ? "minus square outline" : "plus square outline"}
               content={testcasesExpanded ? _(".subtasks.hide_testcases") : _(".subtasks.expand_testcases")}

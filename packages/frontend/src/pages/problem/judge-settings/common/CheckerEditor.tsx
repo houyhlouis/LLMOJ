@@ -16,6 +16,7 @@ import {
 import TestDataFileSelector from "./TestDataFileSelector";
 import { JudgeInfoProcessor, EditorComponentProps } from "./interface";
 import CodeLanguageAndOptions from "@/components/CodeLanguageAndOptions";
+import { actsAsButton } from "@/utils/keyboard";
 
 interface CheckerTypeIntegers {
   type: "integers";
@@ -143,6 +144,7 @@ let CheckerEditor: React.FC<CheckerEditorProps> = props => {
         <Menu secondary pointing>
           {CHECKER_TYPES.map(type => (
             <Menu.Item
+              {...actsAsButton}
               key={type}
               content={_(`.checker.types.${type}`)}
               active={checker.type === type}

@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import { observer } from "mobx-react";
 import ReactMonacoEditor from "@monaco-editor/react";
 import { registerRulesForLanguage } from "monaco-ace-tokenizer";
@@ -13,6 +13,7 @@ import { CodeLanguage } from "@/interfaces/CodeLanguage";
 import { appState } from "@/appState";
 import { generateCodeFontEditorOptions } from "@/misc/fonts";
 import { themeList } from "@/themes";
+import { useLocalizer } from "@/utils/hooks";
 
 // ACE highlights
 import AceHighlightHaskell from "monaco-ace-tokenizer/es/ace/definitions/haskell";
@@ -34,13 +35,34 @@ export interface CodeEditorProps {
   options?: Monaco.editor.IEditorConstructionOptions;
 }
 
+// Monaco's key for toggling whether Tab indents or moves the focus
+const tabFocusKey = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌃⇧M" : "Ctrl+M";
+
 let CodeEditor: React.FC<CodeEditorProps> = props => {
+  const _ = useLocalizer("components.code_editor");
   const refEditor = useRef<Monaco.editor.IStandaloneCodeEditor>();
+
+  // Tab indents in the editor, so a keyboard user needs to know how to leave it: say so while it has the focus.
+  const [focused, setFocused] = useState(false);
+  const [tabMovesFocus, setTabMovesFocus] = useState(false);
+  const tabHint = _(tabMovesFocus ? ".tab_moves_focus" : ".tab_hint", { key: tabFocusKey });
+
   function editorDidMount(editor: Monaco.editor.IStandaloneCodeEditor) {
     editor.getModel().setEOL(Monaco.editor.EndOfLineSequence.LF);
 
     refEditor.current = editor;
     console.log("Monaco Editor:", editor);
+
+    const readTabFocusMode = () => setTabMovesFocus(editor.getOption(Monaco.editor.EditorOption.tabFocusMode));
+    readTabFocusMode();
+    editor.onDidFocusEditorText(() => {
+      readTabFocusMode();
+      setFocused(true);
+    });
+    editor.onDidBlurEditorText(() => setFocused(false));
+    editor.onDidChangeConfiguration(event => {
+      if (event.hasChanged(Monaco.editor.EditorOption.tabFocusMode)) readTabFocusMode();
+    });
 
     if (props.editorDidMount) props.editorDidMount(editor);
   }
@@ -86,12 +108,18 @@ let CodeEditor: React.FC<CodeEditorProps> = props => {
         value={props.value}
         options={{
           lineNumbersMinChars: 4,
+          ariaLabel: `${_(".label")}. ${tabHint}`,
           ...generateCodeFontEditorOptions(appState.locale),
           ...props.options
         }}
         onMount={editorDidMount}
         onChange={props.onChange}
       />
+      {focused && !props.options?.readOnly && (
+        <div className={style.keyboardHint} aria-hidden="true">
+          {tabHint}
+        </div>
+      )}
     </div>
   );
 };

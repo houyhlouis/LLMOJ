@@ -9,6 +9,7 @@ import { useLocalizer } from "@/utils/hooks";
 import CodeEditor from "@/components/LazyCodeEditor";
 import HorizontalScroll from "@/components/HorizontalScroll";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
+import { actsAsButton } from "@/utils/keyboard";
 
 interface TabbedEditorTab {
   title: string;
@@ -81,6 +82,7 @@ let TabbedEditor: React.FC<TabbedEditorProps> = props => {
           {props.tabs.map((tab, i) => (
             <EmojiRenderer key={i}>
               <Menu.Item
+                {...actsAsButton}
                 active={currentTabIndex === i}
                 icon={tab.icon}
                 content={tab.title}

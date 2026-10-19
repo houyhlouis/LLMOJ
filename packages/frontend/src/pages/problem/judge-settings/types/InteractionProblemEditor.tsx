@@ -18,6 +18,7 @@ import { useLocalizer } from "@/utils/hooks";
 import { Segment, Form, Header, Menu, Input } from "semantic-ui-react";
 import TestDataFileSelector from "../common/TestDataFileSelector";
 import CodeLanguageAndOptions from "@/components/CodeLanguageAndOptions";
+import { actsAsButton } from "@/utils/keyboard";
 
 const metaEditorOptions: Options<typeof MetaEditor> = {
   enableTimeMemoryLimit: true,
@@ -112,6 +113,7 @@ let InteractionProblemEditor: React.FC<InteractionProblemEditorProps> = props =>
           <Menu secondary pointing>
             {interactorInterfaces.map(interactorInterface => (
               <Menu.Item
+                {...actsAsButton}
                 key={interactorInterface}
                 content={_(`.interactor.interfaces.${interactorInterface}`)}
                 active={interactor.interface === interactorInterface}

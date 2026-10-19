@@ -34,8 +34,11 @@ interface StatusIconProps {
   noMarginRight?: boolean;
 }
 
+const statusName = (status: string) => status.replace(/([A-Z])/g, " $1").trimStart();
+
+// Named for screen readers, so a link that shows only the icon still says what it leads to
 export const StatusIcon: React.FC<StatusIconProps> = props => (
-  <span className={"statuscolor " + style[props.status]}>
+  <span className={"statuscolor " + style[props.status]} role="img" aria-label={statusName(props.status)}>
     <Icon
       className={"statusicon" + " " + style.icon + (props.noMarginRight ? " " + style.noMarginRight : "")}
       loading={icons[props.status] === "spinner"}
@@ -53,7 +56,7 @@ interface StatusTextProps {
 }
 
 const StatusText: React.FC<StatusTextProps> = props => {
-  const text = props.statusText || props.status.replace(/([A-Z])/g, " $1").trimStart();
+  const text = props.statusText || statusName(props.status);
   return (
     <span className={"statuscolor " + style[props.status]}>
       <Icon
