@@ -6,7 +6,8 @@ import { DataSource } from "typeorm";
 import { StudyListEntity, StudyListItem } from "./study-list.entity";
 
 import { UserEntity } from "../user/user.entity";
-import { ProblemService, ProblemPermissionType } from "../problem/problem.service";
+import { ProblemService } from "../problem/problem.service";
+import { ProblemAccessService, ProblemPermissionType } from "../problem/problem-access.service";
 import { SubmissionService } from "../submission/submission.service";
 import { Locale } from "../common/locale.type";
 import { prefetchTeamResources } from "../team/team-access";
@@ -28,6 +29,7 @@ export class StudyListService {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly problems: ProblemService,
+    private readonly problemAccess: ProblemAccessService,
     @Inject(forwardRef(() => SubmissionService))
     private readonly submissions: SubmissionService
   ) {}
@@ -58,8 +60,11 @@ export class StudyListService {
     );
     const visible: boolean[] = [];
     for (const problem of problems) {
-      // eslint-disable-next-line no-await-in-loop -- Checked in order; most need no query
-      visible.push(!!problem && (await this.problems.userHasPermission(user, problem, ProblemPermissionType.View)));
+      visible.push(
+        !!problem &&
+          // eslint-disable-next-line no-await-in-loop -- Checked in order; most need no query
+          (await this.problemAccess.userHasPermission(user, problem, ProblemPermissionType.View))
+      );
     }
     const shown = problems.filter((problem, index) => visible[index]);
     // As in the problem set: the user's latest accepted submission outside contests, if they may view submissions
@@ -115,7 +120,7 @@ export class StudyListService {
       // eslint-disable-next-line no-await-in-loop -- Resolve access and parent checks before processing the next list.
       const problem = await this.problems.findProblemById(item.problemId);
       // eslint-disable-next-line no-await-in-loop -- Resolve access and parent checks before processing the next list.
-      if (!problem || !(await this.problems.userHasPermission(user, problem, ProblemPermissionType.View)))
+      if (!problem || !(await this.problemAccess.userHasPermission(user, problem, ProblemPermissionType.View)))
         return { error: "PROBLEM_UNAVAILABLE" };
     }
     const values = {

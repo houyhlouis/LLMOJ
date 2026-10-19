@@ -31,12 +31,14 @@ function fixture({ isPublic = false, manage = false, canViewParent = true, overr
     permissionDecision: async (_user, privilege, fallback) => overrides[privilege] ?? fallback
   };
   service.problemService = { findProblemById: async id => ({ id }), userHasPermission: async () => canViewParent };
+  service.problemAccess = service.problemFiles = service.problemTags = service.problemLocks = service.problemService;
   service.permissionService = { userOrItsGroupsHavePermission: async () => false };
   service.addReaction = async (...args) => writes.push(["add", ...args]);
   service.removeReaction = async (...args) => writes.push(["remove", ...args]);
   controller.discussionService = service;
   controller.userPrivilegeService = service.userPrivilegeService;
   controller.problemService = service.problemService;
+  controller.problemAccess = controller.problemFiles = controller.problemTags = controller.problemLocks = controller.problemService;
   controller.configService = { config: { preference: { misc: { discussionReactionAllowCustomEmojis: false,
     discussionReactionEmojis: ["👍"] } }, queryLimit: { discussionReplies: 4 } } };
   return { service, controller, parent, reply, writes };

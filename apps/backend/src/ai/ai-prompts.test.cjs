@@ -97,7 +97,7 @@ test("all repository model instructions and transitive prompt fragments use Engl
 });
 
 test("English instructions retain Chinese and English outputs, original-language data and JSON editor fields", () => {
-  const service = source(path.join(__dirname, "ai.service.ts"));
+  const service = source(path.join(__dirname, "ai-workflow.service.ts"));
   const system = fragments(initializer(service, "SYSTEM")).join("");
   assert.match(system, /zh_CN content must be Chinese/);
   assert.match(system, /en_US content must be English/);

@@ -6,7 +6,9 @@ import { InjectDataSource } from "@nestjs/typeorm";
 
 import { DataSource } from "typeorm";
 
-import { ProblemService, ProblemPermissionType } from "./problem.service";
+import { ProblemService } from "./problem.service";
+import { ProblemAccessService, ProblemPermissionType } from "./problem-access.service";
+import { ProblemFileService } from "./problem-file.service";
 
 import { ProblemFileType } from "./problem-file.entity";
 
@@ -27,6 +29,8 @@ export class ProblemArchiveService {
   constructor(
     @InjectDataSource() private readonly connection: DataSource,
     private readonly problemService: ProblemService,
+    private readonly problemAccess: ProblemAccessService,
+    private readonly problemFiles: ProblemFileService,
     private readonly fileService: FileService,
     private readonly redisService: RedisService,
     private readonly lockService: LockService,
@@ -56,7 +60,7 @@ export class ProblemArchiveService {
         noLimit = await this.userPrivilegeService.userHasPrivilege(freshUser, UserPrivilegeType.ManageProblem);
         if (
           !freshUser ||
-          !(await this.problemService.userHasPermission(freshUser, problem, ProblemPermissionType.Modify, noLimit)) ||
+          !(await this.problemAccess.userHasPermission(freshUser, problem, ProblemPermissionType.Modify, noLimit)) ||
           !(await this.userPrivilegeService.permissionDecision(freshUser, UserPrivilegeType.EditProblemData, true))
         )
           throw new ArchiveError("PERMISSION_DENIED");
@@ -104,7 +108,7 @@ export class ProblemArchiveService {
           )
             throw new ArchiveError("ZIP_INTEGRITY_ERROR");
           const extracted = await extractSafeZip(zip, path.join(workspace, "files"));
-          const importedFiles = await this.problemService.addProblemFilesFromDisk(
+          const importedFiles = await this.problemFiles.addProblemFilesFromDisk(
             problem,
             ProblemFileType.TestData,
             extracted.files,

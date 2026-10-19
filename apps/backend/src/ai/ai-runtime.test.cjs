@@ -23,7 +23,7 @@ const { generateText, searchWeb, listModels } = require("./ai-provider.ts");
 const { withAiRuntime, extractUsage, aiWorkerLockName } = require("./ai-runtime.ts");
 const { responsesRecoveryEnabled, recoverableResponse } = require("./ai-responses.ts");
 const { AiUsageService } = require("./ai-usage.service.ts");
-const { AiService } = require("./ai.service.ts");
+const { aiServices, bareAiServices } = require("./ai-test-services.cjs");
 const { LlmConfigurationDto, SaveAiConfigurationDto } = require("./ai.dto.ts");
 const { validateLlmConfiguration } = require("./ai-validation.ts");
 const { validateSync } = require("class-validator");
@@ -344,7 +344,7 @@ test("metering deduplicates tokens from repeated response retrieval but records 
   assert(!JSON.stringify(rows).includes("resp_unique"));
 });
 function schedulerFixture(jobs, limits) {
-  const service = Object.create(AiService.prototype);
+  const service = bareAiServices();
   service.busy = false;
   service.stopped = false;
   const active = new Set(),
@@ -506,7 +506,7 @@ test("usage report queries only its authenticated owner and strips internal resp
   assert(!("ownerId" in report.recent[0]));
   assert(queries.every(query => query.sql.includes("ownerId=?") && query.args[0] === 7));
   await assert.rejects(usage.report(7, 367), /INVALID_USAGE_PERIOD/);
-  const service = Object.create(AiService.prototype);
+  const service = bareAiServices();
   service.usage = { report: async (id, days) => ({ id, days }) };
   const reported = await service.usageReport({ id: 7 }, 30);
   assert.deepEqual({ id: reported.id, days: reported.days }, { id: 7, days: 30 });
@@ -539,7 +539,7 @@ test("a cancelled sibling frees capacity and reducing a user's limit prevents ne
   assert.equal(fixture.jobs[2].status, "completed");
 });
 test("automatic requests from stale browsers do not enqueue jobs or access API configuration", async () => {
-  const service = Object.create(AiService.prototype);
+  const service = bareAiServices();
   service.config = () => {
     throw Error("must not access keys");
   };
@@ -553,7 +553,7 @@ test("explicit semantic retry discards old provider results while a short-outage
     ["RESPONSE_RECOVERY_EXPIRED", 1],
     ["RESPONSE_RECOVERY_INTERRUPTED", 0]
   ]) {
-    const service = Object.create(AiService.prototype),
+    const service = bareAiServices(),
       deleted = [];
     const job = {
       id: "retry-job",
@@ -632,7 +632,7 @@ test("full Responses HTTP integration reconnects a dropped GET without repeating
   }
 });
 test("stale run completion and error paths cannot overwrite or audit a newer job claim", async () => {
-  const service = Object.create(AiService.prototype),
+  const service = bareAiServices(),
     audits = [],
     updates = [];
   const job = {
@@ -659,7 +659,7 @@ test("stale run completion and error paths cannot overwrite or audit a newer job
   assert(!audits.includes("job.fail"));
 });
 test("model discovery and connection failures are audited without provider error text or credentials",async()=>{
-  const service=Object.create(AiService.prototype),audits=[];
+  const service=bareAiServices(),audits=[];
   service.requirePrivilege=async()=>{};service.recordAiAudit=async(actor,action,job,details)=>audits.push({actor,action,details});
   service.config=async()=>({llm:{type:"chat",baseUrl:"https://example.org",model:"fixture",apiKey:""},search:{type:"tavily",baseUrl:"https://example.org",apiKey:""}});
   await assert.rejects(service.models({id:7}),/LLM_NOT_CONFIGURED/);
@@ -673,7 +673,7 @@ test("model discovery and connection failures are audited without provider error
   assert(!JSON.stringify(audits).includes("provider-secret-or-body"));
 });
 test("model listing and connection tests are bounded per user and for the whole site", async () => {
-  const service = Object.create(AiService.prototype);
+  const service = bareAiServices();
   const releases = [];
   service.requirePrivilege = async () => {};
   service.recordAiAudit = async () => {};
@@ -695,7 +695,7 @@ test("model listing and connection tests are bounded per user and for the whole 
   assert.deepEqual(await again, { models: [] });
 });
 test("a post-commit failure preserves artifact flags and localized discussion IDs stored by the transaction",async()=>{
-  const service=Object.create(AiService.prototype);
+  const service=bareAiServices();
   const persisted={id:"committed",runToken:"lease",status:"running",state:{completed:["import"],attachmentAdditionalDone:true,attachmentHiddenDone:true,discussionIds:{zh_CN:11,en_US:12}}};
   const job={id:persisted.id,runToken:"lease",ownerId:1,state:{completed:[],discussionIds:{zh_CN:11}},input:{count:5}};
   service.recordAiAudit=async()=>{};service.execute=async()=>{throw Error("Redis disconnected after registration commit");};
@@ -839,7 +839,7 @@ test("background polling delay aborts immediately and sends no subsequent retrie
 });
 
 test("old-run cleanup preserves a newer controller with the same job ID", async () => {
-  const service = Object.create(AiService.prototype);
+  const service = bareAiServices();
   const newer = new AbortController();
   const job = fakeJob("same-id", 1);
   job.runToken = "old";

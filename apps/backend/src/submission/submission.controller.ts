@@ -59,7 +59,9 @@ import { RequestWithSession } from "../auth/auth.middleware";
 
 import { CurrentUser } from "../common/user.decorator";
 import { UserEntity } from "../user/user.entity";
-import { ProblemService, ProblemPermissionType } from "../problem/problem.service";
+import { ProblemService } from "../problem/problem.service";
+import { ProblemAccessService, ProblemPermissionType } from "../problem/problem-access.service";
+import { ProblemLockService } from "../problem/problem-lock.service";
 import { UserService } from "../user/user.service";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
 import { ConfigService } from "../config/config.service";
@@ -74,6 +76,8 @@ export class SubmissionController {
   constructor(
     private readonly submissionService: SubmissionService,
     private readonly problemService: ProblemService,
+    private readonly problemAccess: ProblemAccessService,
+    private readonly problemLocks: ProblemLockService,
     private readonly problemTypeFactoryService: ProblemTypeFactoryService,
     private readonly userService: UserService,
     private readonly userPrivilegeService: UserPrivilegeService,
@@ -94,11 +98,11 @@ export class SubmissionController {
   ): Promise<SubmitResponseDto> {
     if (!currentUser) return { error: SubmitResponseError.PERMISSION_DENIED };
 
-    return await this.problemService.lockProblemById<SubmitResponseDto>(problemId, "Read", async problem => {
+    return await this.problemLocks.lockProblemById<SubmitResponseDto>(problemId, "Read", async problem => {
       if (!problem) return { error: SubmitResponseError.NO_SUCH_PROBLEM };
 
       // TODO: add "submit" permission
-      if (!(await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.View))) {
+      if (!(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.View))) {
         return { error: SubmitResponseError.PERMISSION_DENIED };
       }
 
@@ -195,7 +199,7 @@ export class SubmissionController {
     const hasViewProblemPermission =
       hasManageProblemPrivilege ||
       (filterProblem &&
-        (await this.problemService.userHasPermission(currentUser, filterProblem, ProblemPermissionType.View)));
+        (await this.problemAccess.userHasPermission(currentUser, filterProblem, ProblemPermissionType.View)));
     const isSubmissionsOwned = filterSubmitter && currentUser && filterSubmitter.id === currentUser.id;
     const queryResult = await this.submissionService.querySubmissions(
       filterProblem ? filterProblem.id : null,
@@ -464,7 +468,7 @@ export class SubmissionController {
 
     if (
       !this.problemTypeFactoryService.type(problem.type).enableStatistics() ||
-      !(await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.View))
+      !(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.View))
     )
       return {
         error: QuerySubmissionStatisticsResponseError.PERMISSION_DENIED

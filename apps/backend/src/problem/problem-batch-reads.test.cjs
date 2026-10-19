@@ -29,6 +29,7 @@ const { EntityManager } = require("typeorm");
 const { LocalizedContentService } = require("../localized-content/localized-content.service.ts");
 const { LocalizedContentType } = require("../localized-content/localized-content.entity.ts");
 const { ProblemService } = require("./problem.service.ts");
+const { bareProblemServices } = require("./problem-test-services.cjs");
 const { prefetchTeamResources, teamResourceAccess } = require("../team/team-access.ts");
 const { TeamResourceEntity } = require("../team/team.entity.ts");
 const { requestContext } = require("../common/request-context.ts");
@@ -108,7 +109,7 @@ test("tags of many problems are read in two queries, as each problem's tags are"
   ];
   const tags = { 5: { id: 5, locales: ["en_US"] }, 6: { id: 6, locales: ["zh_CN", "en_US"] } };
   let queries = 0;
-  const service = Object.assign(Object.create(ProblemService.prototype), {
+  const service = Object.assign(bareProblemServices(), {
     problemTagMapRepository: {
       findBy: async where => {
         queries++;

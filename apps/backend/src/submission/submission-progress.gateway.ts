@@ -22,7 +22,8 @@ import { SubmissionBasicMetaDto } from "./dto";
 import { AuthSessionService } from "../auth/auth-session.service";
 import { SOCKET_IO_MAX_MESSAGE_SIZE } from "../socket-io.constants";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
-import { ProblemService, ProblemPermissionType } from "../problem/problem.service";
+import { ProblemService } from "../problem/problem.service";
+import { ProblemAccessService, ProblemPermissionType } from "../problem/problem-access.service";
 
 import { MetricsService } from "../metrics/metrics.service";
 import { ConfigService } from "../config/config.service";
@@ -97,6 +98,8 @@ export class SubmissionProgressGateway implements OnGatewayConnection, OnGateway
     private readonly userPrivilegeService: UserPrivilegeService,
     @Inject(forwardRef(() => ProblemService))
     private readonly problemService: ProblemService,
+    @Inject(forwardRef(() => ProblemAccessService))
+    private readonly problemAccess: ProblemAccessService,
     @Inject(forwardRef(() => SubmissionAccessService))
     private readonly submissionAccessService: SubmissionAccessService
   ) {
@@ -196,7 +199,7 @@ export class SubmissionProgressGateway implements OnGatewayConnection, OnGateway
           submission.isPublic ||
           user?.id === submission.submitterId ||
           (await managesProblems) ||
-          (await this.problemService.userHasPermission(
+          (await this.problemAccess.userHasPermission(
             user,
             await this.problemService.findProblemById(submission.problemId),
             ProblemPermissionType.View

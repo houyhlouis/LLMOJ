@@ -1,11 +1,7 @@
-import fs from "fs";
-
-import { Injectable, forwardRef, Inject, BadRequestException, ForbiddenException } from "@nestjs/common";
+import { Injectable, forwardRef, Inject, BadRequestException } from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 
-import { v4 as archiveUuid } from "uuid";
-
-import { DataSource, Repository, EntityManager, Brackets, In, FindOptionsWhere } from "typeorm";
+import { DataSource, Repository, EntityManager, Brackets } from "typeorm";
 
 import { normalizeProblemSource, problemSourceLabel } from "./problem-source";
 
@@ -18,66 +14,45 @@ import { ProblemFileType, ProblemFileEntity } from "./problem-file.entity";
 import { ProblemSampleEntity } from "./problem-sample.entity";
 import { ProblemJudgeInfoEntity } from "./problem-judge-info.entity";
 import { ProblemEntity, ProblemType } from "./problem.entity";
-import { deferTestDataDeletion } from "./deferred-file-deletion";
+import { ProblemAccessService, ProblemPermissionLevel } from "./problem-access.service";
+import { ProblemFileService } from "./problem-file.service";
+import { ProblemTagService } from "./problem-tag.service";
+import { ProblemLockService } from "./problem-lock.service";
+import { preprocessedJudgeInfoCacheKey } from "./problem-judge-info-cache";
 
 import {
   ProblemStatementDto,
   UpdateProblemStatementRequestDto,
   ProblemLocalizedContentDto,
-  ProblemFileDto,
-  ProblemMetaDto,
-  LocalizedProblemTagDto
+  ProblemMetaDto
 } from "./dto";
-
-import type { ProblemJudgeInfoTraditional } from "../problem-type/types/traditional/problem-judge-info.interface";
-
-import { isValidFilename } from "../common/validators";
-import { ArchiveError, ArchivePair, ExtractedArchiveFile, ZIP_LIMITS } from "../archive/safe-zip";
 
 import { UserEntity } from "../user/user.entity";
 import { GroupEntity } from "../group/group.entity";
 import { LocalizedContentService } from "../localized-content/localized-content.service";
 import { LocalizedContentEntity, LocalizedContentType } from "../localized-content/localized-content.entity";
 import { Locale } from "../common/locale.type";
-import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
 import { PermissionService, PermissionObjectType } from "../permission/permission.service";
 import { UserService } from "../user/user.service";
 import { GroupService } from "../group/group.service";
 import { FileService } from "../file/file.service";
-import { ConfigService } from "../config/config.service";
 import { RedisService } from "../redis/redis.service";
-import { LockService } from "../redis/lock.service";
 import { SubmissionService } from "../submission/submission.service";
 import { AuditLogObjectType, AuditService } from "../audit/audit.service";
 import { ProblemTypeFactoryService } from "../problem-type/problem-type-factory.service";
-import { FileEntity } from "../file/file.entity";
 import { escapeLike } from "../database/database.utils";
-import { teamResourceAccess, teamResourceVisibilitySql } from "../team/team-access";
-import { FileUploadInfoDto, SignedFileUploadRequestDto } from "../file/dto";
+import { teamResourceVisibilitySql } from "../team/team-access";
 
 function assertProblemHasTitle(contents: { title?: string }[]): void {
   if (!contents.some(content => typeof content.title === "string" && content.title.trim()))
     throw new BadRequestException("A problem title is required in at least one language.");
 }
 
-export enum ProblemPermissionType {
-  View = "View",
-  Modify = "Modify",
-  ManagePermission = "ManagePermission",
-  ManagePublicness = "ManagePublicness",
-  Delete = "Delete"
-}
-
-export enum ProblemPermissionLevel {
-  Read = 1,
-  Write = 2
-}
-
 /**
- * See `ProblemService.getPreprocessedJudgeInfo()`
+ * The problem catalog: finding and listing problems, creating them, their statements, samples and judge info, who
+ * has explicit permissions on them, their publicness, and deleting them or changing their type. Permission rules,
+ * files, tags and the problem lock have services of their own.
  */
-const REDIS_KEY_PROBLEM_PREPROCESSED_JUDGE_INFO = "problem-preprocessed-judge-info-and-submittable:%d";
-
 @Injectable()
 export class ProblemService {
   constructor(
@@ -89,16 +64,8 @@ export class ProblemService {
     private readonly problemJudgeInfoRepository: Repository<ProblemJudgeInfoEntity>,
     @InjectRepository(ProblemSampleEntity)
     private readonly problemSampleRepository: Repository<ProblemSampleEntity>,
-    @InjectRepository(ProblemFileEntity)
-    private readonly problemFileRepository: Repository<ProblemFileEntity>,
-    @InjectRepository(ProblemTagEntity)
-    private readonly problemTagRepository: Repository<ProblemTagEntity>,
-    @InjectRepository(ProblemTagMapEntity)
-    private readonly problemTagMapRepository: Repository<ProblemTagMapEntity>,
     private readonly problemTypeFactoryService: ProblemTypeFactoryService,
     private readonly localizedContentService: LocalizedContentService,
-    @Inject(forwardRef(() => UserPrivilegeService))
-    private readonly userPrivilegeService: UserPrivilegeService,
     @Inject(forwardRef(() => UserService))
     private readonly userService: UserService,
     private readonly groupService: GroupService,
@@ -106,10 +73,12 @@ export class ProblemService {
     private readonly fileService: FileService,
     @Inject(forwardRef(() => SubmissionService))
     private readonly submissionService: SubmissionService,
-    private readonly configService: ConfigService,
     private readonly redisService: RedisService,
-    private readonly lockService: LockService,
-    private readonly auditService: AuditService
+    private readonly auditService: AuditService,
+    private readonly problemAccess: ProblemAccessService,
+    private readonly problemFiles: ProblemFileService,
+    private readonly problemTags: ProblemTagService,
+    private readonly problemLocks: ProblemLockService
   ) {
     this.auditService.registerObjectTypeQueryHandler(AuditLogObjectType.Problem, async (problemId, locale) => {
       const problem = await this.findProblemById(problemId);
@@ -119,11 +88,6 @@ export class ProblemService {
             this.getProblemMeta(problem),
             this.getProblemLocalizedTitle(problem, problem.locales.includes(locale) ? locale : problem.locales[0])
           ]);
-    });
-
-    this.auditService.registerObjectTypeQueryHandler(AuditLogObjectType.ProblemTag, async (problemTagId, locale) => {
-      const problemTag = await this.findProblemTagById(problemTagId);
-      return !problemTag ? null : await this.getProblemTagLocalized(problemTag, locale);
     });
   }
 
@@ -168,170 +132,6 @@ export class ProblemService {
     }
 
     return meta;
-  }
-
-  async userHasPermission(
-    user: UserEntity,
-    problem: ProblemEntity,
-    type: ProblemPermissionType,
-    hasPrivilege?: boolean,
-    manager?: EntityManager
-  ): Promise<boolean> {
-    if (!problem) return false;
-    if (!(await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ViewProblem, manager))) return false;
-    const teamAccess = await teamResourceAccess(
-      manager ?? this.connection,
-      user,
-      "problem",
-      problem.id,
-      type === ProblemPermissionType.View ? "read" : "problems"
-    );
-    if (teamAccess !== null) {
-      if (![ProblemPermissionType.View, ProblemPermissionType.Modify].includes(type)) return false;
-      return (
-        teamAccess &&
-        (type === ProblemPermissionType.View ||
-          (await this.userPrivilegeService.permissionDecision(
-            user,
-            user?.id === problem.ownerId ? UserPrivilegeType.EditOwnProblem : UserPrivilegeType.EditAnyProblem,
-            true,
-            manager
-          )))
-      );
-    }
-    if (
-      type !== ProblemPermissionType.View &&
-      !(await this.userHasPermission(user, problem, ProblemPermissionType.View, hasPrivilege, manager))
-    )
-      return false;
-    const own = user?.id === problem.ownerId;
-    const legacy = await this.userHasPermissionOriginal(user, problem, type, hasPrivilege, manager);
-    const permission = {
-      [ProblemPermissionType.View]:
-        !problem.isPublic && !own ? UserPrivilegeType.ViewHiddenProblem : UserPrivilegeType.ViewProblem,
-      [ProblemPermissionType.Modify]: own ? UserPrivilegeType.EditOwnProblem : UserPrivilegeType.EditAnyProblem,
-      [ProblemPermissionType.Delete]: own ? UserPrivilegeType.DeleteOwnProblem : UserPrivilegeType.DeleteAnyProblem,
-      [ProblemPermissionType.ManagePermission]: UserPrivilegeType.ManageProblemPermissions,
-      [ProblemPermissionType.ManagePublicness]: UserPrivilegeType.ManageProblemVisibility
-    }[type];
-    return permission ? await this.userPrivilegeService.permissionDecision(user, permission, legacy, manager) : legacy;
-  }
-
-  private async userHasPermissionOriginal(
-    user: UserEntity,
-    problem: ProblemEntity,
-    type: ProblemPermissionType,
-    hasPrivilege?: boolean,
-    manager?: EntityManager
-  ): Promise<boolean> {
-    switch (type) {
-      // Everyone can view a public problem
-      // Owner, admins and those who has read permission can view a non-public problem
-      case ProblemPermissionType.View:
-        if (problem.isPublic) return true;
-        if (user && user.id === problem.ownerId) return true;
-        if (
-          hasPrivilege ??
-          (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageProblem, manager))
-        )
-          return true;
-        else
-          return await this.permissionService.userOrItsGroupsHavePermission(
-            user,
-            problem.id,
-            PermissionObjectType.Problem,
-            ProblemPermissionLevel.Read,
-            manager
-          );
-
-      // Owner, admins and those who has write permission can modify a problem
-      case ProblemPermissionType.Modify:
-        if (
-          user &&
-          user.id === problem.ownerId &&
-          (!problem.isPublic || this.configService.config.preference.security.allowNonPrivilegedUserEditPublicProblem)
-        )
-          return true;
-        if (
-          hasPrivilege ??
-          (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageProblem, manager))
-        )
-          return true;
-        else
-          return (
-            (await this.permissionService.userOrItsGroupsHavePermission(
-              user,
-              problem.id,
-              PermissionObjectType.Problem,
-              ProblemPermissionLevel.Write,
-              manager
-            )) &&
-            (!problem.isPublic || this.configService.config.preference.security.allowNonPrivilegedUserEditPublicProblem)
-          );
-
-      // Admins can manage a problem's permission
-      // Controlled by the application preference, the owner may have the permission
-      case ProblemPermissionType.ManagePermission:
-        if (
-          user &&
-          user.id === problem.ownerId &&
-          this.configService.config.preference.security.allowOwnerManageProblemPermission &&
-          (!problem.isPublic || this.configService.config.preference.security.allowNonPrivilegedUserEditPublicProblem)
-        )
-          return true;
-        else if (
-          hasPrivilege ??
-          (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageProblem, manager))
-        )
-          return true;
-        else return false;
-
-      // Admins can manage a problem's publicness (set display id / make public or non-public)
-      case ProblemPermissionType.ManagePublicness:
-        if (
-          hasPrivilege ??
-          (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageProblem, manager))
-        )
-          return true;
-        else return false;
-
-      // Admins can delete a problem
-      // Controlled by the application preference, the owner may have the permission
-      case ProblemPermissionType.Delete:
-        if (
-          user &&
-          user.id === problem.ownerId &&
-          this.configService.config.preference.security.allowOwnerDeleteProblem &&
-          (!problem.isPublic || this.configService.config.preference.security.allowNonPrivilegedUserEditPublicProblem)
-        )
-          return true;
-        else if (
-          hasPrivilege ??
-          (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageProblem, manager))
-        )
-          return true;
-        else return false;
-
-      default:
-        return false;
-    }
-  }
-
-  async getUserPermissions(user: UserEntity, problem: ProblemEntity): Promise<ProblemPermissionType[]> {
-    const result: ProblemPermissionType[] = [];
-    for (const permission of Object.values(ProblemPermissionType)) {
-      // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
-      if (await this.userHasPermission(user, problem, permission)) result.push(permission);
-    }
-    return result;
-  }
-
-  async userHasCreateProblemPermission(user: UserEntity, manager?: EntityManager): Promise<boolean> {
-    if (!user) return false;
-    const fallback =
-      this.configService.config.preference.security.allowEveryoneCreateProblem ||
-      (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageProblem, manager));
-    return await this.userPrivilegeService.permissionDecision(user, UserPrivilegeType.CreateProblem, fallback, manager);
   }
 
   /**
@@ -488,7 +288,7 @@ export class ProblemService {
         }
         /* eslint-enable no-await-in-loop */
 
-        await this.setProblemTags(problem, tags, transactionalEntityManager);
+        await this.problemTags.setProblemTags(problem, tags, transactionalEntityManager);
         await onCreated?.(problem, transactionalEntityManager);
       }
     );
@@ -595,7 +395,7 @@ export class ProblemService {
           );
         }
 
-        await this.setProblemTags(currentProblem, tags, transactionalEntityManager);
+        await this.problemTags.setProblemTags(currentProblem, tags, transactionalEntityManager);
 
         await transactionalEntityManager.update(ProblemEntity, problem.id, changes);
         Object.assign(problem, changes);
@@ -622,7 +422,7 @@ export class ProblemService {
     ignoreLimitsOnValidation: boolean,
     authorizeCommit?: (manager: EntityManager, currentProblem: ProblemEntity) => Promise<void>
   ): Promise<string[]> {
-    const testData = await this.getProblemFiles(problem, ProblemFileType.TestData);
+    const testData = await this.problemFiles.getProblemFiles(problem, ProblemFileType.TestData);
     try {
       this.problemTypeFactoryService
         .type(problem.type)
@@ -657,7 +457,7 @@ export class ProblemService {
       await this.problemJudgeInfoRepository.save(problemJudgeInfo);
     }
 
-    await this.redisService.cacheDelete(REDIS_KEY_PROBLEM_PREPROCESSED_JUDGE_INFO.format(problem.id));
+    await this.redisService.cacheDelete(preprocessedJudgeInfoCacheKey(problem.id));
 
     return null;
   }
@@ -729,7 +529,7 @@ export class ProblemService {
   async getProblemPreprocessedJudgeInfo(
     problem: ProblemEntity
   ): Promise<[judgeInfo: ProblemJudgeInfo, submittable: boolean]> {
-    const key = REDIS_KEY_PROBLEM_PREPROCESSED_JUDGE_INFO.format(problem.id);
+    const key = preprocessedJudgeInfoCacheKey(problem.id);
     const cachedResult: [judgeInfo: ProblemJudgeInfo, submittable: boolean] = JSON.parse(
       await this.redisService.cacheGet(key)
     );
@@ -738,7 +538,7 @@ export class ProblemService {
     const [judgeInfo, submittable] = await this.getProblemJudgeInfo(problem);
     const preprocessed = this.problemTypeFactoryService
       .type(problem.type)
-      .preprocessJudgeInfo(judgeInfo, await this.getProblemFiles(problem, ProblemFileType.TestData));
+      .preprocessJudgeInfo(judgeInfo, await this.problemFiles.getProblemFiles(problem, ProblemFileType.TestData));
     await this.redisService.cacheSet(key, JSON.stringify([preprocessed, submittable]));
 
     return [preprocessed, submittable];
@@ -752,7 +552,7 @@ export class ProblemService {
     userPermissions: [user: UserEntity, permission: ProblemPermissionLevel][],
     groupPermissions: [group: GroupEntity, permission: ProblemPermissionLevel][]
   ): Promise<void> {
-    await this.lockProblemById(
+    await this.problemLocks.lockProblemById(
       problem.id,
       "Read",
       // eslint-disable-next-line @typescript-eslint/no-shadow
@@ -826,674 +626,6 @@ export class ProblemService {
     await this.submissionService.setSubmissionsPublic(problem.id, isPublic);
   }
 
-  // Upload immutable objects first, then register the whole batch in one transaction.
-  // No existing object is removed until registration commits successfully.
-  async addProblemFilesFromDisk(
-    problem: ProblemEntity,
-    type: ProblemFileType,
-    files: { filename: string; path: string; size: number }[],
-    options: {
-      authorize: () => Promise<void>;
-      replaceExisting?: boolean;
-      noLimit?: boolean | ((manager?: EntityManager) => Promise<boolean>);
-      hiddenSamples?: ArchivePair[];
-      onRegistered?: (manager: EntityManager) => Promise<void>;
-      authorizeCommit?: (manager: EntityManager, currentProblem: ProblemEntity) => Promise<void>;
-    }
-  ): Promise<ProblemFileDto[]> {
-    if (!files.length || files.length > ZIP_LIMITS.files) throw new ArchiveError("ZIP_FILE_COUNT_LIMIT");
-    const names = new Set<string>();
-    for (const file of files) {
-      if (
-        !isValidFilename(file.filename) ||
-        file.filename.length > 256 ||
-        // eslint-disable-next-line no-control-regex -- Explicitly reject or remove control bytes from untrusted names and text.
-        /[\\\x00-\x1f\x7f]/.test(file.filename) ||
-        names.has(file.filename.toLowerCase())
-      )
-        throw new ArchiveError("ZIP_FILENAME_CONFLICT");
-      names.add(file.filename.toLowerCase());
-      if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > ZIP_LIMITS.fileBytes)
-        throw new ArchiveError("ZIP_FILE_SIZE_LIMIT");
-    }
-    if (files.reduce((sum, file) => sum + file.size, 0) > ZIP_LIMITS.totalBytes)
-      throw new ArchiveError("ZIP_TOTAL_SIZE_LIMIT");
-    const prepared: { filename: string; size: number; uuid: string; sha256?: string }[] = [];
-    let committed = false;
-    try {
-      await options.authorize();
-      for (const file of files) {
-        const uuid = archiveUuid();
-        const entry: typeof prepared[number] = { filename: file.filename, size: file.size, uuid };
-        prepared.push(entry);
-        // eslint-disable-next-line no-await-in-loop, no-bitwise -- Keep file handles, imports, and transaction operations ordered. Combine filesystem flags without weakening NOFOLLOW protections.
-        const input = await fs.promises.open(file.path, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-        try {
-          // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
-          const stat = await input.stat();
-          if (!stat.isFile() || stat.size !== file.size) throw new ArchiveError("ZIP_INTEGRITY_ERROR");
-          // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
-          entry.sha256 = await this.fileService.uploadFile(uuid, input.createReadStream({ autoClose: false }), 1);
-        } finally {
-          // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
-          await input.close();
-        }
-      }
-      const removeObjects: (() => void)[] = [];
-      await this.lockManageProblemFile(problem.id, type, async current => {
-        if (!current) throw new ArchiveError("NO_SUCH_PROBLEM");
-        await options.authorize();
-        await this.connection.transaction(
-          options.authorizeCommit ? "SERIALIZABLE" : "READ COMMITTED",
-          async manager => {
-            if (options.authorizeCommit) {
-              const currentProblem = await manager.findOne(ProblemEntity, {
-                where: { id: problem.id },
-                lock: { mode: "pessimistic_write" }
-              });
-              await manager.findOne(ProblemJudgeInfoEntity, {
-                where: { problemId: problem.id },
-                lock: { mode: "pessimistic_write" }
-              });
-              await options.authorizeCommit(manager, currentProblem);
-              problem = currentProblem;
-            }
-            const previous = await manager.findBy(ProblemFileEntity, { problemId: problem.id, type });
-            const replaced = previous.filter(file => names.has(file.filename.toLowerCase()));
-            if (replaced.length && !options.replaceExisting) throw new ArchiveError("FILE_ALREADY_EXISTS");
-            const retained = previous.filter(file => !names.has(file.filename.toLowerCase()));
-            const sizes = await this.fileService.getFileSizes(
-              retained.map(file => file.uuid),
-              manager
-            );
-            const unlimited =
-              typeof options.noLimit === "function" ? await options.noLimit(manager) : !!options.noLimit;
-            const resource = this.configService.config.resourceLimit;
-            const [maximumFiles, maximumBytes] =
-              type === ProblemFileType.TestData
-                ? [resource.problemTestdataFiles, resource.problemTestdataSize]
-                : [resource.problemAdditionalFileFiles, resource.problemAdditionalFileSize];
-            if (!unlimited && retained.length + prepared.length > maximumFiles)
-              throw new ArchiveError("TOO_MANY_FILES");
-            if (
-              !unlimited &&
-              sizes.reduce((a, b) => a + b, 0) + prepared.reduce((a, b) => a + b.size, 0) > maximumBytes
-            )
-              throw new ArchiveError("TOTAL_SIZE_TOO_LARGE");
-            for (const old of replaced) {
-              // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
-              await manager.delete(ProblemFileEntity, { problemId: problem.id, type, filename: old.filename });
-              // Test data may still be needed by submissions pinned to an earlier data version
-              if (type === ProblemFileType.TestData) {
-                // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
-                await deferTestDataDeletion([old.uuid], manager);
-              } else {
-                // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
-                removeObjects.push(await this.fileService.deleteFile(old.uuid, manager));
-              }
-            }
-            for (const file of prepared) {
-              // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
-              await manager.save(FileEntity, {
-                uuid: file.uuid,
-                size: file.size,
-                uploadTime: new Date(),
-                sha256: file.sha256
-              });
-              // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
-              await manager.save(ProblemFileEntity, {
-                problemId: problem.id,
-                type,
-                filename: file.filename,
-                uuid: file.uuid
-              });
-            }
-            if (options.hiddenSamples) {
-              if (problem.type !== ProblemType.Traditional || type !== ProblemFileType.TestData)
-                throw new ArchiveError("INVALID_HIDDEN_SAMPLES");
-              const info = await manager.findOne(ProblemJudgeInfoEntity, {
-                where: { problemId: problem.id },
-                lock: { mode: "pessimistic_write" }
-              });
-              const judgeInfo = { ...(info.judgeInfo as ProblemJudgeInfoTraditional) };
-              judgeInfo.hiddenSamples = [...(judgeInfo.hiddenSamples || []), ...options.hiddenSamples];
-              this.problemTypeFactoryService
-                .type(problem.type)
-                .validateAndFilterJudgeInfo(
-                  judgeInfo,
-                  await manager.findBy(ProblemFileEntity, { problemId: problem.id, type }),
-                  unlimited
-                );
-              info.judgeInfo = judgeInfo;
-              await manager.save(info);
-            }
-            if (options.onRegistered) await options.onRegistered(manager);
-          }
-        );
-        committed = true;
-        for (const remove of removeObjects) remove();
-        if (type === ProblemFileType.TestData)
-          await this.redisService.cacheDelete(REDIS_KEY_PROBLEM_PREPROCESSED_JUDGE_INFO.format(problem.id));
-      });
-      return prepared.map(file => ({ uuid: file.uuid, filename: file.filename, size: file.size }));
-    } finally {
-      if (!committed) for (const file of prepared) this.fileService.deleteUnfinishedUploadedFile(file.uuid);
-    }
-  }
-
-  async installHiddenSamples(
-    problem: ProblemEntity,
-    files: ExtractedArchiveFile[],
-    pairs: ArchivePair[],
-    options: {
-      authorize: () => Promise<void>;
-      noLimit?: boolean | ((manager?: EntityManager) => Promise<boolean>);
-      onRegistered?: (manager: EntityManager) => Promise<void>;
-      authorizeCommit?: (manager: EntityManager, currentProblem: ProblemEntity) => Promise<void>;
-    }
-  ): Promise<ArchivePair[]> {
-    if (!pairs.length) return [];
-    if (pairs.length > 1000) throw new ArchiveError("INVALID_HIDDEN_SAMPLES");
-    const used = new Set(pairs.flatMap(pair => [pair.inputFile, pair.outputFile]));
-    const prefix = `sample-managed-${archiveUuid()}-`;
-    const mapped = new Map(
-      [...used].map((name, index) => [name, `${prefix}${index + 1}${/\.in$/i.test(name) ? ".in" : ".out"}`])
-    );
-    const selected = files.filter(file => used.has(file.filename));
-    if (selected.length !== used.size) throw new ArchiveError("INVALID_HIDDEN_SAMPLES");
-    const hiddenSamples = pairs.map(pair => ({
-      inputFile: mapped.get(pair.inputFile),
-      outputFile: mapped.get(pair.outputFile)
-    }));
-    await this.addProblemFilesFromDisk(
-      problem,
-      ProblemFileType.TestData,
-      selected.map(file => ({ ...file, filename: mapped.get(file.filename) })),
-      { ...options, hiddenSamples }
-    );
-    return hiddenSamples;
-  }
-
-  private async checkAddProblemFileLimit(
-    problem: ProblemEntity,
-    type: ProblemFileType,
-    size: number,
-    filename: string,
-    transactionalEntityManager: EntityManager
-  ): Promise<"TOO_MANY_FILES" | "TOTAL_SIZE_TOO_LARGE"> {
-    const currentFiles = await transactionalEntityManager.findBy(ProblemFileEntity, { problemId: problem.id, type });
-    const fileSizes = await this.fileService.getFileSizes(
-      currentFiles.map(file => file.uuid),
-      transactionalEntityManager
-    );
-
-    let oldFileCount = 0;
-    let oldFileSizeSum = 0;
-    for (const i of currentFiles.keys()) {
-      const file = currentFiles[i];
-      if (file.filename === filename) continue;
-
-      oldFileCount++;
-      oldFileSizeSum += fileSizes[i];
-    }
-
-    // Get the corresponding limits from config
-    const [filesLimit, sizeLimit] = {
-      [ProblemFileType.TestData]: [
-        this.configService.config.resourceLimit.problemTestdataFiles,
-        this.configService.config.resourceLimit.problemTestdataSize
-      ],
-      [ProblemFileType.AdditionalFile]: [
-        this.configService.config.resourceLimit.problemAdditionalFileFiles,
-        this.configService.config.resourceLimit.problemAdditionalFileSize
-      ]
-    }[type];
-
-    if (oldFileCount + 1 > filesLimit) return "TOO_MANY_FILES";
-    if (oldFileSizeSum + size > sizeLimit) return "TOTAL_SIZE_TOO_LARGE";
-
-    return null;
-  }
-
-  // Manage problem file actions should be locked to make sure the limit check works.
-  private async lockManageProblemFile<T>(
-    problemId: number,
-    type: ProblemFileType,
-    callback: (problem: ProblemEntity) => Promise<T>
-  ): Promise<T> {
-    return await this.lockProblemById(
-      problemId,
-      "Read",
-      async problem =>
-        await this.lockService.lock(`ManageProblemFile_${type}_${problem.id}`, async () => await callback(problem))
-    );
-  }
-
-  private async authorizeProblemMutation(
-    manager: EntityManager,
-    problem: ProblemEntity,
-    actingUser?: UserEntity
-  ): Promise<void> {
-    // Legacy internal callers retain their existing authorization contract; HTTP callers always supply the actor.
-    if (!actingUser) return;
-    if (
-      !(await this.userPrivilegeService.userHasPrivilege(actingUser, UserPrivilegeType.ViewSite, manager)) ||
-      !(await this.userHasPermission(actingUser, problem, ProblemPermissionType.Modify, undefined, manager))
-    )
-      throw new ForbiddenException();
-  }
-
-  /**
-   * @error "NO_SUCH_PROBLEM"
-   *
-   * If the user have not uploaded the file, the uuid should be null.
-   * It will return [UUID, upload request info] if success and error message if limit exceeded.
-   * @error "TOO_MANY_FILES" | "TOTAL_SIZE_TOO_LARGE"
-   *
-   * If the user have uploaded the file, the uuid should be the uploaded file UUID.
-   * It will return null if success and error message if failed.
-   * @error "FILE_UUID_EXISTS" | "FILE_NOT_UPLOADED"
-   */
-  async addProblemFile(
-    problem: ProblemEntity,
-    type: ProblemFileType,
-    uploadInfo: FileUploadInfoDto,
-    filename: string,
-    noLimit: boolean,
-    actingUser?: UserEntity
-  ): Promise<
-    | SignedFileUploadRequestDto
-    | "NO_SUCH_PROBLEM"
-    | "TOO_MANY_FILES"
-    | "TOTAL_SIZE_TOO_LARGE"
-    | "FILE_UUID_EXISTS"
-    | "FILE_NOT_UPLOADED"
-  > {
-    // eslint-disable-next-line @typescript-eslint/no-shadow
-    return await this.lockManageProblemFile(problem.id, type, async problem => {
-      if (!problem) return "NO_SUCH_PROBLEM";
-
-      let deleteOldFileActually: () => void = null;
-      const ret = await this.connection.transaction("REPEATABLE READ", async transactionalEntityManager => {
-        await this.authorizeProblemMutation(transactionalEntityManager, problem, actingUser);
-        const result = await this.fileService.processUploadRequest(
-          uploadInfo,
-          async size =>
-            noLimit
-              ? null
-              : await this.checkAddProblemFileLimit(problem, type, size, filename, transactionalEntityManager),
-          transactionalEntityManager
-        );
-
-        // SignedFileUploadRequestDto object or error
-        if (!(result instanceof FileEntity)) return result;
-
-        const oldProblemFile = await transactionalEntityManager.findOneBy(ProblemFileEntity, {
-          problemId: problem.id,
-          type,
-          filename
-        });
-        // Test data may still be needed by submissions pinned to an earlier data version
-        if (oldProblemFile && type === ProblemFileType.TestData)
-          await deferTestDataDeletion([oldProblemFile.uuid], transactionalEntityManager);
-        else if (oldProblemFile)
-          deleteOldFileActually = await this.fileService.deleteFile(oldProblemFile.uuid, transactionalEntityManager);
-
-        const problemFile = new ProblemFileEntity();
-        problemFile.problemId = problem.id;
-        problemFile.type = type;
-        problemFile.filename = filename;
-        problemFile.uuid = uploadInfo.uuid;
-
-        await transactionalEntityManager.save(ProblemFileEntity, problemFile);
-
-        return null;
-      });
-
-      if (deleteOldFileActually) deleteOldFileActually();
-      if (type === ProblemFileType.TestData)
-        await this.redisService.cacheDelete(REDIS_KEY_PROBLEM_PREPROCESSED_JUDGE_INFO.format(problem.id));
-
-      return ret;
-    });
-  }
-
-  async removeProblemFiles(
-    problem: ProblemEntity,
-    type: ProblemFileType,
-    filenames: string[],
-    actingUser?: UserEntity
-  ): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-shadow
-    return await this.lockManageProblemFile(problem.id, type, async problem => {
-      if (!problem) return;
-
-      let deleteFilesActually: () => void = null;
-      await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
-        await this.authorizeProblemMutation(transactionalEntityManager, problem, actingUser);
-        const problemFiles = await transactionalEntityManager.findBy(ProblemFileEntity, {
-          problemId: problem.id,
-          type,
-          filename: In(filenames)
-        });
-
-        await transactionalEntityManager.delete(ProblemFileEntity, {
-          problemId: problem.id,
-          type,
-          filename: In(filenames)
-        });
-
-        // Test data may still be needed by submissions pinned to an earlier data version
-        if (type === ProblemFileType.TestData)
-          await deferTestDataDeletion(
-            problemFiles.map(problemFile => problemFile.uuid),
-            transactionalEntityManager
-          );
-        else
-          deleteFilesActually = await this.fileService.deleteFile(
-            problemFiles.map(problemFile => problemFile.uuid),
-            transactionalEntityManager
-          );
-      });
-
-      if (deleteFilesActually) deleteFilesActually();
-      if (type === ProblemFileType.TestData)
-        await this.redisService.cacheDelete(REDIS_KEY_PROBLEM_PREPROCESSED_JUDGE_INFO.format(problem.id));
-    });
-  }
-
-  async getProblemFiles(
-    problem: ProblemEntity,
-    type: ProblemFileType,
-    transcationalEntityManager?: EntityManager
-  ): Promise<ProblemFileEntity[]> {
-    const problemFiles = transcationalEntityManager
-      ? await transcationalEntityManager.findBy(ProblemFileEntity, {
-          problemId: problem.id,
-          type
-        })
-      : await this.problemFileRepository.findBy({
-          problemId: problem.id,
-          type
-        });
-
-    return problemFiles;
-  }
-
-  async listProblemFiles(problem: ProblemEntity, type: ProblemFileType, withSize = false): Promise<ProblemFileDto[]> {
-    return await this.connection.transaction("REPEATABLE READ", async transcationalEntityManager => {
-      const problemFiles = await this.getProblemFiles(problem, type, transcationalEntityManager);
-
-      if (withSize) {
-        const fileSizes = await this.fileService.getFileSizes(
-          problemFiles.map(problemFile => problemFile.uuid),
-          transcationalEntityManager
-        );
-        const hashes = await this.fileService.getContentHashes(problemFiles.map(problemFile => problemFile.uuid));
-        return problemFiles.map((problemFile, i) => ({
-          ...problemFile,
-          size: fileSizes[i],
-          ...(hashes[problemFile.uuid] ? { sha256: hashes[problemFile.uuid] } : {})
-        }));
-      }
-
-      return problemFiles;
-    });
-  }
-
-  async renameProblemFile(
-    problem: ProblemEntity,
-    type: ProblemFileType,
-    filename: string,
-    newFilename: string,
-    actingUser?: UserEntity
-  ): Promise<boolean | "FILE_ALREADY_EXISTS"> {
-    // eslint-disable-next-line @typescript-eslint/no-shadow
-    return await this.lockManageProblemFile(problem.id, type, async problem => {
-      if (!problem) return false;
-
-      const renamed = await this.connection.transaction("READ COMMITTED", async manager => {
-        await this.authorizeProblemMutation(manager, problem, actingUser);
-        const repository = manager.getRepository(ProblemFileEntity);
-        const findOptions: FindOptionsWhere<ProblemFileEntity> = {
-          problemId: problem.id,
-          type,
-          filename
-        };
-        const problemFile = await repository.findOneBy(findOptions);
-
-        if (!problemFile) return false;
-
-        if (problemFile.filename === newFilename) return true;
-        const target = await repository.findOneBy({ ...findOptions, filename: newFilename });
-        // The database collation may consider a case-only rename the same row.
-        if (target && target.filename !== problemFile.filename) return "FILE_ALREADY_EXISTS";
-
-        try {
-          // Updating the primary key preserves the object and never replaces a file.
-          const result = await repository.update(findOptions, { filename: newFilename });
-          if (!result.affected) return false;
-        } catch (e) {
-          // Also handle writers outside this lock without exposing a SQL exception.
-          if (e?.driverError?.code === "ER_DUP_ENTRY" || e?.driverError?.errno === 1062) return "FILE_ALREADY_EXISTS";
-          throw e;
-        }
-
-        return true;
-      });
-      if (renamed === true && type === ProblemFileType.TestData)
-        await this.redisService.cacheDelete(REDIS_KEY_PROBLEM_PREPROCESSED_JUDGE_INFO.format(problem.id));
-      return renamed;
-    });
-  }
-
-  async findProblemTagById(id: number): Promise<ProblemTagEntity> {
-    return await this.problemTagRepository.findOneBy({ id });
-  }
-
-  async findProblemTagsByExistingIds(problemTagIds: number[]): Promise<ProblemTagEntity[]> {
-    if (problemTagIds.length === 0) return [];
-    const uniqueIds = Array.from(new Set(problemTagIds));
-    const records = await this.problemTagRepository.findByIds(uniqueIds);
-    const map = Object.fromEntries(records.map(record => [record.id, record]));
-    return problemTagIds.map(problemId => map[problemId]);
-  }
-
-  async getAllProblemTags(manager?: EntityManager): Promise<ProblemTagEntity[]> {
-    return manager ? await manager.find(ProblemTagEntity) : await this.problemTagRepository.find();
-  }
-
-  async createProblemTag(
-    localizedNames: [Locale, string][],
-    color: string,
-    manager?: EntityManager
-  ): Promise<ProblemTagEntity> {
-    const create = async (transactionalEntityManager: EntityManager) => {
-      const problemTag = new ProblemTagEntity();
-      problemTag.color = color;
-      problemTag.locales = localizedNames.map(([locale]) => locale);
-      await transactionalEntityManager.save(problemTag);
-
-      for (const [locale, name] of localizedNames) {
-        // eslint-disable-next-line no-await-in-loop
-        await this.localizedContentService.createOrUpdate(
-          problemTag.id,
-          LocalizedContentType.ProblemTagName,
-          locale,
-          name,
-          transactionalEntityManager
-        );
-      }
-
-      return problemTag;
-    };
-    return manager ? await create(manager) : await this.connection.transaction("READ COMMITTED", create);
-  }
-
-  async updateProblemTag(
-    problemTag: ProblemTagEntity,
-    localizedNames: [Locale, string][],
-    color: string,
-    manager?: EntityManager
-  ): Promise<void> {
-    const update = async (transactionalEntityManager: EntityManager) => {
-      problemTag.color = color;
-      problemTag.locales = localizedNames.map(([locale]) => locale);
-      await transactionalEntityManager.save(problemTag);
-
-      await this.localizedContentService.delete(
-        problemTag.id,
-        LocalizedContentType.ProblemTagName,
-        null,
-        transactionalEntityManager
-      );
-      for (const [locale, name] of localizedNames) {
-        // eslint-disable-next-line no-await-in-loop
-        await this.localizedContentService.createOrUpdate(
-          problemTag.id,
-          LocalizedContentType.ProblemTagName,
-          locale,
-          name,
-          transactionalEntityManager
-        );
-      }
-    };
-    if (manager) await update(manager);
-    else await this.connection.transaction("READ COMMITTED", update);
-  }
-
-  async deleteProblemTag(problemTag: ProblemTagEntity): Promise<void> {
-    await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
-      await transactionalEntityManager.delete(ProblemTagEntity, {
-        id: problemTag.id
-      });
-
-      await this.localizedContentService.delete(
-        problemTag.id,
-        LocalizedContentType.ProblemTagName,
-        null,
-        transactionalEntityManager
-      );
-    });
-  }
-
-  async getProblemTagLocalizedName(problemTag: ProblemTagEntity, locale: Locale): Promise<string> {
-    return await this.localizedContentService.get(problemTag.id, LocalizedContentType.ProblemTagName, locale);
-  }
-
-  /**
-   * Get the tag dto with localized name of requested locale, if not available, the name of default locale is used.
-   */
-  async getProblemTagLocalized(problemTag: ProblemTagEntity, locale: Locale): Promise<LocalizedProblemTagDto> {
-    const nameLocale = problemTag.locales.includes(locale) ? locale : problemTag.locales[0];
-    const name = await this.getProblemTagLocalizedName(problemTag, nameLocale);
-    return {
-      id: problemTag.id,
-      color: problemTag.color,
-      name,
-      nameLocale
-    };
-  }
-
-  async getProblemTagAllLocalizedNames(
-    problemTag: ProblemTagEntity,
-    manager?: EntityManager
-  ): Promise<Partial<Record<Locale, string>>> {
-    if (manager) {
-      const rows = await manager.findBy(LocalizedContentEntity, {
-        objectId: problemTag.id,
-        type: LocalizedContentType.ProblemTagName
-      });
-      return Object.fromEntries(rows.map(row => [row.locale, row.data]));
-    }
-    return await this.localizedContentService.getOfAllLocales(problemTag.id, LocalizedContentType.ProblemTagName);
-  }
-
-  async invalidateProblemTagCaches(problemTags: ProblemTagEntity[]): Promise<void> {
-    await Promise.all(
-      problemTags.flatMap(tag =>
-        tag.locales.map(locale =>
-          this.localizedContentService.invalidateCache(tag.id, LocalizedContentType.ProblemTagName, locale)
-        )
-      )
-    );
-  }
-
-  async setProblemTags(
-    problem: ProblemEntity,
-    problemTags: ProblemTagEntity[],
-    transactionalEntityManager: EntityManager
-  ): Promise<void> {
-    await transactionalEntityManager.delete(ProblemTagMapEntity, {
-      problemId: problem.id
-    });
-    if (problemTags.length === 0) return;
-    await transactionalEntityManager
-      .createQueryBuilder()
-      .insert()
-      .into(ProblemTagMapEntity)
-      .values(problemTags.map(problemTag => ({ problemId: problem.id, problemTagId: problemTag.id })))
-      .execute();
-  }
-
-  async getProblemTagIdsByProblem(problem: ProblemEntity, manager?: EntityManager): Promise<number[]> {
-    const problemTagMaps = manager
-      ? await manager.findBy(ProblemTagMapEntity, { problemId: problem.id })
-      : await this.problemTagMapRepository.findBy({ problemId: problem.id });
-
-    return problemTagMaps.map(problemTagMap => problemTagMap.problemTagId);
-  }
-
-  async getProblemTagsByProblem(problem: ProblemEntity): Promise<ProblemTagEntity[]> {
-    return await this.findProblemTagsByExistingIds(await this.getProblemTagIdsByProblem(problem));
-  }
-
-  /** `getProblemTagsByProblem` of each problem, in two queries. */
-  async getProblemTagsByProblems(problems: ProblemEntity[]): Promise<Map<number, ProblemTagEntity[]>> {
-    const result = new Map(problems.map(problem => [problem.id, [] as ProblemTagEntity[]]));
-    if (!problems.length) return result;
-    const maps = await this.problemTagMapRepository.findBy({ problemId: In(problems.map(problem => problem.id)) });
-    const tags = await this.findProblemTagsByExistingIds([...new Set(maps.map(map => map.problemTagId))]);
-    const tagById = new Map(tags.filter(tag => tag).map(tag => [tag.id, tag]));
-    for (const map of maps)
-      if (tagById.has(map.problemTagId)) result.get(map.problemId).push(tagById.get(map.problemTagId));
-    return result;
-  }
-
-  /** `getProblemTagLocalized` of each tag, with the names read together. */
-  async getProblemTagsLocalized(problemTags: ProblemTagEntity[], locale: Locale): Promise<LocalizedProblemTagDto[]> {
-    const nameLocales = problemTags.map(tag => (tag.locales.includes(locale) ? locale : tag.locales[0]));
-    const names = await this.localizedContentService.getMany(
-      problemTags.map((tag, index) => ({
-        objectId: tag.id,
-        type: LocalizedContentType.ProblemTagName,
-        locale: nameLocales[index]
-      }))
-    );
-    return problemTags.map((tag, index) => ({
-      id: tag.id,
-      color: tag.color,
-      name: names[index],
-      nameLocale: nameLocales[index]
-    }));
-  }
-
-  /**
-   * Lock a problem by ID with Read/Write Lock.
-   * @param type `"Read"` to ensure the problem exists while holding the lock, `"Write"` is for deleting the problem.
-   */
-  async lockProblemById<T>(
-    id: number,
-    type: "Read" | "Write",
-    callback: (problem: ProblemEntity) => Promise<T>
-  ): Promise<T> {
-    return await this.lockService.lockReadWrite(
-      `AcquireProblem_${id}`,
-      type,
-      async () => await callback(await this.findProblemById(id))
-    );
-  }
-
   /**
    * @param problem Must be locked by `ProblemService.lockProblemById(id, "Write")`.
    */
@@ -1538,7 +670,7 @@ export class ProblemService {
   async changeProblemType(problem: ProblemEntity, type: ProblemType, actingUser?: UserEntity): Promise<boolean> {
     if (await this.submissionService.problemHasAnySubmission(problem)) return false;
     await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
-      await this.authorizeProblemMutation(transactionalEntityManager, problem, actingUser);
+      await this.problemAccess.authorizeProblemMutation(transactionalEntityManager, problem, actingUser);
       problem.type = type;
       await transactionalEntityManager.update(ProblemEntity, problem.id, { type });
       await transactionalEntityManager.update(

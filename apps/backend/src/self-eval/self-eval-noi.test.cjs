@@ -36,6 +36,7 @@ function fixture() {
     files:{uploadFile:async(id,bytes)=>uploads.set(id,bytes),deleteUnfinishedUploadedFile:async id=>uploads.delete(id)},
     queue:{enqueue:async()=>{},notifyJobsAvailable(){}}
   });
+  service.problemAccess = service.problemFiles = service.problemTags = service.problemLocks = service.problems;
   return {service,user,contest,judgeInfo,files,uploads,events,setManager:value=>manager=value,setAllowed:value=>allowed=value,setFailUpload:()=>failSecondUpload=true};
 }
 const manual = {problemId:1,contestId:1,generatorCode:'int main(){return 0;}',standardCode:'int main(){return 1;}',subtaskIds:[1],attestSameGenerator:true};

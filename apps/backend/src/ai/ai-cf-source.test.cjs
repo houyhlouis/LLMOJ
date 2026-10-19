@@ -7,7 +7,7 @@ require('reflect-metadata');
 require.extensions['.ts']=(module,filename)=>module._compile(ts.transpileModule(fs.readFileSync(filename,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2019,module:ts.ModuleKind.CommonJS,esModuleInterop:true,experimentalDecorators:true,emitDecoratorMetadata:true}}).outputText,filename);
 const {normalizeProblemSource,problemSourceLabel}=require('../problem/problem-source.ts');
 const {exactCodeforcesRating}=require('./codeforces-calibration.ts');
-const {AiService}=require('./ai.service.ts');
+const { aiServices, bareAiServices } = require("./ai-test-services.cjs");
 
 test('verified Luogu CF mirror URLs canonicalize and use the official CF rating snapshot',()=>{
  for(const source of ['https://www.luogu.com.cn/problem/CF868F','https://luogu.com.cn/problem/cf868f?lang=en','https://www.luogu.org/problem/CF868F/']){
@@ -22,7 +22,7 @@ test('CF rating lookup rejects lookalike hosts, credentials, ports and unrelated
 });
 
 test('difficulty action for a verified CF mirror updates official 2500 without model or search calls',async()=>{
- const service=Object.create(AiService.prototype), writes=[];
+ const service=bareAiServices(), writes=[];
  service.assertSnapshot=async()=>({id:4});
  service.db={getRepository:()=>({update:async(id,data)=>writes.push({id,data})})};
  service.model=async()=>assert.fail('official rating must bypass inference');

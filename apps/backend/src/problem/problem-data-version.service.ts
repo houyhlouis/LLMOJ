@@ -10,6 +10,7 @@ import { DeferredFileDeletionEntity } from "./deferred-file-deletion.entity";
 import { ProblemFileEntity, ProblemFileType } from "./problem-file.entity";
 import { ProblemEntity } from "./problem.entity";
 import { ProblemService } from "./problem.service";
+import { ProblemFileService } from "./problem-file.service";
 
 import { logger } from "../logger";
 import { ConfigService } from "../config/config.service";
@@ -63,6 +64,8 @@ export class ProblemDataVersionService implements OnModuleInit, OnModuleDestroy 
     private readonly problemDataVersionRepository: Repository<ProblemDataVersionEntity>,
     @Inject(forwardRef(() => ProblemService))
     private readonly problemService: ProblemService,
+    @Inject(forwardRef(() => ProblemFileService))
+    private readonly problemFiles: ProblemFileService,
     private readonly fileService: FileService,
     private readonly redisService: RedisService,
     private readonly configService: ConfigService
@@ -82,7 +85,7 @@ export class ProblemDataVersionService implements OnModuleInit, OnModuleDestroy 
   /** What the problem is judged with now. */
   async currentContent(problem: ProblemEntity): Promise<ProblemDataVersionContent> {
     const [judgeInfo] = await this.problemService.getProblemPreprocessedJudgeInfo(problem);
-    const files = await this.problemService.getProblemFiles(problem, ProblemFileType.TestData);
+    const files = await this.problemFiles.getProblemFiles(problem, ProblemFileType.TestData);
     const hashes = await this.fileService.getContentHashes(files.map(file => file.uuid));
     const testData: ProblemDataVersionFile[] = files
       .map(({ filename, uuid }) => (hashes[uuid] ? { filename, uuid, sha256: hashes[uuid] } : { filename, uuid }))

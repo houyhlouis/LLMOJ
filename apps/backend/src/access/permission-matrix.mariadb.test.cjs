@@ -36,7 +36,8 @@ const { UserPermissionRuleEntity } = require("./user-permission-rule.entity.ts")
 const { ProblemEntity, ProblemType } = require("../problem/problem.entity.ts");
 const { ProblemSampleEntity } = require("../problem/problem-sample.entity.ts");
 const { ProblemJudgeInfoEntity } = require("../problem/problem-judge-info.entity.ts");
-const { ProblemService, ProblemPermissionType } = require("../problem/problem.service.ts");
+const { ProblemPermissionType } = require("../problem/problem-access.service.ts");
+const { bareProblemServices } = require("../problem/problem-test-services.cjs");
 const { SubmissionEntity } = require("../submission/submission.entity.ts");
 const { SubmissionDetailEntity } = require("../submission/submission-detail.entity.ts");
 const { SubmissionStatus } = require("@libreoj/judge-protocol");
@@ -199,7 +200,7 @@ test(
 
       const privileges = new UserPrivilegeService(db, db.getRepository(UserPrivilegeEntity), {});
       const acl = new Set([`${users.aclReader.id}:${problems.hidden.id}`]);
-      const problemService = Object.assign(Object.create(ProblemService.prototype), {
+      const problemService = Object.assign(bareProblemServices(), {
         connection: db,
         problemRepository: db.getRepository(ProblemEntity),
         userPrivilegeService: privileges,
@@ -212,6 +213,9 @@ test(
         connection: db,
         submissionRepository: db.getRepository(SubmissionEntity),
         problemService,
+        problemAccess: problemService,
+        problemFiles: problemService,
+        problemLocks: problemService,
         userPrivilegeService: privileges
       });
       const submissionAccessService = Object.assign(Object.create(SubmissionAccessService.prototype), submissionService);
@@ -220,7 +224,8 @@ test(
         userPrivilegeService: privileges,
         submissionService,
         submissionAccessService,
-        problemService
+        problemService,
+        problemAccess: problemService
       });
 
       // What each route shows, computed as its controller does (AccessGuard capabilities included).

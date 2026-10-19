@@ -32,7 +32,7 @@ const {SubmissionProgressGateway:Gateway, SubmissionProgressSubscriptionType:T} 
   './submission-progress.service':{SubmissionEventType:{Progress:0,Deleted:2}},
   '@libreoj/judge-protocol':{SubmissionStatus:{Pending:'Pending'}},
   '../user/user-privilege.service':{UserPrivilegeType:P},
-  '../problem/problem.service':{ProblemPermissionType:{View:'View'}},
+  '../problem/problem-access.service':{ProblemPermissionType:{View:'View'}},
   '../logger':{logger:{log:noop,error:noop}}
 });
 function fixture() {
@@ -43,6 +43,7 @@ function fixture() {
     userHasTeamResourceAccess:async()=>state.team,
     userHasPermission:async (user, submission, type)=> {assert.equal(type,'View');if(state.fail)throw Error('storage unavailable');return state.view && state.code && (submission.isPublic || user?.id===submission.submitterId || state.problem);}
   };
+  const problems = {findProblemById:async ()=>({id:1}), userHasPermission:async ()=>state.problem};
   const g = new Gateway({config:{security:{sessionSecret:'test-fixture-only'}}}, {
     findSubmissionById:async id=>records.get(id),
     getSubmissionBasicMeta:async sub=>({status:sub.status}),
@@ -52,9 +53,7 @@ function fixture() {
   }, {
     userHasPrivilege:async (user,p)=>p===P.ViewSite ? state.site : p===P.ViewSubmission ? state.view : false,
     permissionDecision:async (user,p)=> {assert.equal(p,P.ReadProblemData);return state.data;}
-  }, {
-    findProblemById:async ()=>({id:1}), userHasPermission:async ()=>state.problem
-  }, access);
+  }, problems, problems, access);
   const messages=[];
   g.server={sockets:new Map(),to:id=>({emit:(event, submissionId, delta)=>messages.push({id,submissionId,delta})})};
   function key(type=T.Detail,ids=[74],userId=5,sessionId=8) {return g.encodeSubscription({type,submissionIds:ids,userId,sessionId});}

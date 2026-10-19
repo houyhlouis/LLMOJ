@@ -26,6 +26,7 @@ const { UserEntity } = require('../user/user.entity.ts');
 const { UserService } = require('../user/user.service.ts');
 const { ProblemEntity } = require('../problem/problem.entity.ts');
 const { ProblemService } = require('../problem/problem.service.ts');
+const { bareProblemServices } = require("../problem/problem-test-services.cjs");
 
 test('deleted submissions keep owner counts atomic (real MariaDB)',
   { skip: !process.env.HYHOJ_SUBMISSION_TEST_DB_CONFIG, timeout: 60000 }, async t => {
@@ -55,7 +56,7 @@ test('deleted submissions keep owner counts atomic (real MariaDB)',
       try{return await callback();}finally{release();if(tails.get(key)===tail)tails.delete(key);}
     }};
     const outbox=Object.create(StatisticsOutboxService.prototype);Object.assign(outbox,{connection:db});
-    const problemService=Object.create(ProblemService.prototype);
+    const problemService=bareProblemServices();
     Object.assign(problemService,{problemRepository:problems,lockProblemById:async(id,_type,callback)=>callback(await problems.findOneBy({id}))});
     const svc=Object.create(SubmissionService.prototype),userService=Object.create(UserService.prototype);
     Object.assign(userService,{userRepository:users,submissionService:svc,lockService:locks});
@@ -63,6 +64,7 @@ test('deleted submissions keep owner counts atomic (real MariaDB)',
       userService,lockService:locks,submissionStatisticsService:{onSubmissionUpdated:async()=>{}},
       judgeGateway:{cancelTask:()=>{}},submissionProgressService:{emitSubmissionEvent:async()=>{}},
       fileService:{deleteFile:async()=>()=>{}},statisticsOutboxService:outbox});
+    svc.problemAccess = svc.problemFiles = svc.problemTags = svc.problemLocks = svc.problemService;
     // The judging half and the permission rules of the submission service, with the same collaborators
     const judging = Object.assign(Object.create(SubmissionJudgingService.prototype), svc);
     const access = Object.assign(Object.create(SubmissionAccessService.prototype), svc);

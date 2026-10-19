@@ -28,7 +28,7 @@ const {
 } = require("./ai-runtime.ts");
 const { AiAdmissionService, aiResponseHash } = require("./ai-admission.service.ts");
 const { AiReservationEntity } = require("./ai-reservation.entity.ts");
-const { AiService } = require("./ai.service.ts");
+const { aiServices, bareAiServices } = require("./ai-test-services.cjs");
 const { parseAiPolicy, DEFAULT_AI_POLICY } = require("../settings/ai-policy.service.ts");
 
 const generate = { target: "llm", provider: "chat", host: "api.example.com", model: "m", operation: "generate" };
@@ -286,7 +286,7 @@ test("settling releases confirmed or unbilled requests and keeps the rest at the
 });
 
 test("the AI service admits configuration-page requests and returns paused jobs to the queue", async () => {
-  const service = Object.create(AiService.prototype);
+  const service = bareAiServices();
   const admitted = [];
   service.admission = { admit: async (...args) => (admitted.push(args), { release() {} }) };
   service.isSiteAdministrator = async () => false;

@@ -43,12 +43,12 @@ const { DiscussionEntity } = backendRequire("../discussion/discussion.entity.ts"
 const { DiscussionContentEntity } = backendRequire("../discussion/discussion-content.entity.ts");
 const sourceSearch = backendRequire("./ai-source-search.ts");
 const { signAiAttachment } = backendRequire("./ai-attachment.ts");
-const { AiService } = backendRequire("./ai.service.ts");
+const { aiServices } = backendRequire("./ai-test-services.cjs");
 const { AiResponseCheckpointEntity } = backendRequire("./ai-usage.entity.ts");
 const { AiJobEntity } = backendRequire("./ai.entity.ts");
 const { UserEntity } = backendRequire("../user/user.entity.ts");
 const { TeamResourceEntity } = backendRequire("../team/team.entity.ts");
-const { ProblemService } = backendRequire("../problem/problem.service.ts");
+const { bareProblemServices } = backendRequire("../problem/problem-test-services.cjs");
 const { ProblemEntity } = backendRequire("../problem/problem.entity.ts");
 const { ProblemJudgeInfoEntity } = backendRequire("../problem/problem-judge-info.entity.ts");
 const { ProblemSampleEntity } = backendRequire("../problem/problem-sample.entity.ts");
@@ -257,7 +257,7 @@ test(
         });
         const cache = new Map();
         const redis = {cacheDelete: async key => cache.delete(key), cacheGet: async key => cache.get(key), cacheSet: async (key, value) => cache.set(key, value)};
-        const problems = Object.create(ProblemService.prototype);
+        const problems = bareProblemServices();
         Object.assign(problems, {
           connection: db,
           problemRepository: db.getRepository(ProblemEntity),
@@ -298,7 +298,7 @@ test(
         };
         problems.fileService = files;
         problems.lockManageProblemFile = async (_id, _type, callback) => callback(await db.getRepository(ProblemEntity).findOneBy({id: problem.id}));
-        const service = new AiService(db, {}, db.getRepository(AiJobEntity), privileges, problems, discussions, files);
+        const service = aiServices(db, {}, db.getRepository(AiJobEntity), privileges, problems, discussions, files);
         service.recordAiAudit = async () => {};
         const snapshot = await service.snapshot(problem);
         const read = async () =>

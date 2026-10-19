@@ -7,7 +7,7 @@ require('reflect-metadata');
 require.extensions['.ts']=(module,filename)=>module._compile(ts.transpileModule(fs.readFileSync(filename,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2019,module:ts.ModuleKind.CommonJS,esModuleInterop:true,experimentalDecorators:true,emitDecoratorMetadata:true}}).outputText,filename);
 
 const {declaredAiProblemType,resolveAiImportType}=require('./ai-import-type.ts');
-const {AiService}=require('./ai.service.ts');
+const { aiServices, bareAiServices } = require("./ai-test-services.cjs");
 test('explicit bilingual interactive and communication declarations retain their real type',()=>{
  for(const text of ['This is an interactive problem.','This problem is interactive.','本题为交互式问题。','题目类型：交互题','## Interaction']) assert.equal(resolveAiImportType(text),'Interaction',text);
  for(const text of ['The task is communication.','This is a run-twice communication problem.','本题为通信题。','## Problem type: Communication'])assert.equal(resolveAiImportType(text),'Communication',text);
@@ -27,11 +27,11 @@ test('explicit type override prevents model downgrade but cannot contradict an e
  assert.throws(()=>resolveAiImportType('',{problemType:'Unknown'}),/AI_IMPORT_TYPE_UNSUPPORTED/);
 });
 test('unsupported admission still rejects before configuration or any provider/job call',async()=>{
- const svc=Object.create(AiService.prototype);svc.requirePrivilege=async()=>{};svc.problems={userHasCreateProblemPermission:async()=>true};svc.config=async()=>assert.fail('must not read configuration');
+ const svc=bareAiServices();svc.requirePrivilege=async()=>{};svc.problems={userHasCreateProblemPermission:async()=>true};svc.config=async()=>assert.fail('must not read configuration');
  await assert.rejects(svc.start({id:4},{action:'import',markdown:'This is an output-only task.'}),/AI_IMPORT_TYPE_UNSUPPORTED/);
 });
 function fixture(result){
- const svc=Object.create(AiService.prototype),created=[];
+ const svc=bareAiServices(),created=[];
  svc.requirePrivilege=svc.checkpoint=async()=>{};svc.assertJob=async()=>({id:4});svc.installAttachment=async()=>{};svc.resolveImportedFileIo=async()=>null;svc.model=async()=>structuredClone(result);
  svc.problems={userHasCreateProblemPermission:async()=>true,createProblem:async(user,type,statement,_tags,commit)=>{created.push({type,statement});await commit({id:9},{findOneBy:async()=>({judgeInfo:{timeLimit:1000,memoryLimit:256}}),update:async()=>({affected:1})});return{id:9,type};}};
  return {svc,created};
@@ -47,6 +47,6 @@ test('invalid protocol sample indices reject before creating any problem',async(
  const {svc,created}=fixture({...extracted('Interaction'),protocolSampleIndices:[8]});await assert.rejects(svc.importProblem({input:{markdown:'This is an interactive problem.'},state:{}},{id:4},{}),/INVALID_AI_PROTOCOL/);assert.equal(created.length,0);
 });
 test('a previously misclassified legacy Traditional import cannot silently resume as interactive',async()=>{
- const svc=Object.create(AiService.prototype);svc.problems={findProblemById:async()=>({id:26,type:'Traditional'})};svc.installAttachment=async()=>assert.fail('must not resume the wrong type');
+ const svc=bareAiServices();svc.problems={findProblemById:async()=>({id:26,type:'Traditional'})};svc.installAttachment=async()=>assert.fail('must not resume the wrong type');
  await assert.rejects(svc.importProblem({problemId:26,input:{markdown:'This is an interactive problem.'},state:{}},{id:4},{}),/AI_PROBLEM_TYPE_MISMATCH/);
 });

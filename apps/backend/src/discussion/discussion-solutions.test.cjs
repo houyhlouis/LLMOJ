@@ -29,6 +29,7 @@ function fixture({ ownerId = 1, moderator = false, viewProblem = true } = {}) {
     findProblemById: async id => id === 20 ? { id } : null,
     userHasPermission: async () => viewProblem
   };
+  controller.problemAccess = controller.problemFiles = controller.problemTags = controller.problemLocks = controller.problemService;
   controller.userPrivilegeService = { userHasPrivilege: async () => moderator };
   controller.auditService = { log: async (...args) => audit.push(args) };
   const update = extra => controller.updateDiscussion({ id: 1 }, { discussionId: 12, title: "Proof", content: "Updated", ...extra });

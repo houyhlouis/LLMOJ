@@ -12,7 +12,7 @@ require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileMo
     experimentalDecorators: true, emitDecoratorMetadata: true }
 }).outputText, filename);
 const provider = require('./ai-provider.ts');
-const { AiService } = require('./ai.service.ts');
+const { aiServices, bareAiServices } = require("./ai-test-services.cjs");
 const { AiError } = require('./ai.types.ts');
 const { aiTutorialFacts, aiTutorialFactViolation } = require('./ai-tutorial-facts.ts');
 const sum = { subtasks: [{ points: 100, scoringType: 'Sum', testcases: Array(5).fill({}) }] };
@@ -54,7 +54,7 @@ function tutorialFixture(result, action='all') {
   const user = {id:1}, problem = {id:8, type:'Traditional', originalProblem:related.url};
   const snapshot = {samples:[], statements:[], judgeInfo:sum};
   const job = {id:'tutorial-memory',action,state:{},progress:0};
-  const svc = new AiService({}, {}, {}, {}, {}, {
+  const svc = aiServices({}, {}, {}, {}, {}, {
     userHasCreateDiscussionPermission:async()=>true,
     createDiscussion:async(_u,_t,content)=>{published.push(content);return {id:published.length};}
   },{});
@@ -89,7 +89,7 @@ const compileFailure=(detail='no matching function for mt19937_64(random_device&
   'make compilation failed (status=RuntimeError, exit=1, termination=exited, timeMs=1, memoryBytes=1): '+detail);
 function repairFixture() {
   const checks=[], user={id:1}, job={id:'repair-memory',state:{makeCode:bad},progress:45};
-  const svc=new AiService({}, {}, {}, {userHasPrivilege:async()=>true,permissionDecision:async()=>true});
+  const svc=aiServices({}, {}, {}, {userHasPrivilege:async()=>true,permissionDecision:async()=>true});
   svc.assertSnapshot=async()=>{checks.push('authorize');return user;};
   svc.checkpoint=async(_j,phase)=>checks.push(phase);
   const request={makeCode:bad,validatorCode:'official validator',stdCode:'accepted std',managerCode:'official manager',extraSourceFiles:{'message.h':'official header'}};

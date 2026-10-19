@@ -20,7 +20,8 @@ import { Locale } from "../common/locale.type";
 import { DiscussionPermissionType, DiscussionService } from "../discussion/discussion.service";
 import { UserService } from "../user/user.service";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
-import { ProblemPermissionType, ProblemService } from "../problem/problem.service";
+import { ProblemService } from "../problem/problem.service";
+import { ProblemAccessService, ProblemPermissionType } from "../problem/problem-access.service";
 import { SubmissionService } from "../submission/submission.service";
 import { AuditService } from "../audit/audit.service";
 
@@ -33,6 +34,7 @@ export class HomepageController {
     private readonly userPrivilegeService: UserPrivilegeService,
     private readonly discussionService: DiscussionService,
     private readonly problemService: ProblemService,
+    private readonly problemAccess: ProblemAccessService,
     private readonly submissionService: SubmissionService,
     private readonly auditService: AuditService
   ) {}
@@ -85,7 +87,7 @@ export class HomepageController {
         const candidates = await this.homepageService.getLatestUpdatedProblems();
         const visible = await Promise.all(
           candidates.map(problem =>
-            this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.View)
+            this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.View)
           )
         );
         const problems = candidates.filter((_, i) => visible[i]);

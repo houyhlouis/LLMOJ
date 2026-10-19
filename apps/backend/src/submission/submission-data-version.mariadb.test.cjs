@@ -39,6 +39,7 @@ const { ProblemDataVersionService, canonicalJson } = require("../problem/problem
 const { ProblemDataVersionEntity } = require("../problem/problem-data-version.entity.ts");
 const { DeferredFileDeletionEntity } = require("../problem/deferred-file-deletion.entity.ts");
 const { ProblemService } = require("../problem/problem.service.ts");
+const { bareProblemServices } = require("../problem/problem-test-services.cjs");
 const { ProblemFileEntity, ProblemFileType } = require("../problem/problem-file.entity.ts");
 const { ProblemSampleEntity } = require("../problem/problem-sample.entity.ts");
 const { ProblemJudgeInfoEntity } = require("../problem/problem-judge-info.entity.ts");
@@ -145,6 +146,7 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
     configService,
     redisService: { takeTurn: async () => true }
   });
+  versions.problemAccess = versions.problemFiles = versions.problemTags = versions.problemLocks = versions.problemService;
   const outbox = Object.assign(Object.create(StatisticsOutboxService.prototype), { connection: ds });
   const svc = Object.create(SubmissionService.prototype);
   Object.assign(svc, {
@@ -171,6 +173,7 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
       })
     }
   });
+  svc.problemAccess = svc.problemFiles = svc.problemTags = svc.problemLocks = svc.problemService;
 
   // The judging half and the permission rules of the submission service, with the same collaborators
   const judging = Object.assign(Object.create(SubmissionJudgingService.prototype), svc);
@@ -396,7 +399,7 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
     const attachment = await file(p.id, "statement.pdf", ProblemFileType.AdditionalFile);
     const waiting = await submit(submitter, p);
 
-    const problemFiles = Object.create(ProblemService.prototype);
+    const problemFiles = bareProblemServices();
     Object.assign(problemFiles, {
       connection: ds,
       fileService,

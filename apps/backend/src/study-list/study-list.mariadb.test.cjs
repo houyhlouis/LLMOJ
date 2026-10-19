@@ -69,7 +69,7 @@ test("study lists: owner only, saved on top of the loaded version, notes kept (r
       findProblemById: async id => (viewable[id] ? { id } : null),
       userHasPermission: async (user, problem) => viewable[problem.id](user)
     };
-    const service = new StudyListService(db, problems, {});
+    const service = new StudyListService(db, problems, problems, {});
     const owner = { id: 7 },
       other = { id: 8 };
     const item = (problemId, note = "") => ({ problemId, section: "S", note });

@@ -23,7 +23,7 @@ const { normalizeAiMarkdown, normalizeAiSections } = require("./ai-content.ts");
 const { parseAiImportHints } = require("./ai-import-hints.ts");
 const { signAiAttachment, readAiAttachment } = require("./ai-attachment.ts");
 const { normalizeProblemSource, problemSourceLabel } = require("../problem/problem-source.ts");
-const { AiService } = require("./ai.service.ts");
+const { aiServices, bareAiServices } = require("./ai-test-services.cjs");
 const { AiError } = require("./ai.types.ts");
 const { AiJobEntity } = require("./ai.entity.ts");
 const { ProblemJudgeInfoEntity } = require("../problem/problem-judge-info.entity.ts");
@@ -211,7 +211,7 @@ function tutorialFixture() {
     models = [];
   const user = { id: 1 },
     problem = { id: 1, isPublic: false, originalProblem: "" };
-  const service = Object.create(AiService.prototype);
+  const service = bareAiServices();
   service.model = async (_config, prompt) => {
     models.push(prompt);
     return { zh_CN: "中文 \\(x\\) 题解", en_US: "English \\(x\\) tutorial" };
@@ -292,7 +292,7 @@ test("malformed tutorial model responses reject as an AiError before creating di
   }
 });
 test("stale worker authorization and checkpoint compare-and-swap reject before overwriting state", async () => {
-  const service = Object.create(AiService.prototype),
+  const service = bareAiServices(),
     job = { id: "old-job", runToken: "old", state: {}, progress: 0 };
   service.jobs = { findOneBy: async () => ({ id: job.id, runToken: "new", status: "running" }) };
   await assert.rejects(service.assertJob(job), /JOB_LEASE_LOST/);
@@ -304,7 +304,7 @@ test("stale worker authorization and checkpoint compare-and-swap reject before o
   await assert.rejects(service.checkpoint(job, "step", 30), /JOB_LEASE_LOST/);
 });
 function importFixture(markdown, judgeInfo = { timeLimit: 1000, memoryLimit: 64, fileIo: null }) {
-  const service = Object.create(AiService.prototype),
+  const service = bareAiServices(),
     writes = [];
   const job = {
     id: "import-job",
@@ -370,7 +370,7 @@ test("invalid model-import limits fail before binding a created problem to the t
   assert.equal(fixture.job.problemId, undefined);
 });
 test("attachment preparation enforces all import privileges before creating a signed upload", async () => {
-  const service = Object.create(AiService.prototype),
+  const service = bareAiServices(),
     checked = [];
   service.key = crypto.randomBytes(32);
   service.requirePrivilege = async (_user, privilege) => checked.push(privilege);

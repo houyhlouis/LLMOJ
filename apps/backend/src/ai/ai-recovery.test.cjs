@@ -17,7 +17,7 @@ require.extensions[".ts"] = (module, filename) =>
     }).outputText,
     filename
   );
-const { AiService } = require("./ai.service.ts");
+const { aiServices, bareAiServices } = require("./ai-test-services.cjs");
 const { qualityState } = require("./ai-quality.fixture.cjs");
 const { outputCaseRule } = require("./ai-output-rules.ts");
 const statement = (text, sectionTitle = "Description") => [
@@ -33,7 +33,7 @@ const original = () => ({
   judgeInfo: { timeLimit: 1000, memoryLimit: 128, fileIo: null }
 });
 function fixture() {
-  const svc = new AiService(
+  const svc = aiServices(
     {},
     {},
     {},

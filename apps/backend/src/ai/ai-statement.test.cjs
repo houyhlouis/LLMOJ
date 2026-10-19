@@ -17,7 +17,7 @@ require.extensions[".ts"] = (module, filename) =>
     }).outputText,
     filename
   );
-const { AiService } = require("./ai.service.ts");
+const { aiServices, bareAiServices } = require("./ai-test-services.cjs");
 const { qualityState } = require("./ai-quality.fixture.cjs");
 const { resolveAiFileIo } = require("./ai-file-io.ts");
 const { ProblemLocalizedContentDto } = require("../problem/dto/problem-statement.dto.ts");
@@ -29,7 +29,7 @@ const { validateSync } = require("class-validator");
 const text = (sectionTitle = "Description", value = "Task") => ({ sectionTitle, type: "Text", text: value });
 const localized = (locale = "en_US", contentSections = [text()]) => ({ locale, title: "Fixture", contentSections });
 const sample = { inputData: "1\n", outputData: "1\n" };
-const service = () => new AiService({}, {}, {}, {}, {}, {}, {});
+const service = () => aiServices({}, {}, {}, {}, {}, {}, {});
 
 test("normalization keeps section order and existing labels, deduplicates references and fills both languages", () => {
   const first = { sectionTitle: "Original sample label", type: "Sample", sampleId: 1, text: "" };
@@ -101,7 +101,7 @@ test("normalization never silently drops illegal sample IDs", () => {
 test("translate repairs already bilingual statements without another model call and preserves existing tags", async () => {
   let saved,
     writes = 0;
-  const svc = new AiService(
+  const svc = aiServices(
     {},
     {},
     {},
@@ -131,7 +131,7 @@ test("translate repairs already bilingual statements without another model call 
 
 test("import persists normalized sample references before its durable checkpoint", async () => {
   let created, checkpoint;
-  const svc = new AiService(
+  const svc = aiServices(
     {},
     {},
     {},
@@ -236,7 +236,7 @@ test("file I/O rejects invalid paths, ambiguity, same-file truncation and guesse
 
 test("case-insensitive statements or explicit plan flag force SPJ before the runner", async () => {
   for (const statement of ["Letter case is ignored.", "Output is case-insensitive.", "答案不区分大小写。", ""]) {
-    const svc = new AiService(
+    const svc = aiServices(
       {},
       {},
       {},
@@ -308,7 +308,7 @@ test("file-I/O discovery never confuses freopen arguments with standard-I/O requ
 });
 
 test("named I/O from an old durable plan is normalized before sample execution without changing the generation harness", async () => {
-  const svc = new AiService(
+  const svc = aiServices(
     {},
     {},
     {},
@@ -350,7 +350,7 @@ test("named I/O from an old durable plan is normalized before sample execution w
 
 test("tutorial instructions use effective judging I/O and reject implicit machine-integer bounds", async () => {
   let prompt;
-  const svc = new AiService(
+  const svc = aiServices(
     {},
     {},
     {},
@@ -440,7 +440,7 @@ test("testdata checkpoints each current model stage before dispatch and persists
   process.env.HYHOJ_AI_PRIVATE_HOSTS = "127.0.0.1";
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   try {
-    const svc = new AiService(
+    const svc = aiServices(
       {},
       {},
       {},
@@ -509,7 +509,7 @@ test("testdata checkpoints each current model stage before dispatch and persists
 });
 
 test("cached archive-derived I/O cannot override the current standard-input judging contract", async () => {
-  const svc = new AiService({}, {}, {}, { userHasPrivilege: async () => true, permissionDecision: async () => true }, {}, {}, {});
+  const svc = aiServices({}, {}, {}, { userHasPrivilege: async () => true, permissionDecision: async () => true }, {}, {}, {});
   svc.checkpoint = async () => {};
   const snapshot = { statements: [localized("en_US", [text("Input", "The first line of the input file contains n."), text("Output", "The output file contains the answer.")])], samples: [sample], judgeInfo: { fileIo: null } };
   const job = { id: "archive-io", input: { count: 5 }, state: {
@@ -524,7 +524,7 @@ test("cached archive-derived I/O cannot override the current standard-input judg
 });
 
 test("a fresh model plan cannot replace manually configured named I/O with attachment basenames", async () => {
-  const svc = new AiService({}, {}, {}, { userHasPrivilege: async () => true, permissionDecision: async () => true }, {}, {}, {});
+  const svc = aiServices({}, {}, {}, { userHasPrivilege: async () => true, permissionDecision: async () => true }, {}, {}, {});
   svc.checkpoint = async () => {};
   const actual = { inputFilename: "a.in", outputFilename: "a.out" };
   const snapshot = { statements: [localized()], samples: [], judgeInfo: { fileIo: actual } };

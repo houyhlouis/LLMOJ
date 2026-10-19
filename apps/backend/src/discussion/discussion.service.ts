@@ -28,7 +28,8 @@ import { GroupService } from "../group/group.service";
 import { ProblemEntity } from "../problem/problem.entity";
 import { LockService } from "../redis/lock.service";
 import { escapeLike } from "../database/database.utils";
-import { ProblemPermissionType, ProblemService } from "../problem/problem.service";
+import { ProblemService } from "../problem/problem.service";
+import { ProblemAccessService, ProblemPermissionType } from "../problem/problem-access.service";
 import { prefetchTeamResources, teamResourceAccess } from "../team/team-access";
 
 export enum DiscussionReactionType {
@@ -80,6 +81,7 @@ export class DiscussionService {
     private readonly userPrivilegeService: UserPrivilegeService,
     private readonly permissionService: PermissionService,
     private readonly problemService: ProblemService,
+    private readonly problemAccess: ProblemAccessService,
     private readonly lockService: LockService
   ) {
     this.auditService.registerObjectTypeQueryHandler(AuditLogObjectType.Discussion, async discussionId => {
@@ -143,7 +145,7 @@ export class DiscussionService {
       return false;
     if (discussion.problemId) {
       const problem = discussionProblem ?? (await this.problemService.findProblemById(discussion.problemId));
-      if (!(await this.problemService.userHasPermission(user, problem, ProblemPermissionType.View))) return false;
+      if (!(await this.problemAccess.userHasPermission(user, problem, ProblemPermissionType.View))) return false;
     }
     const teamRead = await teamResourceAccess(this.connection, user, "discussion", discussion.id);
     if (teamRead !== null) {
@@ -192,7 +194,7 @@ export class DiscussionService {
     const hasViewProblemPermission = async () => {
       if (discussion.problemId) {
         if (!discussionProblem) discussionProblem = await this.problemService.findProblemById(discussion.problemId);
-        return await this.problemService.userHasPermission(user, discussionProblem, ProblemPermissionType.View);
+        return await this.problemAccess.userHasPermission(user, discussionProblem, ProblemPermissionType.View);
       }
       return true;
     };

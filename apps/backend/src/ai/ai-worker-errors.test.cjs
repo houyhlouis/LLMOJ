@@ -19,14 +19,14 @@ require.extensions[".ts"] = (module, filename) =>
     filename
   );
 const { Logger } = require("@nestjs/common");
-const { AiService } = require("./ai.service.ts");
+const { aiServices, bareAiServices } = require("./ai-test-services.cjs");
 const { AiError } = require("./ai.types.ts");
 
 const logged = [];
 Logger.overrideLogger({ log() {}, warn() {}, debug() {}, verbose() {}, error: message => logged.push(message) });
 
 function fixture() {
-  const service = new AiService({}, {}, {}, {}, {}, {}, {});
+  const service = aiServices({}, {}, {}, {}, {}, {}, {});
   const counted = [];
   service.metricWorkerErrors = { inc: labels => counted.push(labels.stage) };
   return { service, counted };

@@ -8,7 +8,7 @@ require.extensions[".ts"] = (module, filename) => module._compile(ts.transpileMo
   compilerOptions: { target: ts.ScriptTarget.ES2019, module: ts.ModuleKind.CommonJS, esModuleInterop: true,
     experimentalDecorators: true, emitDecoratorMetadata: true }
 }).outputText, filename);
-const { AiService } = require("./ai.service.ts");
+const { aiServices, bareAiServices } = require("./ai-test-services.cjs");
 const { AiError } = require("./ai.types.ts");
 const official = "https://atcoder.jp/contests/abc081/tasks/abc081_b";
 const core = "Repeatedly divide every number by two while all numbers are even.";
@@ -16,7 +16,7 @@ const bounds = "1 <= N <= 200";
 const evidence = JSON.stringify({ results: [{ url: official, title: "Shift only", content: `${core} ${bounds}. Count the number of simultaneous operations.` }] });
 function fixture(options = {}) {
   const state = { searches: [], models: [], writes: [], checkpoints: [], snapshotChecks: 0, jobChecks: 0 };
-  const service = new AiService({ getRepository: () => ({ update: async (id, value) => state.writes.push({ id, value }) }) }, {}, {}, {}, {}, {}, {});
+  const service = aiServices({ getRepository: () => ({ update: async (id, value) => state.writes.push({ id, value }) }) }, {}, {}, {}, {}, {}, {});
   service.references = async (_job, _config, query, required) => {
     assert.equal(required, true);
     state.searches.push(query);
@@ -132,7 +132,7 @@ test("a newly verified source removes stale not-found warnings without removing 
 
 
 test("import admission checkpoints explicit source candidates before the model can strip metadata", async () => {
-  const service = Object.create(AiService.prototype);let stored;
+  const service = bareAiServices();let stored;
   service.requirePrivilege = async () => {};
   service.problems = { userHasCreateProblemPermission: async () => true };
   service.config = async () => ({ llm: { apiKey: "synthetic-not-used", model: "fixture" } });

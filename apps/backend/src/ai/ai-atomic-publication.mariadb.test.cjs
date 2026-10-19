@@ -15,12 +15,13 @@ require.extensions[".ts"] = (module, filename) => module._compile(ts.transpileMo
 }).outputText, filename);
 String.prototype.format ||= function (...args) { return require("node:util").format(this, ...args); };
 const { DataSource, EntitySchema } = require("typeorm");
-const { AiService } = require("./ai.service.ts");
+const { aiServices, bareAiServices } = require("./ai-test-services.cjs");
 const { qualityState, qualityReceipt } = require("./ai-quality.fixture.cjs");
 const { AiJobEntity } = require("./ai.entity.ts");
 const { UserEntity } = require("../user/user.entity.ts");
 const { TeamResourceEntity } = require("../team/team.entity.ts");
 const { ProblemService } = require("../problem/problem.service.ts");
+const { bareProblemServices } = require("../problem/problem-test-services.cjs");
 const { ProblemEntity } = require("../problem/problem.entity.ts");
 const { ProblemJudgeInfoEntity } = require("../problem/problem-judge-info.entity.ts");
 const { ProblemSampleEntity } = require("../problem/problem-sample.entity.ts");
@@ -76,7 +77,7 @@ test("AI final publication is atomic against cancel, lease loss and human edits 
       const job = await db.getRepository(AiJobEntity).save({ id: crypto.randomUUID(), ownerId: user.id,
         problemId: problem.id, action: "testdata", status: "running", step: "testdata", runToken: crypto.randomUUID(), state: {}, input: { count: 5 }, progress: 0, error: null });
       const redis = { cacheDelete: async () => {} };
-      const problems = Object.create(ProblemService.prototype);
+      const problems = bareProblemServices();
       Object.assign(problems, { connection: db, problemRepository: db.getRepository(ProblemEntity),
         problemJudgeInfoRepository: db.getRepository(ProblemJudgeInfoEntity), problemSampleRepository: db.getRepository(ProblemSampleEntity),
         problemTagMapRepository: db.getRepository(ProblemTagMapEntity), redisService: redis,
@@ -85,7 +86,7 @@ test("AI final publication is atomic against cancel, lease loss and human edits 
       const privileges = { userHasPrivilege: async () => true, permissionDecision: async () => true };
       problems.userPrivilegeService = privileges;
       problems.configService = { config: { preference: { security: { allowNonPrivilegedUserEditPublicProblem: false } } } };
-      const service = new AiService(db, {}, db.getRepository(AiJobEntity), privileges, problems, {}, {});
+      const service = aiServices(db, {}, db.getRepository(AiJobEntity), privileges, problems, {}, {});
       service.editable = async (_user, id) => problems.findProblemById(id);
       service.recordAiAudit = async () => {};
       const snapshot = await service.snapshot(problem);

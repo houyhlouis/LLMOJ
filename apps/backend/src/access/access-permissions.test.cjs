@@ -50,12 +50,12 @@ const { UserPrivilegeService } = load("user/user-privilege.service.ts", {
 });
 const { AccessGuard } = load("access/access.guard.ts");
 const { withoutTestData } = load("submission/submission-redaction.ts");
-const { ProblemService, ProblemPermissionType } = load("problem/problem.service.ts");
+const { ProblemAccessService, ProblemPermissionType } = load("problem/problem-access.service.ts");
 const { SubmissionAccessService, SubmissionPermissionType } = load("submission/submission-access.service.ts", {
-  "../problem/problem.service": { ProblemPermissionType }
+  "../problem/problem-access.service": { ProblemPermissionType }
 });
 const { DiscussionService, DiscussionPermissionType } = load("discussion/discussion.service.ts", {
-  "../problem/problem.service": { ProblemPermissionType }
+  "../problem/problem-access.service": { ProblemPermissionType }
 });
 (async () => {
   const rules = new Map();
@@ -189,7 +189,7 @@ const { DiscussionService, DiscussionPermissionType } = load("discussion/discuss
     userHasPrivilege: async (_u, p) => p !== P.ViewHiddenProblem,
     permissionDecision: async (_u, p, fallback) => (p === P.EditAnyProblem ? true : fallback)
   };
-  const problems = Object.create(ProblemService.prototype);
+  const problems = Object.create(ProblemAccessService.prototype);
   problems.userPrivilegeService = capability;
   problems.userHasPermissionOriginal = async () => false;
   assert.equal(
@@ -200,7 +200,10 @@ const { DiscussionService, DiscussionPermissionType } = load("discussion/discuss
   const discussions = Object.create(DiscussionService.prototype);
   discussions.userPrivilegeService = capability;
   discussions.userHasPermissionOriginal = async () => false;
-  discussions.problemService = { findProblemById: async () => ({}), userHasPermission: async () => false };
+  discussions.problemService = discussions.problemAccess = {
+    findProblemById: async () => ({}),
+    userHasPermission: async () => false
+  };
   assert.equal(
     await discussions.userHasPermission(
       user,
@@ -220,7 +223,10 @@ const { DiscussionService, DiscussionPermissionType } = load("discussion/discuss
   );
   const submissions = Object.create(SubmissionAccessService.prototype);
   submissions.userPrivilegeService = service;
-  submissions.problemService = { userHasPermission: async () => false, findProblemById: async () => ({}) };
+  submissions.problemService = submissions.problemAccess = {
+    userHasPermission: async () => false,
+    findProblemById: async () => ({})
+  };
   submissions.getUserProblemAcceptedSubmissionCount = async () => 1;
   const publicSubmission = { id: 1, status: "Accepted", isPublic: true, submitterId: 99, problemId: 1 };
   assert.equal(

@@ -7,12 +7,12 @@ require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileMo
   compilerOptions: { target: ts.ScriptTarget.ES2019, module: ts.ModuleKind.CommonJS, esModuleInterop: true,
     experimentalDecorators: true, emitDecoratorMetadata: true }
 }).outputText, filename);
-const { AiService } = require('./ai.service.ts');
+const { aiServices, bareAiServices } = require("./ai-test-services.cjs");
 const { AiError } = require('./ai.types.ts');
 
 function fixture(errorAt) {
   let attempts = 0, checks = 0, writes = 0;
-  const service = new AiService({ transaction: async (isolation, run) => {
+  const service = aiServices({ transaction: async (isolation, run) => {
     assert.equal(isolation, 'SERIALIZABLE');
     const result = await run({});
     const error = errorAt(++attempts);

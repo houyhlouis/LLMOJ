@@ -9,6 +9,7 @@ require.extensions[".ts"] = (module, filename) => module._compile(ts.transpileMo
 const { DataSource } = require("typeorm");
 const { DiscussionService, DiscussionPermissionType } = require("./discussion.service.ts");
 const { ProblemService } = require("../problem/problem.service.ts");
+const { bareProblemServices } = require("../problem/problem-test-services.cjs");
 const { UserPrivilegeService } = require("../user/user-privilege.service.ts");
 const { PermissionService } = require("../permission/permission.service.ts");
 const { GroupService } = require("../group/group.service.ts");
@@ -54,9 +55,9 @@ test("all discussion pages/counts apply private-problem/team/global/object ACLs 
     const groups = Object.assign(Object.create(GroupService.prototype), { groupMembershipRepository: db.getRepository(GroupMembershipEntity) });
     const permissions = Object.assign(Object.create(PermissionService.prototype), { connection: db, groupService: groups,
       permissionForUserRepository: db.getRepository(PermissionForUserEntity), permissionForGroupRepository: db.getRepository(PermissionForGroupEntity) });
-    const problems = Object.assign(Object.create(ProblemService.prototype), { connection: db, problemRepository: db.getRepository(ProblemEntity), userPrivilegeService: privileges, permissionService: permissions });
+    const problems = Object.assign(bareProblemServices(), { connection: db, problemRepository: db.getRepository(ProblemEntity), userPrivilegeService: privileges, permissionService: permissions });
     const service = Object.assign(Object.create(DiscussionService.prototype), { connection: db, discussionRepository: db.getRepository(DiscussionEntity),
-      userPrivilegeService: privileges, permissionService: permissions, problemService: problems });
+      userPrivilegeService: privileges, permissionService: permissions, problemService: problems, problemAccess: problems, problemFiles: problems, problemTags: problems, problemLocks: problems });
     const users = await db.getRepository(UserEntity).find({ order: { id: "ASC" } });
     const rows = await db.getRepository(DiscussionEntity).find({ order: { sortTime: "DESC" } });
     async function compare(user, type, publisherId) {

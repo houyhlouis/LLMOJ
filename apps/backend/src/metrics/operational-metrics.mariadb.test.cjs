@@ -27,7 +27,7 @@ const { JudgeQueueService } = require("../judge/judge-queue.service.ts");
 const { StatisticsOutboxEntity, StatisticsOutboxKind } = require("../submission/statistics-outbox.entity.ts");
 const { StatisticsOutboxService } = require("../submission/statistics-outbox.service.ts");
 const { AiJobEntity } = require("../ai/ai.entity.ts");
-const { AiService } = require("../ai/ai.service.ts");
+const { AiJobCoordinator } = require("../ai/ai-job-coordinator.service.ts");
 
 const configPath = process.env.LLMOJ_OPERATIONS_TEST_DB_CONFIG;
 
@@ -108,7 +108,7 @@ test("operational gauges read the queue, statistics and AI tables", { skip: !con
   // eslint-disable-next-line no-new
   new JudgeQueueService(ds, { getClient: () => ({}) }, metrics);
   Object.assign(Object.create(StatisticsOutboxService.prototype), { connection: ds, metricsService: metrics }).registerMetrics();
-  const ai = new AiService(ds, {}, {}, {}, {}, {}, {});
+  const ai = new AiJobCoordinator(ds, {}, {}, {}, {}, {});
   Object.assign(ai, {
     metricsService: metrics,
     admission: { load: () => ({ running: 1, waiting: 2 }) },

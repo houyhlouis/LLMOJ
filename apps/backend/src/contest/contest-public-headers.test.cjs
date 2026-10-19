@@ -76,6 +76,7 @@ function fixture() {
     getProblemLocalizedContent: async () => [],
     getProblemSamples: async () => []
   };
+  service.problemAccess = service.problemFiles = service.problems;
   service.files = {
     downloadFileToPath: async (uuid, file, maximum) => {
       assert.equal(maximum, 256 * 1024);

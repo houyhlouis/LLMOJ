@@ -28,6 +28,7 @@ const {
   parseModelJson
 } = require("./ai-provider.ts");
 const { AiService } = require("./ai.service.ts");
+const { aiServices, bareAiServices } = require("./ai-test-services.cjs");
 const { qualityState, qualityReceipt } = require("./ai-quality.fixture.cjs");
 const { AiError } = require("./ai.types.ts");
 const { validateLlmConfiguration, DEEPSEEK_MAX_OUTPUT_TOKENS } = require("./ai-validation.ts");
@@ -244,7 +245,7 @@ test("configuration AES-GCM and response key redaction, owner-scoped storage", a
     findOneBy: async ({ userId }) => stored.get(userId),
     save: async value => stored.set(value.userId, value)
   };
-  const svc = new AiService({}, repo, {}, { userHasPrivilege: async user => !!user }, {}, {}, {});
+  const svc = aiServices({}, repo, {}, { userHasPrivilege: async user => !!user }, {}, {}, {});
   svc.key = require("node:crypto").randomBytes(32);
   const user = { id: 1 };
   const saved = await svc.saveConfiguration(user, {
@@ -292,7 +293,7 @@ test("jobs expose only the owner and no persisted private prompts or source code
       ];
     }
   };
-  const svc = new AiService({}, {}, repo, {}, {}, {}, {});
+  const svc = aiServices({}, {}, repo, {}, {}, {}, {});
   const result = await svc.listJobs({ id: 7 }, 12);
   assert.deepEqual(calls[0].where, { ownerId: 7, problemId: 12 });
   assert.equal(JSON.stringify(result).includes("PRIVATE"), false);
@@ -300,7 +301,7 @@ test("jobs expose only the owner and no persisted private prompts or source code
 });
 test("restarted pipeline skips committed steps and reruns only pending actions", async () => {
   const edits = [];
-  const svc = new AiService({}, {}, {}, {}, {}, {}, {});
+  const svc = aiServices({}, {}, {}, {}, {}, {}, {});
   svc.config = async () => ({ llm: {}, search: {} });
   svc.assertJob = async () => ({ id: 1 });
   svc.editable = async () => ({ id: 8 });
@@ -315,7 +316,7 @@ test("restarted pipeline skips committed steps and reruns only pending actions",
   assert.equal(edits.length, 4);
 });
 test("cancelled jobs and revoked privileges stop before mutation", async () => {
-  const svc = new AiService(
+  const svc = aiServices(
     { getRepository: () => ({ findOneBy: async () => ({ id: 1 }) }) },
     {},
     { findOneBy: async () => ({ status: "cancelled" }) },
@@ -329,7 +330,7 @@ test("cancelled jobs and revoked privileges stop before mutation", async () => {
   await assert.rejects(svc.assertJob({ id: "job", ownerId: 1 }), /PERMISSION_DENIED/);
 });
 test("completed tutorial checkpoint makes a retry side-effect free", async () => {
-  const svc = new AiService(
+  const svc = aiServices(
     {},
     {},
     {},
@@ -345,7 +346,7 @@ test("completed tutorial checkpoint makes a retry side-effect free", async () =>
   await svc.edit({ state: { discussionId: 91, discussionIds: { zh_CN: 91, en_US: 92 } } }, {}, {}, {}, {}, "tutorial");
 });
 test("stale problem snapshot refuses AI overwrite", async () => {
-  const svc = new AiService({}, {}, {}, {}, {}, {}, {});
+  const svc = aiServices({}, {}, {}, {}, {}, {}, {});
   svc.assertJob = async () => ({ id: 1 });
   svc.editable = async () => ({ id: 8 });
   svc.snapshot = async () => ({ statements: "manually changed" });
@@ -381,7 +382,7 @@ test("testdata publishes a uniquely named SPJ before switching and preserves old
         events = [];
       let cleaned = false,
         judgeInfo;
-      const svc = new AiService(
+      const svc = aiServices(
         {},
         {},
         {},
@@ -497,7 +498,7 @@ test("testdata requires proof for every generated input and sample before publis
       let switches = 0,
         cleaned = 0,
         activatedJudgeInfo;
-      const svc = new AiService(
+      const svc = aiServices(
         {},
         {},
         {},
@@ -587,7 +588,7 @@ test("testdata requires proof for every generated input and sample before publis
 });
 
 test("validator artifact cannot replace an existing judging dependency", async () => {
-  const svc = new AiService(
+  const svc = aiServices(
     {},
     {},
     {},
@@ -621,7 +622,7 @@ test("input validator is generated independently from make/std and a runner reje
     checkpoints = [];
   let uploaded = 0,
     switched = 0;
-  const svc = new AiService(
+  const svc = aiServices(
     {},
     {},
     {},
@@ -696,7 +697,7 @@ test("input validator is generated independently from make/std and a runner reje
 });
 
 test("retry regenerates failed programs while retaining committed artifacts", () => {
-  const svc = new AiService({}, {}, {}, {}, {}, {}, {});
+  const svc = aiServices({}, {}, {}, {}, {}, {}, {});
   const state = {
     completed: ["import", "tutorial"],
     discussionId: 7,
@@ -765,7 +766,7 @@ test("configuration DTO accepts larger integer output limits without accepting u
 
 test("old 1M save requests are capped, keep both keys, and return the applied budget", async () => {
   const stored = new Map();
-  const svc = new AiService(
+  const svc = aiServices(
     {},
     { findOneBy: async ({ userId }) => stored.get(userId), save: async row => stored.set(row.userId, row) },
     {},
@@ -824,7 +825,7 @@ test("HTTP save with the real controller and DTO accepts stale 1M settings on th
   const { Module, ValidationPipe } = require("@nestjs/common");
   const { AiController } = require("./ai.controller.ts");
   const stored = new Map();
-  const svc = new AiService(
+  const svc = aiServices(
     {},
     {
       findOneBy: async ({ userId }) => stored.get(userId),
@@ -962,7 +963,7 @@ test("SSE keepalives are ignored but missing Responses terminal events never cou
 
 test("unreadable image import returns a specific error before creating or checkpointing a problem", async () => {
   let mutations = 0;
-  const svc = new AiService(
+  const svc = aiServices(
     {},
     {},
     {},
@@ -993,7 +994,7 @@ test("unreadable image import returns a specific error before creating or checkp
 
 test("null and empty import output produce expected validation errors with no business writes", async () => {
   let mutations = 0;
-  const svc = new AiService(
+  const svc = aiServices(
     {},
     {},
     {},
@@ -1022,7 +1023,7 @@ test("null and empty import output produce expected validation errors with no bu
 });
 
 test("nested null statement fields and samples never throw TypeError", () => {
-  const svc = new AiService({}, {}, {}, {}, {}, {}, {});
+  const svc = aiServices({}, {}, {}, {}, {}, {}, {});
   const valid = {
     localizedContents: [
       {
@@ -1090,7 +1091,7 @@ test("source resolution verifies aliases and performs a targeted search before i
   for (const targeted of [false, true]) {
     const searches = [], prompts = [], updates = [], stages = [];
     let permissionChecks = 0, snapshotChecks = 0;
-    const svc = new AiService(
+    const svc = aiServices(
       { getRepository: () => ({ update: async (id, value) => updates.push({ id, value }) }) }, {}, {}, {}, {}, {}, {}
     );
     svc.references = async (_job, _config, query) => {
@@ -1129,7 +1130,7 @@ test("source resolution verifies aliases and performs a targeted search before i
 test("a proposed original URL remains rejected when targeted search cannot verify the exact page", async () => {
   const searches = [];
   let writes = 0, verificationCalls = 0;
-  const svc = new AiService({ getRepository: () => ({ update: async () => writes++ }) }, {}, {}, {}, {}, {}, {});
+  const svc = aiServices({ getRepository: () => ({ update: async () => writes++ }) }, {}, {}, {}, {}, {}, {});
   svc.references = async (_job, _config, query) => {
     searches.push(query);
     return JSON.stringify([{ url: "https://example.org/problem/123-extra", content: "An unrelated problem with a different exact URL." }]);
@@ -1249,7 +1250,7 @@ test("a matching URL alone cannot confirm a targeted original problem", async ()
   ]) {
     let searches = 0, verifications = 0, writes = 0;
     const official = "https://codeforces.com/contest/4/problem/B";
-    const svc = new AiService({ getRepository: () => ({ update: async () => writes++ }) }, {}, {}, {}, {}, {}, {});
+    const svc = aiServices({ getRepository: () => ({ update: async () => writes++ }) }, {}, {}, {}, {}, {}, {});
     svc.references = async () => JSON.stringify([{ url: ++searches <= 2 ? "https://example.org/discussion" : official }]);
     svc.model = async (_config, prompt) => {
       if (prompt.startsWith("Independently verify")) { verifications++; return confirmation; }
@@ -1273,7 +1274,7 @@ test("a matching URL alone cannot confirm a targeted original problem", async ()
 test("invalid source model output produces a predictable not-found state and no writes", async () => {
   for (const response of [null, undefined, [], {}, { candidates: null }, { candidates: [null, { url: 42 }] }]) {
     let writes = 0, searches = 0, modelCalls = 0;
-    const svc = new AiService({ getRepository: () => ({ update: async () => writes++ }) }, {}, {}, {}, {}, {}, {});
+    const svc = aiServices({ getRepository: () => ({ update: async () => writes++ }) }, {}, {}, {}, {}, {}, {});
     svc.references = async () => { searches++; return "[]"; };
     svc.model = async () => { modelCalls++; return response; };
     svc.assertJob = async () => ({ id: 1 });

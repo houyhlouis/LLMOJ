@@ -22,6 +22,7 @@ const { validateSync } = require("class-validator");
 const { CreateProblemRequestDto } = require("./dto/create-problem-request.dto.ts");
 const { UpdateProblemStatementRequestDto } = require("./dto/update-problem-statement-request.dto.ts");
 const { ProblemService } = require("./problem.service.ts");
+const { bareProblemServices } = require("./problem-test-services.cjs");
 const { ProblemEntity, ProblemType } = require("./problem.entity.ts");
 const { ProblemSampleEntity } = require("./problem-sample.entity.ts");
 const { LocalizedContentType } = require("../localized-content/localized-content.entity.ts");
@@ -37,7 +38,7 @@ const statement = (contents = [localized()]) => ({
 const errors = (type, value) =>
   validateSync(plainToInstance(type, value), { whitelist: true, forbidNonWhitelisted: true });
 function fakeService() {
-  const service = Object.create(ProblemService.prototype),
+  const service = bareProblemServices(),
     saved = [],
     localizedWrites = [],
     deleted = [];

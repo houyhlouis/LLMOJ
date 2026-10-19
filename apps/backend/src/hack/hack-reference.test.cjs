@@ -36,6 +36,7 @@ function fixture() {
     submissionAccess: { userHasPermission: async () => view, userHasTeamResourceAccess: async () => true },
     languages: new CodeLanguageService(), files: {}
   });
+  service.problemAccess = service.problemFiles = service.problemTags = service.problemLocks = service.problems;
   return { service, user, problem, submission, content, options, calls, store,
     denyConfigure: () => configure = false, denyView: () => view = false };
 }

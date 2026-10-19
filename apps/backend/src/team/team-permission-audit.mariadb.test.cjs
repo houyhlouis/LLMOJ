@@ -7,7 +7,8 @@ require.extensions[".ts"] = (module, filename) => module._compile(ts.transpileMo
 String.prototype.format ||= function (...args) { return require("node:util").format(this, ...args); };
 const { DataSource, EntitySchema } = require("typeorm"), acl = require("./team-access.ts");
 const { TeamService } = require("./team.service.ts"), { TeamEntity, TeamMemberEntity, TeamResourceEntity, TeamAssignmentEntity, TeamFileEntity } = require("./team.entity.ts");
-const { ProblemEntity } = require("../problem/problem.entity.ts"), { ProblemService, ProblemPermissionType } = require("../problem/problem.service.ts");
+const { ProblemEntity } = require("../problem/problem.entity.ts"), { ProblemPermissionType } = require("../problem/problem-access.service.ts");
+const { bareProblemServices } = require("../problem/problem-test-services.cjs");
 const { ProblemController } = require("../problem/problem.controller.ts"), { ProblemJudgeInfoEntity } = require("../problem/problem-judge-info.entity.ts"), { ProblemFileEntity, ProblemFileType } = require("../problem/problem-file.entity.ts");
 const { DiscussionEntity } = require("../discussion/discussion.entity.ts"), { DiscussionService, DiscussionPermissionType } = require("../discussion/discussion.service.ts");
 const { DiscussionContentEntity } = require("../discussion/discussion-content.entity.ts"), { DiscussionReplyEntity } = require("../discussion/discussion-reply.entity.ts");
@@ -69,7 +70,7 @@ test("team direct links, list counts, archival, disqualified work and removal re
       }
       return true;
     }, permissionDecision: async (_u, p, fallback) => !denied.has(p) && fallback };
-    const problems = Object.create(ProblemService.prototype); Object.assign(problems, { connection: db, problemRepository: db.getRepository(ProblemEntity), userPrivilegeService: privileges, permissionService: { userOrItsGroupsHavePermission: async () => true }, getProblemLocalizedTitle: async p => "Problem " + p.id });
+    const problems = bareProblemServices(); Object.assign(problems, { connection: db, problemRepository: db.getRepository(ProblemEntity), userPrivilegeService: privileges, permissionService: { userOrItsGroupsHavePermission: async () => true }, getProblemLocalizedTitle: async p => "Problem " + p.id });
     const discussionRepository = db.getRepository(DiscussionEntity);
     const originalDiscussionBuilder = discussionRepository.createQueryBuilder.bind(discussionRepository);
     discussionRepository.createQueryBuilder = (...args) => {
@@ -82,11 +83,11 @@ test("team direct links, list counts, archival, disqualified work and removal re
       }
       return qb;
     };
-    const discussions = Object.create(DiscussionService.prototype); Object.assign(discussions, { connection: db, discussionRepository: db.getRepository(DiscussionEntity), discussionContentRepository: db.getRepository(DiscussionContentEntity), discussionReplyRepository: db.getRepository(DiscussionReplyEntity), problemService: problems, userPrivilegeService: privileges, permissionService: { userOrItsGroupsHavePermission: async () => true }, configService: { config: { preference: { security: { discussionReplyDefaultPublic: true } } } } });
-    const submissions = Object.create(SubmissionService.prototype); Object.assign(submissions, { connection: db, submissionRepository: db.getRepository(SubmissionEntity), problemService: problems, userPrivilegeService: privileges });
+    const discussions = Object.create(DiscussionService.prototype); Object.assign(discussions, { connection: db, discussionRepository: db.getRepository(DiscussionEntity), discussionContentRepository: db.getRepository(DiscussionContentEntity), discussionReplyRepository: db.getRepository(DiscussionReplyEntity), problemService: problems, problemAccess: problems, problemFiles: problems, problemTags: problems, problemLocks: problems, userPrivilegeService: privileges, permissionService: { userOrItsGroupsHavePermission: async () => true }, configService: { config: { preference: { security: { discussionReplyDefaultPublic: true } } } } });
+    const submissions = Object.create(SubmissionService.prototype); Object.assign(submissions, { connection: db, submissionRepository: db.getRepository(SubmissionEntity), problemService: problems, problemAccess: problems, problemFiles: problems, problemTags: problems, problemLocks: problems, userPrivilegeService: privileges });
     const submissionAccess = Object.assign(Object.create(SubmissionAccessService.prototype), submissions);
     const contestAccess = Object.assign(Object.create(ContestAccessService.prototype), { db, privileges }); const contests = Object.create(ContestService.prototype); Object.assign(contests, { db, access: contestAccess, submissions });
-    const teams = Object.create(TeamService.prototype); Object.assign(teams, { db, privileges, problems, users: { findUsersByExistingIds: async ids => ids.map(id => ({ id, username: "user" + id })) }, files: { signDownloadLink: async args => { assert.equal(args.expiresSeconds, 60); return "signed"; } } });
+    const teams = Object.create(TeamService.prototype); Object.assign(teams, { db, privileges, problems, problemAccess: problems, problemFiles: problems, problemTags: problems, problemLocks: problems, users: { findUsersByExistingIds: async ids => ids.map(id => ({ id, username: "user" + id })) }, files: { signDownloadLink: async args => { assert.equal(args.expiresSeconds, 60); return "signed"; } } });
     const groups = Object.create(GroupService.prototype);
     Object.assign(groups, { groupRepository: { createQueryBuilder: alias => {
       const qb = db.getRepository(GroupEntity).createQueryBuilder(alias);
@@ -213,7 +214,7 @@ test("team direct links, list counts, archival, disqualified work and removal re
         fileService: { processUploadRequest: async () => { throw Error("storage called before authorization"); }, deleteFile: async () => { throw Error("storage deletion before authorization"); } }
       });
       const controller = Object.create(ProblemController.prototype);
-      Object.assign(controller, { problemService: problems, userPrivilegeService: privileges, auditService: { log: async () => {} } });
+      Object.assign(controller, { problemService: problems, problemAccess: problems, problemFiles: problems, problemTags: problems, problemLocks: problems, userPrivilegeService: privileges, auditService: { log: async () => {} } });
       const restore = async () => {
         await db.getRepository(TeamMemberEntity).save({ id: 4, teamId: 10, userId: 4, status: "member", permissions: ["problems", "contests", "discussions", "assignments", "files"], groupId: null });
         await db.getRepository(TeamResourceEntity).update({ kind: "problem", resourceId: 3 }, { archived: false });

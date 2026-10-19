@@ -67,7 +67,8 @@ import { UserEntity } from "../user/user.entity";
 import { UserService } from "../user/user.service";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
 import { AuditLogObjectType, AuditService } from "../audit/audit.service";
-import { ProblemPermissionType, ProblemService } from "../problem/problem.service";
+import { ProblemService } from "../problem/problem.service";
+import { ProblemAccessService, ProblemPermissionType } from "../problem/problem-access.service";
 import { GroupEntity } from "../group/group.entity";
 import { GroupService } from "../group/group.service";
 import { isEmoji } from "../common/validators";
@@ -82,6 +83,7 @@ export class DiscussionController {
   constructor(
     private readonly discussionService: DiscussionService,
     private readonly problemService: ProblemService,
+    private readonly problemAccess: ProblemAccessService,
     private readonly configService: ConfigService,
     private readonly userService: UserService,
     private readonly userPrivilegeService: UserPrivilegeService,
@@ -120,7 +122,7 @@ export class DiscussionController {
         };
 
       // Should we add a permission type "publish discussion"?
-      if (!(await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.View)))
+      if (!(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.View)))
         return {
           error: CreateDiscussionResponseError.PERMISSION_DENIED
         };
@@ -296,7 +298,7 @@ export class DiscussionController {
     const discussions = candidates.filter((_, index) => canSee[index]);
     if (
       filterProblem &&
-      !(await this.problemService.userHasPermission(currentUser, filterProblem, ProblemPermissionType.View))
+      !(await this.problemAccess.userHasPermission(currentUser, filterProblem, ProblemPermissionType.View))
     )
       return { error: QueryDiscussionsResponseError.PERMISSION_DENIED };
 
@@ -625,7 +627,7 @@ export class DiscussionController {
       if (problemId) {
         const problem = await this.problemService.findProblemById(problemId);
         if (!problem) return { error: UpdateDiscussionResponseError.NO_SUCH_PROBLEM };
-        if (!(await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.View)))
+        if (!(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.View)))
           return { error: UpdateDiscussionResponseError.PERMISSION_DENIED };
       }
     }

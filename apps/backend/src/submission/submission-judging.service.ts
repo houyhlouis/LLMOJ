@@ -28,6 +28,8 @@ import type { ProblemJudgeInfoTraditional } from "../problem-type/types/traditio
 
 import { logger } from "../logger";
 import { ProblemService } from "../problem/problem.service";
+import { ProblemFileService } from "../problem/problem-file.service";
+import { ProblemLockService } from "../problem/problem-lock.service";
 import { UserEntity } from "../user/user.entity";
 import { ProblemEntity, ProblemType } from "../problem/problem.entity";
 import { JudgeQueueService, JudgeTaskPriorityType, JudgeTask, JudgeTaskExtraInfo } from "../judge/judge-queue.service";
@@ -78,6 +80,8 @@ export class SubmissionJudgingService implements JudgeTaskService<SubmissionProg
     @InjectRepository(SubmissionDetailEntity)
     private readonly submissionDetailRepository: Repository<SubmissionDetailEntity>,
     private readonly problemService: ProblemService,
+    private readonly problemFiles: ProblemFileService,
+    private readonly problemLocks: ProblemLockService,
     private readonly problemTypeFactoryService: ProblemTypeFactoryService,
     private readonly judgeQueueService: JudgeQueueService,
     private readonly lockService: LockService,
@@ -472,7 +476,7 @@ export class SubmissionJudgingService implements JudgeTaskService<SubmissionProg
         : baseJudgeInfo;
       const testData: ProblemDataVersionFile[] = dataVersion
         ? dataVersion.testData
-        : await this.problemService.getProblemFiles(problem, ProblemFileType.TestData);
+        : await this.problemFiles.getProblemFiles(problem, ProblemFileType.TestData);
 
       const problemTypeService = this.problemTypeFactoryService.type(problemType);
 
@@ -588,7 +592,7 @@ export class SubmissionJudgingService implements JudgeTaskService<SubmissionProg
     callback: (submission: SubmissionEntity, problem?: ProblemEntity) => Promise<T>
   ): Promise<T> {
     if (lockProblem) {
-      return await this.problemService.lockProblemById(submission.problemId, "Read", async problem => {
+      return await this.problemLocks.lockProblemById(submission.problemId, "Read", async problem => {
         if (!problem) return await callback(null);
         return await this.lockService.lock(
           `Submission_${submission.id}`,

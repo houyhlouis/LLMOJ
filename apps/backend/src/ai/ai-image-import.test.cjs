@@ -7,7 +7,7 @@ require('reflect-metadata');
 require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
   compilerOptions: { target: ts.ScriptTarget.ES2019, module: ts.ModuleKind.CommonJS, esModuleInterop: true, experimentalDecorators: true, emitDecoratorMetadata: true }
 }).outputText, filename);
-const { AiService } = require('./ai.service.ts');
+const { aiServices, bareAiServices } = require("./ai-test-services.cjs");
 const { AiError } = require('./ai.types.ts');
 const { AiJobEntity } = require('./ai.entity.ts');
 const { ProblemJudgeInfoEntity } = require('../problem/problem-judge-info.entity.ts');
@@ -20,7 +20,7 @@ const fixtureStatement = (locale = 'zh_CN', text = '输入文件的第一行包�
 });
 const fixtureJob = (input = {}) => ({ id: '00000000-0000-4000-8000-000000000001', ownerId: 1, action: 'import', step: 'import', status: 'running', progress: 0, input, state: { completed: [] } });
 const fixtureService = response => {
-  const svc = Object.create(AiService.prototype), calls = [];
+  const svc = bareAiServices(), calls = [];
   svc.model = async (...args) => { calls.push(args); return typeof response === 'function' ? response(...args) : response; };
   return { svc, calls };
 };

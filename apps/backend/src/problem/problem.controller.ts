@@ -10,7 +10,11 @@ import { ProblemFileType } from "./problem-file.entity";
 
 import { ProblemEntity } from "./problem.entity";
 
-import { ProblemService, ProblemPermissionType, ProblemPermissionLevel } from "./problem.service";
+import { ProblemService } from "./problem.service";
+import { ProblemAccessService, ProblemPermissionType, ProblemPermissionLevel } from "./problem-access.service";
+import { ProblemFileService } from "./problem-file.service";
+import { ProblemTagService } from "./problem-tag.service";
+import { ProblemLockService } from "./problem-lock.service";
 
 import {
   CreateProblemRequestDto,
@@ -96,6 +100,10 @@ export class ProblemController {
   constructor(
     private readonly configService: ConfigService,
     private readonly problemService: ProblemService,
+    private readonly problemAccess: ProblemAccessService,
+    private readonly problemFiles: ProblemFileService,
+    private readonly problemTags: ProblemTagService,
+    private readonly problemLocks: ProblemLockService,
     private readonly problemArchiveService: ProblemArchiveService,
     private readonly userService: UserService,
     private readonly userPrivilegeService: UserPrivilegeService,
@@ -137,7 +145,7 @@ export class ProblemController {
 
     const filterTags = !request.tagIds
       ? null
-      : (await this.problemService.findProblemTagsByExistingIds(request.tagIds)).filter(tag => tag);
+      : (await this.problemTags.findProblemTagsByExistingIds(request.tagIds)).filter(tag => tag);
     const filterOwner = !request.ownerId ? null : await this.userService.findUserById(request.ownerId);
     const [problems, count] = await this.problemService.queryProblemsAndCount(
       currentUser,
@@ -169,7 +177,7 @@ export class ProblemController {
             (problem.difficulty != null && problem.difficulty >= request.difficultyMin)) &&
           (request.difficultyMax == null ||
             (problem.difficulty != null && problem.difficulty <= request.difficultyMax)) &&
-          (await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.View, hasPrivilege))
+          (await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.View, hasPrivilege))
         ) {
           problems.unshift(problem);
           if (problems.length > request.takeCount) problems.pop();
@@ -192,13 +200,13 @@ export class ProblemController {
     );
     const [titles, problemTags] = await Promise.all([
       this.problemService.getProblemLocalizedTitles(problems, titleLocales),
-      !request.titleOnly && this.problemService.getProblemTagsByProblems(problems)
+      !request.titleOnly && this.problemTags.getProblemTagsByProblems(problems)
     ]);
     const tagList = problemTags
       ? [...new Map([...problemTags.values()].flat().map(tag => [tag.id, tag])).values()]
       : [];
     const localizedTags = new Map(
-      (await this.problemService.getProblemTagsLocalized(tagList, request.locale)).map(tag => [tag.id, tag])
+      (await this.problemTags.getProblemTagsLocalized(tagList, request.locale)).map(tag => [tag.id, tag])
     );
 
     return {
@@ -216,7 +224,7 @@ export class ProblemController {
         }))
       ),
       permissions: !request.titleOnly && {
-        createProblem: await this.problemService.userHasCreateProblemPermission(currentUser),
+        createProblem: await this.problemAccess.userHasCreateProblemPermission(currentUser),
         manageTags: await this.userPrivilegeService.permissionDecision(
           currentUser,
           UserPrivilegeType.ManageProblemTags,
@@ -230,7 +238,7 @@ export class ProblemController {
         filterTags &&
         filterTags.length &&
         (await Promise.all(
-          filterTags.map(problemTag => this.problemService.getProblemTagLocalized(problemTag, request.locale))
+          filterTags.map(problemTag => this.problemTags.getProblemTagLocalized(problemTag, request.locale))
         )),
       filterOwner: !request.titleOnly && filterOwner && (await this.userService.getUserMeta(filterOwner, currentUser))
     };
@@ -246,12 +254,12 @@ export class ProblemController {
     @CurrentUser() currentUser: UserEntity,
     @Body() request: CreateProblemRequestDto
   ): Promise<CreateProblemResponseDto> {
-    if (!(await this.problemService.userHasCreateProblemPermission(currentUser)))
+    if (!(await this.problemAccess.userHasCreateProblemPermission(currentUser)))
       return {
         error: CreateProblemResponseError.PERMISSION_DENIED
       };
 
-    const problemTags = await this.problemService.findProblemTagsByExistingIds(request.statement.problemTagIds);
+    const problemTags = await this.problemTags.findProblemTagsByExistingIds(request.statement.problemTagIds);
     if (problemTags.some(problemTag => problemTag == null))
       return {
         error: CreateProblemResponseError.NO_SUCH_PROBLEM_TAG
@@ -288,12 +296,12 @@ export class ProblemController {
         error: UpdateProblemStatementResponseError.NO_SUCH_PROBLEM
       };
 
-    if (!(await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.Modify)))
+    if (!(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.Modify)))
       return {
         error: UpdateProblemStatementResponseError.PERMISSION_DENIED
       };
 
-    const problemTags = await this.problemService.findProblemTagsByExistingIds(request.problemTagIds);
+    const problemTags = await this.problemTags.findProblemTagsByExistingIds(request.problemTagIds);
     if (problemTags.some(problemTag => problemTag == null))
       return {
         error: UpdateProblemStatementResponseError.NO_SUCH_PROBLEM_TAG
@@ -302,7 +310,7 @@ export class ProblemController {
     // For audit logging
     const oldStatement = {
       localizedContents: await this.problemService.getProblemAllLocalizedContents(problem),
-      problemTagIds: await this.problemService.getProblemTagIdsByProblem(problem),
+      problemTagIds: await this.problemTags.getProblemTagIdsByProblem(problem),
       samples: await this.problemService.getProblemSamples(problem)
     };
 
@@ -312,7 +320,7 @@ export class ProblemController {
       problemTags,
       async (manager, currentProblem) => {
         if (
-          !(await this.problemService.userHasPermission(
+          !(await this.problemAccess.userHasPermission(
             currentUser,
             currentProblem,
             ProblemPermissionType.Modify,
@@ -361,7 +369,7 @@ export class ProblemController {
         error: GetProblemResponseError.NO_SUCH_PROBLEM
       };
 
-    if (!(await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.View)))
+    if (!(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.View)))
       return {
         error: GetProblemResponseError.PERMISSION_DENIED
       };
@@ -416,13 +424,11 @@ export class ProblemController {
 
     if (request.tagsOfLocale) {
       promises.push(
-        this.problemService
+        this.problemTags
           .getProblemTagsByProblem(problem)
           .then(problemTags =>
             Promise.all(
-              problemTags.map(problemTag =>
-                this.problemService.getProblemTagLocalized(problemTag, request.tagsOfLocale)
-              )
+              problemTags.map(problemTag => this.problemTags.getProblemTagLocalized(problemTag, request.tagsOfLocale))
             )
           )
           .then(tagsOfLocale => (result.tagsOfLocale = tagsOfLocale))
@@ -431,12 +437,12 @@ export class ProblemController {
 
     if (request.tagsOfAllLocales) {
       promises.push(
-        this.problemService
+        this.problemTags
           .getProblemTagsByProblem(problem)
           .then(problemTags =>
             Promise.all(
               problemTags.map(async problemTag => {
-                const localizedNames = await this.problemService.getProblemTagAllLocalizedNames(problemTag);
+                const localizedNames = await this.problemTags.getProblemTagAllLocalizedNames(problemTag);
                 return {
                   id: problemTag.id,
                   color: problemTag.color,
@@ -469,7 +475,7 @@ export class ProblemController {
       if (!(await this.userPrivilegeService.permissionDecision(currentUser, UserPrivilegeType.ReadProblemData, true)))
         return { error: GetProblemResponseError.PERMISSION_DENIED };
       promises.push(
-        this.problemService
+        this.problemFiles
           .listProblemFiles(problem, ProblemFileType.TestData, true)
           .then(testData => (result.testData = testData))
       );
@@ -481,7 +487,7 @@ export class ProblemController {
       )
         return { error: GetProblemResponseError.PERMISSION_DENIED };
       promises.push(
-        this.problemService
+        this.problemFiles
           .listProblemFiles(problem, ProblemFileType.AdditionalFile, true)
           .then(additionalFiles => (result.additionalFiles = additionalFiles))
       );
@@ -499,7 +505,7 @@ export class ProblemController {
 
     if (request.permissionOfCurrentUser) {
       promises.push(
-        this.problemService
+        this.problemAccess
           .getUserPermissions(currentUser, problem)
           .then(permissions => (result.permissionOfCurrentUser = permissions))
       );
@@ -573,7 +579,7 @@ export class ProblemController {
         error: SetProblemPermissionsResponseError.PERMISSION_DENIED
       };
 
-    return await this.problemService.lockProblemById<SetProblemPermissionsResponseDto>(
+    return await this.problemLocks.lockProblemById<SetProblemPermissionsResponseDto>(
       request.problemId,
       "Read",
       async problem => {
@@ -583,9 +589,7 @@ export class ProblemController {
             errorObjectId: request.problemId
           };
 
-        if (
-          !(await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.ManagePermission))
-        )
+        if (!(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.ManagePermission)))
           return {
             error: SetProblemPermissionsResponseError.PERMISSION_DENIED
           };
@@ -662,7 +666,7 @@ export class ProblemController {
         error: SetProblemDisplayIdResponseError.NO_SUCH_PROBLEM
       };
 
-    if (!(await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.ManagePublicness)))
+    if (!(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.ManagePublicness)))
       return {
         error: SetProblemDisplayIdResponseError.PERMISSION_DENIED
       };
@@ -710,7 +714,7 @@ export class ProblemController {
         error: SetProblemPublicResponseError.NO_DISPLAY_ID
       };
 
-    if (!(await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.ManagePublicness)))
+    if (!(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.ManagePublicness)))
       return {
         error: SetProblemPublicResponseError.PERMISSION_DENIED
       };
@@ -756,14 +760,12 @@ export class ProblemController {
 
     const hasPrivilege = await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageProblem);
 
-    if (
-      !(await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.Modify, hasPrivilege))
-    )
+    if (!(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.Modify, hasPrivilege)))
       return {
         error: AddProblemFileResponseError.PERMISSION_DENIED
       };
 
-    const result = await this.problemService.addProblemFile(
+    const result = await this.problemFiles.addProblemFile(
       problem,
       request.type,
       request.uploadInfo,
@@ -804,12 +806,12 @@ export class ProblemController {
         error: RemoveProblemFilesResponseError.NO_SUCH_PROBLEM
       };
 
-    if (!(await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.Modify)))
+    if (!(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.Modify)))
       return {
         error: RemoveProblemFilesResponseError.PERMISSION_DENIED
       };
 
-    await this.problemService.removeProblemFiles(problem, request.type, request.filenames, currentUser);
+    await this.problemFiles.removeProblemFiles(problem, request.type, request.filenames, currentUser);
 
     await this.auditService.log("problem.remove_files", AuditLogObjectType.Problem, problem.id, {
       type: request.type,
@@ -834,12 +836,12 @@ export class ProblemController {
         error: DownloadProblemFilesResponseError.NO_SUCH_PROBLEM
       };
 
-    if (!(await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.View)))
+    if (!(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.View)))
       return {
         error: DownloadProblemFilesResponseError.PERMISSION_DENIED
       };
 
-    const problemFiles = await this.problemService.listProblemFiles(problem, request.type);
+    const problemFiles = await this.problemFiles.listProblemFiles(problem, request.type);
     const downloadList = problemFiles.filter(
       problemFile => request.filenameList.length === 0 || request.filenameList.includes(problemFile.filename)
     );
@@ -873,12 +875,12 @@ export class ProblemController {
         error: RenameProblemFileResponseError.NO_SUCH_PROBLEM
       };
 
-    if (!(await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.Modify)))
+    if (!(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.Modify)))
       return {
         error: RenameProblemFileResponseError.PERMISSION_DENIED
       };
 
-    const renamed = await this.problemService.renameProblemFile(
+    const renamed = await this.problemFiles.renameProblemFile(
       problem,
       request.type,
       request.filename,
@@ -915,9 +917,7 @@ export class ProblemController {
 
     const hasPrivilege = await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageProblem);
 
-    if (
-      !(await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.Modify, hasPrivilege))
-    )
+    if (!(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.Modify, hasPrivilege)))
       return {
         error: UpdateProblemJudgeInfoResponseError.PERMISSION_DENIED
       };
@@ -931,7 +931,7 @@ export class ProblemController {
       hasPrivilege,
       async (manager, currentProblem) => {
         if (
-          !(await this.problemService.userHasPermission(
+          !(await this.problemAccess.userHasPermission(
             currentUser,
             currentProblem,
             ProblemPermissionType.Modify,
@@ -965,10 +965,10 @@ export class ProblemController {
     @CurrentUser() currentUser: UserEntity,
     @Body() request: GetAllProblemTagsRequestDto
   ): Promise<GetAllProblemTagsResponseDto> {
-    const problemTags = await this.problemService.getAllProblemTags();
+    const problemTags = await this.problemTags.getAllProblemTags();
     return {
       tags: await Promise.all(
-        problemTags.map(problemTag => this.problemService.getProblemTagLocalized(problemTag, request.locale))
+        problemTags.map(problemTag => this.problemTags.getProblemTagLocalized(problemTag, request.locale))
       )
     };
   }
@@ -993,7 +993,7 @@ export class ProblemController {
         error: CreateProblemTagResponseError.PERMISSION_DENIED
       };
 
-    const problemTag = await this.problemService.createProblemTag(
+    const problemTag = await this.problemTags.createProblemTag(
       request.localizedNames.map(({ locale, name }) => [locale, name]),
       request.color
     );
@@ -1014,13 +1014,13 @@ export class ProblemController {
     @CurrentUser() currentUser: UserEntity,
     @Body() request: GetProblemTagDetailRequestDto
   ): Promise<GetProblemTagDetailResponseDto> {
-    const problemTag = await this.problemService.findProblemTagById(request.id);
+    const problemTag = await this.problemTags.findProblemTagById(request.id);
     if (!problemTag)
       return {
         error: GetProblemTagDetailResponseError.NO_SUCH_PROBLEM_TAG
       };
 
-    const localizedNames = await this.problemService.getProblemTagAllLocalizedNames(problemTag);
+    const localizedNames = await this.problemTags.getProblemTagAllLocalizedNames(problemTag);
     return {
       id: problemTag.id,
       color: problemTag.color,
@@ -1048,17 +1048,17 @@ export class ProblemController {
         error: UpdateProblemTagResponseError.PERMISSION_DENIED
       };
 
-    const problemTag = await this.problemService.findProblemTagById(request.id);
+    const problemTag = await this.problemTags.findProblemTagById(request.id);
     if (!problemTag)
       return {
         error: UpdateProblemTagResponseError.NO_SUCH_PROBLEM_TAG
       };
 
-    const oldLocalizedNames = await this.problemService.getProblemTagAllLocalizedNames(problemTag);
+    const oldLocalizedNames = await this.problemTags.getProblemTagAllLocalizedNames(problemTag);
     const oldColor = problemTag.color;
 
     const localizedNameTuples: [Locale, string][] = request.localizedNames.map(({ locale, name }) => [locale, name]);
-    await this.problemService.updateProblemTag(problemTag, localizedNameTuples, request.color);
+    await this.problemTags.updateProblemTag(problemTag, localizedNameTuples, request.color);
 
     await this.auditService.log("problem_tag.update", AuditLogObjectType.ProblemTag, problemTag.id, {
       oldLocalizedNames,
@@ -1090,15 +1090,15 @@ export class ProblemController {
         error: DeleteProblemTagResponseError.PERMISSION_DENIED
       };
 
-    const problemTag = await this.problemService.findProblemTagById(request.id);
+    const problemTag = await this.problemTags.findProblemTagById(request.id);
     if (!problemTag)
       return {
         error: DeleteProblemTagResponseError.NO_SUCH_PROBLEM_TAG
       };
 
-    const localizedNames = await this.problemService.getProblemTagAllLocalizedNames(problemTag);
+    const localizedNames = await this.problemTags.getProblemTagAllLocalizedNames(problemTag);
 
-    await this.problemService.deleteProblemTag(problemTag);
+    await this.problemTags.deleteProblemTag(problemTag);
 
     await this.auditService.log("problem_tag.delete", AuditLogObjectType.ProblemTag, problemTag.id, {
       localizedNames,
@@ -1127,12 +1127,12 @@ export class ProblemController {
         error: GetAllProblemTagsOfAllLocalesResponseError.PERMISSION_DENIED
       };
 
-    const problemTags = await this.problemService.getAllProblemTags();
+    const problemTags = await this.problemTags.getAllProblemTags();
 
     return {
       tags: await Promise.all(
         problemTags.map(async problemTag => {
-          const localizedNames = await this.problemService.getProblemTagAllLocalizedNames(problemTag);
+          const localizedNames = await this.problemTags.getProblemTagAllLocalizedNames(problemTag);
           return {
             id: problemTag.id,
             color: problemTag.color,
@@ -1162,13 +1162,13 @@ export class ProblemController {
         error: DeleteProblemResponseError.NO_SUCH_PROBLEM
       };
 
-    if (!(await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.Delete)))
+    if (!(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.Delete)))
       return {
         error: DeleteProblemResponseError.PERMISSION_DENIED
       };
 
     // Lock the problem after permission check to avoid DDoS attacks.
-    return await this.problemService.lockProblemById<DeleteProblemResponseDto>(
+    return await this.problemLocks.lockProblemById<DeleteProblemResponseDto>(
       request.problemId,
       "Write",
       // eslint-disable-next-line @typescript-eslint/no-shadow
@@ -1214,13 +1214,13 @@ export class ProblemController {
         error: ChangeProblemTypeResponseError.NO_SUCH_PROBLEM
       };
 
-    if (!(await this.problemService.userHasPermission(currentUser, problem, ProblemPermissionType.Delete)))
+    if (!(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.Delete)))
       return {
         error: ChangeProblemTypeResponseError.PERMISSION_DENIED
       };
 
     // Lock the problem after permission check to avoid DDoS attacks.
-    return await this.problemService.lockProblemById<ChangeProblemTypeResponseDto>(
+    return await this.problemLocks.lockProblemById<ChangeProblemTypeResponseDto>(
       request.problemId,
       "Write",
       // eslint-disable-next-line @typescript-eslint/no-shadow

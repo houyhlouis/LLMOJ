@@ -51,6 +51,7 @@ function fixture({ parentProblem = 30, collisionProblem = null, canViewParent = 
       return problem.id === parentProblem && canViewParent;
     }
   };
+  service.problemAccess = service.problemFiles = service.problemTags = service.problemLocks = service.problemService;
   service.permissionService = { userOrItsGroupsHavePermission: async () => false };
   service.setReplyPublic = async (target, value) => {
     changes.push({ target, value });

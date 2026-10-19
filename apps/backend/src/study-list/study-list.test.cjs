@@ -45,6 +45,13 @@ test("problems are shown, or marked unavailable, as each one's access allows", a
   const titles = { "1:zh_CN": "一", "1:en_US": "One", "4:en_US": "Four" };
   const checked = [],
     acceptedAsked = [];
+  const problemStub = {
+    findProblemsByExistingIds: async ids => ids.map(id => problems[id]),
+    userHasPermission: async (user, problem) => (checked.push(problem.id), problem.isPublic),
+    getProblemLocalizedTitles: async (list, locales) =>
+      list.map((problem, i) => titles[`${problem.id}:${locales[i]}`] ?? null),
+    getProblemMeta: async problem => ({ id: problem.id })
+  };
   const service = new StudyListService(
     {
       getRepository: entity => {
@@ -52,13 +59,8 @@ test("problems are shown, or marked unavailable, as each one's access allows", a
         return { findOneBy: async ({ id, ownerId }) => (id === 5 && ownerId === 9 ? list : null) };
       }
     },
-    {
-      findProblemsByExistingIds: async ids => ids.map(id => problems[id]),
-      userHasPermission: async (user, problem) => (checked.push(problem.id), problem.isPublic),
-      getProblemLocalizedTitles: async (list, locales) =>
-        list.map((problem, i) => titles[`${problem.id}:${locales[i]}`] ?? null),
-      getProblemMeta: async problem => ({ id: problem.id })
-    },
+    problemStub,
+    problemStub,
     {
       // The problem set's rule: the latest accepted submission outside contests, for the problems shown
       getUserLatestSubmissionByProblems: async (user, shown, acceptedOnly) => {

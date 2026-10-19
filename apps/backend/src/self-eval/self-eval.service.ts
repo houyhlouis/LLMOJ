@@ -15,7 +15,10 @@ import { SelfEvalRequestDto } from "./self-eval-request.dto";
 
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
-import { ProblemService, ProblemPermissionType } from "../problem/problem.service";
+import { ProblemService } from "../problem/problem.service";
+import { ProblemAccessService, ProblemPermissionType } from "../problem/problem-access.service";
+import { ProblemFileService } from "../problem/problem-file.service";
+import { ProblemLockService } from "../problem/problem-lock.service";
 import { ProblemType } from "../problem/problem.entity";
 import { ProblemFileType } from "../problem/problem-file.entity";
 import { ProblemJudgeInfoTraditional } from "../problem-type/types/traditional/problem-judge-info.interface";
@@ -48,6 +51,9 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
     @InjectDataSource() private readonly db: DataSource,
     private readonly privileges: UserPrivilegeService,
     private readonly problems: ProblemService,
+    private readonly problemAccess: ProblemAccessService,
+    private readonly problemFiles: ProblemFileService,
+    private readonly problemLocks: ProblemLockService,
     private readonly submissions: SubmissionService,
     private readonly contestAccess: ContestAccessService,
     private readonly files: FileService,
@@ -120,7 +126,10 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
     const scope = `contest:${request.contestId}:problem:${problem.id}`;
     const quotaScope = `contest:${request.contestId}`;
     const testData = Object.fromEntries(
-      (await this.problems.getProblemFiles(problem, ProblemFileType.TestData)).map(file => [file.filename, file.uuid])
+      (await this.problemFiles.getProblemFiles(problem, ProblemFileType.TestData)).map(file => [
+        file.filename,
+        file.uuid
+      ])
     );
     return {
       problem,
@@ -148,7 +157,7 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
     const canManage =
       ctx.manager &&
       ctx.canPrepare &&
-      (await this.problems.userHasPermission(user, ctx.problem, ProblemPermissionType.Modify)) &&
+      (await this.problemAccess.userHasPermission(user, ctx.problem, ProblemPermissionType.Modify)) &&
       (await this.privileges.userHasPrivilege(user, UserPrivilegeType.EditProblemData));
     const reason = !ctx.enabled
       ? "Self evaluation is disabled for this contest"
@@ -202,7 +211,7 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
     if (
       !ctx.manager ||
       !(await this.privileges.userHasPrivilege(user, UserPrivilegeType.EditProblemData)) ||
-      !(await this.problems.userHasPermission(user, ctx.problem, ProblemPermissionType.Modify))
+      !(await this.problemAccess.userHasPermission(user, ctx.problem, ProblemPermissionType.Modify))
     )
       throw new ForbiddenException();
     if (!ctx.canPrepare) throw new BadRequestException("Configure self evaluation before the contest starts");
@@ -225,7 +234,7 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
       if (
         !fresh.manager ||
         !fresh.canPrepare ||
-        !(await this.problems.userHasPermission(user, fresh.problem, ProblemPermissionType.Modify)) ||
+        !(await this.problemAccess.userHasPermission(user, fresh.problem, ProblemPermissionType.Modify)) ||
         !(await this.privileges.userHasPrivilege(user, UserPrivilegeType.EditProblemData))
       )
         throw new ForbiddenException();
@@ -236,7 +245,7 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
         await this.files.uploadFile(fileId, Buffer.from(programs[index]));
         // addProblemFile acquires the problem read lock itself; do not call it under a write lock.
         // eslint-disable-next-line no-await-in-loop -- Each source must be registered before the recipe references it.
-        const error = await this.problems.addProblemFile(
+        const error = await this.problemFiles.addProblemFile(
           fresh.problem,
           ProblemFileType.TestData,
           { uuid: fileId, size: Buffer.byteLength(programs[index]) },
@@ -250,12 +259,12 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
           throw new BadRequestException("Could not save the self-evaluation source file");
         }
       }
-      await this.problems.lockProblemById(ctx.problem.id, "Write", async problem => {
+      await this.problemLocks.lockProblemById(ctx.problem.id, "Write", async problem => {
         const latest = await this.context(user, request);
         if (
           !latest.manager ||
           !latest.canPrepare ||
-          !(await this.problems.userHasPermission(user, problem, ProblemPermissionType.Modify)) ||
+          !(await this.problemAccess.userHasPermission(user, problem, ProblemPermissionType.Modify)) ||
           !(await this.privileges.userHasPrivilege(user, UserPrivilegeType.EditProblemData))
         )
           throw new ForbiddenException();
@@ -284,7 +293,7 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
           async (manager, currentProblem) => {
             if (
               !currentProblem ||
-              !(await this.problems.userHasPermission(
+              !(await this.problemAccess.userHasPermission(
                 user,
                 currentProblem,
                 ProblemPermissionType.Modify,
@@ -348,7 +357,7 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
     if (
       !ctx.manager ||
       !(await this.privileges.userHasPrivilege(user, UserPrivilegeType.EditProblemData)) ||
-      !(await this.problems.userHasPermission(user, ctx.problem, ProblemPermissionType.Modify))
+      !(await this.problemAccess.userHasPermission(user, ctx.problem, ProblemPermissionType.Modify))
     )
       throw new ForbiddenException();
     if (!ctx.canPrepare) throw new BadRequestException("Prepare the fixed prediction set before the contest starts");

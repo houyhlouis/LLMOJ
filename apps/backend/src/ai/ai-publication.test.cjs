@@ -20,7 +20,7 @@ require.extensions[".ts"] = (module, filename) =>
     }).outputText,
     filename
   );
-const { AiService } = require("./ai.service.ts");
+const { aiServices, bareAiServices } = require("./ai-test-services.cjs");
 const { qualityState, qualityReceipt } = require("./ai-quality.fixture.cjs");
 const { AiError } = require("./ai.types.ts");
 const { autoMatchInputToOutput, autoMatchOutputToInput } = require("../problem-type/common/auto-match-input-output.ts");
@@ -89,7 +89,7 @@ async function fixture(work, initial = originalJudgeInfo()) {
       }
     }
   }
-  const service = new AiService(
+  const service = aiServices(
     {},
     {},
     {},

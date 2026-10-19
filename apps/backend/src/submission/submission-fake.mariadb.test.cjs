@@ -26,6 +26,7 @@ const { UserEntity } = require("../user/user.entity.ts");
 const { UserService } = require("../user/user.service.ts");
 const { ProblemEntity } = require("../problem/problem.entity.ts");
 const { ProblemService } = require("../problem/problem.service.ts");
+const { bareProblemServices } = require("../problem/problem-test-services.cjs");
 const { ContestEntity } = require("../contest/contest.entity.ts");
 const { scoreContest } = require("../contest/contest-scoring.ts");
 const { TeamEntity, TeamMemberEntity, TeamResourceEntity } = require("../team/team.entity.ts");
@@ -62,7 +63,7 @@ test("fake retains evidence, updates statistics and resists judge races (real Ma
       const gate = new Promise(done => release = done), tail = previous.then(() => gate); tails.set(key, tail); await previous;
       try { return await callback(); } finally { release(); if (tails.get(key) === tail) tails.delete(key); }
     }};
-    const problemService = Object.create(ProblemService.prototype);
+    const problemService = bareProblemServices();
     Object.assign(problemService, { problemRepository: problems, userHasPermission: async () => true,
       lockProblemById: async (id, _type, callback) => callback(await problems.findOneBy({ id })) });
     const svc = Object.create(SubmissionService.prototype), userService = Object.create(UserService.prototype);
@@ -83,6 +84,7 @@ test("fake retains evidence, updates statistics and resists judge races (real Ma
         userHasPrivilege: async (u, p) => !!u && (u.isAdmin || ["ViewContest", "ViewSubmission"].includes(p)),
         permissionDecision: async (u, p) => !!u && (u.isAdmin || p === "RejudgeSubmission") }
     });
+    svc.problemAccess = svc.problemFiles = svc.problemTags = svc.problemLocks = svc.problemService;
     // The judging half and the permission rules of the submission service, with the same collaborators
     const judging = Object.assign(Object.create(SubmissionJudgingService.prototype), svc);
     const access = Object.assign(Object.create(SubmissionAccessService.prototype), svc);

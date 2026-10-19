@@ -3,7 +3,7 @@ import { ApiProperty } from "@nestjs/swagger";
 import { Type } from "class-transformer";
 import { IsInt, IsEnum, ValidateNested } from "class-validator";
 
-import { ProblemPermissionLevel } from "../problem.service";
+import { ProblemPermissionLevel } from "../problem-access.service";
 
 class SetProblemPermissionsRequestUserPermissionDto {
   @ApiProperty()

@@ -7,6 +7,10 @@ import { AiUsageService } from "./ai-usage.service";
 import { AiAdmissionService } from "./ai-admission.service";
 import { AiReservationEntity } from "./ai-reservation.entity";
 import { AiService } from "./ai.service";
+import { AiConfigurationService } from "./ai-configuration.service";
+import { AiJobCoordinator } from "./ai-job-coordinator.service";
+import { AiArtifactPublisher } from "./ai-artifact-publisher.service";
+import { AiWorkflowService } from "./ai-workflow.service";
 import { AiExecutionEntity } from "./ai-execution.entity";
 import { AiExecutionService } from "./ai-execution.service";
 import { AiController } from "./ai.controller";
@@ -41,7 +45,16 @@ import { RedisModule } from "../redis/redis.module";
     forwardRef(() => JudgeModule),
     RedisModule
   ],
-  providers: [AiService, AiUsageService, AiAdmissionService, AiExecutionService],
+  providers: [
+    AiConfigurationService,
+    AiJobCoordinator,
+    AiArtifactPublisher,
+    AiWorkflowService,
+    AiService,
+    AiUsageService,
+    AiAdmissionService,
+    AiExecutionService
+  ],
   controllers: [AiController],
   exports: [AiService]
 })

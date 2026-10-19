@@ -384,8 +384,8 @@ test("a run's time limit follows its number of program runs, as the AI runner's 
 });
 
 test("for a run on a judge machine, hidden samples are sent as the stored files they are, not downloaded", async () => {
-  const { AiService } = require("./ai.service.ts");
-  const service = Object.create(AiService.prototype);
+  const { aiServices, bareAiServices } = require("./ai-test-services.cjs");
+  const service = bareAiServices();
   const downloads = [];
   Object.assign(service, {
     execution: { mode: () => "judges" },

@@ -22,6 +22,7 @@ import type { SubmissionContentTraditional } from "../problem-type/types/traditi
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeType } from "../user/user-privilege.service";
 import { ProblemService } from "../problem/problem.service";
+import { ProblemLockService } from "../problem/problem-lock.service";
 import { SubmissionService } from "../submission/submission.service";
 import { SubmissionAccessService, SubmissionPermissionType } from "../submission/submission-access.service";
 import { SubmissionJudgingService } from "../submission/submission-judging.service";
@@ -37,6 +38,7 @@ export class ContestSubmissionService {
     @InjectDataSource() private readonly db: DataSource,
     private readonly access: ContestAccessService,
     private readonly problems: ProblemService,
+    private readonly problemLocks: ProblemLockService,
     private readonly submissions: SubmissionService,
     private readonly submissionAccess: SubmissionAccessService,
     private readonly submissionJudging: SubmissionJudgingService
@@ -48,7 +50,7 @@ export class ContestSubmissionService {
     if (!manager && contestEnded(contest)) throw new ForbiddenException("Contest has ended");
     const row = await this.db.getRepository(ContestProblemEntity).findOneBy({ id: problemId, contestId: id });
     if (!row) throw new NotFoundException();
-    return await this.problems.lockProblemById(row.problemId, "Read", async problem => {
+    return await this.problemLocks.lockProblemById(row.problemId, "Read", async problem => {
       if (!contestSubmissionsOpen(contest, manager)) throw new ForbiddenException("Contest is not running");
       if (!problem || !(await this.problems.getProblemJudgeInfo(problem))[1])
         throw new BadRequestException("Problem cannot be submitted");

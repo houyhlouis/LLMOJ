@@ -24,7 +24,8 @@ const { GroupEntity } = require('../group/group.entity.ts');
 const { GroupMembershipEntity } = require('../group/group-membership.entity.ts');
 const { GroupService } = require('../group/group.service.ts');
 const { ProblemEntity, ProblemType } = require('../problem/problem.entity.ts');
-const { ProblemService, ProblemPermissionType } = require('../problem/problem.service.ts');
+const { ProblemPermissionType } = require('../problem/problem-access.service.ts');
+const { bareProblemServices } = require("../problem/problem-test-services.cjs");
 const { ProblemFileEntity, ProblemFileType } = require('../problem/problem-file.entity.ts');
 const { ProblemJudgeInfoEntity } = require('../problem/problem-judge-info.entity.ts');
 const { ProblemSampleEntity } = require('../problem/problem-sample.entity.ts');
@@ -80,18 +81,18 @@ test('team creation, membership, private resources, assignments and files (real 
       createOrUpdate: async (objectId, type, locale, data, manager) => manager.save(LocalizedContentEntity, { objectId, type, locale, data })
     };
     const config = { config: { preference: { security: { allowEveryoneCreateDiscussion: true, discussionDefaultPublic: true, discussionReplyDefaultPublic: true, allowNonPrivilegedUserEditPublicProblem: false } } } };
-    const problems = Object.create(ProblemService.prototype);
+    const problems = bareProblemServices();
     Object.assign(problems, { connection: db, problemRepository: db.getRepository(ProblemEntity), problemJudgeInfoRepository: db.getRepository(ProblemJudgeInfoEntity), problemSampleRepository: db.getRepository(ProblemSampleEntity), problemFileRepository: db.getRepository(ProblemFileEntity), problemTagMapRepository: db.getRepository(ProblemTagMapEntity), userPrivilegeService: privilege, configService: config, localizedContentService: localized, permissionService: { userOrItsGroupsHavePermission: async () => false }, problemTypeFactoryService: { type: () => ({ getDefaultJudgeInfo: () => ({ timeLimit: 1000, memoryLimit: 128000 }) }) } });
     const discussions = Object.create(DiscussionService.prototype);
-    Object.assign(discussions, { connection: db, discussionRepository: db.getRepository(DiscussionEntity), discussionContentRepository: db.getRepository(DiscussionContentEntity), discussionReplyRepository: db.getRepository(DiscussionReplyEntity), userPrivilegeService: privilege, problemService: problems, configService: config, permissionService: { userOrItsGroupsHavePermission: async () => false } });
+    Object.assign(discussions, { connection: db, discussionRepository: db.getRepository(DiscussionEntity), discussionContentRepository: db.getRepository(DiscussionContentEntity), discussionReplyRepository: db.getRepository(DiscussionReplyEntity), userPrivilegeService: privilege, problemService: problems, problemAccess: problems, problemFiles: problems, problemTags: problems, problemLocks: problems, configService: config, permissionService: { userOrItsGroupsHavePermission: async () => false } });
     const userService = {
       findUsersByExistingIds: async ids => { const found = await userRepo.find(); return ids.map(id => found.find(user => user.id === id)); },
       getUserMeta: async user => ({ id: user.id, username: user.username, nickname: user.nickname })
     };
     const audit = { log: async () => {} };
-    const teams = new TeamService(db, userService, privilege, problems, discussions, files, audit);
+    const teams = new TeamService(db, userService, privilege, problems, problems, discussions, files, audit);
     const contestAccess = new ContestAccessService(db, privilege);
-    const contestProblems = new ContestProblemService(db, contestAccess, problems, files);
+    const contestProblems = new ContestProblemService(db, contestAccess, problems, problems, problems, files);
     const contests = new ContestService(db, contestAccess, new ContestScoreService(db), contestProblems, {}, files);
     const groups = Object.create(GroupService.prototype);
     Object.assign(groups, { groupRepository: db.getRepository(GroupEntity), groupMembershipRepository: db.getRepository(GroupMembershipEntity) });

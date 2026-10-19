@@ -39,7 +39,8 @@ import { GroupEntity } from "../group/group.entity";
 import { GroupMembershipEntity } from "../group/group-membership.entity";
 import { PermissionForGroupEntity } from "../permission/permission-for-group.entity";
 import { PermissionObjectType } from "../permission/permission-object-type.enum";
-import { ProblemService, ProblemPermissionType } from "../problem/problem.service";
+import { ProblemService } from "../problem/problem.service";
+import { ProblemAccessService, ProblemPermissionType } from "../problem/problem-access.service";
 import { ProblemEntity, ProblemType } from "../problem/problem.entity";
 import { ProblemContentSectionType } from "../problem/problem-content.interface";
 import { ProblemFileEntity } from "../problem/problem-file.entity";
@@ -83,6 +84,7 @@ export class TeamService {
     private readonly users: UserService,
     private readonly privileges: UserPrivilegeService,
     private readonly problems: ProblemService,
+    private readonly problemAccess: ProblemAccessService,
     private readonly discussions: DiscussionService,
     private readonly files: FileService,
     private readonly audit: AuditService
@@ -677,7 +679,7 @@ export class TeamService {
       return { problemId: problem.id };
     }
     const source = await this.problems.findProblemById(integer(data.sourceProblemId));
-    if (!source || !(await this.problems.userHasPermission(user, source, ProblemPermissionType.Modify)))
+    if (!source || !(await this.problemAccess.userHasPermission(user, source, ProblemPermissionType.Modify)))
       throw new ForbiddenException("Copying judge data requires permission to modify the source problem");
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), "llmoj-team-copy-"));
     const clonedFiles: { source: ProblemFileEntity; uuid: string; size: number; sha256: string }[] = [];
@@ -717,7 +719,13 @@ export class TeamService {
           throw new ForbiddenException();
         if (
           !lockedSource ||
-          !(await this.problems.userHasPermission(user, lockedSource, ProblemPermissionType.Modify, undefined, manager))
+          !(await this.problemAccess.userHasPermission(
+            user,
+            lockedSource,
+            ProblemPermissionType.Modify,
+            undefined,
+            manager
+          ))
         )
           throw new ForbiddenException();
         const currentFiles = await manager.findBy(ProblemFileEntity, { problemId: source.id });
@@ -894,7 +902,7 @@ export class TeamService {
     const problem = data.problemId ? await this.problems.findProblemById(integer(data.problemId)) : null;
     if (
       data.problemId &&
-      (!problem || !(await this.problems.userHasPermission(user, problem, ProblemPermissionType.View)))
+      (!problem || !(await this.problemAccess.userHasPermission(user, problem, ProblemPermissionType.View)))
     )
       throw new ForbiddenException("Problem unavailable");
     const discussion = await this.discussions.createDiscussion(
@@ -916,7 +924,7 @@ export class TeamService {
           throw new ForbiddenException();
         if (
           problem &&
-          !(await this.problems.userHasPermission(user, problem, ProblemPermissionType.View, undefined, manager))
+          !(await this.problemAccess.userHasPermission(user, problem, ProblemPermissionType.View, undefined, manager))
         )
           throw new ForbiddenException();
       }
@@ -993,7 +1001,7 @@ export class TeamService {
         let available = false;
         if (problem) {
           // eslint-disable-next-line no-await-in-loop -- Authorization uses this transaction's locking reads.
-          available = await this.problems.userHasPermission(
+          available = await this.problemAccess.userHasPermission(
             user,
             problem,
             ProblemPermissionType.View,
@@ -1083,8 +1091,10 @@ export class TeamService {
     for (const item of assignment.items) {
       // eslint-disable-next-line no-await-in-loop
       const problem = await this.problems.findProblemById(item.problemId);
-      // eslint-disable-next-line no-await-in-loop
-      const available = problem && (await this.problems.userHasPermission(user, problem, ProblemPermissionType.View));
+      const available =
+        problem &&
+        // eslint-disable-next-line no-await-in-loop
+        (await this.problemAccess.userHasPermission(user, problem, ProblemPermissionType.View));
       // eslint-disable-next-line no-await-in-loop -- Only fetch a title after its view authorization succeeds.
       const title = available ? await this.problems.getProblemLocalizedTitle(problem, problem.locales[0]) : undefined;
       details.push(!available ? { ...item, unavailable: true } : { ...item, title });

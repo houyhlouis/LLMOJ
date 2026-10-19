@@ -16,6 +16,7 @@ require.extensions['.ts'] = (module, filename) => {
 String.prototype.format ||= function (...args) { return require('node:util').format(this, ...args); };
 const { DataSource, EntitySchema, Repository } = require('typeorm');
 const { ProblemService } = require('./problem.service.ts');
+const { bareProblemServices } = require("./problem-test-services.cjs");
 const { ProblemEntity } = require('./problem.entity.ts');
 const { ProblemSampleEntity } = require('./problem-sample.entity.ts');
 const { ProblemJudgeInfoEntity } = require('./problem-judge-info.entity.ts');
@@ -47,7 +48,7 @@ test('problem mutations preserve concurrent fields and file ownership (real Mari
     const repo = db.getRepository(ProblemEntity), files = db.getRepository(ProblemFileEntity);
     const sample = db.getRepository(ProblemSampleEntity), info = db.getRepository(ProblemJudgeInfoEntity);
     const localized = db.getRepository(LocalizedContentEntity);
-    const svc = Object.create(ProblemService.prototype);
+    const svc = bareProblemServices();
     Object.assign(svc, { connection: db, problemRepository: repo, problemFileRepository: files,
       submissionService: { setSubmissionsPublic: async () => {}, problemHasAnySubmission: async () => false },
       redisService: { cacheDelete: async () => {} },

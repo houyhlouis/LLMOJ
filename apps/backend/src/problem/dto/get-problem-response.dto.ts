@@ -8,7 +8,7 @@ import { LocalizedProblemTagDto } from "./localized-problem-tag.dto";
 import { ProblemTagWithAllLocalesDto } from "./get-all-problem-tags-of-all-locales-response.dto";
 
 import { SubmissionContent } from "../../submission/submission-content.interface";
-import { ProblemPermissionType, ProblemPermissionLevel } from "../problem.service";
+import { ProblemPermissionType, ProblemPermissionLevel } from "../problem-access.service";
 
 import { UserMetaDto } from "../../user/dto";
 import { GroupMetaDto } from "../../group/dto";

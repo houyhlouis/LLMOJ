@@ -19,7 +19,9 @@ import { contestSubmissionsOpen } from "./contest-policy";
 import type { ContestRequestData } from "./contest-request.dto";
 
 import { UserEntity } from "../user/user.entity";
-import { ProblemService, ProblemPermissionType } from "../problem/problem.service";
+import { ProblemService } from "../problem/problem.service";
+import { ProblemAccessService, ProblemPermissionType } from "../problem/problem-access.service";
+import { ProblemFileService } from "../problem/problem-file.service";
 import { ProblemEntity, ProblemType } from "../problem/problem.entity";
 import { ProblemFileType } from "../problem/problem-file.entity";
 import { SubmissionEntity } from "../submission/submission.entity";
@@ -41,6 +43,8 @@ export class ContestProblemService {
     @InjectDataSource() private readonly db: DataSource,
     private readonly access: ContestAccessService,
     private readonly problems: ProblemService,
+    private readonly problemAccess: ProblemAccessService,
+    private readonly problemFiles: ProblemFileService,
     private readonly files: FileService
   ) {}
 
@@ -76,7 +80,7 @@ export class ContestProblemService {
     if (!manager) throw new ForbiddenException();
     const problemId = Number(data.problemId);
     const problem = await this.problems.findProblemById(problemId);
-    if (!problem || !(await this.problems.userHasPermission(user, problem, ProblemPermissionType.Modify)))
+    if (!problem || !(await this.problemAccess.userHasPermission(user, problem, ProblemPermissionType.Modify)))
       throw new ForbiddenException("Problem modification permission required");
     const repository = this.db.getRepository(ContestProblemEntity);
     const row =
@@ -161,8 +165,8 @@ export class ContestProblemService {
       .slice(0, 16);
     if (!aliases.length) return [];
     const [publicFiles, hiddenFiles] = await Promise.all([
-      this.problems.listProblemFiles(problem, ProblemFileType.AdditionalFile, true),
-      this.problems.listProblemFiles(problem, ProblemFileType.TestData, true)
+      this.problemFiles.listProblemFiles(problem, ProblemFileType.AdditionalFile, true),
+      this.problemFiles.listProblemFiles(problem, ProblemFileType.TestData, true)
     ]);
     const maximumBytes = 256 * 1024;
     const pairs = aliases.flatMap(([name, target]) => {

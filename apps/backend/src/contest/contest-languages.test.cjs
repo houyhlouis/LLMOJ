@@ -105,9 +105,16 @@ function fixture(allowed = ["cpp:c++17"]) {
     db,
     access,
     problems,
+    problemLocks: problems,
     submissions
   });
-  const contestProblems = Object.assign(Object.create(ContestProblemService.prototype), { db, access, problems });
+  const contestProblems = Object.assign(Object.create(ContestProblemService.prototype), {
+    db,
+    access,
+    problems,
+    problemAccess: problems,
+    problemFiles: problems
+  });
   return { service, contestSubmissions, contestProblems, access, writes, logins };
 }
 const contestData = languages => ({

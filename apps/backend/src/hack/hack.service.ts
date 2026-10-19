@@ -16,7 +16,9 @@ import { validatorOptions } from "./validator-options";
 
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
-import { ProblemPermissionType, ProblemService } from "../problem/problem.service";
+import { ProblemService } from "../problem/problem.service";
+import { ProblemAccessService, ProblemPermissionType } from "../problem/problem-access.service";
+import { ProblemFileService } from "../problem/problem-file.service";
 import { ProblemType } from "../problem/problem.entity";
 import { ProblemFileType } from "../problem/problem-file.entity";
 import { SubmissionService } from "../submission/submission.service";
@@ -101,6 +103,8 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
     @InjectDataSource() private readonly db: DataSource,
     private readonly privileges: UserPrivilegeService,
     private readonly problems: ProblemService,
+    private readonly problemAccess: ProblemAccessService,
+    private readonly problemFiles: ProblemFileService,
     private readonly submissions: SubmissionService,
     private readonly contestAccess: ContestAccessService,
     private readonly contestSubmissions: ContestSubmissionService,
@@ -129,11 +133,12 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
   private async canConfigure(user: UserEntity, problemId: number) {
     if (!user || !(await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewSite))) return false;
     const problem = await this.problems.findProblemById(problemId);
-    if (!problem || !(await this.problems.userHasPermission(user, problem, ProblemPermissionType.View))) return false;
+    if (!problem || !(await this.problemAccess.userHasPermission(user, problem, ProblemPermissionType.View)))
+      return false;
     return await this.privileges.permissionDecision(
       user,
       UserPrivilegeType.ManageHack,
-      await this.problems.userHasPermission(user, problem, ProblemPermissionType.Modify)
+      await this.problemAccess.userHasPermission(user, problem, ProblemPermissionType.Modify)
     );
   }
 
@@ -264,7 +269,7 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
     const problem = await this.problems.findProblemById(problemId);
     const [raw] = await this.problems.getProblemJudgeInfo(problem);
     const profile = (raw as ProblemJudgeInfoTraditional).selfEval;
-    const testData = await this.problems.getProblemFiles(problem, ProblemFileType.TestData);
+    const testData = await this.problemFiles.getProblemFiles(problem, ProblemFileType.TestData);
     const source = testData.find(file => file.filename === (profile?.validatorFile || "validator.cpp"));
     if (!source) return null;
     const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "llmoj-hack-validator-"));
@@ -417,7 +422,7 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
             : {})
         };
         const testData = Object.fromEntries(
-          (await this.problems.getProblemFiles(problem, ProblemFileType.TestData)).map(file => [
+          (await this.problemFiles.getProblemFiles(problem, ProblemFileType.TestData)).map(file => [
             file.filename,
             file.uuid
           ])

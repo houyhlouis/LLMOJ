@@ -7,7 +7,8 @@ import { SubmissionStatus } from "@libreoj/judge-protocol";
 
 import { SubmissionEntity } from "./submission.entity";
 
-import { ProblemPermissionType, ProblemService } from "../problem/problem.service";
+import { ProblemService } from "../problem/problem.service";
+import { ProblemAccessService, ProblemPermissionType } from "../problem/problem-access.service";
 import { UserEntity } from "../user/user.entity";
 import { ProblemEntity } from "../problem/problem.entity";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
@@ -37,6 +38,7 @@ export class SubmissionAccessService {
     @InjectRepository(SubmissionEntity)
     private readonly submissionRepository: Repository<SubmissionEntity>,
     private readonly problemService: ProblemService,
+    private readonly problemAccess: ProblemAccessService,
     @Inject(forwardRef(() => UserPrivilegeService))
     private readonly userPrivilegeService: UserPrivilegeService
   ) {}
@@ -111,7 +113,7 @@ export class SubmissionAccessService {
           (await this.getUserProblemAcceptedSubmissionCount(user.id, submission.problemId))
         )
           return true;
-        return await this.problemService.userHasPermission(
+        return await this.problemAccess.userHasPermission(
           user,
           problem ?? (await this.problemService.findProblemById(submission.problemId)),
           ProblemPermissionType.Modify,
@@ -122,7 +124,7 @@ export class SubmissionAccessService {
       case SubmissionPermissionType.Cancel:
         if (!user) return false;
         if (user.id === submission.submitterId) return true;
-        return await this.problemService.userHasPermission(
+        return await this.problemAccess.userHasPermission(
           user,
           problem ?? (await this.problemService.findProblemById(submission.problemId)),
           ProblemPermissionType.Modify,
@@ -136,7 +138,7 @@ export class SubmissionAccessService {
           !(await this.userPrivilegeService.permissionDecision(
             user,
             UserPrivilegeType.ManageHack,
-            await this.problemService.userHasPermission(
+            await this.problemAccess.userHasPermission(
               user,
               problem ?? (await this.problemService.findProblemById(submission.problemId)),
               ProblemPermissionType.Modify,
@@ -148,7 +150,7 @@ export class SubmissionAccessService {
         return await this.userPrivilegeService.permissionDecision(
           user,
           UserPrivilegeType.RejudgeSubmission,
-          await this.problemService.userHasPermission(
+          await this.problemAccess.userHasPermission(
             user,
             problem ?? (await this.problemService.findProblemById(submission.problemId)),
             ProblemPermissionType.Modify,
