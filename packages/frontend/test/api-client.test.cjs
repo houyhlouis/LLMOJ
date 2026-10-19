@@ -1,5 +1,6 @@
 // The shared API client (src/api.ts): a sensitive change refused for want of a recent password is confirmed in the
-// dialog and sent once more; an ended session is forgotten; server errors quote the server's error ID.
+// dialog and sent once more; an ended session is forgotten; server errors quote the server's error ID; the session
+// travels in the Authorization header, or in the HttpOnly cookie on the API's own origin.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -11,8 +12,8 @@ const src = path.join(__dirname, "../src");
 // Objects made inside the VM have its prototypes; compare their JSON.
 const plain = value => JSON.parse(JSON.stringify(value));
 
-function client(respond) {
-  const appState = { token: "key", locale: "en_US" };
+function client(respond, { token = "key", window = { apiEndpoint: "/" }, location } = {}) {
+  const appState = { token, locale: "en_US" };
   const requests = [];
   const axios = async (url, config) => {
     requests.push({ url, config });
@@ -30,7 +31,8 @@ function client(respond) {
       module,
       exports: module.exports,
       console: { log() {}, error() {} },
-      window: { apiEndpoint: "/" },
+      window,
+      location,
       require: name => {
         if (name in dependencies) return dependencies[name];
         const local = {
@@ -119,6 +121,39 @@ test("server errors carry the server's error ID; an ended session is forgotten",
   const result = await api.createGetApi("homepage/getHomepage")();
   assert.equal(result.requestId, id);
   assert.deepEqual(plain(result.requestError), { id: "common.request_error.server_error_with_id", parameters: { id } });
+  assert.equal(appState.token, "");
+  assert.equal(appState.sessionEnded, true);
+});
+
+test("the session travels in the Authorization header, or in the cookie that the page can't read", async () => {
+  const headers = async (token, window, location) => {
+    const { api, requests } = client(() => ({ status: 200, data: {}, headers: {} }), { token, window, location });
+    await api.createGetApi("homepage/getHomepage")();
+    return plain(requests[0].config.headers);
+  };
+  const json = { "Content-Type": "application/json" };
+  // On the API's origin the page says it keeps its session in the cookie; a marker never goes in a header
+  assert.deepEqual(await headers("cookie:9"), { ...json, "X-Session-Mode": "cookie" });
+  assert.deepEqual(await headers(""), { ...json, "X-Session-Mode": "cookie" });
+  assert.deepEqual(await headers("key"), { ...json, Authorization: "Bearer key", "X-Session-Mode": "cookie" });
+  const page = { origin: "https://oj.example" };
+  assert.deepEqual(await headers("cookie:9", { apiEndpoint: "https://oj.example/" }, page), {
+    ...json,
+    "X-Session-Mode": "cookie"
+  });
+  // Another origin (the cross-origin proxy) gets the token, and no header a preflight would have to allow
+  assert.deepEqual(await headers("key", { apiEndpoint: "https://api.example/" }, page), {
+    ...json,
+    Authorization: "Bearer key"
+  });
+  assert.deepEqual(await headers("key", { apiEndpoint: "//api.example/" }, page), { ...json, Authorization: "Bearer key" });
+});
+
+test("an ended cookie session is forgotten like a token", async () => {
+  const { api, appState } = client(() => ({ status: 200, data: {}, headers: { "x-session-ended": "1" } }), {
+    token: "cookie:9"
+  });
+  await api.createGetApi("homepage/getHomepage")();
   assert.equal(appState.token, "");
   assert.equal(appState.sessionEnded, true);
 });

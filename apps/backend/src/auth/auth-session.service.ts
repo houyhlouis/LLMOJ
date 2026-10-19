@@ -6,7 +6,16 @@ import { ForbiddenException, Injectable } from "@nestjs/common";
 import jwt from "jsonwebtoken";
 import { Redis } from "ioredis";
 
+import type { Request } from "express"; // eslint-disable-line import/no-extraneous-dependencies
+
 import { RegistrationReviewService } from "./registration-review.service";
+import {
+  cookieSessionKey,
+  expiredSessionCookie,
+  sessionCookie,
+  sessionMarker,
+  wantsCookieSession
+} from "./session-cookie";
 
 import { UserEntity } from "../user/user.entity";
 import { ConfigService } from "../config/config.service";
@@ -83,6 +92,35 @@ export class AuthSessionService {
     await this.markRecentlyAuthenticated(user.id, Number(sessionId));
 
     return jwt.sign(`${user.id.toString()} ${sessionId}`, this.configService.config.security.sessionSecret);
+  }
+
+  /**
+   * Signs the user in with a new session for this request's device. A page that asks for the session cookie (from
+   * the same origin) gets the cookie, and keeps a marker of the session instead of its token: see session-cookie.ts.
+   *
+   * @returns What the client keeps: the session token, or the marker.
+   */
+  async issueSession(user: UserEntity, req: Request): Promise<string> {
+    return this.deliverSession(req, await this.newSession(user, req.ip, req.headers["user-agent"]));
+  }
+
+  /** Puts the session in the cookie if the page asks for that and the site allows it; returns what the client keeps. */
+  deliverSession(req: Request, sessionKey: string): string {
+    if (!this.sessionCookiesEnabled() || !wantsCookieSession(req) || !req.res) return sessionKey;
+    const [, sessionId] = this.decodeSessionKey(sessionKey);
+    const { sessionMaxAgeDays } = this.configService.config.security;
+    req.res.append("Set-Cookie", sessionCookie(req, sessionKey, sessionMaxAgeDays ?? DEFAULT_SESSION_MAX_AGE_DAYS));
+    return sessionMarker(sessionId);
+  }
+
+  /** Removes the session cookie from the browser, if the request has one. */
+  forgetSessionCookie(req: Request): void {
+    if (cookieSessionKey(req) && req.res) req.res.append("Set-Cookie", expiredSessionCookie(req));
+  }
+
+  /** Sessions are kept in cookies unless the configuration turns that off (`security.sessionCookie: false`). */
+  sessionCookiesEnabled(): boolean {
+    return this.configService.config.security.sessionCookie !== false;
   }
 
   async markRecentlyAuthenticated(userId: number, sessionId: number): Promise<void> {

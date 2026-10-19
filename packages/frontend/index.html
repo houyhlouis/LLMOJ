@@ -348,7 +348,8 @@ function safeStringify(object) {
       if (sameOrigin) {
         var xhr = new XMLHttpRequest();
         xhr.open("GET", window.apiEndpoint + "api/auth/getSessionInfo");
-        if (token) xhr.setRequestHeader("Authorization", "Bearer " + token);
+        // A session kept in the cookie carries itself: the page holds only its marker ("cookie:" and its ID)
+        if (token && token.indexOf("cookie:") !== 0) xhr.setRequestHeader("Authorization", "Bearer " + token);
         xhr.onload = function () {
           var sessionInfo;
           try {

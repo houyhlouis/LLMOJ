@@ -241,7 +241,7 @@ export class TwoFactorController {
     const method = request.passkey ? "passkey" : request.recoveryCode ? "recoveryCode" : "totp";
     await this.auditService.log(user.id, "auth.login", { twoFactor: method });
     return {
-      token: await this.authSessionService.newSession(user, req.ip, req.headers["user-agent"]),
+      token: await this.authSessionService.issueSession(user, req),
       username: user.username
     };
   }

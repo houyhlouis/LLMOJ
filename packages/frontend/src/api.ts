@@ -5,7 +5,7 @@ import { makeToBeLocalizedText, ToBeLocalizedText } from "./locales";
 import type { CaptchaAction, CaptchaController, CaptchaResult } from "./utils/hooks/useCaptcha";
 import { ProofOfWorkAction, ProofOfWorkResult, solveProofOfWork } from "./utils/proofOfWork";
 import { confirmIdentity, needsReauthentication, REAUTHENTICATION_REQUIRED } from "./utils/reauthentication";
-import { noteSessionEnded, responseRequestId } from "./utils/session";
+import { noteSessionEnded, responseRequestId, sessionHeaders } from "./utils/session";
 
 export interface ApiResponse<T> {
   requestCancelled?: boolean;
@@ -35,7 +35,7 @@ async function request<T>(
       data: body && JSON.stringify(body),
       headers: {
         "Content-Type": "application/json",
-        Authorization: token && `Bearer ${token}`,
+        ...sessionHeaders(token),
         ...(captchaResult ? { "X-Captcha-Result": JSON.stringify(captchaResult) } : {}),
         ...(proofOfWorkResult ? { "X-Proof-Of-Work": JSON.stringify(proofOfWorkResult) } : {})
       },

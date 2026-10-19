@@ -1,7 +1,7 @@
 import { callApiWithFileUpload, FileUploadApiProgress } from "@/utils/callApiWithFileUpload";
 import axios from "axios";
 import { appState } from "@/appState";
-import { noteSessionEnded, responseRequestId } from "@/utils/session";
+import { noteSessionEnded, responseRequestId, sessionHeaders } from "@/utils/session";
 export const aiText = (zh: string, en: string) => (appState.locale === "zh_CN" ? zh : en);
 const errors: Record<string, [string, string]> = {
   INVALID_ATTACHMENT_TOKEN: [
@@ -380,7 +380,7 @@ export async function aiCall<T = any>(
   const { token } = appState;
   try {
     response = await axios.post(window.apiEndpoint + `api/ai/${method}`, body, {
-      headers: { Authorization: token ? `Bearer ${token}` : undefined },
+      headers: sessionHeaders(token),
       validateStatus: () => true,
       signal: options.signal,
       timeout: options.timeout

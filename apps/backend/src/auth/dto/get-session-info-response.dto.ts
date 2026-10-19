@@ -32,4 +32,8 @@ export class GetSessionInfoResponseDto {
 
   @ApiProperty()
   serverVersion: ServerVersionDto;
+
+  // The marker of the session when the session cookie carries it, for the page to keep instead of a token
+  @ApiProperty({ required: false })
+  sessionMarker?: string;
 }

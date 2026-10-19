@@ -3,6 +3,7 @@ import { NestMiddleware, Injectable } from "@nestjs/common";
 import { Request, Response } from "express"; // eslint-disable-line import/no-extraneous-dependencies
 
 import { AuthSessionService } from "./auth-session.service";
+import { bearerSessionKey, cookieSessionAllowed, cookieSessionKey } from "./session-cookie";
 
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
@@ -11,6 +12,8 @@ import { requestContext } from "../common/request-context";
 export interface Session {
   sessionKey?: string;
   sessionId?: number;
+  /** The session came from the session cookie rather than the Authorization header. */
+  viaCookie?: boolean;
   user?: UserEntity;
   userHasSkipRecaptchaPrivilege: () => Promise<boolean>;
 }
@@ -27,17 +30,24 @@ export class AuthMiddleware implements NestMiddleware {
   ) {}
 
   async use(req: RequestWithSession, res: Response, next: () => void): Promise<void> {
-    const authHeader = req.headers.authorization;
-    const sessionKey = authHeader && authHeader.split(" ")[1];
+    // A token in the Authorization header comes first. Without one, a page of the same origin may have its session in
+    // the cookie, which it may use only as session-cookie.ts allows.
+    let sessionKey = bearerSessionKey(req);
+    const viaCookie = !sessionKey && !!cookieSessionKey(req) && cookieSessionAllowed(req);
+    if (viaCookie) sessionKey = cookieSessionKey(req);
     if (sessionKey) {
       const { sessionId, user, ended } = await this.authSessionService.resolveSession(sessionKey);
       // The request continues as a visitor's. The header lets the client sign out instead of acting signed in.
-      if (ended) res.setHeader("X-Session-Ended", "1");
+      if (ended) {
+        res.setHeader("X-Session-Ended", "1");
+        if (viaCookie) this.authSessionService.forgetSessionCookie(req);
+      }
       if (user) {
         let userHasSkipRecaptchaPrivilegePromise: Promise<boolean>;
         req.session = {
           sessionKey,
           sessionId,
+          viaCookie,
           user,
           userHasSkipRecaptchaPrivilege: () => {
             if (!userHasSkipRecaptchaPrivilegePromise) {

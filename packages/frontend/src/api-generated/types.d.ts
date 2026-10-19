@@ -635,6 +635,7 @@ declare namespace ApiTypes {
     userPreference?: ApiTypes.UserPreferenceDto;
     serverPreference: ApiTypes.PreferenceConfig;
     serverVersion: ApiTypes.ServerVersionDto;
+    sessionMarker?: string;
   }
   export interface GetSubmissionDetailRequestDto {
     submissionId: string;
@@ -1159,6 +1160,9 @@ declare namespace ApiTypes {
   }
   export interface MigrateUserResponseDto {
     error?: "ALREADY_LOGGEDIN" | "NO_SUCH_USER" | "WRONG_PASSWORD" | "ALREADY_MIGRATED" | "DUPLICATE_USERNAME";
+    token?: string;
+  }
+  export interface MoveSessionToCookieResponseDto {
     token?: string;
   }
   namespace Parameters {

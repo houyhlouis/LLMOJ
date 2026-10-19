@@ -23,3 +23,5 @@ export * from "./revoke-user-session-request.dto";
 export * from "./revoke-user-session-response.dto";
 
 export * from "./registration-review.dto";
+
+export * from "./move-session-to-cookie-response.dto";

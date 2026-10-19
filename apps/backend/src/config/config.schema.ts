@@ -232,6 +232,13 @@ class SecurityConfig {
   @IsOptional()
   readonly rateLimit: SecurityConfigRateLimit;
 
+  // Sign-ins of pages on the API's own origin keep their session in an HttpOnly cookie, out of page scripts' reach
+  // (default true). With false, they get the token as before; existing cookie sessions keep working until they end.
+  // Pages on other origins and API clients send the session token in a header either way.
+  @IsBoolean()
+  @IsOptional()
+  readonly sessionCookie?: boolean;
+
   // A login session expires after this many days without use (default 30; 0: never)
   @IsInt()
   @Min(0)

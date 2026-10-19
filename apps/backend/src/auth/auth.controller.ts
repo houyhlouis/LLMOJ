@@ -6,6 +6,7 @@ import { Response } from "express";
 import { AuthEmailVerificationCodeService, EmailVerificationCodeType } from "./auth-email-verification-code.service";
 
 import { AuthSessionService } from "./auth-session.service";
+import { sessionMarker } from "./session-cookie";
 
 import { AuthIpLocationService } from "./auth-ip-location.service";
 
@@ -45,6 +46,7 @@ import {
   ListUserSessionsResponseError,
   RevokeUserSessionRequestDto,
   RevokeUserSessionResponseDto,
+  MoveSessionToCookieResponseDto,
   RevokeUserSessionResponseError
 } from "./dto";
 
@@ -91,12 +93,14 @@ export class AuthController {
   @ApiOperation({
     summary: "A (JSONP or JSON) request to get current user's info and server preference.",
     description:
-      "Same-origin pages send the session in the HTTP Authorization header. JSONP can't, so it passes `token` instead."
+      "Same-origin pages send the session in the session cookie or the HTTP Authorization header. JSONP can't, so " +
+      "it passes `token` instead."
   })
   async getSessionInfo(
     @Query() request: GetSessionInfoRequestDto,
     @Res({ passthrough: true }) response: Response,
-    @CurrentUser() currentUser?: UserEntity
+    @CurrentUser() currentUser?: UserEntity,
+    @Req() req?: RequestWithSession
   ): Promise<GetSessionInfoResponseDto> {
     const user = request.token ? (await this.authSessionService.accessSession(request.token))[1] : currentUser;
 
@@ -119,6 +123,7 @@ export class AuthController {
       result.joinedGroupsCount = await this.groupService.getUserJoinedGroupsCount(user);
       result.userPrivileges = await this.userPrivilegeService.getUserPrivileges(user.id);
       result.userPreference = await this.userService.getUserPreference(user);
+      if (!request.token && req?.session?.viaCookie) result.sessionMarker = sessionMarker(req.session.sessionId);
     }
 
     if (request.jsonp) {
@@ -214,7 +219,7 @@ export class AuthController {
     await this.auditService.log(user.id, "auth.login");
 
     return {
-      token: await this.authSessionService.newSession(user, req.ip, req.headers["user-agent"]),
+      token: await this.authSessionService.issueSession(user, req),
       username: user.username
     };
   }
@@ -232,10 +237,30 @@ export class AuthController {
     if (sessionKey) {
       await this.authSessionService.endSession(sessionKey);
     }
+    this.authSessionService.forgetSessionCookie(req);
 
     if (currentUser) await this.auditService.log("auth.logout");
 
     return {};
+  }
+
+  @Post("moveSessionToCookie")
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: "Keep the current session in the session cookie from now on.",
+    description:
+      "For pages that signed in before sessions were kept in cookies: a page of the API's own origin sends its " +
+      "session token in the Authorization header and `X-Session-Mode: cookie`, and gets the session's marker to keep " +
+      "instead of the token. Nothing changes for other clients, or when the site doesn't keep sessions in cookies."
+  })
+  async moveSessionToCookie(
+    @CurrentUser() currentUser: UserEntity,
+    @Req() req: RequestWithSession
+  ): Promise<MoveSessionToCookieResponseDto> {
+    const sessionKey = req.session?.sessionKey;
+    if (!currentUser || !sessionKey || req.session.viaCookie) return {};
+    const kept = this.authSessionService.deliverSession(req, sessionKey);
+    return kept === sessionKey ? {} : { token: kept };
   }
 
   @Get("checkAvailability")
@@ -379,7 +404,7 @@ export class AuthController {
     await this.auditService.log(user.id, "auth.register", { username: request.username, email: request.email });
     return {
       registrationStatus: "approved",
-      token: await this.authSessionService.newSession(user, req.ip, req.headers["user-agent"])
+      token: await this.authSessionService.issueSession(user, req)
     };
   }
 
@@ -467,7 +492,7 @@ export class AuthController {
       return { twoFactorChallenge: await this.twoFactorService.createChallenge(user.id, req.headers.origin) };
 
     return {
-      token: await this.authSessionService.newSession(user, req.ip, req.headers["user-agent"])
+      token: await this.authSessionService.issueSession(user, req)
     };
   }
 

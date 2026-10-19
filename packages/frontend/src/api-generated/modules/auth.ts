@@ -12,6 +12,10 @@ export const login = createPostApi<ApiTypes.LoginRequestDto, ApiTypes.LoginRespo
   { proofOfWorkAction: "login" }
 );
 export const logout = createPostApi<void, void>("auth/logout", {});
+export const moveSessionToCookie = createPostApi<void, ApiTypes.MoveSessionToCookieResponseDto>(
+  "auth/moveSessionToCookie",
+  {}
+);
 export const checkAvailability = createGetApi<
   { username?: string; email?: string },
   ApiTypes.CheckAvailabilityResponseDto

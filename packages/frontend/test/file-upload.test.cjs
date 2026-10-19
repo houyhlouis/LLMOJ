@@ -21,7 +21,7 @@ function load(relative, dependencies = {}, globals = {}) {
       require: name => {
         // The real session helpers, sharing the test's app state.
         if (name === "@/utils/session" && !(name in dependencies))
-          return load("utils/session.ts", { "@/appState": dependencies["@/appState"] });
+          return load("utils/session.ts", { "@/appState": dependencies["@/appState"] }, globals);
         if (!(name in dependencies)) throw new Error(`Unexpected runtime import: ${name}`);
         return dependencies[name];
       },

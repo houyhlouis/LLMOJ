@@ -89,6 +89,7 @@ LLMOJ 不会检查邮件能否真正发出。开启邮箱验证之前，请先�
 | `security.sessionMaxAgeDays` | `90` | **可选。** 登录会话在登录这么多天后失效，即使一直在使用。`0` 表示永不失效；省略时为 90 |
 | `security.adminSessionIdleTimeoutDays` | `3` | **可选。** 站点管理员的会话连续这么多天未使用即失效（比 `sessionIdleTimeoutDays` 更短时生效）。`0` 表示不另设限制；省略时为 3 |
 | `security.adminSessionMaxAgeDays` | `30` | **可选。** 站点管理员的会话在登录这么多天后失效（比 `sessionMaxAgeDays` 更短时生效）。`0` 表示不另设限制；省略时为 30 |
+| `security.sessionCookie` | `true` | **可选。** 与 API 同源的页面把登录会话保存在 HttpOnly Cookie 中，页面脚本无法读取；通过 HTTPS 访问时还会标记为 `Secure`。设为 `false` 时，登录后页面得到会话令牌，与以前相同；已有的 Cookie 会话在结束前仍可使用。其他源的页面和 API 客户端总是在 `Authorization` 请求头中发送令牌。省略时为 `true` |
 | `security.maintainceKey` | `REPLACE_WITH_MAINTENANCE_KEY` | `POST /api/runMaintainceTasks` 的 `maintaince-key` 请求头所需的密钥（拼写如此，请勿更正）。属于密钥 |
 | `security.proofOfWork.difficulty` | `4` | 受保护操作的工作量证明难度，1～8。值越大浏览器计算越久。不能关闭 |
 | `security.proofOfWork.expensiveActionDifficulty` | `5` | 提交等高开销操作的工作量证明难度，1～8 |

@@ -1,7 +1,7 @@
 import { appState } from "@/appState";
 import { RouteError } from "@/AppRouter";
 import { confirmIdentity, needsReauthentication } from "@/utils/reauthentication";
-import { noteSessionEnded, responseRequestId } from "@/utils/session";
+import { noteSessionEnded, responseRequestId, sessionHeaders } from "@/utils/session";
 
 export async function extensionApi<T = any>(path: string, body?: unknown, confirmed = false): Promise<T> {
   const { token } = appState;
@@ -9,7 +9,7 @@ export async function extensionApi<T = any>(path: string, body?: unknown, confir
     method: body === undefined ? "GET" : "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {})
+      ...sessionHeaders(token)
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) })
   });
