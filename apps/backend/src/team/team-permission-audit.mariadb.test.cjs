@@ -12,7 +12,7 @@ const { ProblemController } = require("../problem/problem.controller.ts"), { Pro
 const { DiscussionEntity } = require("../discussion/discussion.entity.ts"), { DiscussionService, DiscussionPermissionType } = require("../discussion/discussion.service.ts");
 const { DiscussionContentEntity } = require("../discussion/discussion-content.entity.ts"), { DiscussionReplyEntity } = require("../discussion/discussion-reply.entity.ts");
 const { ContestEntity } = require("../contest/contest.entity.ts"), { ContestService } = require("../contest/contest.service.ts");
-const { SubmissionEntity } = require("../submission/submission.entity.ts"), { SubmissionService, SubmissionPermissionType } = require("../submission/submission.service.ts");
+const { SubmissionEntity } = require("../submission/submission.entity.ts"), { SubmissionService } = require("../submission/submission.service.ts"), { SubmissionAccessService, SubmissionPermissionType } = require("../submission/submission-access.service.ts");
 const { GroupEntity } = require("../group/group.entity.ts"), { GroupService } = require("../group/group.service.ts");
 const { UserPermissionRuleEntity } = require("../access/user-permission-rule.entity.ts");
 const { UserPrivilegeEntity } = require("../user/user-privilege.entity.ts");
@@ -84,7 +84,8 @@ test("team direct links, list counts, archival, disqualified work and removal re
     };
     const discussions = Object.create(DiscussionService.prototype); Object.assign(discussions, { connection: db, discussionRepository: db.getRepository(DiscussionEntity), discussionContentRepository: db.getRepository(DiscussionContentEntity), discussionReplyRepository: db.getRepository(DiscussionReplyEntity), problemService: problems, userPrivilegeService: privileges, permissionService: { userOrItsGroupsHavePermission: async () => true }, configService: { config: { preference: { security: { discussionReplyDefaultPublic: true } } } } });
     const submissions = Object.create(SubmissionService.prototype); Object.assign(submissions, { connection: db, submissionRepository: db.getRepository(SubmissionEntity), problemService: problems, userPrivilegeService: privileges });
-    const contests = Object.create(ContestService.prototype); Object.assign(contests, { db, privileges, problems, submissions });
+    const submissionAccess = Object.assign(Object.create(SubmissionAccessService.prototype), submissions);
+    const contests = Object.create(ContestService.prototype); Object.assign(contests, { db, privileges, problems, submissions, submissionAccess });
     const teams = Object.create(TeamService.prototype); Object.assign(teams, { db, privileges, problems, users: { findUsersByExistingIds: async ids => ids.map(id => ({ id, username: "user" + id })) }, files: { signDownloadLink: async args => { assert.equal(args.expiresSeconds, 60); return "signed"; } } });
     const groups = Object.create(GroupService.prototype);
     Object.assign(groups, { groupRepository: { createQueryBuilder: alias => {
@@ -99,7 +100,7 @@ test("team direct links, list counts, archival, disqualified work and removal re
       const p = await problems.findProblemById(1), d = await discussions.findDiscussionById(11), c = await db.getRepository(ContestEntity).findOneBy({ id: 21 });
       for (const permission of Object.values(ProblemPermissionType)) assert.equal(await problems.userHasPermission(former, p, permission), false);
       for (const permission of Object.values(DiscussionPermissionType)) assert.equal(await discussions.userHasPermission(former, d, permission), false);
-      for (const id of [31, 33]) for (const permission of Object.values(SubmissionPermissionType)) assert.equal(await submissions.userHasPermission(former, await submissions.findSubmissionById(id), permission), false);
+      for (const id of [31, 33]) for (const permission of Object.values(SubmissionPermissionType)) assert.equal(await submissionAccess.userHasPermission(former, await submissions.findSubmissionById(id), permission), false);
       assert.equal(await contests.manager(former, c), false); await assert.rejects(contests.get(former, 21));
       await assert.rejects(teams.downloadFile(former, { teamId: 10, id: 41 }), /membership/i);
       assert.deepEqual(await teams.downloadFile(member, { teamId: 10, id: 41 }), { url: "signed" });

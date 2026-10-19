@@ -34,7 +34,8 @@ function fixture(rule = "strictioi") {
     if (entity.name === "UserEntity") return { findBy: async () => [{ id: 7, username: "owner" }] };
     throw new Error("Unexpected repository: " + entity.name);
   } };
-  service.submissions = { getSubmissionDetail: async submission => details.find(detail => detail.submissionId === submission.id), userHasPermission: async () => false };
+  service.submissions = { getSubmissionDetail: async submission => details.find(detail => detail.submissionId === submission.id) };
+  service.submissionAccess = { userHasPermission: async () => false };
   return { service, contest, user, runs, details };
 }
 

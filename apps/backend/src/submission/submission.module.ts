@@ -6,6 +6,8 @@ import { SubmissionEntity } from "./submission.entity";
 import { SubmissionDetailEntity } from "./submission-detail.entity";
 
 import { SubmissionService } from "./submission.service";
+import { SubmissionAccessService } from "./submission-access.service";
+import { SubmissionJudgingService } from "./submission-judging.service";
 
 import { SubmissionController } from "./submission.controller";
 
@@ -44,6 +46,8 @@ import { MetricsModule } from "../metrics/metrics.module";
   ],
   providers: [
     SubmissionService,
+    SubmissionAccessService,
+    SubmissionJudgingService,
     SubmissionProgressService,
     SubmissionProgressGateway,
     SubmissionStatisticsService,
@@ -51,6 +55,6 @@ import { MetricsModule } from "../metrics/metrics.module";
     ContestScoreRevisionService
   ],
   controllers: [SubmissionController],
-  exports: [SubmissionService, ContestScoreRevisionService]
+  exports: [SubmissionService, SubmissionAccessService, SubmissionJudgingService, ContestScoreRevisionService]
 })
 export class SubmissionModule {}

@@ -42,7 +42,9 @@ import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.
 import { ProblemService, ProblemPermissionType } from "../problem/problem.service";
 import { ProblemEntity, ProblemType } from "../problem/problem.entity";
 import { ProblemFileType } from "../problem/problem-file.entity";
-import { SubmissionService, SubmissionPermissionType } from "../submission/submission.service";
+import { SubmissionService } from "../submission/submission.service";
+import { SubmissionAccessService, SubmissionPermissionType } from "../submission/submission-access.service";
+import { SubmissionJudgingService } from "../submission/submission-judging.service";
 import { teamResourceAccess, teamResourceVisibilitySql } from "../team/team-access";
 import { SubmissionEntity } from "../submission/submission.entity";
 import { SubmissionDetailEntity } from "../submission/submission-detail.entity";
@@ -80,7 +82,9 @@ export class ContestService {
     private readonly privileges: UserPrivilegeService,
     private readonly problems: ProblemService,
     private readonly submissions: SubmissionService,
-    private readonly files: FileService
+    private readonly files: FileService,
+    private readonly submissionAccess: SubmissionAccessService,
+    private readonly submissionJudging: SubmissionJudgingService
   ) {}
 
   @Optional() @Inject(ContestScoreRevisionService) private readonly scoreRevisions: ContestScoreRevisionService;
@@ -667,9 +671,10 @@ export class ContestService {
       content: canCode ? detail.content : null,
       compile: canCode && (manager || s.status === "CompilationError") ? result?.compile : undefined,
       subtasks,
-      permissionFake: manager && (await this.submissions.userHasPermission(user, s, SubmissionPermissionType.Fake)),
+      permissionFake:
+        manager && (await this.submissionAccess.userHasPermission(user, s, SubmissionPermissionType.Fake)),
       permissionRejudge:
-        manager && (await this.submissions.userHasPermission(user, s, SubmissionPermissionType.Rejudge))
+        manager && (await this.submissionAccess.userHasPermission(user, s, SubmissionPermissionType.Rejudge))
     };
   }
 
@@ -824,12 +829,12 @@ export class ContestService {
       if (["Fake", "Hacked"].includes(s.status)) {
         if (!submissionId) continue;
         // eslint-disable-next-line no-await-in-loop
-        if (!(await this.submissions.userHasPermission(user, s, SubmissionPermissionType.Rejudge)))
+        if (!(await this.submissionAccess.userHasPermission(user, s, SubmissionPermissionType.Rejudge)))
           throw new ForbiddenException();
       }
       try {
         // eslint-disable-next-line no-await-in-loop
-        await this.submissions.rejudgeSubmission(s, user);
+        await this.submissionJudging.rejudgeSubmission(s, user);
       } catch (error) {
         // Concurrent invalidation must remain in effect during a mass rejudge.
         let isInvalidated = false;

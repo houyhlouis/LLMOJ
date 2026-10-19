@@ -28,6 +28,8 @@ String.prototype.format ||= function (...args) {
 require("@nestjs/common").Logger.overrideLogger(false);
 const { DataSource, In } = require("typeorm");
 const { SubmissionService } = require("./submission.service.ts");
+const { SubmissionJudgingService } = require("./submission-judging.service.ts");
+const { SubmissionAccessService } = require("./submission-access.service.ts");
 const { SubmissionEntity } = require("./submission.entity.ts");
 const { SubmissionDetailEntity } = require("./submission-detail.entity.ts");
 const { SubmissionResultHistoryEntity } = require("./submission-result-history.entity.ts");
@@ -169,6 +171,12 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
       })
     }
   });
+
+  // The judging half and the permission rules of the submission service, with the same collaborators
+  const judging = Object.assign(Object.create(SubmissionJudgingService.prototype), svc);
+  const access = Object.assign(Object.create(SubmissionAccessService.prototype), svc);
+  judging.submissionAccessService = access;
+  svc.submissionJudgingService = judging;
   const admin = { id: 1, isAdmin: true };
 
   let nextId = 1;
@@ -200,7 +208,7 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
   const load = async id => await ds.getRepository(SubmissionEntity).findOneBy({ id });
   const finish = async (id, status, judgeRuntimeId) =>
     assert.equal(
-      await svc.onTaskProgress(
+      await judging.onTaskProgress(
         (await load(id)).taskId,
         finished(status),
         judgeRuntimeId === undefined ? undefined : { judgeRuntimeId, confirm: async () => true }
@@ -249,15 +257,15 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
     await ds.getRepository(FileEntity).insert({ uuid: after, size: 3, uploadTime: new Date() });
     await ds.getRepository(ProblemFileEntity).update({ problemId: p.id, filename: "1.in" }, { uuid: after });
 
-    let task = (await svc.getTaskToBeSentToJudgeByTaskId(s.taskId, 1)).extraInfo;
+    let task = (await judging.getTaskToBeSentToJudgeByTaskId(s.taskId, 1)).extraInfo;
     assert.equal(task.judgeInfo.timeLimit, 1000);
     assert.deepEqual(plain(task.testData), { "1.in": before });
     assert.deepEqual(plain(task.samples), [{ inputData: "1" }, { inputData: "2" }], "the samples it ran, as many as configured");
     await finish(s.id, "Accepted");
 
-    await svc.rejudgeSubmission(await load(s.id), admin);
+    await judging.rejudgeSubmission(await load(s.id), admin);
     const rejudged = await load(s.id);
-    task = (await svc.getTaskToBeSentToJudgeByTaskId(rejudged.taskId, 1)).extraInfo;
+    task = (await judging.getTaskToBeSentToJudgeByTaskId(rejudged.taskId, 1)).extraInfo;
     assert.equal(task.judgeInfo.timeLimit, 2000);
     assert.deepEqual(plain(task.testData), { "1.in": after });
     assert.deepEqual(plain(await svc.getSubmissionDataVersion(rejudged, p)), { version: 2, current: true });
@@ -273,7 +281,7 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
       contestOutputFilename: "a.out",
       contestSubtaskAllOrNothing: true
     });
-    task = (await svc.getTaskToBeSentToJudgeByTaskId(contest.taskId, 1)).extraInfo;
+    task = (await judging.getTaskToBeSentToJudgeByTaskId(contest.taskId, 1)).extraInfo;
     assert.equal(task.judgeInfo.timeLimit, 3000);
     assert.equal(task.judgeInfo.subtasks[0].scoringType, "GroupMin");
     assert.deepEqual(plain(task.judgeInfo.fileIo), { inputFilename: "a.in", outputFilename: "a.out" });
@@ -282,7 +290,7 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
 
     // Submissions from before data versions are judged with the current data
     await ds.getRepository(SubmissionEntity).update(contest.id, { problemDataVersionId: null, taskId: "legacy-task" });
-    task = (await svc.getTaskToBeSentToJudgeByTaskId("legacy-task", 1)).extraInfo;
+    task = (await judging.getTaskToBeSentToJudgeByTaskId("legacy-task", 1)).extraInfo;
     assert.equal(task.judgeInfo.timeLimit, 3000);
     assert.deepEqual(plain(task.samples), [{ inputData: "changed" }]);
     await ds.getRepository(SubmissionEntity).update(contest.id, { taskId: null });
@@ -296,7 +304,7 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
     await finish(s.id, statuses[0]);
     for (const [index, status] of statuses.slice(1).entries()) {
       content.get(p.id).judgeInfo.timeLimit = 2000 + index;
-      await svc.rejudgeSubmission(await load(s.id), admin);
+      await judging.rejudgeSubmission(await load(s.id), admin);
       assert.equal((await ds.getRepository(SubmissionDetailEntity).findOneBy({ submissionId: s.id })).result, null);
       await finish(s.id, status);
     }
@@ -341,7 +349,7 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
 
     const s = await submit(submitter, p);
     assert.equal(s.problemDataVersionId, second.id);
-    const task = await svc.getTaskToBeSentToJudgeByTaskId(s.taskId, 1);
+    const task = await judging.getTaskToBeSentToJudgeByTaskId(s.taskId, 1);
     assert.deepEqual(plain(task.fileHashes), { [older]: sha256("one"), [newer]: sha256("two") });
 
     // The result records the runtime its judge client announced; a rejudge keeps it with the replaced result
@@ -362,7 +370,7 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
       await finish(s.id, "Accepted", 7);
       assert.equal((await load(s.id)).judgeRuntimeId, 7);
       assert.deepEqual(plain(await svc.getSubmissionJudgeRuntime(await load(s.id))), runtime);
-      await svc.rejudgeSubmission(await load(s.id), admin);
+      await judging.rejudgeSubmission(await load(s.id), admin);
       assert.equal((await load(s.id)).judgeRuntimeId, null, "none while it's judged again");
       // A judge client that announces no runtime
       await finish(s.id, "WrongAnswer");
@@ -408,7 +416,7 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
     const later = Date.now() + 20 * 60 * 1000;
     assert.equal(await versions.sweepDeferredFiles(later), 0, "still needed");
     assert.equal(await exists(removed), true);
-    assert.equal((await svc.getTaskToBeSentToJudgeByTaskId(waiting.taskId, 1)).extraInfo.testData["2.in"], removed);
+    assert.equal((await judging.getTaskToBeSentToJudgeByTaskId(waiting.taskId, 1)).extraInfo.testData["2.in"], removed);
 
     await finish(waiting.id, "Accepted");
     assert.equal(await versions.sweepDeferredFiles(later), 1);
@@ -435,7 +443,7 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
     await Promise.all(all.map(s => finish(s.id, "Accepted")));
     for (const p of ps) assert.deepEqual((await counts(p, users[0]))[0], { submissionCount: 6, acceptedSubmissionCount: 6 });
     for (const u of users) assert.deepEqual((await counts(ps[0], u))[1], { submissionCount: 6, acceptedProblemCount: 2 });
-    await Promise.all(all.map(async s => await svc.rejudgeSubmission(await load(s.id), admin)));
+    await Promise.all(all.map(async s => await judging.rejudgeSubmission(await load(s.id), admin)));
     for (const u of users) assert.equal((await counts(ps[0], u))[1].acceptedProblemCount, 0);
     await Promise.all(all.map((s, index) => finish(s.id, index % 3 === 0 ? "Accepted" : "WrongAnswer")));
     assert.deepEqual(
@@ -451,7 +459,7 @@ test("reproducible judging (real MariaDB)", { skip: !configPath && "needs LLMOJ_
       throw new Error("forced record failure");
     };
     try {
-      await assert.rejects(svc.onTaskProgress((await load(s.id)).taskId, finished("Accepted")), /forced record failure/);
+      await assert.rejects(judging.onTaskProgress((await load(s.id)).taskId, finished("Accepted")), /forced record failure/);
     } finally {
       outbox.record = record;
     }

@@ -11,7 +11,9 @@ import { SubmissionProgressService } from "./submission-progress.service";
 
 import { SubmissionProgressGateway, SubmissionProgressSubscriptionType } from "./submission-progress.gateway";
 
-import { SubmissionPermissionType, SubmissionService } from "./submission.service";
+import { SubmissionService } from "./submission.service";
+import { SubmissionAccessService, SubmissionPermissionType } from "./submission-access.service";
+import { SubmissionJudgingService } from "./submission-judging.service";
 
 import {
   SubmitRequestDto,
@@ -80,7 +82,9 @@ export class SubmissionController {
     private readonly submissionProgressService: SubmissionProgressService,
     private readonly submissionStatisticsService: SubmissionStatisticsService,
     private readonly auditService: AuditService,
-    private readonly fileService: FileService
+    private readonly fileService: FileService,
+    private readonly submissionAccessService: SubmissionAccessService,
+    private readonly submissionJudgingService: SubmissionJudgingService
   ) {}
 
   private async withSubmittableProblem(
@@ -286,7 +290,7 @@ export class SubmissionController {
     ]);
 
     if (
-      !(await this.submissionService.userHasPermission(
+      !(await this.submissionAccessService.userHasPermission(
         currentUser,
         submission,
         SubmissionPermissionType.View,
@@ -313,35 +317,35 @@ export class SubmissionController {
       this.userService.findUserById(submission.submitterId),
       this.submissionService.getSubmissionDetail(submission),
       pending && this.submissionProgressService.getPendingSubmissionProgress(submission.id),
-      this.submissionService.userHasPermission(
+      this.submissionAccessService.userHasPermission(
         currentUser,
         submission,
         SubmissionPermissionType.Rejudge,
         problem,
         hasPrivilege
       ),
-      this.submissionService.userHasPermission(
+      this.submissionAccessService.userHasPermission(
         currentUser,
         submission,
         SubmissionPermissionType.Cancel,
         problem,
         hasPrivilege
       ),
-      this.submissionService.userHasPermission(
+      this.submissionAccessService.userHasPermission(
         currentUser,
         submission,
         SubmissionPermissionType.ManagePublicness,
         problem,
         hasPrivilege
       ),
-      this.submissionService.userHasPermission(
+      this.submissionAccessService.userHasPermission(
         currentUser,
         submission,
         SubmissionPermissionType.Delete,
         problem,
         hasPrivilege
       ),
-      this.submissionService.userHasPermission(
+      this.submissionAccessService.userHasPermission(
         currentUser,
         submission,
         SubmissionPermissionType.Fake,
@@ -416,7 +420,7 @@ export class SubmissionController {
         error: DownloadSubmissionFileResponseError.NO_SUCH_SUBMISSION
       };
 
-    if (!(await this.submissionService.userHasPermission(currentUser, submission, SubmissionPermissionType.View)))
+    if (!(await this.submissionAccessService.userHasPermission(currentUser, submission, SubmissionPermissionType.View)))
       return {
         error: DownloadSubmissionFileResponseError.PERMISSION_DENIED
       };
@@ -530,7 +534,9 @@ export class SubmissionController {
         error: RejudgeSubmissionResponseError.NO_SUCH_SUBMISSION
       };
 
-    if (!(await this.submissionService.userHasPermission(currentUser, submission, SubmissionPermissionType.Rejudge)))
+    if (
+      !(await this.submissionAccessService.userHasPermission(currentUser, submission, SubmissionPermissionType.Rejudge))
+    )
       return {
         error: RejudgeSubmissionResponseError.PERMISSION_DENIED
       };
@@ -539,7 +545,7 @@ export class SubmissionController {
     const previousStatus = submission.status;
     const previousScore = submission.score;
 
-    await this.submissionService.rejudgeSubmission(submission, currentUser);
+    await this.submissionJudgingService.rejudgeSubmission(submission, currentUser);
 
     await this.auditService.log("submission.rejudge", AuditLogObjectType.Submission, submission.id, {
       isPreviouslyPending,
@@ -562,7 +568,7 @@ export class SubmissionController {
     if (!currentUser) return { error: FakeSubmissionResponseError.PERMISSION_DENIED };
     const submission = await this.submissionService.findSubmissionById(request.submissionId);
     if (!submission) return { error: FakeSubmissionResponseError.NO_SUCH_SUBMISSION };
-    if (!(await this.submissionService.userHasPermission(currentUser, submission, SubmissionPermissionType.Fake)))
+    if (!(await this.submissionAccessService.userHasPermission(currentUser, submission, SubmissionPermissionType.Fake)))
       return { error: FakeSubmissionResponseError.PERMISSION_DENIED };
     if (!(await this.submissionService.fakeSubmission(submission, currentUser.id)))
       return { error: FakeSubmissionResponseError.NO_SUCH_SUBMISSION };
@@ -590,14 +596,16 @@ export class SubmissionController {
         error: CancelSubmissionResponseError.NO_SUCH_SUBMISSION
       };
 
-    if (!(await this.submissionService.userHasPermission(currentUser, submission, SubmissionPermissionType.Cancel)))
+    if (
+      !(await this.submissionAccessService.userHasPermission(currentUser, submission, SubmissionPermissionType.Cancel))
+    )
       return {
         error: CancelSubmissionResponseError.PERMISSION_DENIED
       };
 
     const { taskId } = submission;
 
-    await this.submissionService.cancelSubmission(submission);
+    await this.submissionJudgingService.cancelSubmission(submission);
 
     await this.auditService.log("submission.cancel", AuditLogObjectType.Submission, submission.id, {
       taskId
@@ -627,7 +635,7 @@ export class SubmissionController {
       };
 
     if (
-      !(await this.submissionService.userHasPermission(
+      !(await this.submissionAccessService.userHasPermission(
         currentUser,
         submission,
         SubmissionPermissionType.ManagePublicness
@@ -669,7 +677,9 @@ export class SubmissionController {
         error: DeleteSubmissionResponseError.NO_SUCH_SUBMISSION
       };
 
-    if (!(await this.submissionService.userHasPermission(currentUser, submission, SubmissionPermissionType.Delete)))
+    if (
+      !(await this.submissionAccessService.userHasPermission(currentUser, submission, SubmissionPermissionType.Delete))
+    )
       return {
         error: DeleteSubmissionResponseError.PERMISSION_DENIED
       };

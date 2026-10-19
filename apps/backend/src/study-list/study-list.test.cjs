@@ -26,6 +26,7 @@ String.prototype.format ||= function format(...args) {
 };
 
 const { StudyListController } = require("./study-list.controller.ts");
+const { StudyListService } = require("./study-list.service.ts");
 const { StudyListEntity } = require("./study-list.entity.ts");
 
 test("problems are shown, or marked unavailable, as each one's access allows", async () => {
@@ -42,37 +43,35 @@ test("problems are shown, or marked unavailable, as each one's access allows", a
     4: { id: 4, locales: ["en_US"], isPublic: true }
   };
   const titles = { "1:zh_CN": "一", "1:en_US": "One", "4:en_US": "Four" };
-  const checked = [];
-  const controller = new StudyListController(
+  const checked = [],
+    acceptedAsked = [];
+  const service = new StudyListService(
     {
-      getRepository: entity =>
-        entity === StudyListEntity
-          ? { findOneBy: async ({ id, ownerId }) => (id === 5 && ownerId === 9 ? list : null) }
-          : {
-              createQueryBuilder: () => {
-                const builder = {
-                  select: () => builder,
-                  addSelect: () => builder,
-                  where: () => builder,
-                  andWhere: () => builder,
-                  groupBy: () => builder,
-                  getRawMany: async () => [{ problemId: "4", submissionId: "77" }]
-                };
-                return builder;
-              }
-            }
+      getRepository: entity => {
+        assert.equal(entity, StudyListEntity);
+        return { findOneBy: async ({ id, ownerId }) => (id === 5 && ownerId === 9 ? list : null) };
+      }
     },
     {
       findProblemsByExistingIds: async ids => ids.map(id => problems[id]),
       userHasPermission: async (user, problem) => (checked.push(problem.id), problem.isPublic),
-      getProblemLocalizedTitles: async (list, locales) => list.map((problem, i) => titles[`${problem.id}:${locales[i]}`] ?? null),
+      getProblemLocalizedTitles: async (list, locales) =>
+        list.map((problem, i) => titles[`${problem.id}:${locales[i]}`] ?? null),
       getProblemMeta: async problem => ({ id: problem.id })
     },
-    { userHasPrivilege: async () => true }
+    {
+      // The problem set's rule: the latest accepted submission outside contests, for the problems shown
+      getUserLatestSubmissionByProblems: async (user, shown, acceptedOnly) => {
+        acceptedAsked.push([user.id, shown.map(problem => problem.id), acceptedOnly]);
+        return new Map([[4, { id: 77, problemId: 4, status: "Accepted" }]]);
+      }
+    }
   );
+  const controller = new StudyListController(service, { userHasPrivilege: async () => true });
   // The team-resource note needs a request; outside one it does nothing
   const result = await controller.get({ id: 9 }, { id: 5 });
   assert.deepEqual(checked, [1, 2, 4]);
+  assert.deepEqual(acceptedAsked, [[9, [1, 4], true]], "asked only for the problems shown");
   assert.deepEqual(result.details, [
     {
       ...items[0],

@@ -11,7 +11,9 @@ require.extensions[".ts"] = (module, filename) => module._compile(ts.transpileMo
 }).outputText, filename);
 String.prototype.format ||= function (...args) { return require("node:util").format(this, ...args); };
 const { DataSource, EntitySchema } = require("typeorm");
-const { SubmissionService, SubmissionPermissionType } = require("./submission.service.ts");
+const { SubmissionService } = require("./submission.service.ts");
+const { SubmissionJudgingService } = require("./submission-judging.service.ts");
+const { SubmissionAccessService, SubmissionPermissionType } = require("./submission-access.service.ts");
 const { SubmissionController } = require("./submission.controller.ts");
 const { SubmissionStatisticsService, SubmissionStatisticsType } = require("./submission-statistics.service.ts");
 const { submissionDisplayProgress } = require("./submission-display-progress.ts");
@@ -81,7 +83,13 @@ test("fake retains evidence, updates statistics and resists judge races (real Ma
         userHasPrivilege: async (u, p) => !!u && (u.isAdmin || ["ViewContest", "ViewSubmission"].includes(p)),
         permissionDecision: async (u, p) => !!u && (u.isAdmin || p === "RejudgeSubmission") }
     });
-    const controller = Object.create(SubmissionController.prototype); Object.assign(controller, { submissionService: svc });
+    // The judging half and the permission rules of the submission service, with the same collaborators
+    const judging = Object.assign(Object.create(SubmissionJudgingService.prototype), svc);
+    const access = Object.assign(Object.create(SubmissionAccessService.prototype), svc);
+    judging.submissionAccessService = access;
+    svc.submissionJudgingService = judging;
+    const controller = Object.create(SubmissionController.prototype);
+    Object.assign(controller, { submissionService: svc, submissionAccessService: access, submissionJudgingService: judging });
     const original = { progressType: "Finished", status: "Accepted", score: 100, totalOccupiedTime: 500,
       testcaseResult: { a: { status: "Accepted", score: 100, time: 4, memory: 8 } }, subtasks: [{ score: 100, fullScore: 100, testcases: [{ testcaseHash: "a" }] }] };
     const start = new Date("2026-01-01T00:00:00Z");
@@ -122,21 +130,21 @@ test("fake retains evidence, updates statistics and resists judge races (real Ma
     });
     await t.test("finished/running callbacks that found a task before fake cannot overwrite the locked verdict", async () => {
       for (const progress of [original, { progressType: "Running" }]) {
-        await reset(1, 0); const s = await create("Pending"), find = svc.findSubmissionByTaskId;
-        svc.findSubmissionByTaskId = async () => { await svc.fakeSubmission(s, 9); return s; };
-        try { assert.equal(await svc.onTaskProgress(s.taskId, progress), false); } finally { svc.findSubmissionByTaskId = find; }
+        await reset(1, 0); const s = await create("Pending"), find = judging.findSubmissionByTaskId;
+        judging.findSubmissionByTaskId = async () => { await svc.fakeSubmission(s, 9); return s; };
+        try { assert.equal(await judging.onTaskProgress(s.taskId, progress), false); } finally { judging.findSubmissionByTaskId = find; }
         assert.equal((await subs.findOneBy({ id: s.id })).status, "Fake"); assert.equal(events.length, 1); assert.deepEqual(canceled, [s.taskId]);
       }
     });
     await t.test("authorized restore creates a new judge task, rejects the old task and recovers AC counts", async () => {
       await reset(1, 0); const s = await create("Pending"), oldTask = s.taskId;
-      await svc.fakeSubmission(s, 9); await svc.rejudgeSubmission(s, { id: 9, isAdmin: true });
+      await svc.fakeSubmission(s, 9); await judging.rejudgeSubmission(s, { id: 9, isAdmin: true });
       const pending = await subs.findOneBy({ id: s.id }); assert.equal(pending.status, "Pending"); assert.notEqual(pending.taskId, oldTask);
       assert.equal((await details.findOneBy({ submissionId: s.id })).result, null);
       const [kept, ...more] = await db.getRepository(SubmissionResultHistoryEntity).findBy({ submissionId: s.id });
       assert.equal(more.length, 0); assert.equal(kept.status, "Fake"); assert.equal(kept.score, 0); assert.equal(kept.replacedBy, 9);
       assert.deepEqual(kept.result, original, "the rejudge keeps the result it replaced");
-      assert.equal(await svc.onTaskProgress(oldTask, original), false); assert.equal(await svc.onTaskProgress(pending.taskId, original), true);
+      assert.equal(await judging.onTaskProgress(oldTask, original), false); assert.equal(await judging.onTaskProgress(pending.taskId, original), true);
       assert.equal((await subs.findOneBy({ id: s.id })).status, "Accepted"); assert.equal((await users.findOneBy({ id: 2 })).acceptedProblemCount, 1); assert.equal(queued.length, 1);
     });
     await t.test("owner/rejudge-only users cannot fake or restore; lock recheck defeats stale permissions", async () => {
@@ -144,10 +152,10 @@ test("fake retains evidence, updates statistics and resists judge races (real Ma
       assert.deepEqual(await controller.fakeSubmission(null, { submissionId: s.id }), { error: "PERMISSION_DENIED" });
       assert.deepEqual(await controller.fakeSubmission(user, { submissionId: s.id }), { error: "PERMISSION_DENIED" });
       await svc.fakeSubmission(s, 9); const fake = await subs.findOneBy({ id: s.id });
-      assert.equal(await svc.userHasPermission(user, fake, SubmissionPermissionType.Rejudge), false);
-      await assert.rejects(svc.rejudgeSubmission(s, user), /Restoring a fake submission/);
+      assert.equal(await access.userHasPermission(user, fake, SubmissionPermissionType.Rejudge), false);
+      await assert.rejects(judging.rejudgeSubmission(s, user), /Restoring a fake submission/);
       assert.equal((await subs.findOneBy({ id: s.id })).status, "Fake");
-      assert.equal(await svc.userHasPermission({ id: 9, isAdmin: true }, fake, SubmissionPermissionType.Rejudge), true);
+      assert.equal(await access.userHasPermission({ id: 9, isAdmin: true }, fake, SubmissionPermissionType.Rejudge), true);
     });
     await t.test("NOI/IOI/ACM scores become zero without polluting ordinary OJ counters", async () => {
       await reset(3, 2); const s = await create("Accepted", 7); await svc.fakeSubmission(s, 9);

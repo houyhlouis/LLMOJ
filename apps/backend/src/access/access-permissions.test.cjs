@@ -51,7 +51,7 @@ const { UserPrivilegeService } = load("user/user-privilege.service.ts", {
 const { AccessGuard } = load("access/access.guard.ts");
 const { withoutTestData } = load("submission/submission-redaction.ts");
 const { ProblemService, ProblemPermissionType } = load("problem/problem.service.ts");
-const { SubmissionService, SubmissionPermissionType } = load("submission/submission.service.ts", {
+const { SubmissionAccessService, SubmissionPermissionType } = load("submission/submission-access.service.ts", {
   "../problem/problem.service": { ProblemPermissionType }
 });
 const { DiscussionService, DiscussionPermissionType } = load("discussion/discussion.service.ts", {
@@ -218,7 +218,7 @@ const { DiscussionService, DiscussionPermissionType } = load("discussion/discuss
     ),
     false
   );
-  const submissions = Object.create(SubmissionService.prototype);
+  const submissions = Object.create(SubmissionAccessService.prototype);
   submissions.userPrivilegeService = service;
   submissions.problemService = { userHasPermission: async () => false, findProblemById: async () => ({}) };
   submissions.getUserProblemAcceptedSubmissionCount = async () => 1;

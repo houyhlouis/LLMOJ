@@ -19,7 +19,9 @@ import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.
 import { ProblemPermissionType, ProblemService } from "../problem/problem.service";
 import { ProblemType } from "../problem/problem.entity";
 import { ProblemFileType } from "../problem/problem-file.entity";
-import { SubmissionService, SubmissionPermissionType } from "../submission/submission.service";
+import { SubmissionService } from "../submission/submission.service";
+import { SubmissionAccessService, SubmissionPermissionType } from "../submission/submission-access.service";
+import { SubmissionJudgingService } from "../submission/submission-judging.service";
 import { SubmissionEntity } from "../submission/submission.entity";
 import { ContestService } from "../contest/contest.service";
 import { ContestEntity } from "../contest/contest.entity";
@@ -102,7 +104,9 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
     private readonly queue: JudgeQueueService,
     private readonly locks: LockService,
     private readonly files: FileService,
-    private readonly languages: CodeLanguageService
+    private readonly languages: CodeLanguageService,
+    private readonly submissionAccess: SubmissionAccessService,
+    private readonly submissionJudging: SubmissionJudgingService
   ) {
     queue.registerTaskType(JudgeTaskType.Hack, this);
   }
@@ -136,12 +140,12 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
     await this.require(user, UserPrivilegeType.ViewSubmission);
     const submission = await this.submissions.findSubmissionById(submissionId);
     if (!submission) throw new NotFoundException();
-    if (!(await this.submissions.userHasTeamResourceAccess(user, submission))) throw new ForbiddenException();
+    if (!(await this.submissionAccess.userHasTeamResourceAccess(user, submission))) throw new ForbiddenException();
     let contestAccess: Awaited<ReturnType<ContestService["get"]>>;
     if (submission.contestId) {
       contestAccess = await this.contests.get(user, submission.contestId, true);
       await this.contests.submissionDetail(user, submission.contestId, submission.id);
-    } else if (!(await this.submissions.userHasPermission(user, submission, SubmissionPermissionType.View)))
+    } else if (!(await this.submissionAccess.userHasPermission(user, submission, SubmissionPermissionType.View)))
       throw new ForbiddenException();
     const canManageConfig = await this.canConfigure(user, submission.problemId);
     const answer = (reason?: string) => ({
@@ -336,7 +340,7 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
     if (!submission) throw new NotFoundException();
     if (
       !(await this.canConfigure(user, submission.problemId)) ||
-      !(await this.submissions.userHasPermission(user, submission, SubmissionPermissionType.View))
+      !(await this.submissionAccess.userHasPermission(user, submission, SubmissionPermissionType.View))
     )
       throw new ForbiddenException();
     if (submission.status !== SubmissionStatus.Accepted || submission.taskId)
@@ -391,7 +395,7 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
       if (recent >= 30 || pending >= 3)
         throw new BadRequestException("Hack quota exceeded (three active tasks, thirty per hour)");
       const target = await this.submissions.findSubmissionById(request.submissionId);
-      return await this.submissions.lockSubmission(target, true, async locked => {
+      return await this.submissionJudging.lockSubmission(target, true, async locked => {
         const fresh = await this.eligibility(user, request.submissionId);
         if (!locked || !fresh.canHack) throw new BadRequestException(fresh.reason || "Target unavailable");
         const config = await this.db.getRepository(HackProblemEntity).findOneBy({ problemId: locked.problemId });
@@ -466,7 +470,7 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
       return false;
     const target = await this.submissions.findSubmissionById(hack.submissionId);
     if (!target) return !!user?.isAdmin;
-    if (!(await this.submissions.userHasTeamResourceAccess(user, target))) return false;
+    if (!(await this.submissionAccess.userHasTeamResourceAccess(user, target))) return false;
     if (target.contestId) {
       try {
         const { contest, manager } = await this.contests.get(user, target.contestId, true);
@@ -477,7 +481,7 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
         return false;
       }
     }
-    return await this.submissions.userHasPermission(user, target, SubmissionPermissionType.View);
+    return await this.submissionAccess.userHasPermission(user, target, SubmissionPermissionType.View);
   }
 
   private async meta(hack: HackEntity) {
@@ -644,10 +648,11 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
       if (!(await this.privileges.userHasPrivilege(user, privilege))) return false;
     }
     const target = await this.submissions.findSubmissionById(hack.submissionId);
-    if (!target || !(await this.submissions.userHasTeamResourceAccess(user, target))) return false;
+    if (!target || !(await this.submissionAccess.userHasTeamResourceAccess(user, target))) return false;
     try {
       if (target.contestId) await this.contests.submissionDetail(user, target.contestId, target.id);
-      else if (!(await this.submissions.userHasPermission(user, target, SubmissionPermissionType.View))) return false;
+      else if (!(await this.submissionAccess.userHasPermission(user, target, SubmissionPermissionType.View)))
+        return false;
     } catch {
       return false;
     }

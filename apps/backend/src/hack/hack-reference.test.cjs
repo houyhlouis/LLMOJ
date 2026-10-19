@@ -31,8 +31,9 @@ function fixture() {
     privileges: { userHasPrivilege: async () => true, permissionDecision: async () => configure },
     problems: { findProblemById: async () => problem, userHasPermission: async () => true,
       getProblemJudgeInfo: async () => [{ subtasks: [] }], getProblemFiles: async () => [] },
-    submissions: { findSubmissionById: async () => submission, userHasPermission: async () => view,
-      userHasTeamResourceAccess: async () => true, getSubmissionDetail: async () => { calls.content++; return { content }; } },
+    submissions: { findSubmissionById: async () => submission,
+      getSubmissionDetail: async () => { calls.content++; return { content }; } },
+    submissionAccess: { userHasPermission: async () => view, userHasTeamResourceAccess: async () => true },
     languages: new CodeLanguageService(), files: {}
   });
   return { service, user, problem, submission, content, options, calls, store,

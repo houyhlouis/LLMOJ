@@ -11,7 +11,8 @@ import { SubmissionStatus } from "@libreoj/judge-protocol";
 import { SubmissionProgress, SubmissionProgressType } from "./submission-progress.interface";
 import { withoutTestData } from "./submission-redaction";
 import { submissionDisplayProgress } from "./submission-display-progress";
-import { SubmissionPermissionType, SubmissionService } from "./submission.service";
+import { SubmissionService } from "./submission.service";
+import { SubmissionAccessService, SubmissionPermissionType } from "./submission-access.service";
 import { SubmissionEventType } from "./submission-progress.service";
 
 import { SubmissionEntity } from "./submission.entity";
@@ -95,7 +96,9 @@ export class SubmissionProgressGateway implements OnGatewayConnection, OnGateway
     @Inject(forwardRef(() => UserPrivilegeService))
     private readonly userPrivilegeService: UserPrivilegeService,
     @Inject(forwardRef(() => ProblemService))
-    private readonly problemService: ProblemService
+    private readonly problemService: ProblemService,
+    @Inject(forwardRef(() => SubmissionAccessService))
+    private readonly submissionAccessService: SubmissionAccessService
   ) {
     // Use a different key with session secret to prevent someone attempt to use the session key
     // as subscription key
@@ -184,7 +187,7 @@ export class SubmissionProgressGateway implements OnGatewayConnection, OnGateway
     let managesProblems: Promise<boolean>;
     return async submission => {
       if (!submission) return false;
-      if (!(await this.submissionService.userHasTeamResourceAccess(user, submission))) return false;
+      if (!(await this.submissionAccessService.userHasTeamResourceAccess(user, submission))) return false;
 
       if (subscription.type === SubmissionProgressSubscriptionType.Meta && !submission.contestId) {
         // List progress exposes metadata; keep its visibility rules independent of code access.
@@ -200,7 +203,7 @@ export class SubmissionProgressGateway implements OnGatewayConnection, OnGateway
           ))
         );
       }
-      return await this.submissionService.userHasPermission(user, submission, SubmissionPermissionType.View);
+      return await this.submissionAccessService.userHasPermission(user, submission, SubmissionPermissionType.View);
     };
   }
 

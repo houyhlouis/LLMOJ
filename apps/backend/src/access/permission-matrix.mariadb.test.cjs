@@ -40,7 +40,8 @@ const { ProblemService, ProblemPermissionType } = require("../problem/problem.se
 const { SubmissionEntity } = require("../submission/submission.entity.ts");
 const { SubmissionDetailEntity } = require("../submission/submission-detail.entity.ts");
 const { SubmissionStatus } = require("@libreoj/judge-protocol");
-const { SubmissionService, SubmissionPermissionType } = require("../submission/submission.service.ts");
+const { SubmissionService } = require("../submission/submission.service.ts");
+const { SubmissionAccessService, SubmissionPermissionType } = require("../submission/submission-access.service.ts");
 const {
   SubmissionProgressGateway,
   SubmissionProgressSubscriptionType
@@ -213,10 +214,12 @@ test(
         problemService,
         userPrivilegeService: privileges
       });
+      const submissionAccessService = Object.assign(Object.create(SubmissionAccessService.prototype), submissionService);
       const gateway = Object.assign(Object.create(SubmissionProgressGateway.prototype), {
         authSessionService: { accessSessionById: async userId => Object.values(users).find(u => u?.id === userId) },
         userPrivilegeService: privileges,
         submissionService,
+        submissionAccessService,
         problemService
       });
 
@@ -253,7 +256,7 @@ test(
         );
         return result.map(s => s.id);
       }
-      const submissionPage = (user, s) => submissionService.userHasPermission(user, s, SubmissionPermissionType.View);
+      const submissionPage = (user, s) => submissionAccessService.userHasPermission(user, s, SubmissionPermissionType.View);
       const liveProgress = async (user, s, type = SubmissionProgressSubscriptionType.Meta) =>
         (
           await gateway.authorize({

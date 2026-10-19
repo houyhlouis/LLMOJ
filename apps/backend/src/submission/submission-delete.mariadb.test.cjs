@@ -16,6 +16,8 @@ require.extensions['.ts'] = (module, filename) => {
 String.prototype.format ||= function(...args) { return require('node:util').format(this,...args); };
 const { DataSource, EntitySchema } = require('typeorm');
 const { SubmissionService } = require('./submission.service.ts');
+const { SubmissionJudgingService } = require('./submission-judging.service.ts');
+const { SubmissionAccessService } = require('./submission-access.service.ts');
 const { SubmissionEntity } = require('./submission.entity.ts');
 const { SubmissionDetailEntity } = require('./submission-detail.entity.ts');
 const { StatisticsOutboxEntity } = require('./statistics-outbox.entity.ts');
@@ -61,6 +63,11 @@ test('deleted submissions keep owner counts atomic (real MariaDB)',
       userService,lockService:locks,submissionStatisticsService:{onSubmissionUpdated:async()=>{}},
       judgeGateway:{cancelTask:()=>{}},submissionProgressService:{emitSubmissionEvent:async()=>{}},
       fileService:{deleteFile:async()=>()=>{}},statisticsOutboxService:outbox});
+    // The judging half and the permission rules of the submission service, with the same collaborators
+    const judging = Object.assign(Object.create(SubmissionJudgingService.prototype), svc);
+    const access = Object.assign(Object.create(SubmissionAccessService.prototype), svc);
+    judging.submissionAccessService = access;
+    svc.submissionJudgingService = judging;
     async function fixture(contest=false,status='WrongAnswer') {
       await users.save([{id:1,submissionCount:9,acceptedProblemCount:2},{id:2,submissionCount:contest?0:1,acceptedProblemCount:status==='Accepted'?1:0}]);
       await problems.save({id:1,submissionCount:contest?0:1,acceptedSubmissionCount:status==='Accepted'?1:0});

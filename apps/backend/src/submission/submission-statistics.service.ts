@@ -175,6 +175,9 @@ export class SubmissionStatisticsService {
    * A newly-added submission won't call this function.
    */
   async onSubmissionUpdated(oldSubmission: SubmissionEntity, submission?: SubmissionEntity): Promise<void> {
+    // Contest submissions don't count in a problem's statistics
+    if (oldSubmission.contestId) return;
+
     // Submission score statistics
     if (
       !submission ||

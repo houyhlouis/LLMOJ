@@ -237,7 +237,8 @@ export const useCaptcha = <Action extends CaptchaAction>(action: Action): Captch
           turnstileWidgetId = turnstile.render(container, {
             sitekey: appState.serverPreference.security.turnstileSiteKey,
             action,
-            size: "invisible",
+            // Invisible mode belongs to the sitekey (Cloudflare dashboard); "size" only takes normal/compact/flexible
+            appearance: "interaction-only",
             execution: "render",
             retry: "never",
             "response-field": false,

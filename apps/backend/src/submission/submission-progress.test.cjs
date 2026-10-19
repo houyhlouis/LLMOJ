@@ -27,7 +27,7 @@ const {SubmissionProgressGateway:Gateway, SubmissionProgressSubscriptionType:T} 
   '@nestjs/websockets':{WebSocketGateway:decorator,WebSocketServer:decorator},
   'jsonwebtoken':jwt, 'jsondiffpatch':{diff}, './submission-redaction':{withoutTestData},
   './submission-display-progress':{submissionDisplayProgress},
-  './submission.service':{SubmissionPermissionType:{View:'View'}},
+  './submission-access.service':{SubmissionPermissionType:{View:'View'}},
   './submission-progress.interface':{SubmissionProgressType:{Finished:'Finished'}},
   './submission-progress.service':{SubmissionEventType:{Progress:0,Deleted:2}},
   '@libreoj/judge-protocol':{SubmissionStatus:{Pending:'Pending'}},
@@ -39,10 +39,12 @@ function fixture() {
   const state = {view:true,site:true,data:true,session:true,problem:true,code:true,team:true,fail:false};
   const records = new Map([[74,{id:74,problemId:1,submitterId:5,isPublic:true,status:'Pending'}]]);
   const metrics = {inc:noop,dec:noop};
+  const access = {
+    userHasTeamResourceAccess:async()=>state.team,
+    userHasPermission:async (user, submission, type)=> {assert.equal(type,'View');if(state.fail)throw Error('storage unavailable');return state.view && state.code && (submission.isPublic || user?.id===submission.submitterId || state.problem);}
+  };
   const g = new Gateway({config:{security:{sessionSecret:'test-fixture-only'}}}, {
     findSubmissionById:async id=>records.get(id),
-    userHasTeamResourceAccess:async()=>state.team,
-    userHasPermission:async (user, submission, type)=> {assert.equal(type,'View');if(state.fail)throw Error('storage unavailable');return state.view && state.code && (submission.isPublic || user?.id===submission.submitterId || state.problem);},
     getSubmissionBasicMeta:async sub=>({status:sub.status}),
     getSubmissionDetail:async()=>({result:{progressType:'Finished',testcaseResult:{a:{status:'Accepted',input:'private input',output:'private answer'}}}})
   }, {gauge:()=>metrics,counter:()=>metrics}, {
@@ -52,7 +54,7 @@ function fixture() {
     permissionDecision:async (user,p)=> {assert.equal(p,P.ReadProblemData);return state.data;}
   }, {
     findProblemById:async ()=>({id:1}), userHasPermission:async ()=>state.problem
-  });
+  }, access);
   const messages=[];
   g.server={sockets:new Map(),to:id=>({emit:(event, submissionId, delta)=>messages.push({id,submissionId,delta})})};
   function key(type=T.Detail,ids=[74],userId=5,sessionId=8) {return g.encodeSubscription({type,submissionIds:ids,userId,sessionId});}
@@ -109,7 +111,7 @@ test('private metadata stops when problem ACL is revoked',async()=>{
   assert.equal(s.connected,false);assert.equal(messages.length,0);
 });
 test('anonymous public subscriptions use current public visibility',async()=>{
-  const {g,key,socket,records,messages}=fixture();const s=socket(key(T.Detail,[74],null,null));await g.handleConnection(s);records.get(74).isPublic=false;g.submissionService.userHasPermission=async()=>false;
+  const {g,key,socket,records,messages}=fixture();const s=socket(key(T.Detail,[74],null,null));await g.handleConnection(s);records.get(74).isPublic=false;g.submissionAccessService.userHasPermission=async()=>false;
   await g.onSubmissionEvent(74,0,progress);assert.equal(s.connected,false);assert.equal(messages.length,0);
 });
 test('authorization storage failure disconnects without any data',async()=>{
@@ -138,7 +140,7 @@ test('ViewSite revocation stops all stream types even when object permission rem
   }
 });
 test('contest object permission cannot bypass revoked global ViewSubmission',async()=>{
-  const {g,key,socket,state,records,messages}=fixture();records.get(74).contestId=14;g.submissionService.userHasPermission=async()=>true;
+  const {g,key,socket,state,records,messages}=fixture();records.get(74).contestId=14;g.submissionAccessService.userHasPermission=async()=>true;
   const s=socket(key());await g.handleConnection(s);state.view=false;await g.onSubmissionEvent(74,0,progress);
   assert.equal(s.connected,false);assert.equal(messages.length,0);
 });
