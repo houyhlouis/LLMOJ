@@ -25,7 +25,7 @@ String.prototype.format ||= function format(...args) {
   return require("node:util").format(String(this), ...args);
 };
 
-const { ContestService } = require("./contest.service.ts");
+const { ContestScoreService } = require("./contest-score.service.ts");
 const { scoreContest } = require("./contest-scoring.ts");
 const { ContestScoreRevisionService } = require("../submission/contest-score-revision.service.ts");
 
@@ -44,7 +44,7 @@ function fixture({ revisions } = {}) {
     { id: 3, submitterId: 8, contestProblemId: 2, submitTime: at(30), status: "Accepted", score: 100 }
   ];
   const reads = { count: 0, selected: null };
-  const service = Object.assign(Object.create(ContestService.prototype), {
+  const service = Object.assign(Object.create(ContestScoreService.prototype), {
     db: {
       getRepository: () => ({
         createQueryBuilder: () => {

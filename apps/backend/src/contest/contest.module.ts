@@ -5,6 +5,10 @@ import { ContestEntity } from "./contest.entity";
 import { ContestProblemEntity } from "./contest-problem.entity";
 import { ContestSummaryEntity } from "./contest-summary.entity";
 import { ContestService } from "./contest.service";
+import { ContestAccessService } from "./contest-access.service";
+import { ContestScoreService } from "./contest-score.service";
+import { ContestProblemService } from "./contest-problem.service";
+import { ContestSubmissionService } from "./contest-submission.service";
 import { ContestController } from "./contest.controller";
 
 import { ProblemModule } from "../problem/problem.module";
@@ -20,8 +24,14 @@ import { FileModule } from "../file/file.module";
     forwardRef(() => UserModule),
     forwardRef(() => FileModule)
   ],
-  providers: [ContestService],
+  providers: [
+    ContestAccessService,
+    ContestScoreService,
+    ContestProblemService,
+    ContestSubmissionService,
+    ContestService
+  ],
   controllers: [ContestController],
-  exports: [ContestService]
+  exports: [ContestAccessService, ContestSubmissionService]
 })
 export class ContestModule {}

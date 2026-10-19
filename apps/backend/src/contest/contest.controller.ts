@@ -2,6 +2,8 @@ import { Body, Controller, Post } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 
 import { ContestService } from "./contest.service";
+import { ContestProblemService } from "./contest-problem.service";
+import { ContestSubmissionService } from "./contest-submission.service";
 import { ContestRequestDto } from "./contest-request.dto";
 
 import { CurrentUser } from "../common/user.decorator";
@@ -13,7 +15,11 @@ import { ProofOfWorkAction } from "../proof-of-work/proof-of-work-action.enum";
 @ApiBearerAuth()
 @Controller("contest")
 export class ContestController {
-  constructor(private readonly service: ContestService) {}
+  constructor(
+    private readonly service: ContestService,
+    private readonly contestProblems: ContestProblemService,
+    private readonly contestSubmissions: ContestSubmissionService
+  ) {}
 
   @Post("list") list(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
     return this.service.list(u, r.page);
@@ -32,47 +38,47 @@ export class ContestController {
   }
 
   @Post("saveProblem") saveProblem(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
-    return this.service.saveProblem(u, r.id, r.data ?? {});
+    return this.contestProblems.saveProblem(u, r.id, r.data ?? {});
   }
 
   @Post("removeProblem") removeProblem(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
-    return this.service.removeProblem(u, r.id, r.problemId);
+    return this.contestProblems.removeProblem(u, r.id, r.problemId);
   }
 
   @Post("problem") problem(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
-    return this.service.problem(u, r.id, r.problemId, r.data?.locale);
+    return this.contestProblems.problem(u, r.id, r.problemId, r.data?.locale);
   }
 
   @Post("attachment") attachment(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
-    return this.service.attachment(u, r.id, r.problemId, r.data ?? {});
+    return this.contestProblems.attachment(u, r.id, r.problemId, r.data ?? {});
   }
 
   @Post("removeAttachment") removeAttachment(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
-    return this.service.removeAttachment(u, r.id, r.problemId, r.data?.filename);
+    return this.contestProblems.removeAttachment(u, r.id, r.problemId, r.data?.filename);
   }
 
   @Post("download") download(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
-    return this.service.download(u, r.id, r.problemId, r.data?.filename);
+    return this.contestProblems.download(u, r.id, r.problemId, r.data?.filename);
   }
 
   @ProofOfWork(ProofOfWorkAction.SubmitProblem)
   @Post("submit")
   submit(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
-    return this.service.submit(u, r.id, r.problemId, r.data ?? {});
+    return this.contestSubmissions.submit(u, r.id, r.problemId, r.data ?? {});
   }
 
   @ProofOfWork(ProofOfWorkAction.PrepareSubmissionFileUpload)
   @Post("prepareUpload")
   prepareUpload(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
-    return this.service.submit(u, r.id, r.problemId, r.data ?? {}, true);
+    return this.contestSubmissions.submit(u, r.id, r.problemId, r.data ?? {}, true);
   }
 
   @Post("submissions") submissions(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
-    return this.service.submissionList(u, r.id, r.page, r.data);
+    return this.contestSubmissions.submissionList(u, r.id, r.page, r.data);
   }
 
   @Post("submission") submission(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
-    return this.service.submissionDetail(u, r.id, r.submissionId);
+    return this.contestSubmissions.submissionDetail(u, r.id, r.submissionId);
   }
 
   @Post("ranklist") ranklist(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
@@ -84,7 +90,7 @@ export class ContestController {
   }
 
   @Post("rejudge") rejudge(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
-    return this.service.rejudge(u, r.id, r.submissionId);
+    return this.contestSubmissions.rejudge(u, r.id, r.submissionId);
   }
 
   @Post("summary") summary(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {

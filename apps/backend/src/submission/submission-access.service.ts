@@ -12,6 +12,8 @@ import { UserEntity } from "../user/user.entity";
 import { ProblemEntity } from "../problem/problem.entity";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
 import { ContestEntity } from "../contest/contest.entity";
+import { isContestManager } from "../contest/contest-manager";
+import { contestEnded } from "../contest/contest-policy";
 import { teamResourceAccess } from "../team/team-access";
 
 export enum SubmissionPermissionType {
@@ -59,15 +61,7 @@ export class SubmissionAccessService {
       const contest = await this.connection.getRepository(ContestEntity).findOneBy({ id: submission.contestId });
       if (!contest || !user || !(await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ViewContest)))
         return false;
-      const teamManager = await teamResourceAccess(this.connection, user, "contest", submission.contestId, "contests");
-      const manager =
-        teamManager !== null
-          ? teamManager &&
-            (await this.userPrivilegeService.permissionDecision(user, UserPrivilegeType.EditContest, true))
-          : user.isAdmin ||
-            (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageContest)) ||
-            ((await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.EditContest)) &&
-              (contest.ownerId === user.id || contest.adminIds.includes(user.id)));
+      const manager = await isContestManager(this.connection, this.userPrivilegeService, user, contest);
       // Contest endpoints expose only the feedback permitted by the contest rule.
       if (manager) {
         if (type === SubmissionPermissionType.Rejudge)
@@ -93,9 +87,8 @@ export class SubmissionAccessService {
         type === SubmissionPermissionType.Rejudge
       )
         return false;
-      if (type === SubmissionPermissionType.Cancel)
-        return user.id === submission.submitterId && Date.now() < +contest.endTime;
-      return Date.now() >= +contest.endTime && user.id === submission.submitterId;
+      if (type === SubmissionPermissionType.Cancel) return user.id === submission.submitterId && !contestEnded(contest);
+      return contestEnded(contest) && user.id === submission.submitterId;
     }
     switch (type) {
       // Everyone can read a public submission

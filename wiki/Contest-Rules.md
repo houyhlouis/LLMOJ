@@ -17,6 +17,19 @@ A contest uses one of four rules. **NOI / OI** is a single rule (stored as `noi`
 
 **Fake and hacked submissions** score 0, and their original subtask results never count towards Strict IOI. Under IOI and Strict IOI, the contestant's other valid submissions still count. Rejudging many submissions at once skips them; restoring one needs explicit permission (see [Fake moderation](Submission-Moderation.md)).
 
+## Who sees what
+
+Contest managers see everything, at any time. Everyone else can open the problems once the contest starts. While it runs, they see:
+
+| | NOI / OI | IOI | ICPC / XCPC | Strict IOI |
+| --- | --- | --- | --- | --- |
+| Other contestants' submissions | After the end | After the end | Verdicts only | After the end |
+| How many tried and solved each problem | After the end | Live | Live | After the end |
+
+- Contest pages never show other contestants' code. After the end, they show everyone's results, but still not their code.
+- **Hide problem statistics** (under **Edit contest**) hides the counts until the end, whatever the rule.
+- Under NOI / OI and Strict IOI, other contestants can't see a hack's input and messages until the end.
+
 ## Choosing a rule
 
 Contest owners and managers choose the rule under **Edit contest**. It can't be changed once the contest has submissions. Team contests use the same four rules.

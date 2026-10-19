@@ -11,7 +11,7 @@ const { ProblemEntity } = require("../problem/problem.entity.ts"), { ProblemServ
 const { ProblemController } = require("../problem/problem.controller.ts"), { ProblemJudgeInfoEntity } = require("../problem/problem-judge-info.entity.ts"), { ProblemFileEntity, ProblemFileType } = require("../problem/problem-file.entity.ts");
 const { DiscussionEntity } = require("../discussion/discussion.entity.ts"), { DiscussionService, DiscussionPermissionType } = require("../discussion/discussion.service.ts");
 const { DiscussionContentEntity } = require("../discussion/discussion-content.entity.ts"), { DiscussionReplyEntity } = require("../discussion/discussion-reply.entity.ts");
-const { ContestEntity } = require("../contest/contest.entity.ts"), { ContestService } = require("../contest/contest.service.ts");
+const { ContestEntity } = require("../contest/contest.entity.ts"), { ContestService } = require("../contest/contest.service.ts"), { ContestAccessService } = require("../contest/contest-access.service.ts");
 const { SubmissionEntity } = require("../submission/submission.entity.ts"), { SubmissionService } = require("../submission/submission.service.ts"), { SubmissionAccessService, SubmissionPermissionType } = require("../submission/submission-access.service.ts");
 const { GroupEntity } = require("../group/group.entity.ts"), { GroupService } = require("../group/group.service.ts");
 const { UserPermissionRuleEntity } = require("../access/user-permission-rule.entity.ts");
@@ -85,7 +85,7 @@ test("team direct links, list counts, archival, disqualified work and removal re
     const discussions = Object.create(DiscussionService.prototype); Object.assign(discussions, { connection: db, discussionRepository: db.getRepository(DiscussionEntity), discussionContentRepository: db.getRepository(DiscussionContentEntity), discussionReplyRepository: db.getRepository(DiscussionReplyEntity), problemService: problems, userPrivilegeService: privileges, permissionService: { userOrItsGroupsHavePermission: async () => true }, configService: { config: { preference: { security: { discussionReplyDefaultPublic: true } } } } });
     const submissions = Object.create(SubmissionService.prototype); Object.assign(submissions, { connection: db, submissionRepository: db.getRepository(SubmissionEntity), problemService: problems, userPrivilegeService: privileges });
     const submissionAccess = Object.assign(Object.create(SubmissionAccessService.prototype), submissions);
-    const contests = Object.create(ContestService.prototype); Object.assign(contests, { db, privileges, problems, submissions, submissionAccess });
+    const contestAccess = Object.assign(Object.create(ContestAccessService.prototype), { db, privileges }); const contests = Object.create(ContestService.prototype); Object.assign(contests, { db, access: contestAccess, submissions });
     const teams = Object.create(TeamService.prototype); Object.assign(teams, { db, privileges, problems, users: { findUsersByExistingIds: async ids => ids.map(id => ({ id, username: "user" + id })) }, files: { signDownloadLink: async args => { assert.equal(args.expiresSeconds, 60); return "signed"; } } });
     const groups = Object.create(GroupService.prototype);
     Object.assign(groups, { groupRepository: { createQueryBuilder: alias => {
@@ -101,7 +101,7 @@ test("team direct links, list counts, archival, disqualified work and removal re
       for (const permission of Object.values(ProblemPermissionType)) assert.equal(await problems.userHasPermission(former, p, permission), false);
       for (const permission of Object.values(DiscussionPermissionType)) assert.equal(await discussions.userHasPermission(former, d, permission), false);
       for (const id of [31, 33]) for (const permission of Object.values(SubmissionPermissionType)) assert.equal(await submissionAccess.userHasPermission(former, await submissions.findSubmissionById(id), permission), false);
-      assert.equal(await contests.manager(former, c), false); await assert.rejects(contests.get(former, 21));
+      assert.equal(await contestAccess.manager(former, c), false); await assert.rejects(contestAccess.get(former, 21));
       await assert.rejects(teams.downloadFile(former, { teamId: 10, id: 41 }), /membership/i);
       assert.deepEqual(await teams.downloadFile(member, { teamId: 10, id: 41 }), { url: "signed" });
       assert.equal(await groups.findGroupById(50), null); assert.deepEqual((await groups.getAllGroups()).map(g => g.id), [51]);
@@ -133,8 +133,8 @@ test("team direct links, list counts, archival, disqualified work and removal re
     await t.test("explicit site denials still constrain delegated team editing", async () => {
       assert.equal(await problems.userHasPermission(editor, await problems.findProblemById(1), ProblemPermissionType.Modify), true);
       denied.add("EditAnyProblem"); assert.equal(await problems.userHasPermission(editor, await problems.findProblemById(1), ProblemPermissionType.Modify), false); denied.clear();
-      assert.equal(await contests.manager(editor, await db.getRepository(ContestEntity).findOneBy({ id: 21 })), true);
-      denied.add("EditContest"); assert.equal(await contests.manager(editor, await db.getRepository(ContestEntity).findOneBy({ id: 21 })), false); denied.clear();
+      assert.equal(await contestAccess.manager(editor, await db.getRepository(ContestEntity).findOneBy({ id: 21 })), true);
+      denied.add("EditContest"); assert.equal(await contestAccess.manager(editor, await db.getRepository(ContestEntity).findOneBy({ id: 21 })), false); denied.clear();
     });
     await t.test("assignment scores exclude late/contest work and score Fake zero even if its stored score is inconsistent", async () => {
       const deadline = new Date("2026-01-01T12:00:00Z"), early = new Date(+deadline - 1000), late = new Date(+deadline + 1000);

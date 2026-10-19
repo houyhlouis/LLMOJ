@@ -21,6 +21,9 @@ const { CPP_STANDARDS } = require("../code-language/compile-and-run-options/cpp.
 const { PYTHON_VERSIONS } = require("../code-language/compile-and-run-options/python.ts");
 const { ProblemTypeTraditionalService } = require("../problem-type/types/traditional/problem-type.service.ts");
 const { ContestService } = require("./contest.service.ts");
+const { ContestAccessService } = require("./contest-access.service.ts");
+const { ContestProblemService } = require("./contest-problem.service.ts");
+const { ContestSubmissionService } = require("./contest-submission.service.ts");
 const repoRoot = path.resolve(__dirname, "../../../..");
 function loadFrontend(relative, imports) {
   const module = { exports: {} };
@@ -57,8 +60,7 @@ const all = normalizeContestLanguages(Object.values(CodeLanguage));
 const cpp = (std = "c++17") => ({ compiler: "g++", std, O: "0", m: "64" });
 const content = (language, options) => ({ language, code: "example", compileAndRunOptions: options });
 function fixture(allowed = ["cpp:c++17"]) {
-  const service = Object.create(ContestService.prototype),
-    writes = [],
+  const writes = [],
     logins = [];
   const contest = {
     id: 1,
@@ -68,11 +70,7 @@ function fixture(allowed = ["cpp:c++17"]) {
     rule: "noi"
   };
   const traditional = new ProblemTypeTraditionalService({}, new CodeLanguageService());
-  service.login = async (_user, privilege) => {
-    logins.push(privilege);
-  };
-  service.get = async () => ({ contest, manager: true });
-  service.db = {
+  const db = {
     getRepository: () => ({
       create: x => ({ ...x, id: 1 }),
       save: async x => {
@@ -83,18 +81,34 @@ function fixture(allowed = ["cpp:c++17"]) {
       countBy: async () => 0
     })
   };
-  service.problems = {
+  const access = Object.assign(Object.create(ContestAccessService.prototype), {
+    db,
+    privileges: { userHasPrivilege: async () => true }
+  });
+  access.requirePrivilege = async (_user, privilege) => {
+    logins.push(privilege);
+  };
+  access.get = async () => ({ contest, manager: true });
+  const problems = {
     lockProblemById: async (_id, _mode, callback) => callback({ id: 3 }),
     getProblemJudgeInfo: async () => [{}, true]
   };
-  service.submissions = {
+  const submissions = {
     validateSubmissionContent: (_problem, value) => traditional.validateSubmissionContent(value),
     createSubmission: async (_user, _problem, value) => {
       writes.push(value);
       return [null, { id: 4 }];
     }
   };
-  return { service, writes, logins };
+  const service = Object.assign(Object.create(ContestService.prototype), { db, access });
+  const contestSubmissions = Object.assign(Object.create(ContestSubmissionService.prototype), {
+    db,
+    access,
+    problems,
+    submissions
+  });
+  const contestProblems = Object.assign(Object.create(ContestProblemService.prototype), { db, access, problems });
+  return { service, contestSubmissions, contestProblems, access, writes, logins };
 }
 const contestData = languages => ({
   title: "Language fixture",
@@ -193,7 +207,7 @@ test("contest save persists the canonical language selection and keeps admission
   );
   assert.equal(invalid.writes.length, 0);
   const denied = fixture();
-  denied.service.get = async () => ({ contest: {}, manager: false });
+  denied.access.get = async () => ({ contest: {}, manager: false });
   await assert.rejects(denied.service.save({ id: 7 }, 1, contestData(["cpp:c++17"])), e => e.getStatus() === 403);
   assert.equal(denied.writes.length, 0);
 });
@@ -207,10 +221,10 @@ test("C++ and Python restrictions apply to real contest submissions", async () =
     content("python", { version: "3.9" }),
     content("ruby", {})
   ])
-    await assert.rejects(f.service.submit({ id: 7 }, 1, 2, { content: value }), e => e.getStatus() === 403);
+    await assert.rejects(f.contestSubmissions.submit({ id: 7 }, 1, 2, { content: value }), e => e.getStatus() === 403);
   assert.equal(f.writes.length, 0);
-  assert.deepEqual(await f.service.submit({ id: 7 }, 1, 2, { content: content("cpp", cpp()) }), { submissionId: 4 });
-  assert.deepEqual(await f.service.submit({ id: 7 }, 1, 2, { content: content("python", { version: "3.10" }) }), {
+  assert.deepEqual(await f.contestSubmissions.submit({ id: 7 }, 1, 2, { content: content("cpp", cpp()) }), { submissionId: 4 });
+  assert.deepEqual(await f.contestSubmissions.submit({ id: 7 }, 1, 2, { content: content("python", { version: "3.10" }) }), {
     submissionId: 4
   });
 });
@@ -220,17 +234,17 @@ test("every actually supported language remains submittable, with option validat
     const [language, version] = choice.split(":");
     const options = frontend.getDefaultCompileAndRunOptions(language);
     if (version) options[language === "cpp" ? "std" : "version"] = version;
-    assert.deepEqual(await f.service.submit({ id: 7 }, 1, 2, { content: content(language, options) }), {
+    assert.deepEqual(await f.contestSubmissions.submit({ id: 7 }, 1, 2, { content: content(language, options) }), {
       submissionId: 4
     });
   }
   const before = f.writes.length;
   await assert.rejects(
-    f.service.submit({ id: 7 }, 1, 2, { content: content("cpp", { ...cpp(), O: "injected" }) }),
+    f.contestSubmissions.submit({ id: 7 }, 1, 2, { content: content("cpp", { ...cpp(), O: "injected" }) }),
     e => e.getStatus() === 400
   );
   await assert.rejects(
-    f.service.submit({ id: 7 }, 1, 2, { content: content("cpp", { ...cpp(), m: "x32" }) }),
+    f.contestSubmissions.submit({ id: 7 }, 1, 2, { content: content("cpp", { ...cpp(), m: "x32" }) }),
     e => e.getStatus() === 400
   );
   assert.equal(f.writes.length, before);
@@ -241,7 +255,7 @@ test("every actually supported language remains submittable, with option validat
 });
 
 test("contest statement exposes only a safe Communication grader capability", async () => {
-  const { service } = fixture(["python", "cpp:c++17"]);
+  const { contestProblems: service, access } = fixture(["python", "cpp:c++17"]);
   const internal = {
     timeLimit: 3000,
     memoryLimit: 128,
@@ -251,7 +265,7 @@ test("contest statement exposes only a safe Communication grader capability", as
     subtasks: [{ testcases: [{ inputFile: "hidden.in" }] }]
   };
   service.problemMeta = () => ({ id: 2 });
-  service.privileges = { userHasPrivilege: async () => false };
+  access.privileges = { userHasPrivilege: async () => false };
   for (const [type, judgeInfo, expected] of [
     ["Communication", internal, true],
     ["Communication", { ...internal, grader: undefined }, false],

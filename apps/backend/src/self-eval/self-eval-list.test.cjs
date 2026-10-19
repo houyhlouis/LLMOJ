@@ -61,7 +61,7 @@ function fixture() {
     if (denied.has(scope)) throw new ForbiddenException();
     return { scope };
   };
-  service.contests = { get: async () => ({ contest: { rule: "noi", ruleOptions: { selfEvalEnabled: true } } }) };
+  service.contestAccess = { get: async () => ({ contest: { rule: "noi", ruleOptions: { selfEvalEnabled: true } } }) };
   return { service, user, records, denied, calls };
 }
 
@@ -123,9 +123,9 @@ test("invalid pagination and filter identifiers are rejected before database acc
 test("list rejects unscoped requests and non-NOI or disabled contests before counting any rows", async () => {
   const f=fixture();await assert.rejects(f.service.list(f.user,{}),BadRequestException);
   for(const rule of ["ioi","strictioi","acm"]) {
-    f.service.contests.get=async()=>({contest:{rule,ruleOptions:{selfEvalEnabled:true}}});
+    f.service.contestAccess.get=async()=>({contest:{rule,ruleOptions:{selfEvalEnabled:true}}});
     await assert.rejects(f.service.list(f.user,{contestId:7}),BadRequestException);
   }
-  f.service.contests.get=async()=>({contest:{rule:"noi",ruleOptions:{selfEvalEnabled:false}}});
+  f.service.contestAccess.get=async()=>({contest:{rule:"noi",ruleOptions:{selfEvalEnabled:false}}});
   await assert.rejects(f.service.list(f.user,{contestId:7}),BadRequestException);assert.equal(f.calls.reads,0);
 });

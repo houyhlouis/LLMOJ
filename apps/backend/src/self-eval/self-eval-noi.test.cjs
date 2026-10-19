@@ -21,7 +21,7 @@ function fixture() {
   Object.assign(service, {
     db: {getRepository: entity => ({findOneBy:async()=>entity === ContestProblemEntity ? {inputFilename:'',outputFilename:''} : null})},
     privileges: {userHasPrivilege:async()=>allowed},
-    contests: {get:async()=>({contest,manager})},
+    contestAccess: {get:async()=>({contest,manager})},
     problems: {
       findProblemById:async()=>({id:1,type:'Traditional'}),
       getProblemPreprocessedJudgeInfo:async()=>[structuredClone(judgeInfo)],

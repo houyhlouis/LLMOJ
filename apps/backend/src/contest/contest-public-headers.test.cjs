@@ -17,11 +17,12 @@ require.extensions[".ts"] = (module, filename) =>
     }).outputText,
     filename
   );
-const { ContestService } = require("./contest.service.ts");
+const { ContestProblemService } = require("./contest-problem.service.ts");
+const { ContestAccessService } = require("./contest-access.service.ts");
 const { UserPrivilegeType } = require("../user/user-privilege.service.ts");
 const { ForbiddenException, NotFoundException } = require("@nestjs/common");
 function fixture() {
-  const service = Object.create(ContestService.prototype),
+  const service = Object.create(ContestProblemService.prototype),
     user = { id: 7 },
     reads = [],
     signed = [],
@@ -90,6 +91,10 @@ function fixture() {
       return "signed:" + input.uuid;
     }
   };
+  service.access = Object.assign(Object.create(ContestAccessService.prototype), {
+    db: service.db,
+    privileges: service.privileges
+  });
   return { service, user, contest, problem, info, row, publicFiles, hiddenFiles, contents, reads, signed };
 }
 function cleanReads(f) {

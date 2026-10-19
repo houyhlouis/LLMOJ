@@ -8,6 +8,9 @@ require.extensions[".ts"] = (module, filename) => module._compile(
     compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, esModuleInterop: true, experimentalDecorators: true, emitDecoratorMetadata: true }
   }).outputText, filename);
 const { ContestService } = require("./contest.service.ts");
+const { ContestAccessService } = require("./contest-access.service.ts");
+const { ContestScoreService } = require("./contest-score.service.ts");
+const { ContestSubmissionService } = require("./contest-submission.service.ts");
 const { UserPrivilegeType: P } = require("../user/user-privilege.service.ts");
 const { ForbiddenException } = require("@nestjs/common");
 
@@ -21,11 +24,8 @@ function fixture(rule = "strictioi") {
   ];
   const result = (a, b) => ({ subtasks: [{ score: a, fullScore: 40, testcases: [] }, { score: b, fullScore: 60, testcases: [] }], testcaseResult: {}, compile: { success: true, message: "private compile" } });
   const details = [ { submissionId: 1, result: result(40, 0), content: { code: "owner code" } }, { submissionId: 2, result: result(0, 60), content: { code: "owner code" } } ];
-  const service = Object.create(ContestService.prototype);
-  service.get = async who => ({ contest, manager: !!who?.manager });
-  service.problemList = async () => [{ id: 2, weight: 1, title: "Merged subtasks" }];
-  service.privileges = { userHasPrivilege: async (who, privilege) => !!who?.allowed.includes(privilege) };
-  service.db = { getRepository: entity => {
+  const privileges = { userHasPrivilege: async (who, privilege) => !!who?.allowed.includes(privilege) };
+  const db = { getRepository: entity => {
     if (entity.name === "SubmissionEntity") return {
       createQueryBuilder: () => { const q = { select: () => q, where: () => q, andWhere: () => q, getMany: async () => runs }; return q; },
       findOneBy: async query => runs.find(run => run.id === query.id && run.contestId === query.contestId)
@@ -34,9 +34,18 @@ function fixture(rule = "strictioi") {
     if (entity.name === "UserEntity") return { findBy: async () => [{ id: 7, username: "owner" }] };
     throw new Error("Unexpected repository: " + entity.name);
   } };
-  service.submissions = { getSubmissionDetail: async submission => details.find(detail => detail.submissionId === submission.id) };
-  service.submissionAccess = { userHasPermission: async () => false };
-  return { service, contest, user, runs, details };
+  const access = Object.assign(Object.create(ContestAccessService.prototype), { db, privileges });
+  access.get = async who => ({ contest, manager: !!who?.manager });
+  const scores = Object.assign(Object.create(ContestScoreService.prototype), { db });
+  const contestProblems = { problemList: async () => [{ id: 2, weight: 1, title: "Merged subtasks" }] };
+  const service = Object.assign(Object.create(ContestService.prototype), { db, access, scores, contestProblems });
+  const submissions = Object.assign(Object.create(ContestSubmissionService.prototype), {
+    db,
+    access,
+    submissions: { getSubmissionDetail: async submission => details.find(detail => detail.submissionId === submission.id) },
+    submissionAccess: { userHasPermission: async () => false }
+  });
+  return { service, submissions, access, contest, user, runs, details };
 }
 
 test("Strict IOI service aggregates persisted judge subtasks for own results while protecting live rank/statistics", async () => {
@@ -69,17 +78,17 @@ test("IOI scoreboard becomes live while NOI protects official own results", asyn
 
 test("Strict IOI self detail contains permitted feedback while rival live detail is denied", async () => {
   const f = fixture();
-  const detail = await f.service.submissionDetail(f.user, 1, 1);
+  const detail = await f.submissions.submissionDetail(f.user, 1, 1);
   assert.equal(detail.submission.score, 40);
   assert.equal(detail.subtasks[0].score, 40);
   const rival = { ...f.user, id: 8 };
-  await assert.rejects(f.service.submissionDetail(rival, 1, 1), ForbiddenException);
+  await assert.rejects(f.submissions.submissionDetail(rival, 1, 1), ForbiddenException);
 });
 
 test("NOI formal judge detail remains hidden independently of self-evaluation settings", async () => {
   const f = fixture("noi");
   f.contest.ruleOptions = { selfEvalEnabled: true, selfEvalMaxAttempts: 30 };
-  const detail = await f.service.submissionDetail(f.user, 1, 1);
+  const detail = await f.submissions.submissionDetail(f.user, 1, 1);
   assert.equal(detail.submission.score, null);
   assert.equal(detail.subtasks, undefined);
   assert.equal(detail.submission.status, "Compiled");
@@ -106,21 +115,21 @@ test("after Strict IOI ends, equal totals and detailed aggregates are available"
 
 test("hack access requires enabled setting, participation and the configured window", async () => {
   const f = fixture("acm");
-  assert.equal((await f.service.hackAccess(f.user, f.contest)).allowed, false);
+  assert.equal((await f.access.hackAccess(f.user, f.contest)).allowed, false);
   f.contest.ruleOptions = { hackEnabled: true, hackStartTime: f.contest.startTime.toISOString(), hackEndTime: f.contest.endTime.toISOString() };
-  assert.equal((await f.service.hackAccess(f.user, f.contest)).allowed, true);
+  assert.equal((await f.access.hackAccess(f.user, f.contest)).allowed, true);
   f.user.allowed = f.user.allowed.filter(privilege => privilege !== P.ParticipateContest);
-  assert.equal((await f.service.hackAccess(f.user, f.contest)).allowed, false);
+  assert.equal((await f.access.hackAccess(f.user, f.contest)).allowed, false);
 });
 
 test("NOI and Strict IOI cannot expose live records through a configured hack window", async () => {
   for (const rule of ["noi", "strictioi"]) {
     const f = fixture(rule);
     f.contest.ruleOptions = { hackEnabled: true, hackStartTime: f.contest.startTime.toISOString() };
-    assert.equal((await f.service.hackAccess(f.user, f.contest)).allowed, false);
+    assert.equal((await f.access.hackAccess(f.user, f.contest)).allowed, false);
     f.user.manager = true;
-    assert.equal((await f.service.hackAccess(f.user, f.contest)).allowed, true);
+    assert.equal((await f.access.hackAccess(f.user, f.contest)).allowed, true);
     f.contest.ruleOptions.hackEnabled = false;
-    assert.equal((await f.service.hackAccess(f.user, f.contest)).allowed, false);
+    assert.equal((await f.access.hackAccess(f.user, f.contest)).allowed, false);
   }
 });

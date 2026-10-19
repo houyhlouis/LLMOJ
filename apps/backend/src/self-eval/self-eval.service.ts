@@ -20,7 +20,8 @@ import { ProblemType } from "../problem/problem.entity";
 import { ProblemFileType } from "../problem/problem-file.entity";
 import { ProblemJudgeInfoTraditional } from "../problem-type/types/traditional/problem-judge-info.interface";
 import { SubmissionService } from "../submission/submission.service";
-import { ContestService } from "../contest/contest.service";
+import { ContestAccessService } from "../contest/contest-access.service";
+import { contestEnded, contestStarted } from "../contest/contest-policy";
 import { ContestProblemEntity } from "../contest/contest-problem.entity";
 import { ContestEntity } from "../contest/contest.entity";
 import { isContestLanguageAllowed } from "../contest/contest-languages";
@@ -48,7 +49,7 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
     private readonly privileges: UserPrivilegeService,
     private readonly problems: ProblemService,
     private readonly submissions: SubmissionService,
-    private readonly contests: ContestService,
+    private readonly contestAccess: ContestAccessService,
     private readonly files: FileService,
     private readonly queue: JudgeQueueService,
     private readonly locks: LockService
@@ -72,7 +73,7 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
       throw new BadRequestException("Self evaluation requires a traditional problem");
     if (!Number.isSafeInteger(request.contestId) || request.contestId < 1)
       throw new BadRequestException("Self evaluation is available only in enabled NOI contests");
-    const access = await this.contests.get(user, request.contestId, true);
+    const access = await this.contestAccess.get(user, request.contestId, true);
     const options = access.contest.ruleOptions || {};
     if (access.contest.rule !== "noi" || options.selfEvalEnabled !== true)
       throw new BadRequestException("Self evaluation is available only in enabled NOI contests");
@@ -84,8 +85,8 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
     const { manager } = access;
     const enabled = true;
     const limit = Number(options.selfEvalMaxAttempts) || 30;
-    const active = Date.now() >= +access.contest.startTime && Date.now() < +access.contest.endTime;
-    const canPrepare = Date.now() < +access.contest.startTime;
+    const active = contestStarted(access.contest) && !contestEnded(access.contest);
+    const canPrepare = !contestStarted(access.contest);
     if (!manager && !(await this.privileges.userHasPrivilege(user, UserPrivilegeType.ParticipateContest)))
       throw new ForbiddenException();
     if (creating && (!enabled || !active))
@@ -493,7 +494,7 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
       if (request[key] != null && (!Number.isSafeInteger(request[key]) || request[key] < 1))
         throw new BadRequestException("A valid filter ID is required");
     if (!request.contestId) throw new BadRequestException("Self evaluation is available only in enabled NOI contests");
-    const { contest } = await this.contests.get(user, request.contestId);
+    const { contest } = await this.contestAccess.get(user, request.contestId);
     if (contest.rule !== "noi" || contest.ruleOptions?.selfEvalEnabled !== true)
       throw new BadRequestException("Self evaluation is available only in enabled NOI contests");
     const page = request.page ?? 1;
@@ -543,7 +544,7 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
         !contest ||
         contest.rule !== "noi" ||
         contest.ruleOptions?.selfEvalEnabled !== true ||
-        Date.now() >= +contest.startTime
+        contestStarted(contest)
       ) {
         await this.db.getRepository(SelfEvalSetEntity).update(set.scope, {
           status: "ConfigurationError",
