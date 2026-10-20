@@ -25,7 +25,10 @@ void PosixSemaphore::Post()
 
 void PosixSemaphore::Wait()
 {
-    ENSURE(sem_wait(m_semaphore));
+    // A signal handler (e.g. libuv's for SIGCHLD) interrupts the wait; it isn't restarted by itself
+    while (sem_wait(m_semaphore) == -1)
+        if (errno != EINTR)
+            throw system_error(errno, std::system_category(), "Failed to wait for semaphore");
 }
 
 bool PosixSemaphore::TryWait()
@@ -57,7 +60,11 @@ bool PosixSemaphore::TimedWait(long msecs)
     add = msecs / (1000 * 1000 * 1000);
     ts.tv_sec += (add + secs);
     ts.tv_nsec = msecs % (1000 * 1000 * 1000);
-    int result = sem_timedwait(m_semaphore, &ts);
+    // The deadline is absolute, so a wait interrupted by a signal handler continues to the same deadline
+    int result;
+    do
+        result = sem_timedwait(m_semaphore, &ts);
+    while (result == -1 && errno == EINTR);
     if (result == 0)
     {
         return true;

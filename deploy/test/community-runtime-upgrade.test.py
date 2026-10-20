@@ -391,7 +391,9 @@ class RuntimeUpgradeTests(unittest.TestCase):
         (self.up.stage/'apps/judge/self-test.mjs').write_text('// staged self-test')
         self.up.activate()
         [check] = self.self_test_calls()
-        self.assertIn('--property=WorkingDirectory='+str(self.up.stage/'apps/judge'), check)
+        # The judge's account can't enter the private backups: the unit sees the staged tree elsewhere
+        self.assertIn(f'--property=BindReadOnlyPaths={self.up.stage}:{u.SELF_TEST_STAGE}', check)
+        self.assertIn(f'--property=WorkingDirectory={u.SELF_TEST_STAGE}/apps/judge', check)
         self.assertEqual(check[check.index('--config')+1], str(self.up.root/'config/judge.yaml'))
         self.assertIn('--property=DelegateSubgroup=supervisor', check)
         stopped = self.host.calls.index(('service', 'stop', 'libreoj-judge.service'))
@@ -400,6 +402,58 @@ class RuntimeUpgradeTests(unittest.TestCase):
         self.assertLess(self.host.calls.index(check), dumps[-1])
         # Only the sandbox itself is checked by the installer's check
         self.assertFalse(any('--unit=libreoj-install-sandbox-check' in call for call in self.host.calls if call))
+
+    def launcher_target(self):
+        self.deployed_reviewed_runtime()
+        self.change('apps/judge/src/rpc.ts')
+        self.change(u.LAUNCHER)
+        self.prepare()
+        (self.up.stage/'apps/judge/self-test.mjs').parent.mkdir(parents=True, exist_ok=True)
+        (self.up.stage/'apps/judge/self-test.mjs').write_text('// staged self-test')
+
+    def test_a_judge_with_the_launcher_gets_its_account_before_the_self_test(self):
+        self.launcher_target()
+        accounts = {}
+        self.up.account_entry = lambda name: accounts.get(name)
+        self.assertEqual(self.up.judge_account(), 'create')
+        real_run = self.host.run
+
+        def run(args, **kwargs):
+            if args and args[0] == 'useradd':
+                accounts[args[-1]] = Mock(pw_uid=990, pw_gid=990, pw_shell='/usr/sbin/nologin')
+            return real_run(args, **kwargs)
+        self.host.run = run
+        self.up.activate()
+        [useradd] = [call for call in self.host.calls if call and call[0] == 'useradd']
+        self.assertEqual(useradd[-1], u.JUDGE_ACCOUNT)
+        self.assertIn('--system', useradd)
+        self.assertEqual(useradd[useradd.index('--shell')+1], '/usr/sbin/nologin')
+        self.assertLess(self.host.calls.index(useradd), self.host.calls.index(self.self_test_calls()[0]))
+        # An existing account is used as it is
+        self.host.calls.clear()
+        self.up.ensure_judge_account()
+        self.assertEqual([call for call in self.host.calls if call and call[0] == 'useradd'], [])
+
+    def test_an_account_of_that_name_that_can_log_in_is_refused(self):
+        self.launcher_target()
+        self.up.account_entry = lambda name: Mock(pw_uid=1000, pw_gid=1000, pw_shell='/bin/bash')
+        with self.assertRaisesRegex(u.UpgradeError, 'system account without login'):
+            self.up.judge_account()
+        self.up.account_entry = lambda name: Mock(pw_uid=0, pw_gid=0, pw_shell='/usr/sbin/nologin')
+        with self.assertRaisesRegex(u.UpgradeError, 'system account without login'):
+            self.up.judge_account()
+
+    def test_no_account_without_the_launcher_or_a_local_judge(self):
+        self.deployed_reviewed_runtime()
+        self.change('apps/judge/src/rpc.ts')
+        self.up.compatibility(self.source)
+        self.assertIsNone(self.up.judge_account())
+        self.change(u.LAUNCHER)
+        self.up.compatibility(self.source)
+        self.up.account_entry = lambda name: None
+        self.assertEqual(self.up.judge_account(), 'create')
+        self.up.role = 'web'
+        self.assertIsNone(self.up.judge_account())
 
     def test_no_self_test_without_runtime_changes_or_staged_entry(self):
         self.deployed_reviewed_runtime()

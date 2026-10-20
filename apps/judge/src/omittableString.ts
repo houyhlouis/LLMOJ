@@ -2,15 +2,18 @@ import fs from "fs";
 
 import { OmittableString } from "@libreoj/judge-protocol";
 
+import { openRegularFile } from "./safeFile";
+
 export type { OmittableString } from "@libreoj/judge-protocol";
 
 export async function readFileOmitted(filePath: string, lengthLimit: number): Promise<OmittableString> {
   let file: fs.promises.FileHandle;
   try {
     try {
-      file = await fs.promises.open(filePath, "r");
+      // A program's output: a link it left in place of the file is no output (and is never followed)
+      file = await openRegularFile(filePath);
     } catch (e) {
-      if (e.code === "ENOENT") return "";
+      if (e.code === "ENOENT" || e.code === "ELOOP" || e.code === "EINVAL") return "";
       throw e;
     }
 

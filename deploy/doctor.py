@@ -475,6 +475,7 @@ class Doctor:
                                           f'评测无法限制 {", ".join(sorted(missing))}（cgroup 委派）'))
             else:
                 r.add(OK, 'cgroup', say('The judge can limit CPU, memory and processes', '评测可以限制 CPU、内存和进程'))
+            self.judge_account(group)
         workspaces = [path for path in self.judge.get('taskWorkingDirectories') or [] if not self.host.ismount(path)]
         if workspaces:
             r.add(FAIL, 'workspaces', say(f'{len(workspaces)} judge workspaces aren\'t mounted, e.g. {workspaces[0]}',
@@ -493,6 +494,32 @@ class Doctor:
                                              'AI 运行器套接字不存在：AI 任务无法运行程序'))
         r.add(INFO, 'self-test', say(f'For a full sandbox and language check: sudo bash {self.root}/deploy/sandbox/self-test.sh',
                                      f'完整检查沙箱和各语言：sudo bash {self.root}/deploy/sandbox/self-test.sh'))
+
+    def judge_account(self, group):
+        """Which accounts the running judge's processes have: its sandbox launcher is root, the judge itself isn't."""
+        r = self.report
+        try:
+            pids = self.host.read(f'/sys/fs/cgroup{group}/supervisor/cgroup.procs').split()
+        except OSError:
+            return
+        users = set()
+        for pid in pids:
+            try:
+                uid = re.search(r'^Uid:\s+\d+\s+(\d+)', self.host.read(f'/proc/{pid}/status'), re.M)
+            except OSError:
+                continue
+            if uid:
+                users.add(int(uid[1]))
+        if not users:
+            return
+        others = sorted(self.host.user(uid) for uid in users if uid != 0)
+        if others:
+            r.add(OK, 'judge account', say(f'The judge runs as {", ".join(others)}; only its sandbox launcher runs as root',
+                                           f'评测以 {", ".join(others)} 身份运行；只有其沙箱启动器以 root 运行'))
+        else:
+            r.add(WARN, 'judge account', say('The whole judge runs as root: this release separates it from its sandbox '
+                                             'launcher, and the judge restarts as libreoj-judge after an upgrade',
+                                             '整个评测以 root 运行：本版本将其与沙箱启动器分开，升级后评测以 libreoj-judge 身份重启'))
 
     def queues(self):
         r = self.report

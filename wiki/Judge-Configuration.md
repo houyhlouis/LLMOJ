@@ -44,8 +44,8 @@ These are set only for a judge on the same server as the site; a remote judge le
 
 | Setting | Meaning |
 | --- | --- |
-| `aiRunnerSocket` | The local socket the backend uses to send AI checks: `<root>/data/judge/ai-runner.sock`, owned by root and the `libreoj` group with mode `0660`. Never expose it over TCP. |
-| `aiGeneratedDirectory` | Private directory for AI results, shared with the backend: `<root>/data/ai-generated`, a real directory (not a link) owned by root and the `libreoj` group with mode `0750` |
+| `aiRunnerSocket` | The local socket the backend uses to send AI checks: `<root>/data/judge/ai-runner.sock`, owned by root and the `libreoj` group with mode `0660`. The [sandbox launcher](#the-judges-account-and-its-sandbox-launcher) creates it and hands the judge only the listening socket. Never expose it over TCP. |
+| `aiGeneratedDirectory` | Private directory for AI results, shared with the backend: `<root>/data/ai-generated`, a real directory (not a link). The launcher gives it to the judge's account and the `libreoj` group with mode `2750`: new files get the group, so the backend can read them. |
 | `aiRunnerGid` | The `libreoj` group's ID. It must be positive when the worker is on; a remote judge has `0`. |
 
 ### Sandbox
@@ -59,7 +59,7 @@ These are set only for a judge on the same server as the site; a remote judge le
 | `sandbox.immutable` | not set | `true` for an image that can't be changed: working paths then live under `/tmp/libreoj` instead of directories inside the image. It doesn't make an image read-only by itself. |
 | `sandbox.resourceMode` | not set | `default` (written by the installer) measures a program's CPU time with cgroups. `arbiter` uses its user CPU time instead and also limits its address space. It applies only to submitted programs, and changes how they are judged. |
 | `sandbox.syscallFilter` | not set | `true` by default: refuse system calls judged programs don't need; see [below](#sandbox-syscall-filter-and-self-test). Set `false` only to find out whether the filter breaks a particular language. |
-| `sandbox.user` | `sandbox` | The user programs run as inside the sandbox (not the user the judge service runs as) |
+| `sandbox.user` | `sandbox` | The user programs run as inside the sandbox. It must differ from the judge's own account, `libreoj-judge`. |
 | `sandbox.environments` | see below | Environment variables for programs in the sandbox, as text. The example sets `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`, `HOME=/sandbox` and `LC_ALL=en_US.UTF-8`. Variables for the judge itself, such as `UV_THREADPOOL_SIZE`, don't belong here. |
 
 ### CPU affinity
@@ -76,7 +76,8 @@ The site sends some limits when the judge connects: `limit.compilerMessage`, `li
 - `LIBREOJ_JUDGE_LOG_LEVEL`: `info` by default. Use `verbose` or `debug` only while investigating a problem, and keep those logs private, as they contain signed download addresses.
 - `UV_THREADPOOL_SIZE`: at least twice the number of slots plus two (up to 1024); the installer writes `max(4, 2 × slots + 2)`. Each slot may wait on two programs at once (for interactive problems), and two more threads handle files. Restart the judge after changing it.
 - `NODE_OPTIONS=--max-old-space-size=512`: the judge's own memory, not the limit for submitted programs.
-- `HYHOJ_AI_SAMPLE_INPUTS_DIR`: private directory of AI sample inputs, `<root>/data/ai-sample-inputs`. It must be the same as the backend's, and must never be served publicly.
+- `HYHOJ_AI_SAMPLE_INPUTS_DIR`: private directory of AI sample inputs, `<root>/data/ai-sample-inputs`. It must be the same as the backend's, and must never be served publicly. The sandbox launcher opens the files in it for the judge.
+- `LIBREOJ_JUDGE_USER`: the account the judge runs as, `libreoj-judge` if not set. Change it only for testing.
 
 ## How work is scheduled
 
@@ -137,10 +138,41 @@ sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh
 
 It prints one line per check and takes from a few seconds to a minute. It uses its own temporary directories and never the judge's key, so it can run while the judge is working, though it competes with judging for CPU. `--only cpp,java` checks only some languages. The upgrader runs it with the new version, before switching over, whenever the judge or the sandbox changes.
 
-**What the sandbox can't do.** Programs in the sandbox share the server's kernel, so a kernel vulnerability could still let one escape. The filter reduces how much of the kernel they can reach, but doesn't prove isolation, and the judge's control process runs as root. For contests open to the public:
+**What the sandbox can't do.** Programs in the sandbox share the server's kernel, so a kernel vulnerability could still let one escape. The filter reduces how much of the kernel they can reach, but doesn't prove isolation. The judge itself runs without privileges, but its small sandbox launcher has to run as root. For contests open to the public:
 - run judges on their own machines, not on the web server;
 - keep the kernel up to date;
 - keep the site's credentials (database, MinIO, AI keys) off remote judges, which need only their judge key.
+
+## The judge's account and its sandbox launcher
+
+Starting a sandbox needs root: namespaces, mounts, cgroups and switching to `sandbox.user`. Only a small part of the judge runs as root, its **sandbox launcher**. It starts the judge itself as the account `libreoj-judge`, without privileges, and runs every sandbox for it.
+
+| Part | Runs as | Does |
+| --- | --- | --- |
+| Sandbox launcher (`index.mjs`, `src/launcher`) | root | Reads `judge.yaml` and passes its contents to the judge. Prepares the judge's directories, starts the judge, and starts it again when it lost its connection to the site. Runs the sandboxes the judge asks for. For the local AI worker, listens on its socket and opens the backend's sample files. |
+| The judge (`src/index.ts`) | `libreoj-judge` | Everything else: connecting to the site with its key, downloading and checking files, compiling and judging through the launcher, and reporting results. It has no capabilities, no extra groups, and can't gain privileges (`no_new_privs`). |
+
+**What the launcher checks.** Each request is checked against `judge.yaml`, never trusting the judge:
+- **From the configuration only:** the image, the sandbox user, the host name, the syscall filter, the CPUs and the resource mode. A request can't choose or turn off any of them.
+- **Mounts:** only from the judge's own directories (the task working directories, the caches and the AI output root), and writable only from task working directories.
+- **Standard I/O and other descriptors:** only as open descriptors the judge passes. The launcher never opens a path for a program.
+- **Limits:** time, memory, processes and argument sizes must be within bounds. At most twice as many sandboxes as slots, plus two, run at once.
+
+**Links.** Root never follows a link that the judge or a program left:
+- **Mount sources:** they are opened one directory at a time, refusing links, both by the launcher and inside the sandbox.
+- **Before a program runs:** its writable directories go to `sandbox.user`, and its read-only ones become readable, with mode `0755`. Only directories and regular files of the judge's or the sandbox user's change.
+- **After it ends:** whatever the sandbox user left in the writable directories goes back to the judge's account.
+- **The judge's own reads:** it reads a program's output without following links, so a submission can't make it read another file in place of its output.
+
+**Directories.** When it starts, the launcher gives the judge's directories to its account: `dataStore`, `binaryCacheStore`, the task working directories and `aiGeneratedDirectory`. Files left by a judge that ran as root, or by the sandbox user, are given to the account too. A parent directory inside the installation that the account can't pass through gets search permission for others (`o+x`), for example `<root>/data/judge`. Elsewhere, the launcher stops and names the directory to fix. `config/judge.yaml` stays readable only by root.
+
+**The account.** `configure-judge.py` creates it (the installer and remote judge setup run it), and so does the upgrade that installs the launcher. It is a system account without a login shell or home directory. To check it on a running judge:
+
+```bash
+ps -o user,pid,cmd --ppid "$(systemctl show -p MainPID --value libreoj-judge.service)"
+```
+
+`deploy/doctor.sh` reports it too. The self-test runs the same way, as the judge's account under the launcher.
 
 ## The systemd service
 
@@ -162,7 +194,7 @@ The installer and the resize command write the judge's service with these settin
 | `UMask`, `LimitCORE` | `0022`, and no core dumps |
 | `StandardOutput`, `StandardError` | `journal` |
 
-`User` and `Group` aren't set, so the service runs as root; `sandbox.user` is a different user, inside the sandbox. `CPUAccounting`, `MemoryAccounting`, `TasksAccounting`, `MemoryMax`, `CPUQuota` and other limits aren't set and come from systemd's defaults or parent slices. To see the values in effect:
+`User` and `Group` aren't set: the service starts as root, its [sandbox launcher](#the-judges-account-and-its-sandbox-launcher) stays root, and the judge runs as `libreoj-judge`. `sandbox.user` is yet another user, inside the sandbox. `CPUAccounting`, `MemoryAccounting`, `TasksAccounting`, `MemoryMax`, `CPUQuota` and other limits aren't set and come from systemd's defaults or parent slices. To see the values in effect:
 
 ```bash
 sudo systemctl show libreoj-judge.service -p CPUAccounting -p MemoryAccounting -p TasksAccounting -p LimitCORE -p TasksMax

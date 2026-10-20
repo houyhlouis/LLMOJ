@@ -1,3 +1,6 @@
+import fs from "fs";
+import path from "path";
+
 import * as Sandbox from "simple-sandbox";
 
 import config from "./config";
@@ -6,6 +9,8 @@ import rpc from "./rpc";
 import { CanceledError } from "./error";
 import { FileDescriptor } from "./posixUtils";
 import * as fsNative from "./fsNative";
+import { launcher, LauncherSandbox } from "./launcherClient";
+import { openBeneathSync } from "./safeFile";
 
 export enum CpuAffinityStrategy {
   Compiler = "Compiler",
@@ -127,28 +132,25 @@ export const SANDBOX_INSIDE_PATH_BINARY = `${insideBase}/binary`;
 export const SANDBOX_INSIDE_PATH_WORKING = `${insideBase}/working`;
 export const SANDBOX_INSIDE_PATH_SOURCE = `${insideBase}/source`;
 
-const sandboxUser = Sandbox.getUidAndGidInSandbox(config.sandbox.rootfs, config.sandbox.user);
-async function setSandboxUserPermission(path: string, writeAccess: boolean): Promise<void> {
-  await fsNative.chmodown(path, {
-    mode: 0o755,
-    owner: writeAccess ? sandboxUser.uid : 0,
-    group: writeAccess ? sandboxUser.gid : 0
-  });
-}
-
-function resolveSandboxCpuAffinity(strategy: CpuAffinityStrategy): number[] {
-  const map = {
-    [CpuAffinityStrategy.Compiler]: config.cpuAffinity?.compiler,
-    [CpuAffinityStrategy.UserProgram]: config.cpuAffinity?.userProgram,
-    [CpuAffinityStrategy.Interactor]: config.cpuAffinity?.interactor,
-    [CpuAffinityStrategy.Checker]: config.cpuAffinity?.checker
-  };
-
-  if (!(strategy in map)) {
-    throw new Error(`Unknown CPU affinity strategy: ${strategy}`);
-  }
-
-  return map[strategy];
+/**
+ * Opens a standard I/O path of the program (inside the sandbox) through the directory mounted there, never following
+ * a link the program could have left. Returns null for none (/dev/null).
+ */
+function openStandardFile(
+  file: string,
+  workingDirectory: string,
+  mounts: SandboxMountDirectory[],
+  write: boolean
+): number | null {
+  if (!file || file === "/dev/null") return null;
+  const inside = path.posix.resolve(workingDirectory, file);
+  const mount = mounts
+    .filter(item => inside.startsWith(`${item.mappedPath.inside}/`))
+    .sort((a, b) => b.mappedPath.inside.length - a.mappedPath.inside.length)[0];
+  if (!mount) throw new Error(`The sandbox's standard I/O file ${inside} isn't in a mounted directory`);
+  // eslint-disable-next-line no-bitwise
+  const flags = write ? fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC : fs.constants.O_RDONLY;
+  return openBeneathSync(mount.mappedPath.outside, inside.slice(mount.mappedPath.inside.length + 1), flags);
 }
 
 /**
@@ -189,69 +191,75 @@ export async function startSandbox(taskId: string, sandboxConfig: SandboxConfig)
     }
   ].concat(sandboxConfig.extraMounts);
 
-  await Promise.all([
-    // /tmp binds first; nested mountpoints are created only in the external work directory.
+  // /tmp binds first; nested mountpoints are created only in the external work directory. A mutable image already
+  // has its mountpoints: it belongs to root.
+  if (config.sandbox.immutable)
     await Promise.all(
       mounts.map(mount => {
-        if (!config.sandbox.immutable)
-          return fsNative.ensureDir(safelyJoinPath(config.sandbox.rootfs, mount.mappedPath.inside));
         if (mount.mappedPath.inside === "/tmp") return Promise.resolve();
         if (!mount.mappedPath.inside.startsWith("/tmp/"))
           throw new Error("Immutable rootfs mounts must be inside /tmp");
         return fsNative.ensureDir(safelyJoinPath(sandboxConfig.tempDirectoryOutside, mount.mappedPath.inside.slice(5)));
       })
-    ),
-    // TODO: Use something like bindfs to set owner for the mount point instead
-    await Promise.all(mounts.map(mount => setSandboxUserPermission(mount.mappedPath.outside, !mount.readOnly)))
-  ]);
+    );
 
   if (taskId) rpc.ensureNotCanceled(taskId);
 
-  const preservedFileDescriptors = sandboxConfig.preservedFileDescriptors || [];
-  preservedFileDescriptors.forEach(fd => fd && fd.setCloseOnExec(false));
-
-  const environments = merge(config.sandbox.environments, sandboxConfig.environments);
-
-  const sandboxParameter: Sandbox.SandboxParameter = {
-    time: sandboxConfig.time,
-    memory: sandboxConfig.memory,
-    resourceMode:
-      sandboxConfig.cpuAffinity === CpuAffinityStrategy.UserProgram ? config.sandbox.resourceMode : "default",
-    addressSpaceLimit:
-      sandboxConfig.cpuAffinity === CpuAffinityStrategy.UserProgram && config.sandbox.resourceMode === "arbiter"
-        ? sandboxConfig.memory
-        : undefined,
-    process: sandboxConfig.process,
-    chroot: config.sandbox.rootfs,
-    hostname: config.sandbox.hostname,
-    mounts: mounts.map(mount => ({
-      src: mount.mappedPath.outside,
-      dst: mount.mappedPath.inside,
-      limit: mount.readOnly ? 0 : -1
-    })),
-    redirectBeforeChroot: false,
-    mountProc: true,
-    executable,
-    stdin: typeof sandboxConfig.stdin === "object" ? (sandboxConfig.stdin || {}).fd : sandboxConfig.stdin,
-    stdout: typeof sandboxConfig.stdout === "object" ? (sandboxConfig.stdout || {}).fd : sandboxConfig.stdout,
-    stderr: typeof sandboxConfig.stderr === "object" ? (sandboxConfig.stderr || {}).fd : sandboxConfig.stderr,
-    user: sandboxUser,
-    parameters: [...parametersPrepend, ...(sandboxConfig.parameters || []).filter(x => x != null)],
-    environments: Object.entries(environments).map(([key, value]) => `${key}=${value}`),
-    workingDirectory: sandboxConfig.workingDirectory,
-    // Stack pages are already included in the memory limits. A separate 8 MiB
-    // ceiling rejects valid deep recursion while most of the problem budget is unused.
-    stackSize: sandboxConfig.stackSize ?? sandboxConfig.memory,
-    cpuAffinity: resolveSandboxCpuAffinity(sandboxConfig.cpuAffinity),
-    syscallFilter: config.sandbox.syscallFilter !== false
+  // Descriptors go to the launcher with the request; the program gets them at the same numbers as here.
+  const passed: number[] = [];
+  const opened: number[] = [];
+  const pass = (fd: number) => {
+    if (!passed.includes(fd)) passed.push(fd);
+    return fd;
+  };
+  for (const descriptor of sandboxConfig.preservedFileDescriptors || []) if (descriptor) pass(descriptor.fd);
+  const standard = (file: string | FileDescriptor, write: boolean) => {
+    if (file && typeof file === "object") return pass(file.fd);
+    const fd = openStandardFile(file as string, sandboxConfig.workingDirectory, mounts, write);
+    if (fd === null) return null;
+    opened.push(fd);
+    return pass(fd);
   };
 
-  let sandbox: ReturnType<typeof Sandbox.startSandbox>;
+  let sandbox: LauncherSandbox;
   try {
-    sandbox = Sandbox.startSandbox(sandboxParameter);
+    const stdin = standard(sandboxConfig.stdin, false);
+    const stdout = standard(sandboxConfig.stdout, true);
+    // The same file for both, as compilers' messages are, is opened once
+    const stderr =
+      typeof sandboxConfig.stderr === "string" && sandboxConfig.stderr === sandboxConfig.stdout
+        ? stdout
+        : standard(sandboxConfig.stderr, true);
+
+    const environments = merge(config.sandbox.environments, sandboxConfig.environments);
+    sandbox = await launcher().startSandbox(
+      {
+        time: sandboxConfig.time,
+        memory: sandboxConfig.memory,
+        // Stack pages are already included in the memory limits. A separate 8 MiB
+        // ceiling rejects valid deep recursion while most of the problem budget is unused.
+        stackSize: sandboxConfig.stackSize ?? sandboxConfig.memory,
+        process: sandboxConfig.process,
+        strategy: sandboxConfig.cpuAffinity,
+        executable,
+        parameters: [...parametersPrepend, ...(sandboxConfig.parameters || []).filter(x => x != null)],
+        environments: Object.entries(environments).map(([key, value]) => `${key}=${value}`),
+        workingDirectory: sandboxConfig.workingDirectory,
+        mounts: mounts.map(mount => ({
+          outside: mount.mappedPath.outside,
+          inside: mount.mappedPath.inside,
+          writable: !mount.readOnly
+        })),
+        descriptors: passed,
+        stdin,
+        stdout,
+        stderr
+      },
+      passed
+    );
   } finally {
-    // A startup failure must not leak these handles into later child processes.
-    preservedFileDescriptors.forEach(fd => fd && fd.setCloseOnExec(true));
+    // The launcher has its own copies
+    for (const fd of opened) fs.closeSync(fd);
   }
 
   const resultPromise = taskId

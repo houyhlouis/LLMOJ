@@ -165,7 +165,7 @@ def permissions(args):
         "data/redis": ("redis", "redis", 0o750), "data/minio": ("libreoj", "libreoj", 0o750),
         "data/ai": ("libreoj", "libreoj", 0o700), "data/tmp": ("libreoj", "libreoj", 0o700),
         "data/ai-generated": ("root", "libreoj", 0o750), "data/ai-sample-inputs": ("libreoj", "libreoj", 0o700),
-        "data/backend-archives": ("libreoj", "libreoj", 0o700), "data/judge": ("root", "libreoj", 0o750),
+        "data/backend-archives": ("libreoj", "libreoj", 0o700), "data/judge": ("root", "libreoj", 0o751),
         "data/judge/work": ("root", "root", 0o755), "data/judge/testdata": ("root", "root", 0o700),
         "data/judge/cache": ("root", "root", 0o700), "data/nginx": ("www-data", "www-data", 0o750),
         "data/nginx/client_body": ("www-data", "www-data", 0o700),

@@ -31,7 +31,9 @@ class RemoteJudge(unittest.TestCase):
         self.keyfile.chmod(0o600)
         self.environment = {**os.environ, 'HYHOJ_ROOT': str(self.root), 'OJ_JUDGE_REMOTE': '1',
                             'OJ_JUDGE_SERVER': 'https://oj.example.invalid', 'OJ_JUDGE_KEY_FILE': str(self.keyfile),
-                            'OJ_JUDGE_SLOTS': '1', 'NODE_BINARY': shutil.which('node')}
+                            'OJ_JUDGE_SLOTS': '1', 'NODE_BINARY': shutil.which('node'),
+                            # An existing system account without login, so that the test creates none
+                            'OJ_JUDGE_ACCOUNT': 'nobody'}
 
     def generate(self):
         return subprocess.run(['/usr/bin/python3', str(DEPLOY / 'configure-judge.py')],
@@ -62,6 +64,13 @@ class RemoteJudge(unittest.TestCase):
         self.assertEqual(check.returncode, 0, check.stderr)
         self.assertEqual(self.generate().returncode, 0)
         self.assertEqual(file.read_bytes(), original)
+        self.assertIn('runs as nobody', result.stdout)
+
+    def test_an_account_with_a_login_shell_is_refused(self):
+        self.environment['OJ_JUDGE_ACCOUNT'] = 'root'
+        result = self.generate()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('not as a system account without login', result.stderr)
 
     def test_key_permissions_and_changed_endpoint_are_rejected_without_key_output(self):
         self.keyfile.chmod(0o644)

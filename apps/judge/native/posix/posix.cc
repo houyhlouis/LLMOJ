@@ -6,6 +6,8 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 
+#include "launcher.h"
+
 auto Init(Napi::Env env, Napi::Object exports) {
     exports.Set("pipe", Napi::Function::New(env, [] (const Napi::CallbackInfo &info) {
         int fd[2];
@@ -64,6 +66,8 @@ auto Init(Napi::Env env, Napi::Object exports) {
             Napi::Error::New(info.Env(), "fcntl: " + std::system_category().message(err)).ThrowAsJavaScriptException();
         }
     }));
+
+    InitLauncher(env, exports);
 
     return exports;
 }

@@ -4,6 +4,7 @@
 #include <vector>
 #include <filesystem>
 #include <memory>
+#include <utility>
 #include <unistd.h>
 #include <pwd.h>
 
@@ -32,6 +33,11 @@ struct MountInfo
     // The maximum length (in bytes) the sandboxed process may write to the mount.
     // 0 for readonly; -1 for no limit.
     int64_t limit;
+    // If set, the source is `beneathPath` (components separated by "/") under `src`, reached through directories
+    // only: no component of it, nor `src`'s last one, may be a symbolic link. The child opens it in its own mount
+    // namespace and mounts exactly that directory.
+    bool beneath = false;
+    std::string beneathPath;
 };
 
 struct SandboxParameter
@@ -102,6 +108,10 @@ struct SandboxParameter
 
     // Install the seccomp filter of syscall-filter.h before executing the program.
     bool syscallFilter = true;
+
+    // Descriptors the program gets at given numbers: {descriptor in this process, number in the program}. They are
+    // placed after the mounts, before the standard I/O redirection, whose descriptor numbers then refer to them.
+    std::vector<std::pair<int, int>> descriptors;
 };
 
 class SandboxExecution;

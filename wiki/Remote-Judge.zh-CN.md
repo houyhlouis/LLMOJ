@@ -95,7 +95,8 @@ sudo env LIBREOJ_X32_SUPPORTED=0 unshare --net --mount --propagation private -- 
 sudo install -m 0600 /dev/null /root/judge-01.key
 sudoedit /root/judge-01.key
 sudo install -d -m 0751 /opt/LLMOJ/data
-sudo install -d -m 0700 /opt/LLMOJ/data/judge /opt/LLMOJ/data/judge/testdata /opt/LLMOJ/data/judge/cache
+sudo install -d -m 0711 /opt/LLMOJ/data/judge
+sudo install -d -m 0700 /opt/LLMOJ/data/judge/testdata /opt/LLMOJ/data/judge/cache
 sudo env HYHOJ_ROOT=/opt/LLMOJ NODE_BINARY=/opt/LLMOJ/runtime/node/bin/node \
   OJ_JUDGE_REMOTE=1 OJ_JUDGE_SERVER=https://oj.example.com \
   OJ_JUDGE_KEY_FILE=/root/judge-01.key OJ_JUDGE_SLOTS=2 \
@@ -105,6 +106,8 @@ sudo env HYHOJ_ROOT=/opt/LLMOJ NODE_BINARY=/opt/LLMOJ/runtime/node/bin/node \
 - `OJ_JUDGE_SERVER` 是站点的地址，不带 `/api`。
 - 密钥文件必须是所有者为 root、权限为 `0600` 的普通文件；其内容不会被输出。
 - `OJ_JUDGE_SLOTS` 必须符合服务器的 CPU 和内存。不设置时使用自动值（见[评测配置](Judge-Configuration.zh-CN.md#如何确定评测槽数量)）。只有一个 CPU 或内存不足 256 MiB 的服务器不能评测。
+
+脚本还会创建账户 `libreoj-judge`，这是不能登录的系统账户。评测机以该账户运行；只有其[沙箱启动器](Judge-Configuration.zh-CN.md#评测机账户与沙箱启动器)以 root 运行，并在启动时把评测机的目录交给它。
 
 生成的 `config/judge.yaml` 只有 root 可读。远程评测机没有本机 AI 任务；对于 `web` 站点，它改为从评测队列运行 AI 程序（见[分布式评测](Distributed-Judging.zh-CN.md#ai)）。它使用自己的 `libreoj-judge.target`。再次运行脚本会保留已有配置，并拒绝不同的站点或密钥；要更换密钥，请停止评测机后明确修改。之后要修改评测槽数量，请使用[扩缩容命令](Judge-Configuration.zh-CN.md#修改评测槽数量)。每项设置的说明见[评测配置](Judge-Configuration.zh-CN.md)。
 
@@ -140,3 +143,12 @@ sudo journalctl -u libreoj-judge.service -n 50 --no-pager
 最后在站点上确认评测机在线，并提交几份程序。评测机需要能主动访问站点地址及其下载地址，不需要开放入站端口。
 
 停止评测机：`sudo systemctl stop libreoj-judge.target`。取消开机启动：`sudo systemctl disable libreoj-judge.target`。
+
+## 更新远程评测机
+
+在站点更新之后，把远程评测机更新到站点的版本：
+1. 在站点的 **评测机状态** 页面将其[排空](Distributed-Judging.zh-CN.md#排空密钥与能力)，等到显示 **已排空**。然后停止它：`sudo systemctl stop libreoj-judge.target`。
+2. 在 `/opt/LLMOJ` 中按[第 1 步](#1-下载与站点相同的版本)切换到站点的版本，再按[第 2 步](#2-安装-nodejs-和-pnpm-并构建评测机)安装并构建。
+3. 用与[第 4 步](#4-保存密钥并生成配置)相同的变量再次运行 `configure-judge.py`。它保留已有配置，并在评测机账户不存在时创建它。沙箱启动器之前的版本整个评测机以 root 运行，没有该账户。
+4. 按[第 5 步](#5-安装服务并检查沙箱)设置文件可读并检查沙箱（`chmod`，然后沙箱检查），再运行 `sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh`。
+5. 用 `sudo systemctl start libreoj-judge.target` 启动它，并在 **评测机状态** 页面点击 **恢复**。

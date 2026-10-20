@@ -9,6 +9,7 @@ import streamToString from "stream-to-string";
 
 import * as fsNative from "./fsNative";
 import config from "./config";
+import { openRegularFile } from "./safeFile";
 
 export interface MappedPath {
   outside: string;
@@ -67,9 +68,10 @@ export async function readFileLimited(filePath: string, lengthLimit: number): Pr
   let file: fs.promises.FileHandle;
   try {
     try {
-      file = await fs.promises.open(filePath, "r");
+      // A program's output: a link it left in place of the file is no output (and is never followed)
+      file = await openRegularFile(filePath);
     } catch (e) {
-      if (e.code === "ENOENT") return "";
+      if (e.code === "ENOENT" || e.code === "ELOOP" || e.code === "EINVAL") return "";
       throw e;
     }
     const actualSize = (await file.stat()).size;

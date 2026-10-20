@@ -4,6 +4,7 @@ from pathlib import Path
 import grp
 import json
 import os
+import pwd
 import re
 import subprocess
 import base64
@@ -17,6 +18,21 @@ from judge_units import render_units, workspace_paths
 
 if os.geteuid() != 0:
     raise SystemExit("Run as root after creating the libreoj service group")
+
+# The judge runs as this account under its sandbox launcher, the only part of it that runs as root. (Tests name an
+# existing account instead.)
+JUDGE_ACCOUNT = os.environ.get("OJ_JUDGE_ACCOUNT", "libreoj-judge")
+
+
+def ensure_judge_account():
+    try:
+        entry = pwd.getpwnam(JUDGE_ACCOUNT)
+    except KeyError:
+        subprocess.run(["useradd", "--system", "--user-group", "--no-create-home", "--home-dir", "/nonexistent",
+                        "--shell", "/usr/sbin/nologin", JUDGE_ACCOUNT], check=True)
+        entry = pwd.getpwnam(JUDGE_ACCOUNT)
+    if entry.pw_uid == 0 or entry.pw_gid == 0 or entry.pw_shell not in ("/usr/sbin/nologin", "/sbin/nologin", "/bin/false", "/usr/bin/false"):
+        raise SystemExit(f"The account {JUDGE_ACCOUNT} exists, but not as a system account without login; review it")
 
 
 def absolute_path(value: str, name: str) -> Path:
@@ -126,6 +142,7 @@ if not judge_cpus or not set(judge_cpus).issubset(available_cpus):
     raise SystemExit("Existing judge CPU affinity contains CPUs unavailable on this host")
 # Render and validate everything before replacing generated unit files.
 rendered = render_units(root, node, c, remote)
+ensure_judge_account()
 units = root / "deploy/systemd"
 units.mkdir(parents=True, exist_ok=True)
 for path in units.glob("*.mount"):
@@ -135,5 +152,5 @@ for work_path in workspace_paths(root, c):
     work_path.mkdir(mode=0o755, parents=True, exist_ok=True)
 for name, contents in rendered.items():
     (units / name).write_text(contents)
-print(f"Judge: {slots} execution slots, {c['taskConsumingThreads']} submission consumers, "
+print(f"Judge: runs as {JUDGE_ACCOUNT}, {slots} execution slots, {c['taskConsumingThreads']} submission consumers, "
       f"CPUs {','.join(str(cpu) for cpu in judge_cpus)}; 512 MiB maximum tmpfs per slot (secrets withheld).")

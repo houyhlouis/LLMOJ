@@ -26,6 +26,12 @@ import yaml from "js-yaml";
 import { ensureDirectoryEmptySync } from "./utils";
 import * as fsNative from "./fsNative";
 import { assertExecutionCapacity } from "./executionCapacity";
+import {
+  AI_RUNNER_DESCRIPTOR_VARIABLE,
+  CONFIG_DESCRIPTOR_VARIABLE,
+  LAUNCHER_DESCRIPTOR_VARIABLE
+} from "./launcher/protocol";
+import { setCloseOnExec } from "./launcher/native";
 
 winston.add(
   new winston.transports.Console({
@@ -176,15 +182,25 @@ export class Config {
   cpuAffinity: CpuAffinityConfig;
 }
 
+// The sandbox launcher's channel and the AI socket must not reach programs the judge starts (findmnt below)
+for (const variable of [LAUNCHER_DESCRIPTOR_VARIABLE, AI_RUNNER_DESCRIPTOR_VARIABLE]) {
+  const fd = Number(process.env[variable]);
+  if (Number.isInteger(fd) && fd > 2) setCloseOnExec(fd, true);
+}
+
+// The sandbox launcher passes the configuration through a pipe: the file itself is root's alone.
+const configDescriptor = process.env[CONFIG_DESCRIPTOR_VARIABLE];
 const filePath = process.env.LIBREOJ_JUDGE_CONFIG_FILE;
-if (!filePath) {
+if (!configDescriptor && !filePath) {
   winston.error("Please specify configuration file with environment variable LIBREOJ_JUDGE_CONFIG_FILE");
   process.exit(1);
 }
 
 let parsedConfig: unknown;
 try {
-  parsedConfig = yaml.load(fs.readFileSync(filePath).toString("utf-8"));
+  const source = configDescriptor ? Number(configDescriptor) : filePath;
+  parsedConfig = yaml.load(fs.readFileSync(source).toString("utf-8"));
+  if (typeof source === "number") fs.closeSync(source);
 } catch {
   winston.error("Cannot parse judge configuration (private key withheld)");
   process.exit(1);

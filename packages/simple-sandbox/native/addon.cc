@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <stdexcept>
 
+#include <unistd.h>
 #include <napi.h>
 #include <fmt/format.h>
 
@@ -90,6 +91,30 @@ Napi::Value NodeStartSandbox(const Napi::CallbackInfo &info)
     SET_REDIRECTION(stdout);
     SET_REDIRECTION(stderr);
 
+    const auto &descriptors = jsparam.Get("descriptors");
+    if (descriptors.IsArray())
+    {
+        const auto array = descriptors.As<Napi::Array>();
+        for (size_t i = 0; i < array.Length(); i++)
+        {
+            const auto pair = static_cast<Napi::Value>(array[i]).As<Napi::Array>();
+            const int source = static_cast<Napi::Value>(pair[(uint32_t)0]).ToNumber().Int32Value(),
+                      target = static_cast<Napi::Value>(pair[(uint32_t)1]).ToNumber().Int32Value();
+            if (source < 0 || target <= STDERR_FILENO)
+            {
+                Napi::Error::New(env, "Invalid descriptor placement").ThrowAsJavaScriptException();
+                return Napi::Value();
+            }
+            for (const auto &[otherSource, otherTarget] : param.descriptors)
+                if (otherTarget == target)
+                {
+                    Napi::Error::New(env, "Duplicate descriptor placement").ThrowAsJavaScriptException();
+                    return Napi::Value();
+                }
+            param.descriptors.emplace_back(source, target);
+        }
+    }
+
     auto user = jsparam.Get("user").ToObject();
     param.uid = user.Get("uid").ToNumber().Uint32Value();
     param.gid = user.Get("gid").ToNumber().Uint32Value();
@@ -109,6 +134,11 @@ Napi::Value NodeStartSandbox(const Napi::CallbackInfo &info)
         mnt.src = fs::path(GetStringWithEmptyCheck(mntObj.Get("src")));
         mnt.dst = fs::path(GetStringWithEmptyCheck(mntObj.Get("dst")));
         mnt.limit = mntObj.Get("limit").ToNumber().Int32Value();
+        if (mntObj.Get("beneath").IsString())
+        {
+            mnt.beneath = true;
+            mnt.beneathPath = mntObj.Get("beneath").ToString().Utf8Value();
+        }
         param.mounts.push_back(mnt);
     }
 

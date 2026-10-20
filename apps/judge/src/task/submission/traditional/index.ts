@@ -30,6 +30,7 @@ import { runCustomChecker, validateCustomChecker } from "../../../checkers/custo
 import * as fsNative from "../../../fsNative";
 
 import { runCommonTask, getExtraSourceFiles } from "../common";
+import { isRegularFile } from "../../../safeFile";
 
 export * from "./judgeInfo";
 
@@ -188,7 +189,7 @@ async function runTestcase(
       sandboxResult.termination === "signaled" ? `Signal: ${sandboxResult.code}` : `Exit code: ${sandboxResult.code}`;
   } else if (sandboxResult.status !== SandboxStatus.OK) {
     throw new Error(`Corrupt sandbox result: ${JSON.stringify(sandboxResult)}`);
-  } else if (!(await fsNative.exists(outputFile.outside))) {
+  } else if (!(await isRegularFile(outputFile.outside))) {
     result.status = TestcaseStatusTraditional.FileError;
   }
 

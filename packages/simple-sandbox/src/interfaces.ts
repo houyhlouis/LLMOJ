@@ -8,6 +8,9 @@ export interface MountInfo {
     // Length limit requires fuse and has not yet been implemented: a positive value is rejected when
     // the sandbox starts. (Readonly works, however.)
     limit: number;
+    // If set, the source is this path ("a/b", or "" for `src` itself) under the directory `src`, reached through
+    // directories only: none of its components, nor the last of `src`, may be a symbolic link.
+    beneath?: string;
 }
 
 export interface SandboxParameter {
@@ -101,6 +104,11 @@ export interface SandboxParameter {
     // Install the seccomp filter before executing the program (default true): system calls that create
     // namespaces or mounts, change the system or widen the kernel's attack surface fail with EPERM.
     syscallFilter?: boolean;
+
+    // Descriptors of this process the program gets at other numbers: [descriptor here, number in the program].
+    // They are placed after the mounts and before the standard I/O redirection, so `stdin`, `stdout` and `stderr`
+    // given as numbers refer to the program's numbers. Requires `redirectBeforeChroot: false`.
+    descriptors?: [number, number][];
 };
 
 export enum SandboxStatus {

@@ -112,6 +112,20 @@ class ResizeTests(unittest.TestCase):
         return cfg
 
     def manager(self,cpus=32,ram=65536):return resize.Resize(self.root,self.host,self.units,capacity(cpus,ram))
+
+    def test_workspaces_may_belong_to_the_judge_account_only(self):
+        # The sandbox launcher gives the mounted workspaces to the judge's account
+        work=self.root/'data/judge/work/1';os.chown(work,4321,4321)
+        with patch.object(resize,'judge_account_uid',return_value=(4321,)):
+            self.assertEqual(resize.read_config(self.root)['maxConcurrentTasks'],3)
+        os.chown(work,4322,4322)
+        with patch.object(resize,'judge_account_uid',return_value=(4321,)),self.assertRaises(resize.MaintenanceError):
+            resize.read_config(self.root)
+        # Its parents stay root's
+        os.chown(work,0,0);os.chown(self.root/'data/judge',4321,4321)
+        with patch.object(resize,'judge_account_uid',return_value=(4321,)),self.assertRaises(resize.MaintenanceError):
+            resize.read_config(self.root)
+        os.chown(self.root/'data/judge',0,0)
     def assert_restored(self):
         self.assertEqual((self.root/'config/judge.yaml').read_bytes(),self.original)
         self.assertEqual({p.name:p.read_bytes() for p in self.units.iterdir()},self.initial_units)
@@ -255,7 +269,7 @@ class GeneratorTests(unittest.TestCase):
                 (root/'apps/judge/config-example.yaml').write_bytes((DEPLOY.parent/'apps/judge/config-example.yaml').read_bytes())
                 (root/'runtime/sandbox-rootfs/etc/libreoj-rootfs-id').write_text('a'*64)
                 (root/'config/secrets.json').write_text(json.dumps({'judge':base64.b64encode(b'Y'*30).decode()}))
-                env={'HYHOJ_ROOT':str(root),'NODE_BINARY':'/usr/bin/node'}
+                env={'HYHOJ_ROOT':str(root),'NODE_BINARY':'/usr/bin/node','OJ_JUDGE_ACCOUNT':'nobody'}
                 with patch.dict(os.environ,env,clear=True),patch('judge_capacity.discover_capacity',return_value=capacity(cpus,ram)),patch('grp.getgrnam',return_value=types.SimpleNamespace(gr_gid=1234)),contextlib.redirect_stdout(io.StringIO()):
                     if not slots:
                         with self.assertRaisesRegex(SystemExit,'at least 2 effective CPUs and 256 MiB RAM'):
@@ -274,7 +288,7 @@ class GeneratorTests(unittest.TestCase):
             (root/'apps/judge/config-example.yaml').write_bytes((DEPLOY.parent/'apps/judge/config-example.yaml').read_bytes())
             (root/'runtime/sandbox-rootfs/etc/libreoj-rootfs-id').write_text('a'*64)
             (root/'config/secrets.json').write_text(json.dumps({'judge':base64.b64encode(b'Y'*30).decode()}))
-            env={'HYHOJ_ROOT':str(root),'NODE_BINARY':'/usr/bin/node'}
+            env={'HYHOJ_ROOT':str(root),'NODE_BINARY':'/usr/bin/node','OJ_JUDGE_ACCOUNT':'nobody'}
             def generate(cap):
                 with patch.dict(os.environ,env,clear=True),patch('judge_capacity.discover_capacity',return_value=cap),patch('grp.getgrnam',return_value=types.SimpleNamespace(gr_gid=1234)),contextlib.redirect_stdout(io.StringIO()):
                     runpy.run_path(str(DEPLOY/'configure-judge.py'),run_name='__main__')

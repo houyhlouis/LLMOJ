@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <memory>
 #include <mutex>
+#include <algorithm>
 
 #include <cstring>
 #include <cassert>
@@ -99,11 +100,69 @@ void GetUserEntryInSandbox(const fs::path &rootfs, const std::string username, s
             throw std::system_error(errno, std::system_category(), "fgetpwent_r");
 }
 
+// Opens `relative` under the directory `root` as an O_PATH descriptor without following any symbolic link in it.
+static int OpenBeneath(const fs::path &root, const std::string &relative)
+{
+    int fd = ENSURE(open(root.c_str(), O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+    size_t start = 0;
+    while (!relative.empty() && start <= relative.size())
+    {
+        auto end = relative.find('/', start);
+        if (end == string::npos)
+            end = relative.size();
+        const auto component = relative.substr(start, end - start);
+        start = end + 1;
+        if (component.empty() || component == "." || component == "..")
+        {
+            close(fd);
+            throw std::invalid_argument(format("Invalid mount source component in {}", relative));
+        }
+        const int next = openat(fd, component.c_str(), O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        const int error = errno;
+        close(fd);
+        if (next == -1)
+            throw std::system_error(error, std::system_category(), format("Cannot open mount source {}", relative));
+        fd = next;
+    }
+    return fd;
+}
+
+// Moves a descriptor to the lowest free number at or above `minimum`.
+static int MoveDescriptor(int descriptor, int minimum)
+{
+    const int moved = ENSURE(fcntl(descriptor, F_DUPFD_CLOEXEC, minimum));
+    ENSURE(close(descriptor));
+    return moved;
+}
+
+// Places the passed descriptors at the numbers the program expects. The child's own descriptors that are still in use
+// (the error pipe and /dev/null) move above every number involved first, so that no placement replaces them.
+static void PlaceDescriptors(const SandboxParameter &parameter, int &errorPipe, int &nullfd)
+{
+    int minimum = std::max({3, errorPipe, nullfd}) + 1;
+    for (const auto &[source, target] : parameter.descriptors)
+        minimum = std::max({minimum, source + 1, target + 1});
+    errorPipe = MoveDescriptor(errorPipe, minimum);
+    nullfd = MoveDescriptor(nullfd, minimum);
+
+    // Copies first: a descriptor's target may be another descriptor's source.
+    vector<int> copies;
+    for (const auto &[source, target] : parameter.descriptors)
+        copies.push_back(ENSURE(fcntl(source, F_DUPFD_CLOEXEC, minimum)));
+    for (size_t i = 0; i < copies.size(); i++)
+    {
+        // dup2 leaves the target without FD_CLOEXEC, so it stays open in the program.
+        ENSURE(dup2(copies[i], parameter.descriptors[i].second));
+        ENSURE(close(copies[i]));
+    }
+}
+
 static int ChildProcess(void *param_ptr)
 {
     SandboxExecution &execParam = *reinterpret_cast<SandboxExecution *>(param_ptr);
     // We obtain a full copy of parameters here. The arguments may be destoryed after some time.
     SandboxParameter parameter = execParam.parameter;
+    int errorPipe = execParam.pipefd[1];
 
     try
     {
@@ -117,9 +176,11 @@ static int ChildProcess(void *param_ptr)
             ENSURE(sched_setaffinity(0, sizeof(cpu_set_t), &mask));
         }
 
-        int nullfd = ENSURE(open("/dev/null", O_RDWR));
+        int nullfd = ENSURE(open("/dev/null", O_RDWR | O_CLOEXEC));
         if (parameter.redirectBeforeChroot)
         {
+            if (!parameter.descriptors.empty())
+                throw std::invalid_argument("Passed descriptors require redirection after chroot.");
             RedirectIO(parameter, nullfd);
         }
 
@@ -137,10 +198,15 @@ static int ChildProcess(void *param_ptr)
             }
 
             fs::path target = parameter.chrootDirectory / std::filesystem::relative(info.dst, "/");
-	    
-            EnsureDirectoryExistance(info.src);
+
+            // A pinned source is mounted through its descriptor: exactly the directory opened, in this namespace
+            const int pinned = info.beneath ? OpenBeneath(info.src, info.beneathPath) : -1;
+            const fs::path source = pinned == -1 ? info.src : fs::path(format("/proc/self/fd/{}", pinned));
+            EnsureDirectoryExistance(source);
             EnsureDirectoryExistance(target);
-            ENSURE(mount(info.src.string().c_str(), target.string().c_str(), "", MS_BIND | MS_REC, ""));
+            ENSURE(mount(source.string().c_str(), target.string().c_str(), "", MS_BIND | MS_REC, ""));
+            if (pinned != -1)
+                ENSURE(close(pinned));
             if (info.limit == 0)
             {
                 ENSURE(mount("", target.string().c_str(), "", MS_BIND | MS_REMOUNT | MS_RDONLY | MS_REC, ""));
@@ -159,6 +225,11 @@ static int ChildProcess(void *param_ptr)
         if (parameter.mountProc)
         {
             ENSURE(mount("proc", "/proc", "proc", 0, NULL));
+        }
+        if (!parameter.descriptors.empty())
+        {
+            // After the mounts, whose sources may be /proc/self/fd paths of this process's descriptors
+            PlaceDescriptors(parameter, errorPipe, nullfd);
         }
         if (!parameter.redirectBeforeChroot)
         {
@@ -204,7 +275,7 @@ static int ChildProcess(void *param_ptr)
 
         int temp = -1;
         // Inform the parent that no exception occurred.
-        ENSURE(write(execParam.pipefd[1], &temp, sizeof(int)));
+        ENSURE(write(errorPipe, &temp, sizeof(int)));
 
         // Inform our parent that we are ready to go.
         execParam.semaphore1.Post();
@@ -222,9 +293,9 @@ static int ChildProcess(void *param_ptr)
         int len = strlen(errMessage);
         try
         {
-            ENSURE(write(execParam.pipefd[1], &len, sizeof(int)));
-            ENSURE(write(execParam.pipefd[1], errMessage, len));
-            ENSURE(close(execParam.pipefd[1]));
+            ENSURE(write(errorPipe, &len, sizeof(int)));
+            ENSURE(write(errorPipe, errMessage, len));
+            ENSURE(close(errorPipe));
             execParam.semaphore1.Post();
             return 1;
         }

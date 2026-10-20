@@ -44,8 +44,8 @@
 
 | 设置 | 含义 |
 | --- | --- |
-| `aiRunnerSocket` | 后端发送 AI 检查所用的本机 socket：`<root>/data/judge/ai-runner.sock`，所有者为 root 和 `libreoj` 组，权限 `0660`。不要通过 TCP 公开 |
-| `aiGeneratedDirectory` | 与后端共用的 AI 结果私有目录：`<root>/data/ai-generated`，必须是真实目录（不能是链接），所有者为 root 和 `libreoj` 组，权限 `0750` |
+| `aiRunnerSocket` | 后端发送 AI 检查所用的本机 socket：`<root>/data/judge/ai-runner.sock`，所有者为 root 和 `libreoj` 组，权限 `0660`。由[沙箱启动器](#评测机账户与沙箱启动器)创建，评测机只拿到正在监听的 socket。不要通过 TCP 公开 |
+| `aiGeneratedDirectory` | 与后端共用的 AI 结果私有目录：`<root>/data/ai-generated`，必须是真实目录（不能是链接）。启动器把它交给评测机账户和 `libreoj` 组，权限 `2750`：新文件继承该组，后端因此可以读取 |
 | `aiRunnerGid` | `libreoj` 组的 ID。开启 AI 任务时必须为正数；远程评测机为 `0` |
 
 ### 沙箱
@@ -59,7 +59,7 @@
 | `sandbox.immutable` | 未设置 | 用于不可修改的镜像：设为 `true` 时，工作路径改为 `/tmp/libreoj`，而不是镜像内的目录。它本身不会让镜像变成只读 |
 | `sandbox.resourceMode` | 未设置 | `default`（安装器写入）用 cgroup 统计程序的 CPU 时间；`arbiter` 改用程序的用户态 CPU 时间，并额外限制地址空间。只影响提交的程序，会改变评测结果的计算方式 |
 | `sandbox.syscallFilter` | 未设置 | 默认 `true`：拒绝评测程序用不到的系统调用，见[下文](#沙箱系统调用过滤器与自检)。只在需要确认过滤器是否影响某种语言时设为 `false` |
-| `sandbox.user` | `sandbox` | 程序在沙箱中运行的用户（不是评测服务本身的运行用户） |
+| `sandbox.user` | `sandbox` | 程序在沙箱中运行的用户，必须不同于评测机自身的账户 `libreoj-judge` |
 | `sandbox.environments` | 见右 | 沙箱中程序的环境变量，值为文本。示例设置 `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`、`HOME=/sandbox` 和 `LC_ALL=en_US.UTF-8`。评测机自身的变量（如 `UV_THREADPOOL_SIZE`）不能写在这里 |
 
 ### CPU 亲和性
@@ -76,7 +76,8 @@
 - `LIBREOJ_JUDGE_LOG_LEVEL`：默认 `info`。只在排查问题时使用 `verbose` 或 `debug`，并且不要公开这些日志，其中包含带签名的下载地址。
 - `UV_THREADPOOL_SIZE`：至少为评测槽数的两倍加二（最多 1024）；安装器写入 `max(4, 2 × 槽数 + 2)`。每个槽可能同时等待两个程序（交互题），另外两个线程处理文件。修改后需要重启评测机。
 - `NODE_OPTIONS=--max-old-space-size=512`：评测机自身的内存，不是提交程序的内存限制。
-- `HYHOJ_AI_SAMPLE_INPUTS_DIR`：AI 样例输入的私有目录，`<root>/data/ai-sample-inputs`。必须与后端相同，并且不能公开访问。
+- `HYHOJ_AI_SAMPLE_INPUTS_DIR`：AI 样例输入的私有目录，`<root>/data/ai-sample-inputs`。必须与后端相同，并且不能公开访问。沙箱启动器替评测机打开其中的文件。
+- `LIBREOJ_JUDGE_USER`：评测机运行所用的账户，未设置时为 `libreoj-judge`。仅在测试时修改。
 
 ## 工作如何调度
 
@@ -137,10 +138,41 @@ sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh
 
 每项检查输出一行，耗时几秒到一分钟。它使用自己的临时目录，从不使用评测机密钥，因此可以在评测机工作时运行，但会与评测争用 CPU。`--only cpp,java` 只检查部分语言。每当评测机或沙箱有改动时，升级器都会在切换之前用新版本运行它。
 
-**沙箱不能做到的事。** 沙箱中的程序与服务器共用内核，因此内核漏洞仍可能让程序逃逸。过滤器减少了程序能接触到的内核功能，但不能证明完全隔离，而且评测机的控制进程以 root 运行。对于公开的比赛：
+**沙箱不能做到的事。** 沙箱中的程序与服务器共用内核，因此内核漏洞仍可能让程序逃逸。过滤器减少了程序能接触到的内核功能，但不能证明完全隔离。评测机本身以无特权账户运行，但其小巧的沙箱启动器必须以 root 运行。对于公开的比赛：
 - 在独立的机器上运行评测机，不要放在网页服务器上；
 - 及时更新内核；
 - 不要在远程评测机上存放站点的凭据（数据库、MinIO、AI 密钥），它们只需要评测机密钥。
+
+## 评测机账户与沙箱启动器
+
+启动沙箱需要 root：命名空间、挂载、cgroup，以及切换到 `sandbox.user`。评测机只有一小部分以 root 运行，即它的**沙箱启动器**。启动器以账户 `libreoj-judge` 无特权地启动评测机本身，并替它运行所有沙箱。
+
+| 部分 | 运行身份 | 职责 |
+| --- | --- | --- |
+| 沙箱启动器（`index.mjs`、`src/launcher`） | root | 读取 `judge.yaml` 并把内容交给评测机。准备评测机的目录，启动评测机，在它与网站断开后重新启动它。运行评测机请求的沙箱。为本机 AI 工作进程监听其 socket，并打开后端的样例文件 |
+| 评测机（`src/index.ts`） | `libreoj-judge` | 其余全部工作：用密钥连接网站，下载并校验文件，通过启动器编译和评测，报告结果。它没有任何 capability，没有附加组，也无法获得特权（`no_new_privs`） |
+
+**启动器检查的内容。** 每个请求都按 `judge.yaml` 检查，从不信任评测机：
+- **只取自配置：** 镜像、沙箱用户、主机名、系统调用过滤器、CPU 和资源模式。请求无法选择或关闭其中任何一项。
+- **挂载：** 只能来自评测机自己的目录（各任务工作目录、缓存和 AI 结果目录），并且只有任务工作目录可以可写挂载。
+- **标准输入输出及其他描述符：** 只能是评测机传来的已打开描述符。启动器从不替程序按路径打开文件。
+- **限制：** 时间、内存、进程数和参数大小都必须在范围内。同时运行的沙箱最多为评测槽数的两倍再加二。
+
+**链接。** root 从不跟随评测机或程序留下的链接：
+- **挂载来源：** 由启动器和沙箱内部各自逐级打开目录，遇到链接即拒绝。
+- **程序运行前：** 可写目录交给 `sandbox.user`，只读目录设为可读（权限 `0755`）。只改动属于评测机账户或沙箱用户的目录和普通文件。
+- **程序结束后：** 沙箱用户在可写目录中留下的内容交还给评测机账户。
+- **评测机自己读取：** 读取程序输出时不跟随链接，因此提交无法让评测机把其他文件当作它的输出读取。
+
+**目录。** 启动器启动时把评测机的目录交给其账户：`dataStore`、`binaryCacheStore`、各任务工作目录和 `aiGeneratedDirectory`。以 root 运行的旧评测机或沙箱用户留下的文件也一并交给该账户。安装目录内该账户无法进入的上级目录会为其他用户加上进入权限（`o+x`），例如 `<root>/data/judge`。安装目录以外的位置，启动器会停止并指出需要修改的目录。`config/judge.yaml` 仍只有 root 可读。
+
+**账户。** `configure-judge.py` 会创建它（安装器和远程评测机的配置步骤都会运行该脚本），安装启动器的升级也会创建它。它是没有登录 shell 和主目录的系统账户。在运行中的评测机上查看：
+
+```bash
+ps -o user,pid,cmd --ppid "$(systemctl show -p MainPID --value libreoj-judge.service)"
+```
+
+`deploy/doctor.sh` 也会报告。自检以同样方式运行：在启动器下以评测机账户运行。
 
 ## systemd 服务
 
@@ -162,7 +194,7 @@ sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh
 | `UMask`、`LimitCORE` | `0022`，不生成 core 文件 |
 | `StandardOutput`、`StandardError` | `journal` |
 
-没有设置 `User` 和 `Group`，因此服务以 root 运行；`sandbox.user` 是沙箱内的另一个用户。`CPUAccounting`、`MemoryAccounting`、`TasksAccounting`、`MemoryMax`、`CPUQuota` 等限制也没有设置，由 systemd 默认值或上级 slice 决定。查看实际生效的值：
+没有设置 `User` 和 `Group`：服务以 root 启动，其[沙箱启动器](#评测机账户与沙箱启动器)保持 root，评测机以 `libreoj-judge` 运行。`sandbox.user` 是沙箱内的另一个用户。`CPUAccounting`、`MemoryAccounting`、`TasksAccounting`、`MemoryMax`、`CPUQuota` 等限制也没有设置，由 systemd 默认值或上级 slice 决定。查看实际生效的值：
 
 ```bash
 sudo systemctl show libreoj-judge.service -p CPUAccounting -p MemoryAccounting -p TasksAccounting -p LimitCORE -p TasksMax

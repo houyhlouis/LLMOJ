@@ -15,6 +15,7 @@ import io
 import json
 import os
 from pathlib import Path
+import pwd
 import re
 import secrets
 import shlex
@@ -85,7 +86,13 @@ NATIVE_PACKAGES = {
 JUDGE_REGRESSIONS = ('apps/judge/src/task/hack/hack.test.cjs', 'apps/judge/src/task/self-eval/self-eval.test.cjs',
                      'apps/judge/src/rpc.test.cjs', 'apps/judge/src/executionScheduler.test.cjs',
                      'apps/judge/src/selfTestConfig.test.cjs', 'apps/judge/src/fileContent.test.cjs',
-                     'apps/judge/src/task/ai-execution/ai-execution.test.cjs')
+                     'apps/judge/src/task/ai-execution/ai-execution.test.cjs', 'apps/judge/src/launcher/policy.test.cjs')
+# A judge with the sandbox launcher runs as this account; only the launcher runs as root.
+LAUNCHER = 'apps/judge/src/launcher/main.ts'
+JUDGE_ACCOUNT = 'libreoj-judge'
+NOLOGIN = ('/usr/sbin/nologin', '/sbin/nologin', '/bin/false', '/usr/bin/false')
+# Where the staged judge appears to its self-test: the staging directory itself is in the private backups.
+SELF_TEST_STAGE = '/run/libreoj-judge-self-test/stage'
 COMMUNITY_PERMISSIONS = (
     'ViewTeam', 'CreateTeam', 'ManageTeams', 'FakeSubmission',
     'ViewHack', 'CreateHack', 'ManageHack', 'CreateSelfEval'
@@ -396,6 +403,7 @@ class Upgrade:
         self.runtime_changes = []
         self.native_rebuild = []
         self.sandbox_changed = False
+        self.launcher = False
 
     def sql(self, query, database=None):
         args = ['mariadb', '--protocol=socket', f'--socket={self.root}/data/mariadb/mysql.sock', '--user=root', '--batch', '--skip-column-names']
@@ -550,6 +558,7 @@ class Upgrade:
         self.native_rebuild = sorted(package for package, native in NATIVE_PACKAGES.items()
                                      if self.role == 'all' and any(name.startswith(native['inputs']) for name in runtime_changes))
         self.sandbox_changed = self.role == 'all' and any(name.startswith('packages/simple-sandbox/') for name in runtime_changes)
+        self.launcher = (source/LAUNCHER).is_file()
         protocol = 'packages/judge-protocol/src/index.ts'
         if protocol in source_map and protocol in old_map:
             # Judges and the backend may run different releases (remote judges, rollback), so deployed protocol
@@ -796,6 +805,32 @@ class Upgrade:
             if self.host.active('libreoj-'+name+'.service'):
                 fail('Application service did not stop')
 
+    def account_entry(self, name):
+        try:
+            return pwd.getpwnam(name)
+        except KeyError:
+            return None
+
+    def judge_account(self):
+        """What the target judge needs of its account: None (no local judge, or no sandbox launcher), 'exists' or
+        'create'. An account of that name that isn't a system account without login is refused."""
+        if self.role != 'all' or not self.launcher:
+            return None
+        entry = self.account_entry(JUDGE_ACCOUNT)
+        if entry is None:
+            return 'create'
+        if entry.pw_uid == 0 or entry.pw_gid == 0 or entry.pw_shell not in NOLOGIN:
+            fail(f'The account {JUDGE_ACCOUNT} exists, but not as a system account without login; review it')
+        return 'exists'
+
+    def ensure_judge_account(self):
+        # Kept by a rollback: an older judge runs as root and doesn't use it
+        if self.judge_account() == 'create':
+            self.host.run(['useradd', '--system', '--user-group', '--no-create-home', '--home-dir', '/nonexistent',
+                           '--shell', '/usr/sbin/nologin', JUDGE_ACCOUNT])
+            if self.judge_account() != 'exists':
+                fail(f'Could not create the account {JUDGE_ACCOUNT}')
+
     def verify_sandbox(self):
         """Check the staged sandbox and judge on this host, while the judge is stopped."""
         if self.sandbox_changed:
@@ -807,11 +842,14 @@ class Upgrade:
                            self.node, self.stage/'deploy/sandbox/verify-installed.mjs', '--root', self.root,
                            '--sandbox', self.stage/'packages/simple-sandbox'], timeout=180)
         if self.role == 'all' and self.runtime_changes and (self.stage/'apps/judge/self-test.mjs').is_file():
-            # Every language compiled and run through the staged judge and sandbox, and the syscall filter probed
+            # Every language compiled and run through the staged judge and sandbox, and the syscall filter probed.
+            # The judge runs as its own account, which can't enter the private backups: the unit sees the staged
+            # tree at another path.
             self.host.run(['systemd-run', '--unit=libreoj-judge-self-test', '--wait', '--pipe', '--collect',
                            '--property=Delegate=cpu memory pids', '--property=DelegateSubgroup=supervisor',
                            '--property=LimitCORE=0', '--property=RuntimeMaxSec=900', '--property=TimeoutStopSec=15',
-                           '--property=WorkingDirectory='+str(self.stage/'apps/judge'),
+                           f'--property=BindReadOnlyPaths={self.stage}:{SELF_TEST_STAGE}',
+                           f'--property=WorkingDirectory={SELF_TEST_STAGE}/apps/judge',
                            '--setenv=UV_THREADPOOL_SIZE=16',
                            '--setenv=PATH='+str(Path(self.node).parent)+':/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
                            self.node, '-r', '@swc-node/register', 'self-test.mjs',
@@ -919,6 +957,7 @@ class Upgrade:
         self.manifest['status'] = 'maintenance'
         self.save()
         # Before any database change: a sandbox that fails its check leaves nothing to undo but service states.
+        self.ensure_judge_account()
         self.verify_sandbox()
         self.dump(self.backup/'database.sql')
         self.schema_on_clone(self.backup/'database.sql')
@@ -1176,6 +1215,8 @@ def main(argv=None):
         upgrade.compatibility(source)
         info['runtimeChanges'] = len(upgrade.runtime_changes)
         info['nativeRebuild'] = upgrade.native_rebuild
+        if upgrade.judge_account():
+            info['judgeAccount'] = {'exists': JUDGE_ACCOUNT, 'create': f'{JUDGE_ACCOUNT} (created by the upgrade)'}[upgrade.judge_account()]
         if upgrade.runtime_changes and upgrade.role == 'web':
             info['remoteJudges'] = 'Judge runtime changed: update remote judges separately (wiki/Remote-Judge.md)'
         info['sourceSha256'] = source_hash

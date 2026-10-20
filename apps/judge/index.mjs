@@ -1,31 +1,21 @@
-import child_process from "child_process";
+// The judge service's entry: its sandbox launcher, the only part of the judge that runs as root
+// (src/launcher/main.ts). It starts the judge itself (src/index.ts) as the account libreoj-judge, runs sandboxes for
+// it, and starts it again when it lost its connection to the site (exit code 100).
+import { createRequire } from "module";
 
-/**
- * Start judge service and restart it when connection lost.
- *
- * Exit code = 100 means connection lost.
- */
+const require = createRequire(import.meta.url);
 
-while (true) {
-  const child = child_process.fork("./src/index");
+if (!process.env.LIBREOJ_JUDGE_CONFIG_FILE) {
+  console.error("Please specify configuration file with environment variable LIBREOJ_JUDGE_CONFIG_FILE");
+  process.exit(1);
+}
 
-  child.on("error", error => {
-    console.error(error);
-    child.kill("SIGKILL");
-    process.exit(-1);
-  });
-
-  await new Promise(resolve => {
-    child.on("exit", (code, signal) => {
-      // 100: Disconnected
-      if (code === 100) {
-        // Restart child
-        return resolve();
-      }
-
-      // Killed by a signal (e.g. the OOM killer): exit as failed, so the service manager restarts the judge.
-      if (code === null) console.error(`Judge process killed by ${signal}`);
-      process.exit(code ?? 1);
-    });
-  });
-};
+try {
+  const { runLauncher } = require("./src/launcher/main");
+  process.exit(
+    await runLauncher({ configFile: process.env.LIBREOJ_JUDGE_CONFIG_FILE, worker: "./src/index", restart: true })
+  );
+} catch (error) {
+  console.error(error);
+  process.exit(1);
+}

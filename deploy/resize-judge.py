@@ -9,6 +9,7 @@ import fcntl
 import hashlib
 import json
 import os
+import pwd
 from pathlib import Path
 import re
 import shlex
@@ -52,7 +53,7 @@ class Host:
         return state
 
 
-def safe_directory(path, create=False, private=False):
+def safe_directory(path, create=False, private=False, owners=(0,)):
     path = Path(path)
     if not path.is_absolute() or not re.fullmatch(r'/[A-Za-z0-9_./-]+', str(path)) or '..' in path.parts:
         raise MaintenanceError(say('The directory must be a safe absolute path without spaces', '目录必须为无空格的安全绝对路径'))
@@ -63,11 +64,18 @@ def safe_directory(path, create=False, private=False):
         path.mkdir(parents=True, exist_ok=True, mode=0o700 if private else 0o755)
     if path.exists():
         st = path.stat()
-        if not stat.S_ISDIR(st.st_mode) or st.st_uid != 0 or st.st_mode & 0o022:
+        if not stat.S_ISDIR(st.st_mode) or st.st_uid not in owners or st.st_mode & 0o022:
             raise MaintenanceError(say('The directory must be owned by root and not writable by other users: ', '目录必须由 root 所有且不可由其他用户写入：')+str(path))
         if private and st.st_mode & 0o077:
             raise MaintenanceError(say('The backup or lock directory must be private to root: ', '备份/锁目录必须为 root 私有：')+str(path))
     return path
+
+
+def judge_account_uid():
+    try:
+        return (pwd.getpwnam('libreoj-judge').pw_uid,)
+    except KeyError:
+        return ()
 
 
 def regular(path, private=False, missing=False):
@@ -113,8 +121,11 @@ def read_config(root):
             raise MaintenanceError(say('Custom workspace directories need manual maintenance; only work/1..N is supported', '自定义工作目录需人工维护；仅支持 work/1..N'))
         if config['maxConcurrentTasks'] != len(paths):
             raise MaintenanceError(say('The configured concurrency differs from the number of workspaces', '现有并发数与工作目录数不一致'))
-        for path in [root/'data', root/'data/judge', root/'data/judge/work', *paths]:
+        for path in [root/'data', root/'data/judge', root/'data/judge/work']:
             safe_directory(path)
+        # A mounted workspace belongs to the judge's account, which its sandbox launcher gives it
+        for path in paths:
+            safe_directory(path, owners=(0, *judge_account_uid()))
         return config
     except MaintenanceError:
         raise

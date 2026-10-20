@@ -23,6 +23,7 @@ import { runTaskQueued } from "./taskQueue";
 import { COMPILE_RESERVATION } from "./executionScheduler";
 import { getFile, getFileHash } from "./file";
 import * as fsNative from "./fsNative";
+import { isRegularFile } from "./safeFile";
 
 export interface CompilationConfig extends SandboxConfigBase {
   messageFile?: string; // The file contains the message to display for user (in the binary directory)
@@ -297,9 +298,9 @@ async function doCompile(
   const [message, extraInfo] = await Promise.all([
     readFileOmitted(messageFile.outside, serverSideConfig.limit.compilerMessage).then(result => result || ""),
     extraInfoFile
-      ? fsNative
-          .exists(extraInfoFile.outside)
-          .then(exists => (exists ? fs.promises.readFile(extraInfoFile.outside, "utf-8") : null))
+      ? isRegularFile(extraInfoFile.outside).then(exists =>
+          exists ? fs.promises.readFile(extraInfoFile.outside, "utf-8") : null
+        )
       : null
   ]);
   await Promise.all([

@@ -27,7 +27,7 @@ spec.loader.exec_module(d)
 SECRETS = ('session-secret-7f3a', 'database-password-91c2', 'redis-password-55d0', 'minio-secret-key-e81b',
            'maintenance-key-0c9d', 'judge-key-a4f6', 'master-key-bytes-3b2e')
 ROOTFS = 'a' * 64
-USERS = {0: 'root', 1001: 'libreoj', 1002: 'mysql', 1003: 'redis'}
+USERS = {0: 'root', 1001: 'libreoj', 1002: 'mysql', 1003: 'redis', 1004: 'libreoj-judge'}
 UID = {name: uid for uid, name in USERS.items()}
 GIB = 1024 ** 3
 
@@ -85,6 +85,10 @@ class FakeHost(d.Host):
         self.texts = {
             '/proc/meminfo': 'MemTotal:        3500000 kB\nMemAvailable:    2000000 kB\n',
             f'/sys/fs/cgroup/system.slice/{d.JUDGE_SERVICE}/cgroup.controllers': 'cpuset cpu io memory pids\n',
+            # The sandbox launcher (root) and the judge it started
+            f'/sys/fs/cgroup/system.slice/{d.JUDGE_SERVICE}/supervisor/cgroup.procs': '4100\n4101\n',
+            '/proc/4100/status': 'Name:\tnode\nUid:\t0\t0\t0\t0\n',
+            '/proc/4101/status': 'Name:\tnode\nUid:\t1004\t1004\t1004\t1004\n',
         }
         self.mounts = set()
         self.clock = time.time()
@@ -304,6 +308,18 @@ class DoctorTests(unittest.TestCase):
             self.host.hashes = hashes
             report, _ = self.run_doctor()
             self.assertFalse([item for item in report.items if item['check'] == 'content hashes'])
+
+    def test_judge_account(self):
+        report, _ = self.run_doctor()
+        self.assertReported(report, d.OK, r'The judge runs as libreoj-judge; only its sandbox launcher runs as root')
+        # A judge from before the launcher runs entirely as root
+        self.host.texts['/proc/4101/status'] = 'Name:\tnode\nUid:\t0\t0\t0\t0\n'
+        report, _ = self.run_doctor()
+        self.assertReported(report, d.WARN, r'The whole judge runs as root')
+        # A stopped judge has no processes to check
+        self.host.texts[f'/sys/fs/cgroup/system.slice/{d.JUDGE_SERVICE}/supervisor/cgroup.procs'] = ''
+        report, _ = self.run_doctor()
+        self.assertFalse([item for item in report.items if item['check'] == 'judge account'])
 
     def test_judging_and_queues(self):
         self.host.answers['http://127.0.0.1:2020/metrics'] = (200, metrics(**{

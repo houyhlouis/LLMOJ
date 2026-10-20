@@ -39,15 +39,11 @@ function loadCompiledProgram(remove) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
   }).outputText;
   const module = { exports: {} };
-  vm.runInNewContext(
-    js,
-    { module, exports: module.exports, fsNative: { remove } },
-    { timeout: 1000 }
-  );
+  vm.runInNewContext(js, { module, exports: module.exports, fsNative: { remove } }, { timeout: 1000 });
   return module.exports.CompileResultSuccess;
 }
 
-const omitted = load("omittableString.ts", { fs: {} });
+const omitted = load("omittableString.ts", { fs: {}, "./safeFile": {} });
 const checkers = load("checkers/index.ts", { "../omittableString": omitted });
 const SandboxStatus = { OK: 1, TimeLimitExceeded: 2, MemoryLimitExceeded: 3, RuntimeError: 4, Cancelled: 5 };
 for (const row of [
@@ -144,6 +140,7 @@ for (const kind of ["traditional", "interaction", "communication"]) {
         "../../../checkers/builtin": {},
         "../../../checkers/custom": { validateCustomChecker() {} },
         "../../../fsNative": {},
+        "../../../safeFile": {},
         "../common": {
           getExtraSourceFiles: () => ({}),
           runCommonTask: async () => {
@@ -187,7 +184,10 @@ for (const kind of ["traditional", "interaction", "communication"]) {
         await ActualCompileResultSuccess.prototype.dereference.call(program); // Cache eviction.
         assert.equal(program.referenceCount, 0);
       }
-      assert.deepEqual(removals, programs.map(program => program.binaryDirectory));
+      assert.deepEqual(
+        removals,
+        programs.map(program => program.binaryDirectory)
+      );
     });
   }
 }
@@ -195,7 +195,7 @@ for (const kind of ["traditional", "interaction", "communication"]) {
 for (const outcome of ["success", "initialization fails", "cancelled before contestant starts"]) {
   test(`runtime initialization: ${outcome}`, async () => {
     const starts = [],
-      closeOnExec = [];
+      closed = [];
     let cancelled = false;
     const config = {
       sandbox: {
@@ -208,11 +208,10 @@ for (const outcome of ["success", "initialization fails", "cancelled before cont
       cpuAffinity: { compiler: [1], userProgram: [2] }
     };
     class CanceledError extends Error {}
-    const sandbox = {
-      SandboxStatus,
-      getUidAndGidInSandbox: () => ({ uid: 65534, gid: 65534 }),
-      startSandbox(parameters) {
-        starts.push(parameters);
+    // The sandbox launcher runs the sandboxes; standard I/O paths are opened by the judge and passed
+    const launcher = {
+      async startSandbox(request, descriptors) {
+        starts.push({ ...request, passed: descriptors });
         return {
           stop() {},
           waitForStop: async () => {
@@ -225,8 +224,18 @@ for (const outcome of ["success", "initialization fails", "cancelled before cont
         };
       }
     };
+    let opened = 300;
     const { startSandbox } = load("sandbox.ts", {
-      "simple-sandbox": sandbox,
+      fs: { constants: require("node:fs").constants, closeSync: fd => closed.push(fd) },
+      path: require("node:path"),
+      "simple-sandbox": { SandboxStatus },
+      "./launcherClient": { launcher: () => launcher },
+      "./safeFile": {
+        openBeneathSync: (root, relative) => {
+          assert.deepEqual([root, relative], ["/temp", relative === "output" ? "output" : "errors"]);
+          return ++opened;
+        }
+      },
       "./config": config,
       "./utils": { safelyJoinPath: (a, b) => a + "/" + b, merge: (a, b) => Object.assign({}, a, b) },
       "./rpc": {
@@ -237,9 +246,9 @@ for (const outcome of ["success", "initialization fails", "cancelled before cont
         isCanceled: () => false
       },
       "./error": { CanceledError },
-      "./fsNative": { ensureDir: async () => {}, chmodown: async () => {} }
+      "./fsNative": { ensureDir: async () => {} }
     });
-    const fd = { fd: 123, setCloseOnExec: value => closeOnExec.push(value) };
+    const fd = { fd: 123 };
     const runtimeInitialization = {
       executable: "/usr/bin/emacs",
       parameters: ["--quick", "--batch", "--eval", "(kill-emacs 0)"],
@@ -268,28 +277,34 @@ for (const outcome of ["success", "initialization fails", "cancelled before cont
     else await assert.rejects(startSandbox("task", args));
     assert.equal(starts.length, outcome === "success" ? 2 : 1);
     const initialization = starts[0];
-    assert.equal(initialization.stdin, undefined);
-    assert.equal(initialization.stdout, undefined);
-    assert.equal(initialization.stderr, undefined);
+    assert.equal(initialization.stdin, null);
+    assert.equal(initialization.stdout, null);
+    assert.equal(initialization.stderr, null);
+    assert.equal(JSON.stringify(initialization.passed), "[]");
     assert.equal(initialization.mounts.length, 1);
-    assert.equal(initialization.mounts[0].dst, "/tmp");
+    assert.equal(initialization.mounts[0].inside, "/tmp");
     assert.equal(initialization.workingDirectory, "/tmp");
     assert.equal(initialization.memory, 512 * 1048576);
     assert.equal(initialization.time, 10000);
-    assert.equal(initialization.addressSpaceLimit, undefined);
+    // Not the submitted program: the launcher gives it neither the arbiter mode nor the address space limit
+    assert.equal(initialization.strategy, "Compiler");
     assert.equal(initialization.environments.includes("UNTRUSTED=submission"), false);
     assert.equal(initialization.environments.includes("BASE=trusted"), true);
     assert.equal(
       JSON.stringify(initialization.parameters),
       JSON.stringify(["/usr/bin/emacs", ...runtimeInitialization.parameters])
     );
-    assert.deepEqual(closeOnExec, outcome === "success" ? [false, true] : []);
     if (outcome === "success") {
       assert.equal(starts[1].stdin, 123);
+      // Opened under the /tmp mount's directory, passed, and closed here once the launcher has them
+      assert.equal(JSON.stringify([starts[1].stdout, starts[1].stderr]), "[301,302]");
+      assert.equal(JSON.stringify(starts[1].passed), "[123,301,302]");
+      assert.equal(JSON.stringify(starts[1].descriptors), "[123,301,302]");
+      assert.deepEqual(closed, [301, 302]);
       assert.equal(starts[1].time, 1000);
       assert.equal(starts[1].memory, 256 * 1048576);
-      assert.equal(starts[1].addressSpaceLimit, 256 * 1048576);
-    }
+      assert.equal(starts[1].strategy, "UserProgram");
+    } else assert.deepEqual(closed, []);
   });
 }
 

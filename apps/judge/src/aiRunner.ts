@@ -29,6 +29,9 @@ import getLanguage from "./languages";
 import { runTaskQueued } from "./taskQueue";
 import { COMPILE_RESERVATION } from "./executionScheduler";
 import { ensureDirectoryEmpty } from "./utils";
+import { launcher } from "./launcherClient";
+import { AI_RUNNER_DESCRIPTOR_VARIABLE } from "./launcher/protocol";
+import { setCloseOnExec } from "./launcher/native";
 import {
   runSandbox,
   CpuAffinityStrategy,
@@ -80,6 +83,8 @@ export type Emit = (event: Record<string, unknown>) => void;
 export interface GenerationLayout {
   // The directory of the request's sample files
   sampleDirectory: string;
+  // Opens a sample file when the judge can't read the directory itself (the backend's, for the local runner)
+  openSample?: (name: string) => Promise<number>;
   // Each job's output directory is made in it
   outputRoot: string;
   // The group allowed to read the output (the local backend); none for a queued task, whose output is uploaded
@@ -90,13 +95,45 @@ export interface GenerationLayout {
 function localLayout(jobId: string): GenerationLayout {
   return {
     sampleDirectory: path.join(SAMPLE_DIRECTORY, jobId),
+    // The backend's directory is its own; the sandbox launcher opens the files (and nothing else) for the judge
+    openSample: name => launcher().openSample(jobId, name),
     outputRoot: config.aiGeneratedDirectory,
     outputGroup: config.aiRunnerGid
   };
 }
 
 async function shareWithBackend(filename: string, layout: GenerationLayout) {
-  if (layout.outputGroup != null) await fs.promises.chown(filename, 0, layout.outputGroup);
+  // The output root is set-group-ID, so new files already have the backend's group
+  if (layout.outputGroup == null) return;
+  const stat = await fs.promises.lstat(filename);
+  if (stat.gid !== layout.outputGroup) await fs.promises.chown(filename, stat.uid, layout.outputGroup);
+}
+
+/** A sample file: opened by path, or a descriptor the launcher opened. */
+async function openSampleFile(layout: GenerationLayout, source: fs.promises.FileHandle, name: string) {
+  if (!layout.openSample) {
+    const file = await fs.promises.open(
+      `/proc/self/fd/${source.fd}/${name}`,
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
+    );
+    return {
+      stat: () => file.stat(),
+      createReadStream: () => file.createReadStream({ autoClose: false }),
+      close: () => file.close()
+    };
+  }
+  const fd = await layout.openSample(name);
+  return {
+    stat: () =>
+      new Promise<fs.Stats>((resolve, reject) => {
+        fs.fstat(fd, (error, stat) => (error ? reject(error) : resolve(stat)));
+      }),
+    createReadStream: () => fs.createReadStream("", { fd, autoClose: false }),
+    close: () =>
+      new Promise<void>(resolve => {
+        fs.close(fd, () => resolve());
+      })
+  };
 }
 
 function referenceError(message: string, candidateFailure: boolean, qualityVerdict?: QualityVerdict): Error {
@@ -532,7 +569,7 @@ export async function generate(
   checkCanceled: () => void,
   layout: GenerationLayout = localLayout(request.jobId)
 ) {
-  // Snapshot backend-owned inputs through O_NOFOLLOW into root-owned storage before using them.
+  // Snapshot backend-owned inputs through O_NOFOLLOW into the judge's own storage before using them.
   // The descriptor-based source path pins the UUID directory even if its owner renames it.
   let snapshot: string;
   const sampleHashes: string[] = [];
@@ -540,18 +577,17 @@ export async function generate(
   try {
     if (request.sampleFiles?.length) {
       snapshot = await fs.promises.mkdtemp(path.join(layout.outputRoot, ".samples-"));
-      const source = await fs.promises.open(
-        layout.sampleDirectory,
-        fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW
-      );
+      const source = layout.openSample
+        ? null
+        : await fs.promises.open(
+            layout.sampleDirectory,
+            fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW
+          );
       try {
         const names = new Set(request.sampleFiles.flatMap(sample => [sample.inputFile, sample.outputFile]));
         for (const name of names) {
           checkCanceled();
-          const input = await fs.promises.open(
-            `/proc/self/fd/${source.fd}/${name}`,
-            fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
-          );
+          const input = await openSampleFile(layout, source, name);
           try {
             const stat = await input.stat();
             if (!stat.isFile() || stat.size > MAX_SAMPLE_FILE || stat.size < 0)
@@ -566,7 +602,7 @@ export async function generate(
             const hash = crypto.createHash("sha256");
             let received = 0;
             await pipeline(
-              input.createReadStream({ autoClose: false }),
+              input.createReadStream(),
               new Transform({
                 transform(chunk: Buffer, encoding, callback) {
                   received += chunk.length;
@@ -584,7 +620,7 @@ export async function generate(
           }
         }
       } finally {
-        await source.close();
+        await source?.close();
       }
     }
     return await generateWithSamples(request, emit, checkCanceled, snapshot, sampleHashes, layout);
@@ -1015,7 +1051,7 @@ async function pruneAbandonedOutputs() {
     if (
       stat &&
       !active.has(entry.name) &&
-      stat.uid === 0 &&
+      stat.uid === process.getuid() &&
       !stat.isSymbolicLink() &&
       Date.now() - stat.mtimeMs > RETENTION_MS
     )
@@ -1026,19 +1062,13 @@ async function pruneAbandonedOutputs() {
 export async function startAiRunner() {
   if (!config.aiRunnerSocket || !config.aiGeneratedDirectory) return;
   if (!Number.isInteger(config.aiRunnerGid) || config.aiRunnerGid <= 0) throw new Error("AI runner group is required");
-  await fs.promises.mkdir(config.aiGeneratedDirectory, { recursive: true, mode: 0o750 });
+  // The sandbox launcher prepared the output root (the judge's, in the backend's group) and listens on the socket
   const outputStat = await fs.promises.lstat(config.aiGeneratedDirectory);
-  if (!outputStat.isDirectory() || outputStat.isSymbolicLink())
-    throw new Error("AI output root must be a real directory");
-  await fs.promises.chown(config.aiGeneratedDirectory, 0, config.aiRunnerGid);
-  await fs.promises.chmod(config.aiGeneratedDirectory, 0o750);
-  try {
-    const old = await fs.promises.lstat(config.aiRunnerSocket);
-    if (!old.isSocket()) throw new Error("AI socket path is not a socket");
-    await fs.promises.unlink(config.aiRunnerSocket);
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
+  if (!outputStat.isDirectory() || outputStat.uid !== process.getuid())
+    throw new Error("AI output root must be a real directory of the judge's");
+  const listener = Number(process.env[AI_RUNNER_DESCRIPTOR_VARIABLE]);
+  if (!Number.isInteger(listener) || listener < 3) throw new Error("The sandbox launcher didn't pass the AI socket");
+  setCloseOnExec(listener, true);
   const server = net.createServer(socket => {
     let buffer = "";
     let received = false;
@@ -1092,10 +1122,8 @@ export async function startAiRunner() {
   server.maxConnections = 32;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(config.aiRunnerSocket, () => resolve());
+    server.listen({ fd: listener }, () => resolve());
   });
-  await fs.promises.chown(config.aiRunnerSocket, 0, config.aiRunnerGid);
-  await fs.promises.chmod(config.aiRunnerSocket, 0o660);
   await pruneAbandonedOutputs();
   const cleanupTimer = setInterval(() => {
     pruneAbandonedOutputs().catch(() => winston.warn("Could not clean an abandoned AI output directory"));

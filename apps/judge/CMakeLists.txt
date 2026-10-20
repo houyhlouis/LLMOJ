@@ -35,6 +35,8 @@ add_library(
     SHARED
     ${CMAKE_JS_SRC}
     "native/posix/posix.cc"
+    "native/posix/launcher.cc"
+    "native/posix/launcher.h"
 )
 set_target_properties(posix PROPERTIES PREFIX "" SUFFIX ".node")
 target_include_directories(posix PRIVATE 

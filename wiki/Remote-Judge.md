@@ -95,7 +95,8 @@ Save the judge's key on one line with an editor, so it doesn't end up in your sh
 sudo install -m 0600 /dev/null /root/judge-01.key
 sudoedit /root/judge-01.key
 sudo install -d -m 0751 /opt/LLMOJ/data
-sudo install -d -m 0700 /opt/LLMOJ/data/judge /opt/LLMOJ/data/judge/testdata /opt/LLMOJ/data/judge/cache
+sudo install -d -m 0711 /opt/LLMOJ/data/judge
+sudo install -d -m 0700 /opt/LLMOJ/data/judge/testdata /opt/LLMOJ/data/judge/cache
 sudo env HYHOJ_ROOT=/opt/LLMOJ NODE_BINARY=/opt/LLMOJ/runtime/node/bin/node \
   OJ_JUDGE_REMOTE=1 OJ_JUDGE_SERVER=https://oj.example.com \
   OJ_JUDGE_KEY_FILE=/root/judge-01.key OJ_JUDGE_SLOTS=2 \
@@ -105,6 +106,8 @@ sudo env HYHOJ_ROOT=/opt/LLMOJ NODE_BINARY=/opt/LLMOJ/runtime/node/bin/node \
 - `OJ_JUDGE_SERVER` is the site's address, without `/api`.
 - The key file must be a regular file owned by root with mode `0600`; its contents are never printed.
 - `OJ_JUDGE_SLOTS` must fit the server's CPUs and memory. Leave it out for the automatic number (see [Judge configuration](Judge-Configuration.md#choosing-the-number-of-slots)). A server with one CPU or less than 256 MiB of memory can't judge.
+
+The script also creates the account `libreoj-judge`, a system account without login. The judge runs as this account; only its [sandbox launcher](Judge-Configuration.md#the-judges-account-and-its-sandbox-launcher) runs as root, and gives the judge its directories when it starts.
 
 The resulting `config/judge.yaml` is readable only by root. A remote judge has no local AI worker; for a `web` site it runs AI programs from the judge queue instead ([Distributed judging](Distributed-Judging.md#ai)). It gets its own `libreoj-judge.target`. Running the script again keeps the configuration and refuses a different site or key; to change the key, stop the judge and change it deliberately. To change the number of slots later, use the [resize command](Judge-Configuration.md#changing-the-number-of-slots). [Judge configuration](Judge-Configuration.md) describes every setting.
 
@@ -140,3 +143,12 @@ The check compiles and runs a real program and checks the sandbox user, the read
 Finally, check on the site that the judge is online, and make a few submissions. The judge needs outgoing access to the site's address and its download addresses, and no incoming port.
 
 To stop the judge: `sudo systemctl stop libreoj-judge.target`. To stop it starting at boot: `sudo systemctl disable libreoj-judge.target`.
+
+## Updating a remote judge
+
+Update a remote judge to the site's version after the site:
+1. On the site's **Judge Machine** page, [drain](Distributed-Judging.md#draining-keys-and-capabilities) it and wait until it shows **Drained**. Then stop it: `sudo systemctl stop libreoj-judge.target`.
+2. In `/opt/LLMOJ`, check out the site's version as in [step 1](#1-download-the-same-version-as-the-site), then install and build as in [step 2](#2-install-nodejs-and-pnpm-and-build-the-judge).
+3. Run `configure-judge.py` again with the same variables as in [step 4](#4-save-the-key-and-write-the-configuration). It keeps the configuration, and creates the judge's account if it's missing. Versions from before the sandbox launcher ran the whole judge as root and had no account.
+4. Make the files readable and check the sandbox as in [step 5](#5-install-the-service-and-check-the-sandbox) (`chmod`, then the sandbox check), and run `sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh`.
+5. Start it with `sudo systemctl start libreoj-judge.target`, and **Resume** it on the **Judge Machine** page.

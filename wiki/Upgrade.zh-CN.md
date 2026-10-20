@@ -51,6 +51,8 @@ sudo bash /tmp/llmoj-upgrade.zh-CN.sh --prefix /opt/LLMOJ --plan
 5. 切换到新文件并执行数据库修改；
 6. 等待新后端[就绪](Operations-Configuration.zh-CN.md#存活与就绪检查)（能连接数据库、Redis 和对象存储）并检查本机评测机，然后启动之前在运行的服务，最后启动 Nginx。
 
+评测机以账户 `libreoj-judge` 运行，只有其[沙箱启动器](Judge-Configuration.zh-CN.md#评测机账户与沙箱启动器)以 root 运行。在 `all` 安装上，如果该账户还不存在，升级器会在评测机自检之前创建它。升级计划中显示为 `judgeAccount`。同名账户如果可以登录，升级器会拒绝。回滚会保留该账户；旧版评测机以 root 运行，不使用它。
+
 备份和构建日志保存在 `<prefix>/backups/upgrade/<UTC 时间>-<随机数>/`，升级器会输出该路径。其中包含密钥，请妥善保管；不再需要时请自行删除旧备份，升级器从不删除数据或备份。升级完成后，它只删除构建用的依赖副本（`staging/node_modules`，约 1 GiB），之后没有任何操作会用到它，回滚也不会。此版本之前的升级备份中仍保留该副本；[doctor](Operations-Configuration.zh-CN.md#运行-doctor) 会告诉你有多少份。对于已完成的升级，可以删除它：`sudo rm -rf /opt/LLMOJ/backups/upgrade/<UTC 时间>-<随机数>/staging/node_modules`。
 
 升级器会安装 `/etc/systemd/system/libreoj-backend.service.d/90-libreoj-schema-sync.conf`，其中设置 `LIBREOJ_SCHEMA_SYNC=0`，使后端永远不会自行修改数据库结构；这些修改由升级器明确执行。你的其他 drop-in、Nginx 配置、凭据和评测容量都保持不变。
