@@ -15,13 +15,21 @@ overrides:
   "@types/node": "catalog:"
   # urllib (of ali-oss, for apps/bootstrap-static) can use proxy-agent 5, whose PAC support runs vm2; it isn't needed
   "urllib>proxy-agent": "-"
-  "tsup>esbuild": 0.15.5
-  "vite-plugin-compile-time>esbuild": 0.15.5
-  "vite@2>esbuild": 0.15.5
-  "vite@3>esbuild": 0.15.5
+  # What autotrack's command-line bundler needs; the pages import only its plugins (lib/, which need only dom-utils)
+  "autotrack>chalk": "-"
+  "autotrack>fs-extra": "-"
+  "autotrack>glob": "-"
+  "autotrack>google-closure-compiler-js": "-"
+  "autotrack>gzip-size": "-"
+  "autotrack>rollup": "-"
+  "autotrack>rollup-plugin-memory": "-"
+  "autotrack>rollup-plugin-node-resolve": "-"
+  "autotrack>source-map": "-"
 
 allowBuilds:
   "@nestjs/core": false
+  # Sass's file watcher, which builds don't use; its binaries come as optional platform packages
+  "@parcel/watcher": false
   # Swagger UI's usage reporting
   "@scarf/scarf": false
   "@swc/core": true
@@ -35,19 +43,15 @@ allowBuilds:
 
 peerDependencyRules:
   allowedVersions:
-    "monaco-ace-tokenizer>monaco-editor": 0.33.0
+    # Unmaintained packages whose ranges predate the versions used; checked with them
+    "monaco-ace-tokenizer>monaco-editor": 0.57.0
     "react-navi>navi": 0.15.0
-    "react-navi>react": 18.2.0
-    "vite-plugin-public-path>vite": 3.1.2
+    "react-navi>react": 18.3.1
 
+# Behavior the frontend relies on: user names in mentions, and links that don't prefetch on hover
 patchedDependencies:
-  "@vitejs/plugin-legacy@2.0.0": packages/frontend/patches/@vitejs+plugin-legacy+2.0.0.patch
-  "fomantic-ui-css@2.8.8": packages/frontend/patches/fomantic-ui-css+2.8.8.patch
   "markdown-it-mentions@1.0.0": packages/frontend/patches/markdown-it-mentions+1.0.0.patch
   "react-navi@0.15.0": packages/frontend/patches/react-navi+0.15.0.patch
-  "rollup-plugin-node-polyfills@0.2.1": packages/frontend/patches/rollup-plugin-node-polyfills+0.2.1.patch
-  "vite-plugin-html-minifier-terser@2.0.3": packages/frontend/patches/vite-plugin-html-minifier-terser+2.0.3.patch
-  "vite-plugin-public-path@1.0.0": packages/frontend/patches/vite-plugin-public-path+1.0.0.patch
 
 strictDepBuilds: true
 disallowWorkspaceCycles: true

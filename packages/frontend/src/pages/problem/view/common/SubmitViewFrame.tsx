@@ -34,12 +34,16 @@ let SubmitViewFrame: React.FC<SubmitViewFrameProps> = props => {
   useEffect(() => {
     if (!props.inSubmitView || !refView.current) return;
     const view = refView.current;
+    // Through Monaco, whose input is a text area or (where the browser has EditContext) another element
+    const monaco: typeof import("monaco-editor") | undefined = window["Monaco"];
     const editor =
-      window.matchMedia?.("(pointer: fine)").matches && view.querySelector<HTMLElement>(".monaco-editor textarea");
-    (
-      editor ||
-      view.querySelector<HTMLElement>('a[href], button:not([disabled]), input:not([type="hidden"]), [tabindex="0"]')
-    )?.focus();
+      window.matchMedia?.("(pointer: fine)").matches &&
+      monaco?.editor.getEditors().find(editor => view.contains(editor.getContainerDomNode()));
+    if (editor) editor.focus();
+    else
+      view
+        .querySelector<HTMLElement>('a[href], button:not([disabled]), input:not([type="hidden"]), [tabindex="0"]')
+        ?.focus();
   }, [props.inSubmitView]);
 
   return (

@@ -2,8 +2,6 @@ import React, { useRef, useState } from "react";
 import { observer } from "mobx-react";
 import ReactMonacoEditor from "@monaco-editor/react";
 import { registerRulesForLanguage } from "monaco-ace-tokenizer";
-import ResizeSensor from "css-element-queries/src/ResizeSensor";
-import path from "path";
 
 import * as Monaco from "monaco-editor";
 
@@ -22,9 +20,11 @@ registerRulesForLanguage("haskell", new AceHighlightHaskell());
 
 // Monaco themes
 
-Object.entries(import.meta.globEager("../assets/monaco-themes/*.json")).forEach(([filename, data]) => {
-  Monaco.editor.defineTheme(path.basename(filename, ".json"), data as any);
-});
+Object.entries(import.meta.glob("../assets/monaco-themes/*.json", { eager: true, import: "default" })).forEach(
+  ([filename, data]) => {
+    Monaco.editor.defineTheme(filename.match(/([^/]+)\.json$/)[1], data as any);
+  }
+);
 
 export interface CodeEditorProps {
   editorDidMount?: (editor: Monaco.editor.IStandaloneCodeEditor) => void;
@@ -53,41 +53,46 @@ let CodeEditor: React.FC<CodeEditorProps> = props => {
     refEditor.current = editor;
     console.log("Monaco Editor:", editor);
 
-    const readTabFocusMode = () => setTabMovesFocus(editor.getOption(Monaco.editor.EditorOption.tabFocusMode));
+    // Monaco keeps whether Tab moves the focus (toggled with the key, or from its command palette) outside the editor's
+    // options and events. An action enabled only in that mode reads it, and in the palette makes Tab indent again.
+    editor.addAction({
+      id: "llmoj.indentWithTab",
+      label: _(".indent_with_tab"),
+      precondition: "editorTabMovesFocus",
+      run: () => editor.trigger("llmoj", "editor.action.toggleTabFocusMode", null)
+    });
+    const readTabFocusMode = () => setTabMovesFocus(editor.getAction("llmoj.indentWithTab").isSupported());
     readTabFocusMode();
     editor.onDidFocusEditorText(() => {
       readTabFocusMode();
       setFocused(true);
     });
     editor.onDidBlurEditorText(() => setFocused(false));
-    editor.onDidChangeConfiguration(event => {
-      if (event.hasChanged(Monaco.editor.EditorOption.tabFocusMode)) readTabFocusMode();
-    });
+    editor.onKeyUp(readTabFocusMode);
 
     if (props.editorDidMount) props.editorDidMount(editor);
   }
 
   // The Monaco Editor's automaticLayout option doesn't work on a initially hidden editor
-  // So use ResizeSensor instead
+  // So follow the container's size instead
   const containerRef = useRef<HTMLDivElement>();
-  const resizeSensorRef = useRef<ResizeSensor>();
-  function initializeResizeSensor(div: HTMLDivElement) {
+  const resizeObserverRef = useRef<ResizeObserver>();
+  function initializeResizeObserver(div: HTMLDivElement) {
     if (containerRef.current !== div) {
-      if (resizeSensorRef.current) {
-        resizeSensorRef.current.detach();
-      }
+      resizeObserverRef.current?.disconnect();
       if (div) {
-        resizeSensorRef.current = new ResizeSensor(div, () => {
+        resizeObserverRef.current = new ResizeObserver(() => {
           if (refEditor.current) refEditor.current.layout();
         });
-      } else resizeSensorRef.current = null;
+        resizeObserverRef.current.observe(div);
+      } else resizeObserverRef.current = null;
       containerRef.current = div;
     }
   }
 
   return (
     <div
-      ref={initializeResizeSensor}
+      ref={initializeResizeObserver}
       className={props.className ? `${style.editorContainer} ${props.className}` : style.editorContainer}
     >
       <ReactMonacoEditor
@@ -108,6 +113,8 @@ let CodeEditor: React.FC<CodeEditorProps> = props => {
         value={props.value}
         options={{
           lineNumbersMinChars: 4,
+          // Monaco now colours bracket pairs by default; brackets keep the themes' colours, as before
+          bracketPairColorization: { enabled: false },
           ariaLabel: `${_(".label")}. ${tabHint}`,
           ...generateCodeFontEditorOptions(appState.locale),
           ...props.options

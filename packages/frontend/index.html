@@ -22,12 +22,6 @@
 //       /     /  /               |   |    //
 /////////////////////////////////////////////
 -->
-<%
-// Esacpe </script> in JSON.stringify's result
-function safeStringify(object) {
-  return JSON.stringify(object).split("<").join("\\u003C");
-}
-%>
 <!DOCTYPE html>
 <html>
 
@@ -35,10 +29,14 @@ function safeStringify(object) {
   <meta charset="utf-8">
 
   <script>
-    window.appVersion = <%- safeStringify({
-      hash: gitCommitInfo.hash.slice(0, 10),
-      date: gitCommitInfo.date
-    }) %>;
+    window.appVersion = { hash: "__app_commit_hash__", date: "__app_commit_date__" };
+
+    // The build targets browsers in Baseline Widely Available (Chrome and Edge 111, Firefox 114, Safari 16.4 and
+    // later). An older one loads none of the application and gets a message instead of a broken page (see below).
+    window.browserSupported =
+      "noModule" in HTMLScriptElement.prototype &&
+      typeof structuredClone === "function" &&
+      typeof Array.prototype.findLast === "function";
 
     (() => {
       var normalizePath = (path) => {
@@ -112,15 +110,6 @@ function safeStringify(object) {
       }
       window.ghAvatarCdn = ghAvatarCdn;
 
-      // Specify the CDNJS mirror in the same way.
-      var cdnjs;
-      try {
-        cdnjs = __cdnjs__;
-      } catch (e) {
-        cdnjs = "https://cdnjs.cloudflare.com/ajax/libs";
-      }
-      window.cdnjs = cdnjs;
-
       var addLinkTag = (rel, href) => {
         var link = document.createElement("link");
         link.rel = rel;
@@ -130,20 +119,11 @@ function safeStringify(object) {
 
       if (faviconUrl) addLinkTag("icon", faviconUrl);
 
-      <%
-      for (const [packageName, , cssFiles] of externalPackages) {
-        for (const css of (Array.isArray(cssFiles) ? cssFiles : [cssFiles]).filter(f => f)) {
-      %>
-          addLinkTag(
-            "stylesheet",
-            window.cdnjs + <%- safeStringify(`/${packageName}/${externalPackageVersions[packageName]}/${css}`) %>
-          );
-      <%
-        }
+      // The libraries' stylesheets, then the build's own and its module preloads (see vite/)
+      if (window.browserSupported) {
+        // __add_vendor_link_tags__
+        // __add_link_tags__
       }
-      %>
-
-      // __add_link_tags__
     })();
   </script>
 
@@ -384,38 +364,39 @@ function safeStringify(object) {
     <div id="error-footer">
       <code>
         LLMOJ Open Source Project<br>
-        (version <%= gitCommitInfo.hash.slice(0, 10) %>)
+        (version __app_commit_hash__)
       </code>
     </div>
   </div>
 
-  <!-- Dynamicly generate <script> tags -->
+  <!-- Loads the application once the browser is known to run it -->
   <script>
-    (() => {
-      var modernScriptTags = [];
-      window.modernScriptTags = modernScriptTags;
-      var legacyScriptTags = [];
-      window.legacyScriptTags = legacyScriptTags;
-      var addScriptTag = (attributes, code) => {
-        var script = document.createElement("script");
-        if (attributes) for (var key in attributes) script.setAttribute(key, attributes[key]);
+    (function () {
+      if (!window.browserSupported) {
+        fatalError([
+          "This browser is too old for this site. Please use a recent version of Chrome, Edge, Firefox or Safari.",
+          "此浏览器版本过旧，无法使用本站。请使用较新版本的 Chrome、Edge、Firefox 或 Safari。"
+        ]);
+        return;
+      }
 
+      var addScriptTag = function (attributes) {
+        var script = document.createElement("script");
+        for (var key in attributes) script.setAttribute(key, attributes[key]);
         script.async = false;
         script.onerror = handleLoadingError;
-        if (code) script.src = "data:text/javascript," + code;
-
-        if (attributes.type === "module" && !code) {
-          modernScriptTags.push(script);
-        } else if (script.noModule) {
-          script.noModule = false;
-          legacyScriptTags.push(script);
-        } else {
-          var promise = new Promise(function (resolve) {
-            script.onload = resolve;
-          });
-          document.body.appendChild(script);
-          return promise;
-        }
+        var promise = new Promise(function (resolve) {
+          script.onload = resolve;
+        });
+        document.body.appendChild(script);
+        return promise;
+      };
+      var addModuleScript = function (src) {
+        var script = document.createElement("script");
+        script.type = "module";
+        script.src = src;
+        script.onerror = handleLoadingError;
+        document.body.appendChild(script);
       };
 
       var dependencyPromises = [];
@@ -423,7 +404,7 @@ function safeStringify(object) {
       // xdomain.js
       // Check for cross-origin API endpoint.
       var apiEndpoint = window.apiEndpoint;
-      var isCrossOrigin = (url) => {
+      var isCrossOrigin = function (url) {
         return new URL(url, location).origin !== location.origin;
       };
       if (isCrossOrigin(apiEndpoint)) {
@@ -432,58 +413,14 @@ function safeStringify(object) {
         dependencyPromises.push(addScriptTag({
           src: apiHostCorsPath + "xdomain.min.js",
           "data-slave": apiHostCorsPath + "xdomain.html"
-        }, null));
+        }));
       }
 
-      <%
-      for (const [packageName, scripts] of externalPackages) {
-        for (const scriptName of (Array.isArray(scripts) ? scripts : [scripts]).filter(f => f)) {
-      %>
-          dependencyPromises.push(addScriptTag({
-            src: window.cdnjs + <%-
-              safeStringify(`/${packageName}/${externalPackageVersions[packageName]}/${scriptName}`)
-            %>
-          }));
-      <%
-        }
-      }
-      %>
-
-      window.scriptTagsLoaded = Promise.all(dependencyPromises).then(function () {
+      Promise.all(dependencyPromises).then(function () {
+        // The build's entry (vite/runtime-public-path.ts)
         // __add_script_tags__
       });
     })();
-  </script>
-
-  <script>
-    (function () {
-      // Workaround for Vite: type="module" got replaced by Vite
-      var script = document.currentScript;
-      if (script) {
-        var newScript = document.createElement("script");
-        newScript.type = "module";
-        newScript.innerHTML = script.innerHTML;
-        document.body.appendChild(newScript);
-        return;
-      }
-      window.scriptTagsLoaded.then(function () {
-        console.log("Loading " + (window.__vite_is_modern_browser ? "modern" : "legacy") + " script tags: feature detection");
-        var scriptTags = window.__vite_is_modern_browser ? window.modernScriptTags : window.legacyScriptTags;
-        for (var i in scriptTags) {
-          document.body.appendChild(scriptTags[i]);
-        }
-      });
-    })();
-  </script>
-
-  <script nomodule data-notransform>
-    window.scriptTagsLoaded.then(function () {
-      console.log("Loading legacy script tags: no module");
-      var scriptTags = window.legacyScriptTags;
-      for (var i in scriptTags) {
-        document.body.appendChild(scriptTags[i]);
-      }
-    });
   </script>
 
   <script type="module" src="/src/index.ts"></script>

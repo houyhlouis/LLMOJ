@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from "react";
 import { Table, Icon, Accordion, Grid, SemanticWIDTHS, Button, Popup, Ref, Menu, Message } from "semantic-ui-react";
 import { observer } from "mobx-react";
 import { v4 as uuid } from "uuid";
-import { patch } from "jsondiffpatch";
+import { patch } from "jsondiffpatch/with-text-diffs"; // the backend sends text diffs of long strings
 
 import style from "./SubmissionPage.module.less";
 import SubmissionJudgingRecord from "./SubmissionJudgingRecord";

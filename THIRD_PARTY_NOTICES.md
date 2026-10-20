@@ -15,12 +15,12 @@
 | React / React DOM、Monaco Editor、MobX、Axios、Noty、Fomantic UI、Semantic UI React | MIT | 各上游：[React](https://github.com/facebook/react)、[Monaco](https://github.com/microsoft/monaco-editor)、[MobX](https://github.com/mobxjs/mobx)、[Axios](https://github.com/axios/axios)、[Noty](https://github.com/needim/noty)、[Fomantic UI](https://github.com/fomantic/Fomantic-UI)、[Semantic UI React](https://github.com/Semantic-Org/Semantic-UI-React)。 |
 | MathJax 3 | Apache-2.0 | [MathJax 源码与许可](https://github.com/mathjax/MathJax)。 |
 | Prism | MIT | [Prism 源码与许可](https://github.com/PrismJS/prism)。 |
-| Twemoji 14.0.2 代码 / 图形 | MIT / CC-BY-4.0 | [Twemoji](https://github.com/twitter/twemoji)、[图形许可证](https://github.com/twitter/twemoji/blob/master/LICENSE-GRAPHICS)。图形须注明 Twitter / Twemoji 来源、许可链接及适用的修改说明。 |
-| MinIO JavaScript SDK 7.0.29 | Apache-2.0 | [MinIO JS SDK](https://github.com/minio/minio-js)；它与 MinIO Server 的许可不同。 |
+| Twemoji 15 代码 / 图形（`@twemoji/api`、`@twemoji/svg`） | MIT / CC-BY-4.0 | [Twemoji](https://github.com/jdecked/twemoji)；图形许可证见 `@twemoji/api` 包内的 `LICENSE-GRAPHICS`，前端发布时随附于 `licenses/@twemoji/api/`。图形须注明 Twitter / Twemoji 来源、许可链接及适用的修改说明。 |
+| MinIO JavaScript SDK 8 | Apache-2.0 | [MinIO JS SDK](https://github.com/minio/minio-js)；它与 MinIO Server 的许可不同。 |
 | MinIO Server（独立外部服务） | AGPL-3.0 | [服务器 LICENSE](https://github.com/minio/minio/blob/master/LICENSE)、[合规说明](https://github.com/minio/minio/blob/master/COMPLIANCE.md)。本仓库不附带服务器二进制。分发时须保留许可并提供对应源码；修改服务器并供网络用户使用时须履行 AGPL 第 13 条。 |
-| MariaDB Connector/Node.js 3.0.1 | LGPL-2.1-or-later | [MariaDB Connector LICENSE](https://github.com/mariadb-corporation/mariadb-connector-nodejs/blob/main/LICENSE)。分发时保留许可与适用源码，保障使用者替换或修改该独立依赖的权利。 |
+| MariaDB Connector/Node.js 3.5 | LGPL-2.1-or-later | [MariaDB Connector LICENSE](https://github.com/mariadb-corporation/mariadb-connector-nodejs/blob/main/LICENSE)。分发时保留许可与适用源码，保障使用者替换或修改该独立依赖的权利。 |
 | sharp / libvips | Apache-2.0 / LGPL-3.0-or-later | [sharp](https://github.com/lovell/sharp)、[libvips 预编译包许可](https://github.com/lovell/sharp-libvips/blob/main/LICENSE)。打包原生库时须保留各自许可并满足对应源码及适用的替换或重链接义务。 |
-| geoip-country 4.0.84 库 / GeoLite 数据 | Apache-2.0 / MaxMind EULA | [MaxMind GeoLite EULA](https://www.maxmind.com/en/geolite/eula)。数据库应由部署者按条款取得、署名和更新；不将其当作普通 Apache 代码随源码包分发。 |
+| geoip-country 5 库 / GeoLite 数据 | Apache-2.0 / MaxMind EULA | [MaxMind GeoLite EULA](https://www.maxmind.com/en/geolite/eula)。数据库应由部署者按条款取得、署名和更新；不将其当作普通 Apache 代码随源码包分发。 |
 
 通过标准接口使用独立服务器、操作系统或编译器，不会仅因这些组件采用 GPL / AGPL 就自动改变主体源码的许可。涉及合并、修改或再分发时，应按实际组件和连接方式核对义务。
 
@@ -30,8 +30,8 @@ CSS / npm 包的 MIT 元数据不替代字体文件本身的许可。下表按�
 
 | 字体 | 字体许可 | 来源 |
 | --- | --- | --- |
-| Fira Code、JetBrains Mono、DM Mono、Inconsolata、Noto Sans、Nunito Sans、Open Sans、PT Mono、PT Sans、Source Code Pro、Source Serif Pro、Zilla Slab、Lato、Saira | SIL OFL-1.1 | [Google Fonts 官方字体与逐字体许可](https://github.com/google/fonts)、[Fira Code](https://github.com/tonsky/FiraCode)、[JetBrains Mono](https://github.com/JetBrains/JetBrainsMono)。 |
-| 当前依赖中的 Roboto、Roboto Mono、Roboto Slab、Noto Serif | Apache-2.0 | 当前 Fontsource 4.5.x 字体文件的许可元数据；[Google Fonts](https://github.com/google/fonts)。同名字体的新版本可能采用不同许可。 |
+| Fira Code、JetBrains Mono、DM Mono、Inconsolata、Noto Sans、Noto Serif、Nunito Sans、Open Sans、PT Mono、PT Sans、Roboto、Roboto Mono、Source Code Pro、Source Serif Pro、Zilla Slab、Lato、Saira | SIL OFL-1.1 | [Google Fonts 官方字体与逐字体许可](https://github.com/google/fonts)、[Fira Code](https://github.com/tonsky/FiraCode)、[JetBrains Mono](https://github.com/JetBrains/JetBrainsMono)。 |
+| 当前依赖中的 Roboto Slab | Apache-2.0 | 当前 Fontsource 5.x 字体文件的许可元数据；[Google Fonts](https://github.com/google/fonts)。同名字体的不同版本可能采用不同许可：Fontsource 4.5.x 中的 Roboto、Roboto Mono 和 Noto Serif 为 Apache-2.0，5.x 中为 OFL-1.1。 |
 | Ubuntu Mono | Ubuntu Font Licence 1.0 | [Ubuntu 字体官方说明](https://design.ubuntu.com/font)、[Ubuntu Mono UFL 原文](https://github.com/google/fonts/blob/main/ufl/ubuntumono/UFL.txt)。 |
 | Hack 3.3.0 | MIT + Bitstream Vera License；DejaVu 部分为公有领域 | [Hack LICENSE](https://github.com/source-foundry/Hack/blob/master/LICENSE.md)。保留全部声明，并遵守保留字体名称和修改版改名条件。 |
 

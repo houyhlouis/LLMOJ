@@ -3,10 +3,13 @@ import path from "path";
 import crypto from "crypto";
 
 import type { Plugin } from "vite";
-import SVGO from "svgo";
+import { optimize, type Config } from "svgo";
 
-export default function svgo(options: SVGO.OptimizeOptions): Plugin {
-  let base: string;
+/**
+ * Imported SVG images, optimized by SVGO. A build emits each as a file whose URL is found from the page's public path
+ * at runtime (see runtime-public-path.ts); the development server inlines it.
+ */
+export default function svgo(options: Config): Plugin {
   let assetsDir: string;
   let isProd: boolean;
 
@@ -18,42 +21,22 @@ export default function svgo(options: SVGO.OptimizeOptions): Plugin {
   }
 
   return {
-    name: "vite:svgo",
+    name: "llmoj:svgo",
     enforce: "pre",
     configResolved(config) {
-      base = config.base;
       assetsDir = config.build.assetsDir;
       isProd = config.command === "build";
     },
     async load(id) {
-      if (id.toLowerCase().endsWith(".svg")) {
-        const source = await fs.promises.readFile(id, "utf-8");
-        const result = SVGO.optimize(source, options);
-        if ("data" in result) {
-          const content = result.data;
-          let url: string;
-
-          if (isProd) {
-            url =
-              base +
-              this.getFileName(
-                this.emitFile({
-                  type: "asset",
-                  fileName: getBuiltFilename(id, content),
-                  source: content
-                })
-              );
-          } else {
-            url = `data:image/svg+xml;base64,${Buffer.from(content, "utf-8").toString("base64")}`;
-          }
-
-          return {
-            code: `export default ${JSON.stringify(url)}`
-          };
-        }
-
-        throw result.modernError;
-      }
+      if (!id.toLowerCase().endsWith(".svg")) return null;
+      const content = optimize(await fs.promises.readFile(id, "utf-8"), { ...options, path: id }).data;
+      if (!isProd)
+        return {
+          code: `export default ${JSON.stringify(`data:image/svg+xml;base64,${Buffer.from(content).toString("base64")}`)};`
+        };
+      const fileName = getBuiltFilename(id, content);
+      this.emitFile({ type: "asset", fileName, source: content });
+      return { code: `export default window.publicPath + ${JSON.stringify(fileName)};` };
     }
   };
 }

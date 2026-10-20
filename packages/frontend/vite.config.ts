@@ -1,30 +1,15 @@
-import { defineConfig, Plugin } from "vite";
-import fs from "fs";
+import { defineConfig, type Plugin } from "vite";
 import path from "path";
+import { execFileSync } from "child_process";
 
-// Vite plugins
-import react from "@vitejs/plugin-react";
-import compileTime from "vite-plugin-compile-time";
-import legacy from "@vitejs/plugin-legacy";
-import { ViteEjsPlugin as ejs } from "vite-plugin-ejs";
-import { prismjsPlugin as prismjs } from "vite-plugin-prismjs";
-import minifyHtml from "vite-plugin-html-minifier-terser";
-import svgo from "./vite/svgo";
-import publicPath from "vite-plugin-public-path";
-import { viteExternalsPlugin as externals } from "vite-plugin-externals";
-import { visualizer } from "rollup-plugin-visualizer";
+import svgo from "./vite/svgo.ts";
+import compileTime from "./vite/compile-time.ts";
+import minifyHtml from "./vite/minify-html.ts";
+import runtimePublicPath from "./vite/runtime-public-path.ts";
+import selfContainedCss from "./vite/self-contained-css.ts";
+import vendorAssets, { type VendorPackage, vendorPath, vendorStylesheets } from "./vite/vendor-assets.ts";
 
-// Node polyfill
-import { NodeModulesPolyfillPlugin } from "@esbuild-plugins/node-modules-polyfill";
-import rollupNodePolyFill from "rollup-plugin-node-polyfills";
-
-// Others
-import getGitCommitInfo from "git-commit-info";
-import { Options as HtmlMinifierOptions } from "html-minifier-terser";
-import { browsersWithSupportForFeatures, normalizeBrowserslist } from "browserslist-generator";
-import { resolveToEsbuildTarget } from "esbuild-plugin-browserslist";
-
-import tsconfig from "./tsconfig.json";
+import tsconfig from "./tsconfig.json" with { type: "json" };
 
 const isDev = process.env.NODE_ENV !== "production";
 
@@ -36,30 +21,19 @@ const tsconfigPathAliases = Object.fromEntries(
       value = value.slice(0, -2);
     }
 
-    const nodeModulesPrefix = "node_modules/";
+    const nodeModulesPrefix = "./node_modules/";
     if (value.startsWith(nodeModulesPrefix)) {
       value = value.replace(nodeModulesPrefix, "");
     } else {
-      value = path.join(__dirname, value);
+      value = path.join(import.meta.dirname, value);
     }
 
     return [key, value];
   })
 );
 
-const modernTargets = browsersWithSupportForFeatures(
-  "es6-module-dynamic-import",
-  "javascript.statements.import_meta",
-  "javascript.operators.await.top_level"
-).filter(browser => !(browser.includes("safari") || browser.includes("ios_saf")));
-
-const enabledNodePolyfills = {
-  util: "rollup-plugin-node-polyfills/polyfills/util",
-  path: "rollup-plugin-node-polyfills/polyfills/path",
-  buffer: "rollup-plugin-node-polyfills/polyfills/buffer-es6"
-};
-
-const semanticUiCssComponents = [
+// The Fomantic UI components the pages use
+const fomanticComponents = [
   "accordion",
   "breadcrumb",
   "button",
@@ -97,78 +71,67 @@ const semanticUiCssComponents = [
   "transition"
 ];
 
-// These packages are simply loaded in HTML with the JS path
-const baseExternalPackages: Record<
-  string,
-  {
-    cdnjsName?: string;
-    globalVariableName?: string;
-    devScript?: string | string[];
-    prodScript?: string | string[];
-    css?: string | string[];
-  }
-> = {
-  react: {
-    globalVariableName: "React",
-    devScript: "umd/react.development.js",
-    prodScript: "umd/react.production.min.js"
+// Loaded only when a page needs them, from the build's own copy (see vite/vendor-assets.ts)
+const vendor: Record<"noty" | "fomantic" | "monaco" | "mathjax" | "prism" | "twemoji", VendorPackage> = {
+  noty: { package: "noty", name: "noty", copy: { "lib/noty.css": "noty.css" } },
+  // The components' stylesheets and the fonts and images they use
+  fomantic: {
+    package: "fomantic-ui-css",
+    name: "fomantic-ui",
+    copy: { components: "components", themes: "themes" },
+    // Only the components the pages link (site.css is bundled with the pages instead: see AppLayout.tsx)
+    exclude: new RegExp(`^components/(?!(?:${fomanticComponents.join("|")})\\.min\\.css$).`)
   },
-  "react-dom": {
-    globalVariableName: "ReactDOM",
-    devScript: "umd/react-dom.development.js",
-    prodScript: "umd/react-dom.production.min.js"
+  // The editor's messages stay in English, as before: its translations aren't loaded
+  monaco: {
+    package: "monaco-editor",
+    name: "monaco-editor",
+    copy: { "min/vs": "min/vs" },
+    exclude: /^min\/vs\/nls(?:\/|$)/
   },
-  mobx: { globalVariableName: "mobx", devScript: "mobx.umd.development.js", prodScript: "mobx.umd.production.min.js" },
-  axios: { globalVariableName: "axios", devScript: "axios.min.js" },
-  noty: { globalVariableName: "Noty", devScript: "noty.min.js", css: "noty.min.css" },
-  "semantic-ui-react": { globalVariableName: "semanticUIReact", devScript: "semantic-ui-react.min.js" },
-  "fomantic-ui-css": {
-    cdnjsName: "fomantic-ui",
-    css: semanticUiCssComponents.map(component => `components/${component}.min.css`)
-  }
+  mathjax: { package: "mathjax-full", name: "mathjax", copy: { es5: "es5" } },
+  prism: { package: "prismjs", name: "prism", copy: { components: "components", plugins: "plugins" } },
+  // Only the images (the licences are copied anyway)
+  twemoji: { package: "@twemoji/svg", name: "twemoji", copy: { "": "svg" }, exclude: /^(?!$)(?![^/]+\.svg$)/ }
 };
+const vendorDirectories = { monaco: "min/vs", mathjax: "es5", prism: "", twemoji: "" };
 
-const externalPackageVersions = Object.fromEntries(
-  [
-    // These packages are loaded separatedly in JS code when needed
-    "monaco-editor",
-    "mathjax-full",
-    "twemoji",
-    "prismjs",
+// The source's commit, shown in the footer and on the error screen; source archives have no Git metadata
+function commitInfo(): { hash: string; date: string } {
+  try {
+    const [hash, date] = execFileSync("git", ["log", "-1", "--format=%H %cI"], {
+      cwd: import.meta.dirname,
+      encoding: "utf-8"
+    })
+      .trim()
+      .split(" ");
+    if (/^[0-9a-f]{40}$/.test(hash)) return { hash, date };
+  } catch {
+    // Not a Git checkout
+  }
+  return { hash: "source", date: "" };
+}
+const commit = commitInfo();
 
-    ...Object.keys(baseExternalPackages)
-  ].map(packageName => [
-    baseExternalPackages[packageName]?.cdnjsName || packageName,
-    require(`${packageName}/package.json`).version
-  ])
-);
+// The commit in index.html
+const appVersion = (): Plugin => ({
+  name: "llmoj:app-version",
+  transformIndexHtml: html =>
+    html
+      .replaceAll("__app_commit_hash__", commit.hash.slice(0, 10))
+      .replaceAll("__app_commit_date__", commit.date.replace(/[^0-9T:+.-]/g, ""))
+});
 
-// Clean source archives intentionally omit Git metadata.
-const commitInfo = getGitCommitInfo();
-const gitCommitInfo = commitInfo.hash ? commitInfo : { hash: "source", date: "" };
-
-export default defineConfig({
+export default defineConfig(async () => ({
   server: {
     port: 3000
   },
   plugins: [
-    react({
-      babel: {
-        plugins: [["@babel/plugin-proposal-decorators", { legacy: true }], ["@babel/plugin-proposal-class-properties"]]
-      }
-    }),
+    // Published only as ES modules, which a configuration bundled as CommonJS can't require
+    (await import("@vitejs/plugin-react")).default(),
     compileTime(),
-    ejs({
-      gitCommitInfo,
-      externalPackages: Object.entries(baseExternalPackages).map(
-        ([packageName, { cdnjsName, devScript, prodScript, css }]) => [
-          cdnjsName || packageName,
-          !isDev && prodScript ? prodScript : devScript,
-          css
-        ]
-      ),
-      externalPackageVersions
-    }),
+    appVersion(),
+    selfContainedCss(),
     svgo({
       plugins: [
         "preset-default",
@@ -176,38 +139,18 @@ export default defineConfig({
           name: "sortAttrs",
           params: {
             xmlnsOrder: "alphabetical"
-          } as any
+          }
         }
       ]
     }),
-    legacy({
-      modernPolyfills: true,
-      ignoreBrowserslistConfig: true,
-      targets: [
-        // Default
-        ">0.2%",
-        "not dead",
-        "not op_mini all",
-
-        // Don't support IE
-        "not IE 11",
-
-        // Windows XP
-        "Firefox 52"
-      ],
-      modernTargets,
-      modernFeatureTestExtraCode: "await 0;if(navigator.vendor.includes('Apple'))throw 0;"
-    }),
-    publicPath({
-      publicPathExpression: "window.publicPath",
-      html: {
-        functionNameAddLinkTag: "addLinkTag",
-        addLinkTagsPlaceholder: "// __add_link_tags__",
-        functionNameAddScriptTag: "addScriptTag",
-        addScriptTagsPlaceholder: "// __add_script_tags__"
-      }
-    }),
-    minifyHtml(<HtmlMinifierOptions>{
+    vendorAssets(Object.values(vendor)),
+    vendorStylesheets([
+      vendorPath(vendor.noty, "noty.css"),
+      ...fomanticComponents.map(component => vendorPath(vendor.fomantic, `components/${component}.min.css`))
+    ]),
+    // Before the HTML is minified
+    runtimePublicPath(),
+    minifyHtml({
       includeAutoGeneratedTags: true,
       removeAttributeQuotes: true,
       removeRedundantAttributes: true,
@@ -218,73 +161,46 @@ export default defineConfig({
       collapseWhitespace: true,
       removeComments: true,
       ignoreCustomComments: [/Menci/],
-      minifyJS: {
-        parse: {
-          ecma: 8
-        },
-        compress: {
-          ecma: 5,
-          warnings: false,
-          comparisons: false,
-          inline: 2
-        },
-        mangle: {
-          safari10: true
-        },
-        output: {
-          ecma: 5,
-          comments: false
-        }
-      },
+      minifyJS: true,
       minifyCSS: true
     }),
-    prismjs({
-      languages: fs.readFileSync(".prism-languages", "utf-8").trim().split("\n")
-    }),
-    externals({
-      "monaco-editor": "Monaco",
-      ...Object.fromEntries(
-        Object.entries(baseExternalPackages)
-          .filter(([, { globalVariableName }]) => globalVariableName)
-          .map(([packageName, { globalVariableName }]) => [packageName, globalVariableName])
-      )
-    }),
-    visualizer()
+    (await import("rollup-plugin-visualizer")).visualizer()
   ],
-  base: isDev ? "/" : "/__vite_base__/",
+  // Paths relative to the page; the page's loader and renderBuiltUrl make them relative to its public path
+  base: isDev ? "/" : "./",
+  experimental: {
+    renderBuiltUrl(filename, { hostType }) {
+      if (hostType === "js") return { runtime: `window.publicPath + ${JSON.stringify(filename)}` };
+      return { relative: true };
+    }
+  },
   resolve: {
-    alias: {
-      ...enabledNodePolyfills,
-      ...tsconfigPathAliases
-    }
+    alias: [
+      // @monaco-editor/react loads the editor's own copy; modules importing "monaco-editor" get that one
+      { find: /^monaco-editor$/, replacement: path.join(import.meta.dirname, "src/misc/monaco.ts") },
+      // Node's util, for markdown-it-regexp (of markdown-it-mentions)
+      { find: /^util$/, replacement: path.join(import.meta.dirname, "src/misc/util.ts") },
+      ...Object.entries(tsconfigPathAliases).map(([find, replacement]) => ({ find, replacement }))
+    ]
   },
-  build: {
-    minify: "terser",
-    target: resolveToEsbuildTarget(normalizeBrowserslist(modernTargets), { printUnknownTargets: false }),
-    rollupOptions: {
-      plugins: [rollupNodePolyFill({ include: /[/\\]node_modules[/\\].*\.js$/ })]
-    }
+  css: {
+    // The minifier drops what browsers ignore anyway, such as Fomantic UI's "[data-tooltip][data-inverted]:after .header"
+    lightningcss: { errorRecovery: true }
   },
-  esbuild: {
-    supported: {
-      "top-level-await": true
-    }
+  // MobX's legacy decorators (experimentalDecorators in tsconfig.json)
+  oxc: {
+    decorator: { legacy: true }
   },
   define: {
-    EXTERNAL_PACKAGE_VERSION: JSON.stringify(externalPackageVersions)
+    VENDOR: JSON.stringify(
+      Object.fromEntries(
+        Object.entries(vendorDirectories).map(([name, directory]) => [name, vendorPath(vendor[name], directory)])
+      )
+    )
   },
-  optimizeDeps: {
-    exclude: ["mobx-utils/mobx-utils.module.js"],
-    esbuildOptions: {
-      // Node.js global to browser globalThis
-      define: {
-        global: "globalThis",
-        process: '{ "env": {} }'
-      },
-      plugins: [
-        // Enable esbuild polyfill plugins
-        NodeModulesPolyfillPlugin()
-      ]
-    }
+  build: {
+    // Browsers in Baseline Widely Available (see wiki/Dependencies.md)
+    target: "baseline-widely-available",
+    chunkSizeWarningLimit: 2048
   }
-});
+}));

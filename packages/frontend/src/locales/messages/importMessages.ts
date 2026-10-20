@@ -73,7 +73,7 @@ export default async (fromUrl: string) => {
 
   return {
     cachable: true,
-    code: `import flat from "flat";export default flat(${JSON.stringify(result)});`,
+    code: `import { flatten } from "flat";export default flatten(${JSON.stringify(result)});`,
     watchFiles: watchFiles
   };
 };

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require('typescript');
 const jwt = require('jsonwebtoken');
-const {diff} = require('jsondiffpatch');
+const {diff} = require('jsondiffpatch/with-text-diffs');
 const noop = () => {};
 const decorator = () => noop;
 const P = {ViewSite:'ViewSite',ViewSubmission:'ViewSubmission', ManageProblem:'ManageProblem', ReadProblemData:'ReadProblemData'};
@@ -25,7 +25,7 @@ const {submissionDisplayProgress} = load('submission-display-progress.ts', {
 const {SubmissionProgressGateway:Gateway, SubmissionProgressSubscriptionType:T} = load('submission-progress.gateway.ts', {
   '@nestjs/common':{Inject:decorator,forwardRef:x=>x},
   '@nestjs/websockets':{WebSocketGateway:decorator,WebSocketServer:decorator},
-  'jsonwebtoken':jwt, 'jsondiffpatch':{diff}, './submission-redaction':{withoutTestData},
+  'jsonwebtoken':jwt, 'jsondiffpatch/with-text-diffs':{diff}, './submission-redaction':{withoutTestData},
   './submission-display-progress':{submissionDisplayProgress},
   './submission-access.service':{SubmissionPermissionType:{View:'View'}},
   './submission-progress.interface':{SubmissionProgressType:{Finished:'Finished'}},

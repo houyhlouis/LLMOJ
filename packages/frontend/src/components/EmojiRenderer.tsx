@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { Ref } from "semantic-ui-react";
-import twemoji from "twemoji";
+import twemoji, { type TwemojiOptions } from "@twemoji/api";
 
 import style from "./EmojiRenderer.module.less";
 
@@ -10,7 +10,7 @@ interface EmojiRendererProps {
 
 export const getTwemojiOptions = (inline: boolean) =>
   ({
-    base: `${window.cdnjs}/twemoji/${EXTERNAL_PACKAGE_VERSION["twemoji"]}/`,
+    base: `${window.publicPath}${VENDOR.twemoji}/`,
     size: "svg",
     ext: ".svg",
     className: inline ? style.emoji : "",

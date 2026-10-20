@@ -8,7 +8,7 @@ import style from "./CodeEditor.module.less";
 const CodeEditor = lazy(async () => {
   monacoLoader.config({
     paths: {
-      vs: `${window.cdnjs}/monaco-editor/${EXTERNAL_PACKAGE_VERSION["monaco-editor"]}/min/vs`
+      vs: window.publicPath + VENDOR.monaco
     }
   });
   window["Monaco"] = await monacoLoader.init();

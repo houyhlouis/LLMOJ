@@ -1,7 +1,6 @@
 // Usage: node scripts/generate-api.js [<docs-json URL> | --from-backend-build] [--out <directory>]
 // --from-backend-build reads the API from the compiled backend (apps/backend/dist) instead of a running server.
 const path = require("path");
-const fetch = require("node-fetch");
 const dtsgenerator = require("dtsgenerator").default;
 const fs = require("fs-extra");
 const prettier = require("prettier");

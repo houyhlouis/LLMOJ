@@ -7,10 +7,9 @@ export const loadPrism = (() => {
     window["Prism"] = {
       manual: true
     } as any;
-    await getScript(`${window.cdnjs}/prism/${EXTERNAL_PACKAGE_VERSION["prismjs"]}/components/prism-core.min.js`);
-    await getScript(
-      `${window.cdnjs}/prism/${EXTERNAL_PACKAGE_VERSION["prismjs"]}/plugins/autoloader/prism-autoloader.min.js`
-    );
+    // The autoloader loads languages from the components/ next to its plugins/
+    await getScript(`${window.publicPath}${VENDOR.prism}/components/prism-core.min.js`);
+    await getScript(`${window.publicPath}${VENDOR.prism}/plugins/autoloader/prism-autoloader.min.js`);
 
     Prism = window["Prism"] as unknown as typeof import("prismjs");
   })();

@@ -3,7 +3,8 @@ import { WebSocketGateway, WebSocketServer, OnGatewayConnection, OnGatewayDiscon
 
 import { Namespace, Socket } from "socket.io"; // eslint-disable-line import/no-extraneous-dependencies
 import jwt from "jsonwebtoken";
-import { diff } from "jsondiffpatch";
+// With text diffs of long strings, as jsondiffpatch 0.4 made by default and the pages apply
+import { diff } from "jsondiffpatch/with-text-diffs";
 import SocketIOParser from "socket.io-msgpack-parser";
 
 import { SubmissionStatus } from "@libreoj/judge-protocol";

@@ -1,4 +1,5 @@
 import React from "react";
+import { createRoot } from "react-dom/client";
 import "./themes";
 import "./index.less";
 import "./misc/fonts";
@@ -31,7 +32,6 @@ class ErrorBoundary extends React.Component<React.PropsWithChildren, { hasError:
 
 initApp()
   .then(() => {
-    const { createRoot } = window["ReactDOM"] as unknown as typeof import("react-dom/client");
     createRoot(document.getElementById("root")).render(
       <ErrorBoundary>
         <App />

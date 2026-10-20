@@ -205,8 +205,11 @@ let SubmissionStatisticsPage: React.FC<SubmissionStatisticsPageProps> = props =>
                       color: "#888"
                     },
                     grid: {
-                      drawBorder: false,
                       color: "#ccc"
+                    },
+                    // Chart.js 4 moved the axis line out of the grid
+                    border: {
+                      display: false
                     }
                   },
                   x: {
@@ -273,8 +276,11 @@ let SubmissionStatisticsPage: React.FC<SubmissionStatisticsPageProps> = props =>
                       color: "#888"
                     },
                     grid: {
-                      drawBorder: false,
                       color: "#ccc"
+                    },
+                    // Chart.js 4 moved the axis line out of the grid
+                    border: {
+                      display: false
                     }
                   },
                   x: {
@@ -347,8 +353,11 @@ let SubmissionStatisticsPage: React.FC<SubmissionStatisticsPageProps> = props =>
                       color: "#888"
                     },
                     grid: {
-                      drawBorder: false,
                       color: "#ccc"
+                    },
+                    // Chart.js 4 moved the axis line out of the grid
+                    border: {
+                      display: false
                     }
                   },
                   x: {

@@ -14,7 +14,7 @@ import {
   TextArea
 } from "semantic-ui-react";
 import { observer } from "mobx-react";
-import twemoji from "twemoji";
+import twemoji from "@twemoji/api";
 import TextAreaAutoSize from "react-textarea-autosize";
 import { v4 as uuid } from "uuid";
 

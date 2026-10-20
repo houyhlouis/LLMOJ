@@ -1,4 +1,3 @@
-import ResizeSensor from "css-element-queries/src/ResizeSensor";
 import { useEffect, useState } from "react";
 
 export function useBoundingRect<K extends keyof DOMRect, T extends HTMLElement = HTMLElement>(
@@ -23,8 +22,9 @@ export function useBoundingRect<K extends keyof DOMRect, T extends HTMLElement =
   useEffect(() => {
     if (element) {
       update();
-      const resizeSensor = new ResizeSensor(element, update);
-      return () => resizeSensor.detach();
+      const resizeObserver = new ResizeObserver(update);
+      resizeObserver.observe(element);
+      return () => resizeObserver.disconnect();
     }
   }, [element]);
 

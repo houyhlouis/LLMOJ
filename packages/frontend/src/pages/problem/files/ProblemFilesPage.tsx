@@ -48,7 +48,7 @@ import { actsAsButton, keyboardMenu } from "@/utils/keyboard";
 
 // Firefox have no WritableStream
 if (!window.WritableStream || true) {
-  (streamsaver as any).WritableStream = (await import("web-streams-polyfill/ponyfill/es6")).WritableStream;
+  (streamsaver as any).WritableStream = (await import("web-streams-polyfill")).WritableStream;
 }
 // Keep StreamSaver same-origin; HTTP intranet clients use a Blob below because
 // service workers are unavailable in an insecure context.

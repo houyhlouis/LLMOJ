@@ -185,7 +185,7 @@ Default AI tests use simulated models, databases and sandboxes, and need no cred
 
 ### In a browser
 
-Check pages you change at desktop and mobile widths, in both languages, including empty lists, long content and horizontal scrolling of wide tables.
+Check pages you change at desktop and mobile widths, in both languages, including empty lists, long content and horizontal scrolling of wide tables. The pages are built for the [supported browsers](wiki/Dependencies.md#supported-browsers).
 
 Every control must also work with the keyboard alone (see [Keyboard and screen readers](wiki/Accessibility.md)):
 

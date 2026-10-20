@@ -21,7 +21,7 @@ And these options:
 - `--assets-only`: only prepare the local assets, then stop (even if `--build` is also given).
 - no option: publish an existing build from `dist`.
 
-Pages built this way load their scripts from `/frontend`, call the API on the same site, and load libraries from `/cdnjs` on the same site. These values are fixed in the script.
+Pages built this way load their scripts from `/frontend` and call the API on the same site. The libraries they load when needed (the code editor, maths, highlighting and emoji images) are part of the build, under `/frontend/vendor`, so nothing comes from a CDN. These values are fixed in the script.
 
 Publishing rewrites the output files and `index.html`, and adds a `sw.js` that removes any old service worker and clears its caches. Don't edit the published files by hand; your changes would be lost on the next build.
 
@@ -58,7 +58,7 @@ Clicking an entry in the submission or hack list opens a preview window, 1100 ×
 The file has two sections:
 
 - `env`: named values (not environment variables). A value can refer to an earlier one as `${name}`. The example defines `title`, `cdnRoot`, `apiEndpoint`, `apiEndpointCN`, `bootstrapCdnRoot`, `bootstrapCdnRootStaging`, `assets`, `favicon`, `appLogo`, `gravatar`, `gravatarCN`, `ghAvatar`, `ghAvatarCN`, `cdnjs` and `cdnjsCN`; you can add your own.
-- `substitution`: what replaces each placeholder in the pages (`__api_endpoint__`, `__default_title__`, `__public_path__`, `__favicon__`, `__applogo__`, `__gravatar__`, `__ghavatar__`, `__cdnjs__`, `__bootstrap_cdn_root__`, `__bootstrap_cdn_root_staging__`). A value is either one string, or a map from region to string, where `""` is the fallback and `CN` is the China region, for example `{"CN": "${apiEndpointCN}", "": "${apiEndpoint}"}`.
+- `substitution`: what replaces each placeholder in the pages (`__api_endpoint__`, `__default_title__`, `__public_path__`, `__favicon__`, `__applogo__`, `__gravatar__`, `__ghavatar__`, `__cdnjs__`, `__bootstrap_cdn_root__`, `__bootstrap_cdn_root_staging__`). A value is either one string, or a map from region to string, where `""` is the fallback and `CN` is the China region, for example `{"CN": "${apiEndpointCN}", "": "${apiEndpoint}"}`. The pages no longer contain `__cdnjs__`, since they load their libraries from the build itself, so `cdnjs`, `cdnjsCN` and that substitution have no effect.
 
 After a change, rebuild bootstrap-config and the bootstrap app and deploy the result. The other fields in the generated `config.json` are produced by the build. The build reads Git commit information, so it needs a Git checkout rather than a source archive.
 

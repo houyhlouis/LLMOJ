@@ -21,7 +21,7 @@
 - `--assets-only`：只准备本地资源，然后结束（即使同时给了 `--build`）。
 - 不带参数：发布 `dist` 中已有的构建结果。
 
-这样构建的页面从 `/frontend` 加载脚本，调用同一站点的 API，并从同一站点的 `/cdnjs` 加载依赖库。这些值在脚本中固定。
+这样构建的页面从 `/frontend` 加载脚本，并调用同一站点的 API。它们按需加载的依赖库（代码编辑器、数学公式、代码高亮和表情图片）属于构建结果，位于 `/frontend/vendor` 下，不从 CDN 加载任何内容。这些值在脚本中固定。
 
 发布时会重写输出文件和 `index.html`，并生成 `sw.js`，用于移除旧的 service worker 并清除其缓存。不要手动修改发布后的文件，下次构建时修改会丢失。
 
@@ -58,7 +58,7 @@ sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_module
 文件包含两部分：
 
 - `env`：具名的值（不是环境变量）。值中可以用 `${name}` 引用前面定义的值。示例定义了 `title`、`cdnRoot`、`apiEndpoint`、`apiEndpointCN`、`bootstrapCdnRoot`、`bootstrapCdnRootStaging`、`assets`、`favicon`、`appLogo`、`gravatar`、`gravatarCN`、`ghAvatar`、`ghAvatarCN`、`cdnjs` 和 `cdnjsCN`，也可以添加自己的值。
-- `substitution`：页面中各占位符的替换内容（`__api_endpoint__`、`__default_title__`、`__public_path__`、`__favicon__`、`__applogo__`、`__gravatar__`、`__ghavatar__`、`__cdnjs__`、`__bootstrap_cdn_root__`、`__bootstrap_cdn_root_staging__`）。值可以是一个字符串，也可以是从区域到字符串的映射，其中 `""` 是默认区域，`CN` 是中国区域，例如 `{"CN": "${apiEndpointCN}", "": "${apiEndpoint}"}`。
+- `substitution`：页面中各占位符的替换内容（`__api_endpoint__`、`__default_title__`、`__public_path__`、`__favicon__`、`__applogo__`、`__gravatar__`、`__ghavatar__`、`__cdnjs__`、`__bootstrap_cdn_root__`、`__bootstrap_cdn_root_staging__`）。值可以是一个字符串，也可以是从区域到字符串的映射，其中 `""` 是默认区域，`CN` 是中国区域，例如 `{"CN": "${apiEndpointCN}", "": "${apiEndpoint}"}`。页面已不再包含 `__cdnjs__`，因为它们从构建结果本身加载依赖库，所以 `cdnjs`、`cdnjsCN` 和这项替换不再起作用。
 
 修改后需要重新构建 bootstrap-config 和 bootstrap 应用并部署。生成的 `config.json` 中的其他字段都由构建产生。构建会读取 Git 提交信息，因此需要 Git 工作区，而不是源码压缩包。
 

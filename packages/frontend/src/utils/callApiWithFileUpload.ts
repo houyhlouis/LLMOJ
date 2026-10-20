@@ -1,4 +1,4 @@
-import Axios from "axios";
+import Axios, { type AxiosProgressEvent } from "axios";
 
 import { ApiResponse } from "@/api";
 
@@ -79,7 +79,7 @@ export async function callApiWithFileUpload<
       const config = {
         cancelToken: cancelTokenSource.token,
         timeout: options.uploadTimeoutMs ?? 0,
-        onUploadProgress: (event: ProgressEvent<EventTarget>) => {
+        onUploadProgress: (event: AxiosProgressEvent) => {
           // Axios can report a final progress event after an upload has failed.
           setTimeout(() => {
             if (uploadActive && event.total > 0)

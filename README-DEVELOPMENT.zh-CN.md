@@ -185,7 +185,7 @@ sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh
 
 ### 在浏览器中检查
 
-修改页面后，请在桌面和手机宽度、中英文两种语言下检查，包括空列表、长内容和宽表格的横向滚动。
+修改页面后，请在桌面和手机宽度、中英文两种语言下检查，包括空列表、长内容和宽表格的横向滚动。页面针对[受支持的浏览器](wiki/Dependencies.zh-CN.md#受支持的浏览器)构建。
 
 每个控件还必须只用键盘就能操作（见[键盘与读屏软件](wiki/Accessibility.zh-CN.md)）：
 
