@@ -38,7 +38,9 @@ export class CodeLanguageService {
   validateCompileAndRunOptions(language: CodeLanguage, compileAndRunOptions: unknown): ValidationError[] {
     return validateSync(plainToClass(CompileAndRunOptionsClasses[language], compileAndRunOptions), {
       whitelist: true,
-      forbidNonWhitelisted: true
+      forbidNonWhitelisted: true,
+      // Java and F# have no options: their classes declare nothing to validate, and any property is refused.
+      forbidUnknownValues: false
     });
   }
 }

@@ -134,7 +134,7 @@ export default function ResourceEditor({
       search
       clearable
       label={tr("从团队题库选择", "Choose from team problems")}
-      value={mode === "assignment" ? "" : form[mode === "problem" ? "sourceProblemId" : "problemId"] ?? ""}
+      value={mode === "assignment" ? "" : (form[mode === "problem" ? "sourceProblemId" : "problemId"] ?? "")}
       options={teamProblems.map(problem => ({
         value: problem.id,
         text: (problem.title || "#" + problem.id) + " (#" + problem.id + ")"

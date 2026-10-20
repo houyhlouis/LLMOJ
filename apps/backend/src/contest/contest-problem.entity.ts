@@ -3,6 +3,7 @@ import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } 
 import { ContestEntity } from "./contest.entity";
 
 import { ProblemEntity } from "../problem/problem.entity";
+import { JsonColumn } from "../database/json-column";
 
 @Entity("contest_problem")
 @Index(["contestId", "problemId"], { unique: true })
@@ -30,5 +31,5 @@ export class ContestProblemEntity {
 
   @Column({ length: 120, default: "" }) outputFilename: string;
 
-  @Column({ type: "json" }) attachments: { filename: string; uuid: string; size: number }[];
+  @JsonColumn() attachments: { filename: string; uuid: string; size: number }[];
 }

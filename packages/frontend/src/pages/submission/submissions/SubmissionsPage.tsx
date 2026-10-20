@@ -93,8 +93,8 @@ let SubmissionsPage: React.FC<SubmissionsPageProps> = props => {
     props.query.problemDisplayId
       ? props.query.problemDisplayId.toString()
       : props.query.problemId
-      ? "P" + props.query.problemId
-      : ""
+        ? "P" + props.query.problemId
+        : ""
   );
   const [checkQueryProblemId, queryProblemIdError] = useFieldCheckSimple(queryProblemId, value => {
     if (value.toUpperCase().startsWith("P") && Number.isSafeInteger(Number(value.substr(1)))) return true;

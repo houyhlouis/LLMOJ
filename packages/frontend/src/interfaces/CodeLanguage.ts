@@ -217,8 +217,8 @@ export const normalizeContestLanguages = (languages: string[]): string[] => [
       Object.prototype.hasOwnProperty.call(contestLanguageVariants, language)
         ? contestLanguageVariants[language].map(version => `${language}:${version}`)
         : contestLanguageValues.includes(language)
-        ? [language]
-        : []
+          ? [language]
+          : []
     )
   )
 ];

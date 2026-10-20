@@ -3,7 +3,7 @@ import http from "http";
 
 import { Injectable, Logger } from "@nestjs/common";
 
-import PromClient from "prom-client";
+import PromClient from "@prometheus-io/client";
 
 import { ConfigService } from "../config/config.service";
 

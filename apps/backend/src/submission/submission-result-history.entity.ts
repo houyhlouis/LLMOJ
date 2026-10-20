@@ -3,6 +3,8 @@ import { Entity, PrimaryGeneratedColumn, Column, Index, ManyToOne, JoinColumn } 
 import { SubmissionEntity } from "./submission.entity";
 import { SubmissionProgress } from "./submission-progress.interface";
 
+import { JsonColumn } from "../database/json-column";
+
 /**
  * A result a rejudge replaced, so the previous result isn't lost. Only the most recent few are kept per submission.
  */
@@ -42,7 +44,7 @@ export class SubmissionResultHistoryEntity {
   @Column({ type: "integer", nullable: true })
   totalOccupiedTime: number;
 
-  @Column({ type: "json", nullable: true })
+  @JsonColumn({ nullable: true })
   result: SubmissionProgress;
 
   @Column({ type: "datetime" })

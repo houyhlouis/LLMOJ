@@ -29,7 +29,7 @@ export const getTwemojiOptions = (inline: boolean) =>
 
       return `${options.base}${options.size}/${icon}${options.ext}`;
     }
-  } as Partial<TwemojiOptions>);
+  }) as Partial<TwemojiOptions>;
 
 export const EmojiRenderer: React.FC<EmojiRendererProps> = props => {
   const refElement = useRef<HTMLElement>();

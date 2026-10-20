@@ -8,7 +8,10 @@ import { RequestWithSession } from "../auth/auth.middleware";
 
 @Injectable()
 export class ProofOfWorkGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector, private readonly proofOfWorkService: ProofOfWorkService) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly proofOfWorkService: ProofOfWorkService
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<RequestWithSession>();

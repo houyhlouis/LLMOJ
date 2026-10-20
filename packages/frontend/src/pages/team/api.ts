@@ -28,7 +28,7 @@ export const joinPolicyText = (policy: string) =>
     open: tr("免审核加入", "Join without approval"),
     approval: tr("申请审核", "Approval required"),
     closed: tr("仅邀请", "Invitation only")
-  }[policy] || policy);
+  })[policy] || policy;
 export const policyOptions = () =>
   ["open", "approval", "closed"].map(value => ({ value, text: joinPolicyText(value) }));
 export function downloadCsv(filename: string, csv: string) {

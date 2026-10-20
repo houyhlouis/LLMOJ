@@ -17,7 +17,7 @@ export default async function getSystemInfo(): Promise<JudgeClientSystemInfo> {
   ]);
 
   const memory =
-    memLayout.reduce((max, val) => (max.size > val.size ? max : val), memLayout[0]) || ({} as typeof memLayout[0]);
+    memLayout.reduce((max, val) => (max.size > val.size ? max : val), memLayout[0]) || ({} as (typeof memLayout)[0]);
 
   const cpuCores = [cpu.physicalCores, cpu.cores].find(x => Number.isSafeInteger(x));
 

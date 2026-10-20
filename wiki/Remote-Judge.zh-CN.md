@@ -148,7 +148,7 @@ sudo journalctl -u libreoj-judge.service -n 50 --no-pager
 
 在站点更新之后，把远程评测机更新到站点的版本：
 1. 在站点的 **评测机状态** 页面将其[排空](Distributed-Judging.zh-CN.md#排空密钥与能力)，等到显示 **已排空**。然后停止它：`sudo systemctl stop libreoj-judge.target`。
-2. 在 `/opt/LLMOJ` 中按[第 1 步](#1-下载与站点相同的版本)切换到站点的版本，再按[第 2 步](#2-安装-nodejs-和-pnpm-并构建评测机)安装并构建。
+2. 在 `/opt/LLMOJ` 中按[第 1 步](#1-下载与站点相同的版本)切换到站点的版本。删除原生模块的构建目录，以便用新的构建工具重新配置：`sudo rm -rf apps/judge/build packages/simple-sandbox/build`。然后按[第 2 步](#2-安装-nodejs-和-pnpm-并构建评测机)安装并构建；`pnpm install` 会安装新版本锁定的依赖。
 3. 用与[第 4 步](#4-保存密钥并生成配置)相同的变量再次运行 `configure-judge.py`。它保留已有配置，并在评测机账户不存在时创建它。沙箱启动器之前的版本整个评测机以 root 运行，没有该账户。
 4. 按[第 5 步](#5-安装服务并检查沙箱)设置文件可读并检查沙箱（`chmod`，然后沙箱检查），再运行 `sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh`。
 5. 用 `sudo systemctl start libreoj-judge.target` 启动它，并在 **评测机状态** 页面点击 **恢复**。

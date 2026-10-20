@@ -161,19 +161,19 @@ function parseSearchQuery(query: Record<string, string>): DiscussionsPageSearchQ
       query["type"] === "Solution"
         ? "Solution"
         : query["type"] === "Discussion"
-        ? "Discussion"
-        : query["publisherId"]
-        ? undefined
-        : "Discussion",
+          ? "Discussion"
+          : query["publisherId"]
+            ? undefined
+            : "Discussion",
     keyword: query["keyword"] || "",
     problemId:
       query["problemId"] === "any" || (query["publisherId"] && !query["problemId"])
         ? -2
         : query["problemId"] === "all"
-        ? -1
-        : Number.isSafeInteger(Number(query["problemId"]))
-        ? Number(query["problemId"])
-        : null,
+          ? -1
+          : Number.isSafeInteger(Number(query["problemId"]))
+            ? Number(query["problemId"])
+            : null,
     publisherId: Number.isSafeInteger(Number(query["publisherId"])) ? Number(query["publisherId"]) : null,
     nonpublic: query["nonpublic"] != null
   };

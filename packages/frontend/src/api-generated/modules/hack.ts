@@ -6,6 +6,7 @@ import { createGetApi, createPostApi } from "@/api";
 
 export const list = createGetApi<
   {
+    mine?: string;
     id?: string;
     problemId?: string;
     submissionId?: string;
@@ -18,6 +19,7 @@ export const list = createGetApi<
     referenceSubmissionId?: string;
     standardCode?: string;
     standardLanguage?: string;
+    standardCompileAndRunOptions?: string;
     standardFileIo?: string;
     validatorCode?: string;
     validatorLanguage?: string;

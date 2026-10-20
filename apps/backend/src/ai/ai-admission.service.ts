@@ -50,7 +50,10 @@ export class AiAdmissionService {
 
   private lastCleanup = 0;
 
-  constructor(@InjectDataSource() private readonly db: DataSource, private readonly policies: AiPolicyService) {}
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly policies: AiPolicyService
+  ) {}
 
   /** Provider requests running and waiting for a slot in this process. */
   load(): { running: number; waiting: number } {

@@ -2,6 +2,8 @@ import { Entity, PrimaryGeneratedColumn, Column, Index, ManyToOne, JoinColumn } 
 
 import { ProblemEntity } from "./problem.entity";
 
+import { JsonColumn } from "../database/json-column";
+
 export interface ProblemDataVersionFile {
   filename: string;
   uuid: string;
@@ -39,14 +41,14 @@ export class ProblemDataVersionEntity {
   @Column({ type: "varchar", length: 24 })
   problemType: string;
 
-  @Column({ type: "json" })
+  @JsonColumn()
   judgeInfo: unknown;
 
-  @Column({ type: "json" })
+  @JsonColumn()
   testData: ProblemDataVersionFile[];
 
   // The problem's samples, when its judge info runs them
-  @Column({ type: "json", nullable: true })
+  @JsonColumn({ nullable: true })
   samples: unknown;
 
   @Column({ type: "datetime" })

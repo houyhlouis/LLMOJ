@@ -129,7 +129,10 @@ export class AiQuality {
 
   private readonly searchedSeeds = new Set<string>();
 
-  constructor(private readonly request: QualityRequest, private readonly environment: QualityEnvironment) {}
+  constructor(
+    private readonly request: QualityRequest,
+    private readonly environment: QualityEnvironment
+  ) {}
 
   async checkSample(input: QualityData, expected: QualityData, number: number) {
     const verify = async (name: string, label: string) => {

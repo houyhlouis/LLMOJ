@@ -135,22 +135,18 @@ export function validateMetaAndSubtasks(
       const { inputFile, outputFile, userOutputFilename, timeLimit, memoryLimit, points } = testcase;
 
       if (options.enableInputFile) {
-        if (
-          !(
-            testData.some(file => file.filename === inputFile) ||
-            (inputFile == null && options.enableInputFile === "optional")
-          )
-        )
+        if (!(
+          testData.some(file => file.filename === inputFile) ||
+          (inputFile == null && options.enableInputFile === "optional")
+        ))
           throw ["NO_SUCH_INPUT_FILE", i + 1, j + 1, inputFile];
       } else delete testcase.inputFile;
 
       if (options.enableOutputFile) {
-        if (
-          !(
-            testData.some(file => file.filename === outputFile) ||
-            (outputFile == null && options.enableOutputFile === "optional")
-          )
-        )
+        if (!(
+          testData.some(file => file.filename === outputFile) ||
+          (outputFile == null && options.enableOutputFile === "optional")
+        ))
           throw ["NO_SUCH_OUTPUT_FILE", i + 1, j + 1, outputFile];
       } else delete testcase.outputFile;
 

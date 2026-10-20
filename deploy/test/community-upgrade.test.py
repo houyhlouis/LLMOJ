@@ -130,14 +130,14 @@ class CommunityUpgradeTests(unittest.TestCase):
         for candidate in candidates:
             with self.subTest(candidate=candidate[:60]):
                 (self.source/relative).write_text(candidate)
-                with self.assertRaisesRegex(u.UpgradeError, 'Dependencies'):
+                with self.assertRaisesRegex(u.UpgradeError, 'frozen runtime contract'):
                     self.up.compatibility(self.source)
 
     def test_a_preexisting_fake_verdict_cannot_be_removed_through_the_append_exception(self):
         relative, old, new = self.protocol_fixture()
         (self.root/relative).write_text(new)
         (self.source/relative).write_text(old)
-        with self.assertRaisesRegex(u.UpgradeError, 'Dependencies|protocol|Fake'):
+        with self.assertRaisesRegex(u.UpgradeError, 'frozen runtime contract|protocol|Fake'):
             self.up.compatibility(self.source)
 
     def test_real_build_rebuilds_protocol_before_backend_and_frontend(self):

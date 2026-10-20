@@ -40,7 +40,7 @@ export function useNavigationChecked() {
   const navigation = useNavigation();
   const confirmNavigation = useNavigationConfirm();
 
-  function wrap<Method extends keyof typeof navigation>(method: Method): typeof navigation[Method] {
+  function wrap<Method extends keyof typeof navigation>(method: Method): (typeof navigation)[Method] {
     return function () {
       if (!confirmNavigation()) return;
       return (navigation[method] as Function).apply(navigation, arguments);

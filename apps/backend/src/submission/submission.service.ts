@@ -235,10 +235,7 @@ export class SubmissionService {
   ): Promise<
     [
       fileUploadErrorOrRequest:
-        | "FILE_UUID_EXISTS"
-        | "FILE_NOT_UPLOADED"
-        | "FILE_TOO_LARGE"
-        | SignedFileUploadRequestDto,
+        "FILE_UUID_EXISTS" | "FILE_NOT_UPLOADED" | "FILE_TOO_LARGE" | SignedFileUploadRequestDto,
       submission: SubmissionEntity
     ]
   > {
@@ -249,10 +246,7 @@ export class SubmissionService {
     const [fileUploadErrorOrRequest, submission] = await this.connection.transaction<
       [
         fileUploadErrorOrRequest:
-          | "FILE_UUID_EXISTS"
-          | "FILE_NOT_UPLOADED"
-          | "FILE_TOO_LARGE"
-          | SignedFileUploadRequestDto,
+          "FILE_UUID_EXISTS" | "FILE_NOT_UPLOADED" | "FILE_TOO_LARGE" | SignedFileUploadRequestDto,
         submission: SubmissionEntity
       ]
     >("READ COMMITTED", async transactionalEntityManager => {
@@ -549,9 +543,10 @@ export class SubmissionService {
       .andWhere("problemId IN (:...problemIds)", { problemIds: problems.map(problem => problem.id) })
       .andWhere("contestId IS NULL")
       .groupBy("problemId");
-    const queryResult: { id: string }[] = await (acceptedOnly
-      ? queryBuilder.andWhere("status = :status", { status: SubmissionStatus.Accepted })
-      : queryBuilder.andWhere("status != :status", { status: SubmissionStatus.Pending })
+    const queryResult: { id: string }[] = await (
+      acceptedOnly
+        ? queryBuilder.andWhere("status = :status", { status: SubmissionStatus.Accepted })
+        : queryBuilder.andWhere("status != :status", { status: SubmissionStatus.Pending })
     ).getRawMany();
     const submissionIds = queryResult.map(result => Number(result.id));
     const submissions = await this.findSubmissionsByExistingIds(submissionIds);

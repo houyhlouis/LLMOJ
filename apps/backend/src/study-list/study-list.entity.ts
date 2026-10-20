@@ -9,6 +9,7 @@ import {
 } from "typeorm";
 
 import { UserEntity } from "../user/user.entity";
+import { JsonColumn } from "../database/json-column";
 
 export interface StudyListItem {
   problemId: number;
@@ -27,7 +28,7 @@ export class StudyListEntity {
 
   @Column({ type: "mediumtext" }) description: string;
 
-  @Column({ type: "json" }) items: StudyListItem[];
+  @JsonColumn() items: StudyListItem[];
 
   @Column({ default: false }) starred: boolean;
 

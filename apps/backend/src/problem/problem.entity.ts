@@ -6,6 +6,7 @@ import { ProblemSampleEntity } from "./problem-sample.entity";
 
 import { UserEntity } from "../user/user.entity";
 import { Locale } from "../common/locale.type";
+import { JsonColumn } from "../database/json-column";
 
 export enum ProblemType {
   Traditional = "Traditional",
@@ -49,7 +50,7 @@ export class ProblemEntity {
   ownerId: number;
 
   // The first of the array is its default locale
-  @Column({ type: "json" })
+  @JsonColumn()
   locales: Locale[];
 
   @Column({ type: "integer", nullable: true })

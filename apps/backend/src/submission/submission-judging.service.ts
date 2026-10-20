@@ -493,7 +493,7 @@ export class SubmissionJudgingService implements JudgeTaskService<SubmissionProg
             preprocessedJudgeInfo && (preprocessedJudgeInfo as ProblemJudgeInfoTraditional).runSamples
               ? [
                   ...(dataVersion
-                    ? (dataVersion.samples as ProblemSampleData) ?? []
+                    ? ((dataVersion.samples as ProblemSampleData) ?? [])
                     : (await this.problemService.getProblemSamples(problem)).slice(
                         0,
                         this.configService.config.resourceLimit.problemSamplesToRun

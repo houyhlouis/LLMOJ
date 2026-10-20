@@ -6,7 +6,7 @@ LLMOJ is based on [LibreOJ](https://github.com/libreoj/libreoj) and released und
 
 ## Toolchain
 
-- Node.js 22.13 or later (installations use 24.21.0) and pnpm 11.13.1, as set in `package.json`.
+- Node.js 24.21 (`.node-version`; installations use exactly 24.21.0) and pnpm 11.13.1 (`packageManager` in `package.json`). The other pinned versions, what isn't upgraded yet, and how to check the dependencies for advisories are in [Dependencies](wiki/Dependencies.md).
 - For the judge's native code: Linux on amd64, CMake, a C++ compiler and libfmt.
 - To actually run programs in the sandbox: namespaces and cgroup v2.
 
@@ -89,7 +89,7 @@ python3 deploy/test/install-flow.test.py
 python3 deploy/test/backup.test.py
 python3 deploy/test/doctor.test.py
 python3 deploy/test/verify-backup.test.py
-node --test deploy/test/backup-keys.test.mjs
+node --test deploy/test/backup-keys.test.mjs deploy/test/dependency-audit.test.mjs
 sudo python3 deploy/test/community-upgrade.test.py
 sudo python3 deploy/test/community-runtime-upgrade.test.py
 python3 deploy/test/wiki-export.test.py

@@ -123,10 +123,10 @@ async function evaluateTeamResourceAccess(
     kind === "problem"
       ? "problems"
       : kind === "contest"
-      ? "contests"
-      : kind === "discussion"
-      ? "discussions"
-      : "assignments",
+        ? "contests"
+        : kind === "discussion"
+          ? "discussions"
+          : "assignments",
     globalManager
   );
   if (team.archived || resource.archived) return manager && permission === "read";
@@ -176,10 +176,10 @@ export function teamResourceVisibilitySql(kind: TeamResourceKind, idExpression: 
     kind === "problem"
       ? "problems"
       : kind === "contest"
-      ? "contests"
-      : kind === "discussion"
-      ? "discussions"
-      : "assignments";
+        ? "contests"
+        : kind === "discussion"
+          ? "discussions"
+          : "assignments";
   const invited =
     kind === "contest"
       ? `OR (tr.visibility = 'public' AND tr.archived = 0 AND t.archived = 0) OR (tr.visibility = 'invite' AND tr.archived = 0 AND t.archived = 0 AND ${userId} > 0 AND JSON_CONTAINS(tr.invitedUserIds, '${userId}') AND NOT EXISTS (SELECT 1 FROM team_member tb WHERE tb.teamId = t.id AND tb.userId = ${userId} AND tb.status = 'blocked'))`

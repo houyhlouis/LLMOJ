@@ -1,5 +1,7 @@
 import { Column, Entity, Index, PrimaryColumn, PrimaryGeneratedColumn } from "typeorm";
 
+import { JsonColumn } from "../database/json-column";
+
 @Entity("self_eval_set")
 export class SelfEvalSetEntity {
   @PrimaryColumn({ type: "varchar", length: 80 }) scope: string;
@@ -16,11 +18,11 @@ export class SelfEvalSetEntity {
 
   @Column({ type: "varchar", length: 24 }) status: string;
 
-  @Column({ type: "json", nullable: true }) cases: unknown;
+  @JsonColumn({ nullable: true }) cases: unknown;
 
   @Column({ type: "text", nullable: true }) message: string;
 
-  @Column({ type: "json" }) snapshot: unknown;
+  @JsonColumn() snapshot: unknown;
 
   @Column({ type: "datetime" }) createdAt: Date;
 }
@@ -48,11 +50,11 @@ export class SelfEvalEntity {
 
   @Column({ type: "integer", nullable: true }) memoryUsed: number;
 
-  @Column({ type: "json", nullable: true }) feedback: unknown;
+  @JsonColumn({ nullable: true }) feedback: unknown;
 
-  @Column({ type: "json" }) content: unknown;
+  @JsonColumn() content: unknown;
 
-  @Column({ type: "json" }) snapshot: unknown;
+  @JsonColumn() snapshot: unknown;
 
   @Column({ type: "datetime" }) createTime: Date;
 

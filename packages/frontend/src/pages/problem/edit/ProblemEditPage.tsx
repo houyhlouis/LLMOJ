@@ -668,26 +668,24 @@ let ProblemEditPage: React.FC<ProblemEditPageProps> = props => {
         if (locale === defaultLocale) return locales[0];
         return locale;
       })
-      .map(
-        (locale): ApiTypes.ProblemLocalizedContentDto => ({
-          locale: locale,
-          title: localizedContents[locale].title,
-          contentSections: localizedContents[locale].contentSections.map(section =>
-            section.type === "Text"
-              ? {
-                  sectionTitle: section.sectionTitle,
-                  type: "Text",
-                  text: section.text
-                }
-              : {
-                  sectionTitle: section.sectionTitle,
-                  type: "Sample",
-                  sampleId: section.sampleId,
-                  text: section.text
-                }
-          )
-        })
-      );
+      .map((locale): ApiTypes.ProblemLocalizedContentDto => ({
+        locale: locale,
+        title: localizedContents[locale].title,
+        contentSections: localizedContents[locale].contentSections.map(section =>
+          section.type === "Text"
+            ? {
+                sectionTitle: section.sectionTitle,
+                type: "Text",
+                text: section.text
+              }
+            : {
+                sectionTitle: section.sectionTitle,
+                type: "Sample",
+                sampleId: section.sampleId,
+                text: section.text
+              }
+        )
+      }));
 
     if (!localizedContentsPayload.some(content => content.title.trim())) {
       toast.error(

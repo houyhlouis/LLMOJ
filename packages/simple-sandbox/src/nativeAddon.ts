@@ -1,4 +1,4 @@
-import * as bindings from 'bindings';
+import bindings from 'bindings';
 const sandboxAddon: any = bindings('sandbox');
 
 export default sandboxAddon;

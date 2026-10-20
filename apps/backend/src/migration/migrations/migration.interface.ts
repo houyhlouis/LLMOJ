@@ -1,7 +1,7 @@
 import { NestExpressApplication } from "@nestjs/platform-express";
 
 import { EntityManager } from "typeorm";
-import MariaDB from "mariadb";
+import * as MariaDB from "mariadb";
 
 import { MigrationConfig } from "../migration-config.schema";
 

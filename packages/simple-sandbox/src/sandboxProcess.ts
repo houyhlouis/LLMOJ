@@ -3,7 +3,7 @@ import sandboxAddon from './nativeAddon';
 import * as utils from './utils';
 
 export class SandboxProcess {
-    private readonly cancellationToken: NodeJS.Timer = null;
+    private readonly cancellationToken: NodeJS.Timeout = null;
     private readonly stopCallback: () => void;
 
     private countedCpuTime: number = 0;

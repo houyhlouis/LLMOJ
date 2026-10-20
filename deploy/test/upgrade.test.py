@@ -39,6 +39,8 @@ class FakeHost:
         self.ai_policy_limited = False
         self.queries = []
         self.fail_start = None
+        self.fail_install = False
+        self.config_refused = False
     def prop(self, unit, name):
         if (unit,name) in self.override:
             return self.override[(unit,name)]
@@ -89,12 +91,29 @@ class FakeHost:
         elif args[0]=='mariadb-dump': kwargs['output'].write(b'-- synthetic logical SQL backup\n'+b'x'*200)
         elif args[0]=='cp':
             source,target=Path(args[-2]),Path(args[-1]); shutil.copytree(source,target,symlinks=True)
+        elif len(args) > 1 and args[1] == '-e' and args[2] == u.BACKEND_CONFIGURATION_CHECK:
+            assert kwargs['env']['LIBREOJ_CONFIG_FILE'] == str(self.root/'config/backend.yaml')
+            return subprocess.CompletedProcess(args, int(self.config_refused), b'', b'')
+        elif 'install' in args and '--frozen-lockfile' in args:
+            # pnpm installing the target's lockfile into the staged copy: it records where it installed
+            if self.fail_install: raise u.UpgradeError('pnpm operation failed (exit 1; private output withheld)')
+            stage=Path(kwargs['cwd'])
+            (stage/'node_modules/old-dependency').unlink(missing_ok=True)
+            (stage/'node_modules/new-dependency').write_text('installed from the new lockfile')
+            shim=stage/'apps/backend/node_modules/.bin/tool'; shim.parent.mkdir(parents=True,exist_ok=True)
+            shim.write_text('#!/bin/sh\nexport NODE_PATH="'+str(stage)+'/node_modules/.pnpm/node_modules"\nexec node "$basedir/../tool/cli.js"\n'); shim.chmod(0o755)
+            (stage/'node_modules/.pnpm-workspace-state-v1.json').write_text(json.dumps({'projects':{str(stage):{},str(stage)+'/apps/backend':{}}}))
+            package=stage/'node_modules/.pnpm/tool@2.0.0/node_modules/tool/index.js'; package.parent.mkdir(parents=True,exist_ok=True)
+            package.write_text('// built in '+str(stage)+'\n')
         elif args[-1]=='--version': output=b'11.13.1' if 'pnpm' in args[-2] else b'v24.21.0'
         return subprocess.CompletedProcess(args,0,output,b'')
 
 
 class FixtureUpgrade(u.Upgrade):
     def build(self):
+        if self.dependency_changes:
+            with open(os.devnull,'wb') as log: self.install_dependencies({},log)
+            self.relocate_dependencies()
         (self.stage/'apps/backend/dist/database').mkdir(parents=True,exist_ok=True)
         (self.stage/'apps/backend/dist/main.js').write_text('new backend')
         (self.stage/'apps/backend/dist/database/database.providers.js').write_text('LIBREOJ_SCHEMA_SYNC')
@@ -140,6 +159,7 @@ class UpgradeTests(unittest.TestCase):
         (self.root/'packages/shared/src/index.ts').write_text('shared')
         (self.root/'packages/bootstrap-config').mkdir(); (self.root/'packages/bootstrap-config/config.json').write_text('generated')
         for name in ('package.json','pnpm-lock.yaml','pnpm-workspace.yaml'): (self.root/name).write_text('{}')
+        (self.root/'node_modules/old-dependency').write_text('installed from the old lockfile')
         for name in (*u.SERVICES,'judge'):
             (self.units/('libreoj-'+name+'.service')).write_text('[Service]\n# '+str(self.root)+'/\n')
         # A source archive contains no build outputs or generated bootstrap config.
@@ -183,9 +203,115 @@ class UpgradeTests(unittest.TestCase):
     def test_unsafe_secret_mode_rejected(self):
         (self.root/'config/secrets.json').chmod(0o644)
         with self.assertRaises(u.UpgradeError): self.up.preflight()
-    def test_dependency_change_rejected(self):
-        self.up.preflight(); (self.source/'pnpm-lock.yaml').write_text('different')
-        with self.assertRaises(u.UpgradeError): self.up.compatibility(self.source)
+    LOCK_BEFORE={'lockfileVersion':'9.0','importers':{'apps/backend':{'dependencies':{'tool':{'specifier':'^1.0.0','version':'1.0.0'},
+                  'kept':{'specifier':'1.0.0','version':'1.0.0'}}},'apps/bootstrap-azure':{'devDependencies':{'esbuild':{'specifier':'0.12.24','version':'0.12.24'}}}},
+                  'packages':{'tool@1.0.0':{},'kept@1.0.0':{},'esbuild@0.12.24':{}}}
+    LOCK_AFTER={'lockfileVersion':'9.0','importers':{'apps/backend':{'dependencies':{'tool':{'specifier':'^2.0.0','version':'2.0.0(peer@1.0.0)'},
+                 'kept':{'specifier':'1.0.0','version':'1.0.0'}}},'apps/bootstrap-azure':{'devDependencies':{'esbuild':{'specifier':'0.28.2','version':'0.28.2'}}}},
+                 'packages':{'tool@2.0.0':{},'kept@1.0.0':{},'peer@1.0.0':{},'esbuild@0.28.2':{}}}
+    def dependency_fixture(self,manager='pnpm@11.13.1'):
+        """An installation and a target that differ only in their dependencies"""
+        for tree,lock in ((self.root,self.LOCK_BEFORE),(self.source,self.LOCK_AFTER)):
+            (tree/'package.json').write_text(json.dumps({'name':'@libreoj/monorepo','packageManager':'pnpm@11.13.1'}))
+            (tree/'pnpm-lock.yaml').write_text(json.dumps(lock))
+            (tree/'pnpm-workspace.yaml').write_text(json.dumps({'packages':['apps/*'],'allowBuilds':{'bcrypt':True,'core-js':False}}))
+        (self.source/'package.json').write_text(json.dumps({'name':'@libreoj/monorepo','packageManager':manager}))
+        (self.source/'pnpm-workspace.yaml').write_text(json.dumps({'packages':['apps/*'],'allowBuilds':{'bcrypt':True,'core-js':False,'esbuild':True}}))
+    def test_dependency_change_is_planned_with_its_packages_and_build_scripts(self):
+        self.dependency_fixture(); self.up.preflight(); self.up.compatibility(self.source)
+        self.assertEqual(self.up.dependency_changes,['pnpm-lock.yaml','pnpm-workspace.yaml'])
+        # Every native addon and the sandbox are rebuilt and checked with the new dependencies
+        self.assertEqual(self.up.native_rebuild,sorted(u.NATIVE_PACKAGES)); self.assertTrue(self.up.sandbox_changed)
+        summary=u.dependency_summary(self.root,self.source)
+        self.assertEqual((summary['packages'],summary['added'],summary['removed']),(4,3,2))
+        # Only the deployed projects' direct dependencies are listed, without peer suffixes
+        self.assertEqual(summary['directChanges'],['apps/backend: tool 1.0.0 -> 2.0.0'])
+        self.assertEqual((summary['buildScripts'],summary['buildScriptsChanged']),(['bcrypt','esbuild'],True))
+    def test_dependency_change_installs_the_lockfile_into_the_stage_and_switches_the_dependencies(self):
+        self.dependency_fixture(); self.prepare()
+        install=[c for c in self.host.calls if 'install' in c and '--frozen-lockfile' in c]
+        self.assertEqual(len(install),1)
+        self.assertEqual(install[0][install[0].index('--store-dir')+1],str(self.root/'runtime/pnpm-store'))
+        # The live dependencies are untouched until the switch
+        self.assertTrue((self.root/'node_modules/old-dependency').exists())
+        # pnpm's shims and workspace state name the installation, not the staging directory; packages are left alone
+        shim=(self.up.stage/'apps/backend/node_modules/.bin/tool').read_text()
+        self.assertIn(str(self.root)+'/node_modules/.pnpm/node_modules',shim); self.assertNotIn(str(self.up.stage),shim)
+        self.assertTrue(os.access(self.up.stage/'apps/backend/node_modules/.bin/tool',os.X_OK))
+        state=json.loads((self.up.stage/'node_modules/.pnpm-workspace-state-v1.json').read_text())
+        self.assertEqual(sorted(state['projects']),[str(self.root),str(self.root)+'/apps/backend'])
+        self.assertIn(str(self.up.stage),(self.up.stage/'node_modules/.pnpm/tool@2.0.0/node_modules/tool/index.js').read_text())
+        self.up.activate()
+        self.assertEqual(self.up.manifest['status'],'complete')
+        self.assertEqual(self.up.manifest['entries'][-1]['name'],'node_modules')
+        self.assertTrue((self.root/'node_modules/new-dependency').exists()); self.assertFalse((self.root/'node_modules/old-dependency').exists())
+        # The old dependencies are what a rollback restores
+        self.assertTrue((self.up.backup/'previous/node_modules/old-dependency').exists())
+        self.assertIn(str(self.root),(self.root/'apps/backend/node_modules/.bin/tool').read_text())
+    def test_rollback_restores_the_previous_dependencies(self):
+        self.dependency_fixture(); self.prepare(); self.up.activate()
+        rollback=FixtureUpgrade(self.root,self.host,self.units); rollback.preflight()
+        u.validate_manifest(self.up.manifest)
+        rollback.backup=self.up.backup; rollback.stage=self.up.stage; rollback.manifest=self.up.manifest
+        rollback.rollback(manual=True)
+        self.assertTrue((self.root/'node_modules/old-dependency').exists()); self.assertFalse((self.root/'node_modules/new-dependency').exists())
+        self.assertEqual((self.root/'apps/backend/dist/main.js').read_text(),'old backend')
+    def test_failed_start_after_a_dependency_change_rolls_the_dependencies_back(self):
+        self.dependency_fixture(); self.prepare(); self.host.fail_start='libreoj-backend.service'
+        with self.assertRaises(u.UpgradeError): self.up.activate()
+        self.up.rollback()
+        self.assertTrue((self.root/'node_modules/old-dependency').exists()); self.assertFalse((self.root/'node_modules/new-dependency').exists())
+        self.assertEqual(self.up.manifest['status'],'rolled-back')
+    def test_failed_dependency_install_keeps_services_running(self):
+        self.dependency_fixture(); self.up.preflight(); self.host.fail_install=True
+        with self.assertRaisesRegex(u.UpgradeError,'operation failed'): self.up.prepare(self.source,{'treeSha256':u.tree_digest(self.source)})
+        self.assertFalse(any(c[0]=='service' for c in self.host.calls))
+        self.assertTrue((self.root/'node_modules/old-dependency').exists())
+    def test_new_backend_checks_the_installed_configuration_before_maintenance(self):
+        self.prepare()
+        check=[c for c in self.host.calls if len(c) > 2 and c[1:3]==('-e',u.BACKEND_CONFIGURATION_CHECK)]
+        self.assertEqual([c[3] for c in check],[str(self.up.stage/'apps/backend/package.json')])
+    def test_configuration_the_new_backend_refuses_keeps_services_running(self):
+        self.dependency_fixture(); self.up.preflight(); self.host.config_refused=True
+        with self.assertRaisesRegex(u.UpgradeError,'refuses the installed config/backend.yaml'):
+            self.up.prepare(self.source,{'treeSha256':u.tree_digest(self.source)})
+        self.assertFalse(any(c[0]=='service' for c in self.host.calls))
+        self.assertTrue((self.root/'node_modules/old-dependency').exists())
+    def test_web_dependency_change_installs_without_native_rebuild(self):
+        for name in ('install-state.json','install-complete.json'):
+            p=self.root/'config'/name; value=json.loads(p.read_text()); value['role']='web'; p.write_text(json.dumps(value))
+        self.host.states.pop('libreoj-judge.service')
+        self.dependency_fixture(); self.prepare()
+        self.assertEqual((self.up.native_rebuild,self.up.sandbox_changed),([],False))
+        self.up.activate()
+        self.assertTrue((self.root/'node_modules/new-dependency').exists())
+    def test_dependency_change_cannot_change_the_pinned_pnpm_or_lockfile_format(self):
+        self.dependency_fixture(manager='pnpm@11.28.6'); self.up.preflight()
+        with self.assertRaisesRegex(u.UpgradeError,'pnpm version'): self.up.compatibility(self.source)
+        self.dependency_fixture(); (self.source/'pnpm-lock.yaml').write_text(json.dumps({**self.LOCK_AFTER,'lockfileVersion':'10.0'}))
+        with self.assertRaisesRegex(u.UpgradeError,'lockfile format'): self.up.compatibility(self.source)
+        (self.source/'pnpm-lock.yaml').write_text('packages: [unterminated')
+        with self.assertRaisesRegex(u.UpgradeError,'Invalid pnpm lockfile'): self.up.compatibility(self.source)
+    def test_without_dependency_changes_the_installed_dependencies_stay(self):
+        self.prepare(); self.up.activate()
+        self.assertFalse(any('install' in c for c in self.host.calls))
+        self.assertNotIn('node_modules',[entry['name'] for entry in self.up.manifest['entries']])
+        self.assertTrue((self.root/'node_modules/old-dependency').exists())
+    def test_tooling_configuration_may_change_but_shared_code_may_not(self):
+        self.up.preflight()
+        for relative in ('packages/shared/tsconfig.json','packages/shared/eslint.config.mjs','infra/tsconfig.json'):
+            with self.subTest(path=relative):
+                (self.source/relative).parent.mkdir(parents=True,exist_ok=True)
+                (self.source/relative).write_text('{"compilerOptions": {"module": "nodenext"}}')
+                self.up.compatibility(self.source)
+        (self.source/'packages/shared/src/index.ts').write_text('changed shared code')
+        with self.assertRaisesRegex(u.UpgradeError,'frozen runtime contract'): self.up.compatibility(self.source)
+    def test_rollback_manifest_may_name_the_dependencies_but_no_other_persistent_entry(self):
+        for name in ('node_modules','public'):
+            u.validate_manifest({'guardBefore':False,'entries':[{'name':name,'hadOld':True,'oldMoved':True,'newMoved':True}]})
+        for name in ('config','data','runtime','backups'):
+            with self.subTest(name=name),self.assertRaisesRegex(u.UpgradeError,'Unsafe rollback manifest entry'):
+                u.validate_manifest({'guardBefore':False,'entries':[{'name':name,'hadOld':True,'oldMoved':True,'newMoved':True}]})
     def repository_link_fixtures(self):
         for relative in u.REPOSITORY_LINK_MANIFESTS:
             directory=relative.rsplit('/',1)[0]
@@ -202,6 +328,8 @@ class UpgradeTests(unittest.TestCase):
                     value['repository']['url']=u.PACKAGE_REPOSITORY
                     if 'description' in value: value['description']=value['description'].replace('LibreOJ','LLMOJ')
                 target.write_text(json.dumps(value,indent=2)+'\n')
+        for tree in (self.root,self.source):
+            (tree/'package.json').write_text(json.dumps({'name':'@libreoj/monorepo','packageManager':'pnpm@11.13.1'}))
         for tree,title in ((self.root,'LibreOJ'),(self.source,'LLMOJ')):
             (tree/u.BOOTSTRAP_SETTINGS).parent.mkdir(parents=True,exist_ok=True)
             (tree/u.BOOTSTRAP_SETTINGS).write_text(json.dumps({'env':{'title':title,'apiEndpoint':'https://example.invalid/api','cdnRoot':'https://example.invalid/assets'},'substitution':{'__default_title__':'${title}'}}))
@@ -218,7 +346,9 @@ class UpgradeTests(unittest.TestCase):
         for name,value in expected.items(): self.assertEqual(u.digest(self.root/name),value)
 
     def test_repository_link_exception_does_not_hide_executable_or_other_metadata_changes(self):
+        # A branding-only manifest difference is no dependency change; any other difference is one, which installs
         self.repository_link_fixtures(); self.up.preflight()
+        self.up.compatibility(self.source); self.assertEqual(self.up.dependency_changes,[])
         changes=[('description','arbitrary new description'),('dependencies',{'example':'2.0.0'}),('scripts',{'build':'node changed.js'}),
                  ('name','@another/package'),('engines',{'node':'>=26'}),('packageManager','pnpm@12.0.0'),
                  ('repository',{'type':'git','url':'https://github.com/another/project.git','directory':'apps/judge'}),
@@ -229,7 +359,7 @@ class UpgradeTests(unittest.TestCase):
             for field,value in changes:
                 with self.subTest(manifest=relative,field=field,value=value):
                     changed=json.loads(original); changed[field]=value; target.write_text(json.dumps(changed))
-                    with self.assertRaisesRegex(u.UpgradeError,'Dependencies'): self.up.compatibility(self.source)
+                    self.up.compatibility(self.source); self.assertEqual(self.up.dependency_changes,[relative])
                     target.write_text(original)
 
     def test_bootstrap_branding_exception_keeps_network_and_substitutions_strict(self):
@@ -239,14 +369,14 @@ class UpgradeTests(unittest.TestCase):
                                   ('env','cdnRoot','https://changed.invalid/cdn'),('substitution','__default_title__','changed')]:
             with self.subTest(section=section,key=key):
                 changed=json.loads(original); changed[section][key]=value; target.write_text(json.dumps(changed))
-                with self.assertRaisesRegex(u.UpgradeError,'Dependencies'): self.up.compatibility(self.source)
+                with self.assertRaisesRegex(u.UpgradeError,'frozen runtime contract'): self.up.compatibility(self.source)
                 target.write_text(original)
 
     def test_repository_link_exception_does_not_extend_to_other_manifests(self):
         self.up.preflight()
         for tree,url in ((self.root,u.LEGACY_PACKAGE_REPOSITORY),(self.source,u.PACKAGE_REPOSITORY)):
-            (tree/'package.json').write_text(json.dumps({'repository':{'url':url}}))
-        with self.assertRaisesRegex(u.UpgradeError,'Dependencies'): self.up.compatibility(self.source)
+            (tree/'package.json').write_text(json.dumps({'packageManager':'pnpm@11.13.1','repository':{'url':url}}))
+        self.up.compatibility(self.source); self.assertEqual(self.up.dependency_changes,['package.json'])
 
     def test_judge_change_rejected(self):
         self.up.preflight(); (self.source/'apps/judge/src/index.ts').write_text('different')

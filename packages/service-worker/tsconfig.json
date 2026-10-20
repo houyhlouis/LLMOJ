@@ -9,13 +9,13 @@
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
+    "types": ["node"],
     "noEmit": true,
     "strict": false,
     "module": "esnext",
     "strictBindCallApply": true,
-    "noFallthroughCasesInSwitch": false,
-    "baseUrl": "./"
+    "noFallthroughCasesInSwitch": false
   },
   "include": ["."],
   "exclude": ["node_modules", "dist"]

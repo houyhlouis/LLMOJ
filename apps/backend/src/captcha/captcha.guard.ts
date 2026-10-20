@@ -8,7 +8,10 @@ import { RequestWithSession } from "../auth/auth.middleware";
 
 @Injectable()
 export class CaptchaGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector, private readonly captchaService: CaptchaService) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly captchaService: CaptchaService
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<RequestWithSession>();

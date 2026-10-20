@@ -7,7 +7,10 @@ import { ConfigService } from "./config/config.service";
 @ApiTags("App")
 @Controller()
 export class AppController {
-  constructor(private readonly appService: AppService, private readonly configService: ConfigService) {}
+  constructor(
+    private readonly appService: AppService,
+    private readonly configService: ConfigService
+  ) {}
 
   @ApiOperation({
     summary: "Run maintaince tasks of the app. Should be executed by cron."

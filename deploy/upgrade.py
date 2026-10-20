@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Conservative, dependency-preserving upgrades of official all/web installations.
+"""Conservative upgrades of official all/web installations.
 
 No installer, configuration generator, rootfs builder, or automatic schema sync is
-run. Database migration is restricted to frozen additive registration/community
-contracts. A rollback never restores a stale SQL dump over user data.
+run. Changed dependencies are installed from the target's lockfile into the staged
+copy and switched with the code. Database migration is restricted to frozen
+additive registration/community contracts. A rollback never restores a stale SQL
+dump over user data.
 """
 import argparse
 import contextlib
@@ -50,6 +52,17 @@ LEGACY_PACKAGE_DESCRIPTIONS = {
 BOOTSTRAP_SETTINGS = 'packages/bootstrap-config/settings.json'
 SKIP = {'.git', 'node_modules', '__pycache__', 'dist', 'build', 'lib', '.cache', '.vite'}
 PERSISTENT = {'config', 'runtime', 'data', 'logs', 'backups', 'release', 'public', 'node_modules', '.git', 'changes'}
+# Of the persistent entries, the ones an upgrade replaces (and a rollback restores): the built frontend always, the
+# installed dependencies when the target changes them.
+SWITCHED = {'public', 'node_modules'}
+# The workspace's dependency declarations. An upgrade that changes them installs the target's lockfile, frozen, into
+# the staged copy and switches the installed dependencies with the code.
+DEPENDENCY_FILES = ('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc')
+# Configuration of the type checker, linter and formatter, which a toolchain update may change in any package. The
+# staged build checks what it configures.
+TOOLING_CONFIGURATION = re.compile(r'(?:^|/)(?:tsconfig(?:\.[\w-]+)?\.json|eslint\.config\.m?js|\.prettierrc(?:\.json)?)$')
+# Projects whose dependencies an installation runs or ships: summarized in the plan.
+DEPLOYED_PROJECTS = ('apps/backend', 'apps/judge', 'packages/frontend', 'packages/judge-protocol', 'packages/simple-sandbox')
 GUARD = '[Service]\nEnvironment=LIBREOJ_SCHEMA_SYNC=0\n'
 GUARD_NAME = '90-libreoj-schema-sync.conf'
 SERVICES = ('mariadb', 'redis', 'minio', 'backend', 'nginx')
@@ -93,6 +106,13 @@ JUDGE_ACCOUNT = 'libreoj-judge'
 NOLOGIN = ('/usr/sbin/nologin', '/sbin/nologin', '/bin/false', '/usr/bin/false')
 # Where the staged judge appears to its self-test: the staging directory itself is in the private backups.
 SELF_TEST_STAGE = '/run/libreoj-judge-self-test/stage'
+# The staged backend reads the installed configuration as it would at startup. Nothing is printed: the configuration
+# holds credentials.
+BACKEND_CONFIGURATION_CHECK = (
+    'try { const backend = require("node:module").createRequire(process.argv[1]); backend("reflect-metadata"); '
+    'const { ConfigService } = backend("./dist/config/config.service.js"); new ConfigService(); } '
+    'catch { process.exitCode = 1; }'
+)
 COMMUNITY_PERMISSIONS = (
     'ViewTeam', 'CreateTeam', 'ManageTeams', 'FakeSubmission',
     'ViewHack', 'CreateHack', 'ManageHack', 'CreateSelfEval'
@@ -159,7 +179,7 @@ def community_runtime_transition(source, before, after, deployed_by_upgrade=Fals
     """
     contract_path = Path(source)/'deploy/community-runtime-contract.json'
     if not contract_path.is_file() or contract_path.is_symlink() or contract_path.stat().st_size > 32768:
-        fail('Dependencies changed without the frozen community runtime contract')
+        fail('Shared packages changed outside the frozen runtime contract (no community runtime contract)')
     if digest(contract_path) != COMMUNITY_RUNTIME_CONTRACT_SHA256:
         fail('Community runtime contract differs from the reviewed frozen digest')
     try:
@@ -202,6 +222,58 @@ def community_runtime_transition(source, before, after, deployed_by_upgrade=Fals
 
 def runtime_source(relative):
     return relative.startswith(RUNTIME_SOURCE_PREFIXES) and Path(relative).name != 'package.json'
+
+
+def dependency_file(relative):
+    return relative in DEPENDENCY_FILES or relative.endswith('/package.json')
+
+
+def lockfile(path):
+    """The resolved packages of a pnpm lockfile, and each project's direct dependencies as {(project, name): version}."""
+    import yaml
+    try:
+        with Path(path).open() as stream:
+            data = yaml.load(stream, Loader=getattr(yaml, 'CSafeLoader', yaml.SafeLoader))
+    except (OSError, UnicodeError, yaml.YAMLError):
+        fail('Invalid pnpm lockfile')
+    if not isinstance(data, dict) or not isinstance(data.get('packages', {}), dict) or not isinstance(data.get('importers', {}), dict):
+        fail('Invalid pnpm lockfile')
+    direct = {}
+    for project, entry in (data.get('importers') or {}).items():
+        for kind in ('dependencies', 'devDependencies', 'optionalDependencies'):
+            for name, spec in ((entry or {}).get(kind) or {}).items():
+                version = spec.get('version') if isinstance(spec, dict) else spec
+                # Drop the peer-dependency suffix: 11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)
+                direct[(project, name)] = str(version).split('(')[0]
+    return {str(key).split('(')[0] for key in data.get('packages') or {}}, direct, str(data.get('lockfileVersion'))
+
+
+def allowed_builds(path):
+    """Packages whose install scripts the workspace allows to run (pnpm-workspace.yaml allowBuilds)."""
+    import yaml
+    try:
+        data = yaml.safe_load(Path(path).read_text()) if Path(path).is_file() else {}
+    except (OSError, UnicodeError, yaml.YAMLError):
+        fail('Invalid pnpm workspace file')
+    builds = (data or {}).get('allowBuilds') or {}
+    return sorted(name for name, allowed in builds.items() if allowed is True) if isinstance(builds, dict) else []
+
+
+def dependency_summary(before, after):
+    """What a dependency change installs, for the plan: package counts and the deployed projects' direct changes."""
+    old_packages, old_direct, _ = lockfile(Path(before)/'pnpm-lock.yaml')
+    new_packages, new_direct, _ = lockfile(Path(after)/'pnpm-lock.yaml')
+    changes = []
+    for project, name in sorted(set(old_direct) | set(new_direct)):
+        if project not in DEPLOYED_PROJECTS:
+            continue
+        old, new = old_direct.get((project, name)), new_direct.get((project, name))
+        if old != new:
+            changes.append(f'{project}: {name} {old or "(new)"} -> {new or "(removed)"}')
+    builds = allowed_builds(Path(after)/'pnpm-workspace.yaml')
+    return {'packages': len(new_packages), 'added': len(new_packages - old_packages), 'removed': len(old_packages - new_packages),
+            'directChanges': changes, 'buildScripts': builds,
+            'buildScriptsChanged': builds != allowed_builds(Path(before)/'pnpm-workspace.yaml')}
 
 
 def protocol_enums(text):
@@ -401,6 +473,7 @@ class Upgrade:
         self.stage = None
         self.paused = False
         self.runtime_changes = []
+        self.dependency_changes = []
         self.native_rebuild = []
         self.sandbox_changed = False
         self.launcher = False
@@ -513,7 +586,7 @@ class Upgrade:
             fail('Custom database views, triggers, routines or events require manual upgrade')
         self.database_bytes = int(self.sql("SELECT COALESCE(SUM(DATA_LENGTH+INDEX_LENGTH),0) FROM information_schema.TABLES WHERE TABLE_SCHEMA='libreoj'"))
         return {'role': self.role, 'prefix': str(self.root), 'node': self.node_version, 'pnpm': self.pnpm_version,
-                'services': self.states, 'databaseBytes': self.database_bytes, 'scope': 'dependency/native-preserving code + frozen community/contest/permission schema + reviewed Hack/SelfEval runtime + verified data migration'}
+                'services': self.states, 'databaseBytes': self.database_bytes, 'scope': 'code and locked dependency changes on the pinned Node/pnpm + frozen community/contest/permission schema + reviewed Hack/SelfEval runtime + verified data migration'}
 
     def deployed_by_upgrade(self):
         """Whether the installed source is exactly what one of this installation's completed upgrades deployed."""
@@ -546,18 +619,26 @@ class Upgrade:
         old_dependencies = {name: compatibility_digest(name, self.root/name) for name in old_map if shared(name)}
         changed = {name for name in set(source_dependencies) | set(old_dependencies)
                    if source_dependencies.get(name) != old_dependencies.get(name)}
+        # Dependency changes are installed from the target's lockfile and verified like code: the whole staged build,
+        # every native addon and the sandbox are rebuilt and tested with them.
+        self.dependency_changes = sorted(name for name in changed if dependency_file(name))
+        changed -= set(self.dependency_changes)
+        tooling = {name for name in changed if TOOLING_CONFIGURATION.search(name)}
+        changed -= tooling
         approved_runtime = (community_runtime_transition(source, old_map, source_map, self.deployed_by_upgrade())
                             if changed else set())
         runtime_changes = changed - approved_runtime
         if any(not runtime_source(name) for name in runtime_changes):
-            fail('Dependencies, infrastructure or unsupported shared packages changed outside the frozen runtime contract')
+            fail('Infrastructure or unsupported shared packages changed outside the frozen runtime contract')
         if approved_runtime and self.role != 'all':
             fail('The new Hack/SelfEval runtime requires an all installation; remote judges need a separately coordinated upgrade')
-        self.runtime_changes = sorted(runtime_changes)
+        if self.dependency_changes:
+            self.check_dependencies(source)
+        self.runtime_changes = sorted(runtime_changes | {name for name in tooling if runtime_source(name)})
         # A web installation runs no local judge or sandbox, so there is nothing native to rebuild.
         self.native_rebuild = sorted(package for package, native in NATIVE_PACKAGES.items()
-                                     if self.role == 'all' and any(name.startswith(native['inputs']) for name in runtime_changes))
-        self.sandbox_changed = self.role == 'all' and any(name.startswith('packages/simple-sandbox/') for name in runtime_changes)
+                                     if self.role == 'all' and (self.dependency_changes or any(name.startswith(native['inputs']) for name in runtime_changes)))
+        self.sandbox_changed = self.role == 'all' and (bool(self.dependency_changes) or any(name.startswith('packages/simple-sandbox/') for name in runtime_changes))
         self.launcher = (source/LAUNCHER).is_file()
         protocol = 'packages/judge-protocol/src/index.ts'
         if protocol in source_map and protocol in old_map:
@@ -574,10 +655,65 @@ class Upgrade:
             fail('Target backend cannot disable automatic schema synchronization')
         return source_map
 
+    def check_dependencies(self, source):
+        """A dependency change may update packages, but not the pinned toolchain that installs and runs them."""
+        try:
+            manifest = json.loads((source/'package.json').read_text())
+        except (OSError, UnicodeError, ValueError):
+            fail('Invalid source metadata in dependency compatibility check')
+        if not isinstance(manifest, dict) or manifest.get('packageManager') != 'pnpm@'+self.pnpm_version:
+            fail(say('Target pnpm version differs; toolchain upgrades require a separate procedure',
+                     '目标 pnpm 版本不同；工具链升级需要单独的流程'))
+        _, _, old_format = lockfile(self.root/'pnpm-lock.yaml')
+        _, _, new_format = lockfile(source/'pnpm-lock.yaml')
+        if new_format != old_format:
+            fail(say('Target lockfile format differs from the installed pnpm\'s', '目标锁文件格式与已安装的 pnpm 不同'))
+
+    def install_dependencies(self, env, log):
+        """Install the target's lockfile, frozen, into the staged copy of the dependencies. Packages come from the
+        registry (or the store) and are checked against the lockfile's integrity hashes; only the packages the
+        workspace's allowBuilds lists run install scripts."""
+        self.host.run([self.node, self.pnpm, 'install', '--frozen-lockfile', '--store-dir', self.root/'runtime/pnpm-store',
+                       '--config.confirmModulesPurge=false'], input=b'', cwd=self.stage, env=env, output=log, error_output=log,
+                      timeout=3600, umask=0o022)
+
+    def relocate_dependencies(self):
+        """pnpm writes the absolute path it installs to into its command shims (node_modules/.bin) and its workspace
+        state. The staged dependencies are switched into the installation, so point those at it."""
+        old, new = str(self.stage).encode(), str(self.root).encode()
+        for directory, dirs, files in os.walk(self.stage, followlinks=False):
+            current = Path(directory)
+            if current.name == '.bin' and current.parent.name == 'node_modules':
+                names = files
+            elif current == self.stage/'node_modules':
+                names = [name for name in files if name == '.pnpm-workspace-state-v1.json']
+            else:
+                continue
+            for name in names:
+                path = current/name
+                st = path.lstat()
+                if not stat.S_ISREG(st.st_mode):
+                    continue
+                data = path.read_bytes()
+                if old not in data:
+                    continue
+                # A new file: never write through a hard link into the package store
+                fd, temporary = tempfile.mkstemp(prefix='.relocate-', dir=current)
+                try:
+                    with os.fdopen(fd, 'wb') as stream:
+                        stream.write(data.replace(old, new))
+                    os.chmod(temporary, stat.S_IMODE(st.st_mode))
+                    os.replace(temporary, path)
+                finally:
+                    Path(temporary).unlink(missing_ok=True)
+
     def check_space(self, source):
         def size(path):
             return sum(p.stat().st_size for p in path.rglob('*') if p.is_file() and not p.is_symlink())
         estimate = sum(size(self.root/name) for name in ('apps', 'packages', 'node_modules', 'public')) + sum(p.stat().st_size for _, p in source_files(source)) + self.database_bytes*4 + 2*GIB
+        if self.dependency_changes:
+            # New packages in the store and in the staged dependencies; the old ones stay for a rollback.
+            estimate += 2*GIB
         if shutil.disk_usage(self.root).free < estimate:
             fail(f'Insufficient free space: at least {estimate//(1024**2)} MiB required for staging and backups')
         return estimate
@@ -624,10 +760,11 @@ class Upgrade:
             (self.backup/'ai-master.key').chmod(0o600)
         self.manifest = {'version': 1, 'prefix': str(self.root), 'provenance': provenance, 'status': 'building', 'states': self.states,
                          'config': self.config_before, 'aiMasterKeySha256': self.key_before, 'unitHashes': self.unit_fingerprint,
-                         'guardBefore': self.guard_before, 'entries': [], 'port': self.port}
+                         'guardBefore': self.guard_before, 'entries': [], 'port': self.port, 'dependencyChanges': self.dependency_changes}
         self.save()
         self.build()
         self.make_publish_readable()
+        self.check_backend_configuration()
         self.assert_preserved()
         # External databases can reference this instance; these incoming keys are
         # absent from a restored clone, so audit the live schema read-only first.
@@ -644,6 +781,8 @@ class Upgrade:
                    npm_config_nodedir=str(self.root/'runtime/node'))
         fd = os.open(self.backup/'build.log', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, 'wb') as log:
+            if self.dependency_changes:
+                self.install_dependencies(env, log)
             commands = [[self.node, self.pnpm, '--filter', '@libreoj/judge-protocol', 'run', 'build']]
             if self.role == 'all':
                 if self.sandbox_changed:
@@ -666,6 +805,8 @@ class Upgrade:
             ])
             for command in commands:
                 self.host.run(command, cwd=self.stage, env=env, output=log, error_output=log, timeout=1800, umask=0o022)
+        if self.dependency_changes:
+            self.relocate_dependencies()
         if not (self.stage/'apps/backend/dist/main.js').is_file() or not (self.stage/'public/index.html').is_file() or not (self.stage/'public/offline-manifest.json').is_file():
             fail('Build did not produce required artifacts')
         for package in self.native_rebuild:
@@ -682,6 +823,17 @@ class Upgrade:
                 fail('Frontend asset manifest integrity check failed')
         # Runtime paths remain at the installation prefix; stage dependencies are
         # temporary copies. No generated service or private configuration is used.
+
+    def check_backend_configuration(self):
+        """Whether the new backend accepts the installed backend.yaml, which a dependency change (a stricter validator)
+        could alter. Checked before the maintenance window, so a refusal leaves the site running."""
+        env = {'PATH': str(self.root/'runtime/node/bin')+':/usr/bin:/bin', 'LIBREOJ_CONFIG_FILE': str(self.root/'config/backend.yaml')}
+        result = self.host.run([self.node, '-e', BACKEND_CONFIGURATION_CHECK, self.stage/'apps/backend/package.json'],
+                               check=False, env=env, cwd=self.stage/'apps/backend', timeout=120)
+        if result.returncode:
+            fail(say('The new backend refuses the installed config/backend.yaml (its contents are not shown); '
+                     'check it against the new release\'s configuration reference',
+                     '新版后端不接受已安装的 config/backend.yaml（不显示其内容）；请对照新版本的配置说明检查'))
 
     def make_publish_readable(self):
         # Match installer code permissions, never touching private backup/config.
@@ -841,7 +993,7 @@ class Upgrade:
                            '--property=WorkingDirectory='+str(self.stage/'apps/judge'),
                            self.node, self.stage/'deploy/sandbox/verify-installed.mjs', '--root', self.root,
                            '--sandbox', self.stage/'packages/simple-sandbox'], timeout=180)
-        if self.role == 'all' and self.runtime_changes and (self.stage/'apps/judge/self-test.mjs').is_file():
+        if self.role == 'all' and (self.runtime_changes or self.dependency_changes) and (self.stage/'apps/judge/self-test.mjs').is_file():
             # Every language compiled and run through the staged judge and sandbox, and the syscall filter probed.
             # The judge runs as its own account, which can't enter the private backups: the unit sees the staged
             # tree at another path.
@@ -874,10 +1026,13 @@ class Upgrade:
         names = sorted({rel.parts[0] for rel, _ in source_files(self.stage)} - PERSISTENT)
         names = [name for name in names if not name.startswith('.')] + [name for name in names if name.startswith('.')]
         names.append('public')
+        if self.dependency_changes:
+            # Last: the code switched before it already refers to these dependencies.
+            names.append('node_modules')
         old = self.backup/'previous'
         old.mkdir(mode=0o700)
         for name in names:
-            if not re.fullmatch(r'[A-Za-z0-9_.-]+', name) or name in PERSISTENT-{'public'}:
+            if not re.fullmatch(r'[A-Za-z0-9_.-]+', name) or name in PERSISTENT-SWITCHED:
                 fail('Unsafe deployment entry')
             record = {'name': name, 'hadOld': (self.root/name).exists(), 'oldMoved': False, 'newMoved': False}
             self.manifest['entries'].append(record)
@@ -1105,7 +1260,7 @@ class Upgrade:
         retired.mkdir(mode=0o700, exist_ok=True)
         for record in reversed(self.manifest['entries']):
             name = record['name']
-            if not re.fullmatch(r'[A-Za-z0-9_.-]+', name) or name in ('.', '..') or name in PERSISTENT-{'public'}:
+            if not re.fullmatch(r'[A-Za-z0-9_.-]+', name) or name in ('.', '..') or name in PERSISTENT-SWITCHED:
                 fail('Unsafe rollback manifest entry')
             # Presence detects a crash between rename and manifest fsync.
             if (previous/name).exists():
@@ -1136,7 +1291,7 @@ def validate_manifest(manifest):
         if not isinstance(entry, dict):
             fail('Invalid rollback manifest entry')
         name = entry.get('name', '')
-        if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_.-]+', name) or name in ('.', '..') or name in PERSISTENT-{'public'} or name in seen:
+        if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_.-]+', name) or name in ('.', '..') or name in PERSISTENT-SWITCHED or name in seen:
             fail('Unsafe rollback manifest entry')
         if any(not isinstance(entry.get(key), bool) for key in ('hadOld', 'oldMoved', 'newMoved')):
             fail('Invalid rollback manifest progress')
@@ -1214,6 +1369,10 @@ def main(argv=None):
             fail('Local source digest differs from the supplied trusted release digest')
         upgrade.compatibility(source)
         info['runtimeChanges'] = len(upgrade.runtime_changes)
+        if upgrade.dependency_changes:
+            info['dependencies'] = {'changedFiles': upgrade.dependency_changes, **dependency_summary(upgrade.root, source),
+                                    'install': say('from the npm registry into the staged copy; the installed dependencies are kept for a rollback',
+                                                   '从 npm 仓库安装到暂存副本；已安装的依赖保留以便回滚')}
         info['nativeRebuild'] = upgrade.native_rebuild
         if upgrade.judge_account():
             info['judgeAccount'] = {'exists': JUDGE_ACCOUNT, 'create': f'{JUDGE_ACCOUNT} (created by the upgrade)'}[upgrade.judge_account()]

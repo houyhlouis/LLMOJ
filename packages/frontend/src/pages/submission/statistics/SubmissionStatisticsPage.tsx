@@ -96,8 +96,8 @@ let SubmissionStatisticsPage: React.FC<SubmissionStatisticsPageProps> = props =>
     props.type === SubmissionStatisticsType.Fastest
       ? "timeUsed"
       : props.type === SubmissionStatisticsType.MinMemory
-      ? "memoryUsed"
-      : null;
+        ? "memoryUsed"
+        : null;
 
   return (
     <>

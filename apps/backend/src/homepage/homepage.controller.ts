@@ -144,9 +144,8 @@ export class HomepageController {
     const settings = await this.homepageService.getSettings();
 
     const annnouncementDiscussionIds = Object.values(settings.annnouncements.items).flat();
-    const annnouncementDiscussions = await this.discussionService.findDiscussionsByExistingIds(
-      annnouncementDiscussionIds
-    );
+    const annnouncementDiscussions =
+      await this.discussionService.findDiscussionsByExistingIds(annnouncementDiscussionIds);
 
     return {
       annnouncementDiscussions: await Promise.all(
@@ -171,9 +170,8 @@ export class HomepageController {
       };
 
     const annnouncementDiscussionIds = Object.values(request.settings.annnouncements.items).flat();
-    const annnouncementDiscussions = await this.discussionService.findDiscussionsByExistingIds(
-      annnouncementDiscussionIds
-    );
+    const annnouncementDiscussions =
+      await this.discussionService.findDiscussionsByExistingIds(annnouncementDiscussionIds);
     const existingIds = new Set(annnouncementDiscussions.map(discussion => discussion.id));
 
     const nonexistingId = annnouncementDiscussionIds.find(id => !existingIds.has(id));

@@ -190,7 +190,7 @@ export class ContestService {
         r.penalty,
         ...result.problems.map(p => {
           const x = r.problems[p.id];
-          return x ? x.score ?? (x.accepted ? "AC" : `-${x.wrong}`) : "";
+          return x ? (x.score ?? (x.accepted ? "AC" : `-${x.wrong}`)) : "";
         })
       ])
     ];

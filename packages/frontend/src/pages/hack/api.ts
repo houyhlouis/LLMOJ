@@ -13,7 +13,7 @@ export const hackStatuses = [
   "SystemError",
   "Canceled"
 ] as const;
-export type HackStatus = typeof hackStatuses[number];
+export type HackStatus = (typeof hackStatuses)[number];
 export interface HackRecord {
   id: number;
   status: HackStatus;
@@ -52,7 +52,7 @@ export const statusText = (status: HackStatus) =>
     ConfigurationError: tr("评测配置不完整", "Configuration error"),
     SystemError: tr("系统错误", "System error"),
     Canceled: tr("已取消", "Canceled")
-  }[status] || status);
+  })[status] || status;
 export const submissionUrl = (record: Pick<HackRecord, "contestId" | "submissionId">) =>
   record.contestId ? `/contest/${record.contestId}/submission/${record.submissionId}` : `/s/${record.submissionId}`;
 export const problemUrl = (record: Pick<HackRecord, "contestId" | "contestProblemId" | "problemId">) =>

@@ -1,5 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, Index } from "typeorm";
 
+import { JsonColumn } from "../database/json-column";
+
 @Entity("judge_client")
 export class JudgeClientEntity {
   @PrimaryGeneratedColumn()
@@ -12,7 +14,7 @@ export class JudgeClientEntity {
   @Index({ unique: true })
   key: string;
 
-  @Column({ type: "json" })
+  @JsonColumn()
   allowedHosts: string[];
 
   // A draining judge client is sent no new tasks; it finishes the ones it has.

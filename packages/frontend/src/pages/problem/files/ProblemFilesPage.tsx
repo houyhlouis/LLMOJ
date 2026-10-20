@@ -836,8 +836,8 @@ let ProblemFilesPage: React.FC<ProblemFilesPageProps> = props => {
               "Archive limits exceeded: up to 4,096 files, 256 MiB per file, and 8 GiB compressed / extracted, within the problem's remaining quota."
             )
           : errors[code]
-          ? aiText(...errors[code])
-          : _(`.error.${code}`);
+            ? aiText(...errors[code])
+            : _(`.error.${code}`);
         throw new Error(detail);
       }
       const imported = transformResponseToFileTableItems(result.response.importedFiles || []);

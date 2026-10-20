@@ -54,7 +54,11 @@ export class ExecutionScheduler {
 
   private readonly waiting: Waiting[] = [];
 
-  constructor(readonly slots: number, memoryBudget?: number, aiSlots?: number) {
+  constructor(
+    readonly slots: number,
+    memoryBudget?: number,
+    aiSlots?: number
+  ) {
     this.memoryBudget = memoryBudget ?? defaultMemoryBudget();
     this.aiSlots = Math.min(slots, aiSlots ?? defaultAiSlots(slots));
     this.freeSlots = slots;

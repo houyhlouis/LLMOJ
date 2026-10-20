@@ -10,11 +10,12 @@
 
 - 由安装器安装、模式为 `all` 或 `web`、使用默认服务布局以及本机 MariaDB、Redis 和 MinIO 的站点。
 - 网站代码、评测机和沙箱的修改。在 `all` 安装中，有改动的沙箱或评测机会在切换前重新构建并测试（见[评测机自检](Judge-Configuration.zh-CN.md#沙箱系统调用过滤器与自检)）。
+- 依赖和锁文件的修改：见[依赖变更](#依赖变更)。
 - LLMOJ 自身功能带来的数据库修改，每一项都会与预期的确切形式核对。完整列表见[功能升级](Community-Upgrade.zh-CN.md)。
 
 以下情况会被拒绝：
 - 用 Git 管理的安装、自定义布局、自定义数据库连接、后端或评测机的 `EnvironmentFile` 覆盖，或自定义的 AI 目录；
-- 无法识别的数据库差异，以及依赖、锁文件或 Node.js、pnpm 版本（24.21.0 和 11.13.1）的变化；
+- 无法识别的数据库差异，以及 Node.js、pnpm 版本（24.21.0 和 11.13.1，见[依赖与工具链](Dependencies.zh-CN.md)）的变化；
 - 删除或修改评测协议或数据库已在使用的取值（只能在末尾追加新取值）。
 
 这些情况需要单独计划迁移。不要通过删除数据或重新安装来绕过拒绝。
@@ -45,7 +46,7 @@ sudo bash /tmp/llmoj-upgrade.zh-CN.sh --prefix /opt/LLMOJ --plan
 
 之后升级器会：
 1. 获取维护锁（期间不能进行备份和评测扩缩容），检查服务和可用磁盘空间；
-2. 使用独立的依赖副本构建新版本并核对文件；
+2. 使用独立的依赖副本构建新版本（依赖有变化时先安装新依赖），核对文件，并检查新后端接受你的 `config/backend.yaml`；
 3. 备份配置、AI 主密钥和数据库，把备份导入临时数据库，并在其中测试所有结构和数据修改；
 4. 停止 Nginx、评测机和后端，重新备份数据库并再次检查；
 5. 切换到新文件并执行数据库修改；
@@ -53,11 +54,21 @@ sudo bash /tmp/llmoj-upgrade.zh-CN.sh --prefix /opt/LLMOJ --plan
 
 评测机以账户 `libreoj-judge` 运行，只有其[沙箱启动器](Judge-Configuration.zh-CN.md#评测机账户与沙箱启动器)以 root 运行。在 `all` 安装上，如果该账户还不存在，升级器会在评测机自检之前创建它。升级计划中显示为 `judgeAccount`。同名账户如果可以登录，升级器会拒绝。回滚会保留该账户；旧版评测机以 root 运行，不使用它。
 
-备份和构建日志保存在 `<prefix>/backups/upgrade/<UTC 时间>-<随机数>/`，升级器会输出该路径。其中包含密钥，请妥善保管；不再需要时请自行删除旧备份，升级器从不删除数据或备份。升级完成后，它只删除构建用的依赖副本（`staging/node_modules`，约 1 GiB），之后没有任何操作会用到它，回滚也不会。此版本之前的升级备份中仍保留该副本；[doctor](Operations-Configuration.zh-CN.md#运行-doctor) 会告诉你有多少份。对于已完成的升级，可以删除它：`sudo rm -rf /opt/LLMOJ/backups/upgrade/<UTC 时间>-<随机数>/staging/node_modules`。
+备份和构建日志保存在 `<prefix>/backups/upgrade/<UTC 时间>-<随机数>/`，升级器会输出该路径。其中包含密钥，请妥善保管；不再需要时请自行删除旧备份，升级器从不删除数据或备份。升级完成后，它只删除构建用的依赖副本（`staging/node_modules`，约 1 GiB），之后没有任何操作会用到它，回滚也不会。如果这次升级更改了依赖，这份副本会成为已安装的依赖，原来的依赖则保留在 `previous/node_modules` 中，供回滚使用。此版本之前的升级备份中仍保留该副本；[doctor](Operations-Configuration.zh-CN.md#运行-doctor) 会告诉你有多少份。对于已完成的升级，可以删除它：`sudo rm -rf /opt/LLMOJ/backups/upgrade/<UTC 时间>-<随机数>/staging/node_modules`。
 
 升级器会安装 `/etc/systemd/system/libreoj-backend.service.d/90-libreoj-schema-sync.conf`，其中设置 `LIBREOJ_SCHEMA_SYNC=0`，使后端永远不会自行修改数据库结构；这些修改由升级器明确执行。你的其他 drop-in、Nginx 配置、凭据和评测容量都保持不变。
 
 在网站中保存的设置（例如[注册模式](Registration-Approval.zh-CN.md)和首页内容）都会保留。
+
+## 依赖变更
+
+新版本修改了 `package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml` 或 `.npmrc` 时，升级器把新的锁文件安装（frozen：严格使用锁定的版本，并校验哈希）到构建用的依赖副本中。新的软件包从 npm 仓库下载到 `<prefix>/runtime/pnpm-store`，因此服务器需要能访问 `registry.npmjs.org`。只有 `pnpm-workspace.yaml` 的 `allowBuilds` 允许的软件包才会运行安装脚本。
+
+计划中以 `dependencies` 显示这项变更：新锁文件中的软件包数量、新增和删除的数量，后端、评测机、前端、评测协议和沙箱每个有变化的直接依赖，以及允许运行安装脚本的软件包（`buildScriptsChanged` 表示该列表是否有变化）。
+
+依赖有变化时，所有原生模块都会重新构建，并运行沙箱检查和评测机自检，与沙箱有改动时相同。新依赖在维护时段内随代码一起切换。回滚（自动回滚或 `--rollback`）会从备份中恢复原来的依赖。
+
+Node.js 和 pnpm 的版本不能以这种方式更改。如果升级的 `packageManager` 指定了其他 pnpm 版本，或其安装程序固定了其他 Node.js 版本，升级会被拒绝。受支持的版本见[依赖与工具链](Dependencies.zh-CN.md)。
 
 ## 从本地源码升级
 

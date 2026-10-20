@@ -116,7 +116,8 @@ const PreferenceView: React.FC<PreferenceViewProps> = props => {
       },
       code: {
         defaultLanguage: defaultCodeLanguage,
-        defaultCompileAndRunOptions: defaultCompileAndRunOptions
+        // Every option's value is a string
+        defaultCompileAndRunOptions: defaultCompileAndRunOptions as Record<string, string>
       }
     };
 
@@ -172,7 +173,8 @@ return 1234567890;`;
         fluid
         value={systemLocale || "DEFAULT"}
         onChange={(e, { value }) => (
-          setModified(true), setSystemLocale((value === "DEFAULT" ? null : value) as Locale)
+          setModified(true),
+          setSystemLocale((value === "DEFAULT" ? null : value) as Locale)
         )}
         options={[
           {
@@ -210,7 +212,8 @@ return 1234567890;`;
         fluid
         value={contentLocale || "DEFAULT"}
         onChange={(e, { value }) => (
-          setModified(true), setContentLocale((value === "DEFAULT" ? null : value) as Locale)
+          setModified(true),
+          setContentLocale((value === "DEFAULT" ? null : value) as Locale)
         )}
         options={[
           {
@@ -340,7 +343,7 @@ return 1234567890;`;
         step={0.5}
         onChange={(e, { value }) => {
           const x = Number(value);
-          if (x >= 5 && x <= 20) setModified(true), setCodeFontSize(x);
+          if (x >= 5 && x <= 20) (setModified(true), setCodeFontSize(x));
         }}
       />
       <Header className={style.header} size="tiny" content={_(".appearance.code_line_height")} />
@@ -354,7 +357,7 @@ return 1234567890;`;
         step={0.05}
         onChange={(e, { value }) => {
           const x = Number(value);
-          if (x >= 1 && x <= 2) setModified(true), setCodeLineHeight(x);
+          if (x >= 1 && x <= 2) (setModified(true), setCodeLineHeight(x));
         }}
       />
       <Checkbox

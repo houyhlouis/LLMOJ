@@ -169,8 +169,8 @@ export class ProblemController {
         const problem = matchId
           ? await this.problemService.findProblemById(matchId)
           : matchDisplayId
-          ? await this.problemService.findProblemByDisplayId(matchDisplayId)
-          : null;
+            ? await this.problemService.findProblemByDisplayId(matchDisplayId)
+            : null;
         if (
           problem &&
           (request.difficultyMin == null ||

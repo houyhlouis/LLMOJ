@@ -542,10 +542,10 @@ export let DiscussionEditor = observer<DiscussionEditorProps, HTMLDivElement>(
                         ? _(".placeholder.update_discussion")
                         : _(".placeholder.update_reply")
                       : isNew
-                      ? isDiscussion
-                        ? _(".placeholder.add_discussion")
-                        : _(".placeholder.add_reply")
-                      : props.placeholder
+                        ? isDiscussion
+                          ? _(".placeholder.add_discussion")
+                          : _(".placeholder.add_reply")
+                        : props.placeholder
                   }
                   value={props.content}
                   onChange={(e, { value }) => {
@@ -831,9 +831,9 @@ let DiscussionViewPage: React.FC<DiscussionViewPageProps> = props => {
   }
 
   async function onSetPublic(type: "Discussion" | "DiscussionReply", id: number, isPublic: boolean) {
-    const { requestError, response } = await (type === "Discussion"
-      ? api.discussion.setDiscussionPublic
-      : api.discussion.setDiscussionReplyPublic)({
+    const { requestError, response } = await (
+      type === "Discussion" ? api.discussion.setDiscussionPublic : api.discussion.setDiscussionReplyPublic
+    )({
       [type === "Discussion" ? "discussionId" : "discussionReplyId"]: id,
       isPublic
     } as any);
@@ -854,9 +854,9 @@ let DiscussionViewPage: React.FC<DiscussionViewPageProps> = props => {
   }
 
   async function onDelete(type: "Discussion" | "DiscussionReply", id: number) {
-    const { requestError, response } = await (type === "Discussion"
-      ? api.discussion.deleteDiscussion
-      : api.discussion.deleteDiscussionReply)({
+    const { requestError, response } = await (
+      type === "Discussion" ? api.discussion.deleteDiscussion : api.discussion.deleteDiscussionReply
+    )({
       [type === "Discussion" ? "discussionId" : "discussionReplyId"]: id
     } as any);
 
@@ -1041,8 +1041,8 @@ let DiscussionViewPage: React.FC<DiscussionViewPageProps> = props => {
               discussion.meta.replyCount === 0
                 ? ".reply_count_0"
                 : discussion.meta.replyCount === 1
-                ? ".reply_count"
-                : ".reply_count_s",
+                  ? ".reply_count"
+                  : ".reply_count_s",
               {
                 replyCount: discussion.meta.replyCount
               }

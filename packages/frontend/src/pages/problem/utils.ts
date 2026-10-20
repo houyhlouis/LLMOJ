@@ -17,8 +17,8 @@ export function getProblemUrl(
         ? `/p/${metaOrId}`
         : `/p/id/${metaOrId}`
       : (!use && metaOrId.displayId) || use === "displayId"
-      ? `/p/${metaOrId.displayId}`
-      : `/p/id/${metaOrId.id}`) + (subRoute ? `/${subRoute}` : "")
+        ? `/p/${metaOrId.displayId}`
+        : `/p/id/${metaOrId.id}`) + (subRoute ? `/${subRoute}` : "")
   );
 }
 
@@ -41,8 +41,8 @@ export function getProblemIdString(
       ? `${hideHashTagOnDisplayId ? "" : "#"}${metaOrId}`
       : `P${metaOrId}`
     : (!use && metaOrId.displayId) || use === "displayId"
-    ? `${hideHashTagOnDisplayId ? "" : "#"}${metaOrId.displayId}`
-    : `P${metaOrId.id}`;
+      ? `${hideHashTagOnDisplayId ? "" : "#"}${metaOrId.displayId}`
+      : `P${metaOrId.id}`;
 }
 
 export function getProblemDisplayName(

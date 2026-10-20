@@ -15,8 +15,8 @@ export class TeamController {
   @Get("list") list(
     @CurrentUser() user: UserEntity,
     @Query("mine") mine: string,
-    @Query("query") query = "",
-    @Query("page") page = "1"
+    @Query("query") query: string = "",
+    @Query("page") page: string = "1"
   ) {
     const value = Number(page);
     if (!Number.isSafeInteger(value) || value < 1 || value > 100000 || query.length > 200)

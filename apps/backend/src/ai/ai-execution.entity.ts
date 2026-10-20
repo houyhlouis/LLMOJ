@@ -2,6 +2,8 @@ import { Column, Entity, Index, PrimaryColumn } from "typeorm";
 
 import type { AiExecutionProgress } from "@libreoj/judge-protocol";
 
+import { JsonColumn } from "../database/json-column";
+
 export enum AiExecutionState {
   // Waiting for a judge machine
   Queued = "Queued",
@@ -32,19 +34,19 @@ export class AiExecutionEntity {
   state: AiExecutionState;
 
   // The stored files the request's sample files are
-  @Column({ type: "json" })
+  @JsonColumn()
   sampleFiles: { name: string; uuid: string }[];
 
   // The latest progress while it runs
-  @Column({ type: "json", nullable: true })
+  @JsonColumn({ nullable: true })
   progress: Pick<AiExecutionProgress, "phase" | "completed" | "total">;
 
   // The judge's final progress
-  @Column({ type: "json", nullable: true })
+  @JsonColumn({ nullable: true })
   result: AiExecutionProgress;
 
   // The files the judge was given upload forms for
-  @Column({ type: "json", nullable: true })
+  @JsonColumn({ nullable: true })
   uploads: { name: string; size: number }[];
 
   @Column({ type: "datetime", precision: 3 })

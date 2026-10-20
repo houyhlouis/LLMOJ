@@ -39,7 +39,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
@@ -68,7 +68,7 @@ jobs:
           python3 deploy/test/backup.test.py
           python3 deploy/test/doctor.test.py
           python3 deploy/test/verify-backup.test.py
-          node --test deploy/test/backup-keys.test.mjs
+          node --test deploy/test/backup-keys.test.mjs deploy/test/dependency-audit.test.mjs
           sudo python3 deploy/test/community-upgrade.test.py
           sudo python3 deploy/test/community-runtime-upgrade.test.py
       - name: Check Wiki export and navigation
@@ -134,7 +134,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.changes.outputs.native == 'true'
         with:
-          node-version: 24
+          node-version-file: .node-version
           cache: pnpm
       - if: steps.changes.outputs.native == 'true'
         run: sudo apt-get update && sudo apt-get install --yes libfmt-dev

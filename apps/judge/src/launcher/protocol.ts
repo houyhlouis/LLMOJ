@@ -8,7 +8,7 @@
  */
 
 export const CPU_AFFINITY_STRATEGIES = ["Compiler", "UserProgram", "Interactor", "Checker"] as const;
-export type CpuAffinityStrategyName = typeof CPU_AFFINITY_STRATEGIES[number];
+export type CpuAffinityStrategyName = (typeof CPU_AFFINITY_STRATEGIES)[number];
 
 export interface SandboxMountRequest {
   // A directory of the judge's: a task working directory, the binary cache, the data store or the AI output root

@@ -256,8 +256,8 @@ async function rawProviderRequest(
         signal?.aborted
           ? aiCancellationError(signal)
           : error instanceof AiError
-          ? error
-          : new AiError("PROVIDER_NETWORK_ERROR")
+            ? error
+            : new AiError("PROVIDER_NETWORK_ERROR")
       )
     );
     if (data !== null) req.write(data);

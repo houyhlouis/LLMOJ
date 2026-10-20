@@ -4,7 +4,7 @@ import { createHash } from "crypto";
 
 import { SandboxStatus } from "simple-sandbox";
 import objectHash from "object-hash";
-import LruCache from "lru-cache";
+import { LRUCache as LruCache } from "lru-cache";
 import winston from "winston";
 import { v4 as uuid } from "uuid";
 

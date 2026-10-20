@@ -6,7 +6,7 @@ LLMOJ 基于 [LibreOJ](https://github.com/libreoj/libreoj)，采用 MIT 许可�
 
 ## 工具链
 
-- Node.js 22.13 或更高版本（安装时使用 24.21.0），以及 `package.json` 中指定的 pnpm 11.13.1。
+- Node.js 24.21（`.node-version`；安装时严格使用 24.21.0），以及 pnpm 11.13.1（`package.json` 的 `packageManager`）。其他固定的版本、尚未升级的部分以及如何检查依赖的安全通告，见[依赖与工具链](wiki/Dependencies.zh-CN.md)。
 - 评测机的原生代码需要：amd64 上的 Linux、CMake、C++ 编译器和 libfmt。
 - 在沙箱中实际运行程序还需要：命名空间和 cgroup v2。
 
@@ -89,7 +89,7 @@ python3 deploy/test/install-flow.test.py
 python3 deploy/test/backup.test.py
 python3 deploy/test/doctor.test.py
 python3 deploy/test/verify-backup.test.py
-node --test deploy/test/backup-keys.test.mjs
+node --test deploy/test/backup-keys.test.mjs deploy/test/dependency-audit.test.mjs
 sudo python3 deploy/test/community-upgrade.test.py
 sudo python3 deploy/test/community-runtime-upgrade.test.py
 python3 deploy/test/wiki-export.test.py

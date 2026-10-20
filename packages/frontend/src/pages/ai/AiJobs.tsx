@@ -100,10 +100,10 @@ export default observer(function AiJobs({
                         {job.result.sourceSearch.status === "verified"
                           ? aiText("原题已核实", "Source verified")
                           : job.result.sourceSearch.status === "not_found"
-                          ? aiText("未找到可核实原题", "No verified source found")
-                          : job.result.sourceSearch.status === "not_configured"
-                          ? aiText("未配置搜索服务", "Search not configured")
-                          : aiText("原题检索", "Source search")}
+                            ? aiText("未找到可核实原题", "No verified source found")
+                            : job.result.sourceSearch.status === "not_configured"
+                              ? aiText("未配置搜索服务", "Search not configured")
+                              : aiText("原题检索", "Source search")}
                         {job.result.sourceSearch.searchCount > 0 &&
                           aiText(
                             `（${job.result.sourceSearch.searchCount} 次检索）`,

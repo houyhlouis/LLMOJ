@@ -1,6 +1,6 @@
 /** Stable stored names; NOI is the traditional OI format. */
 export const CONTEST_RULES = ["noi", "ioi", "acm", "strictioi"] as const;
-export type ContestRule = typeof CONTEST_RULES[number];
+export type ContestRule = (typeof CONTEST_RULES)[number];
 
 export interface ContestRuleOptions {
   hackEnabled?: boolean;

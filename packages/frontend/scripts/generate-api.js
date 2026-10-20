@@ -23,7 +23,7 @@ async function readApi() {
 // Formatted as the repository's files are, so the output can be compared with the committed client.
 async function write(file, code) {
   const options = await prettier.resolveConfig(path.join(defaultOutput, "index.ts"));
-  await fs.writeFile(path.join(output, file), prettier.format(code, { ...options, parser: "typescript" }));
+  await fs.writeFile(path.join(output, file), await prettier.format(code, { ...options, parser: "typescript" }));
 }
 
 const skipTags = ["App", "CORS"];

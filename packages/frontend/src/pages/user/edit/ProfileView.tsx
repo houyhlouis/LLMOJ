@@ -341,8 +341,8 @@ const ProfileView: React.FC<ProfileViewProps> = props => {
             avatarType === AvatarType.Gravatar
               ? email
               : avatarType === AvatarType.GitHub
-              ? _(".avatar.github.placeholder")
-              : _(".avatar.qq.placeholder")
+                ? _(".avatar.github.placeholder")
+                : _(".avatar.qq.placeholder")
           }
           error={avatarError}
           value={avatarKeyValue}

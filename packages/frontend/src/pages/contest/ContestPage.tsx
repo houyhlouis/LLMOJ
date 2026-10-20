@@ -117,8 +117,8 @@ function ContestPage({ initial, tab }: { initial: any; tab: string }) {
                             (detail.ownResults[p.id].status
                               ? contestStatusText(detail.ownResults[p.id].status)
                               : detail.ownResults[p.id].accepted
-                              ? "AC"
-                              : "—")}
+                                ? "AC"
+                                : "—")}
                         </Link>
                       ) : (
                         "—"
@@ -187,8 +187,8 @@ function ContestPage({ initial, tab }: { initial: any; tab: string }) {
                             {!x
                               ? "—"
                               : detail.contest.rule === "acm"
-                              ? `${x.accepted ? "+" : "−"}${x.wrong || ""}${x.accepted ? ` (${x.minutes})` : ""}`
-                              : x.score ?? "—"}
+                                ? `${x.accepted ? "+" : "−"}${x.wrong || ""}${x.accepted ? ` (${x.minutes})` : ""}`
+                                : (x.score ?? "—")}
                           </Table.Cell>
                         );
                       })}

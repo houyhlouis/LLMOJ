@@ -2,6 +2,8 @@ import { Entity, PrimaryGeneratedColumn, PrimaryColumn, Column, Index } from "ty
 
 import { HackStatus } from "@libreoj/judge-protocol";
 
+import { JsonColumn } from "../database/json-column";
+
 @Entity("hack")
 @Index("IDX_hack_list", ["contestId", "problemId", "hackerId", "status", "id"])
 export class HackEntity {
@@ -25,7 +27,7 @@ export class HackEntity {
 
   @Column({ type: "mediumtext" }) inputData: string;
 
-  @Column({ type: "json" }) snapshot: unknown;
+  @JsonColumn() snapshot: unknown;
 
   @Column({ type: "varchar", length: 64 }) targetFingerprint: string;
 
@@ -46,7 +48,7 @@ export class HackProblemEntity {
 
   @Column({ type: "integer" }) referenceSubmissionId: number;
 
-  @Column({ type: "json", nullable: true }) standardContent: unknown;
+  @JsonColumn({ nullable: true }) standardContent: unknown;
 
   @Column({ type: "varchar", length: 20 }) validatorLanguage: string;
 

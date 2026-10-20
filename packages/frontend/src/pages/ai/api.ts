@@ -576,7 +576,7 @@ export const actionName = (name: string) =>
     generate: aiText("运行生成器", "Run generator"),
     upload: aiText("保存数据", "Save test data"),
     samples: aiText("验证样例", "Validate samples")
-  }[name] ||
+  })[name] ||
   (/^compile-quality-/.test(name)
     ? aiText("编译对拍与对抗测试程序", "Compile differential and adversarial programs")
-    : name));
+    : name);

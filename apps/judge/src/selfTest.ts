@@ -227,7 +227,7 @@ async function runCase(testCase: SelfTestCase): Promise<string> {
   if (!(compileResult instanceof CompileResultSuccess)) {
     const { message } = compileResult;
     throw new Error(
-      `compilation failed: ${(typeof message === "string" ? message : message?.data ?? "").trim().slice(0, 500)}`
+      `compilation failed: ${(typeof message === "string" ? message : (message?.data ?? "")).trim().slice(0, 500)}`
     );
   }
   try {

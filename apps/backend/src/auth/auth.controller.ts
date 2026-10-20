@@ -506,13 +506,11 @@ export class AuthController {
     @CurrentUser() currentUser: UserEntity,
     @Body() request: ListUserSessionsRequestDto
   ): Promise<ListUserSessionsResponseDto> {
-    if (
-      !(
-        (currentUser &&
-          (request.username ? currentUser.username === request.username : currentUser.id === request.userId)) ||
-        (await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageUser))
-      )
-    )
+    if (!(
+      (currentUser &&
+        (request.username ? currentUser.username === request.username : currentUser.id === request.userId)) ||
+      (await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageUser))
+    ))
       return {
         error: ListUserSessionsResponseError.PERMISSION_DENIED
       };
@@ -542,12 +540,10 @@ export class AuthController {
     @CurrentUser() currentUser: UserEntity,
     @Body() request: RevokeUserSessionRequestDto
   ): Promise<RevokeUserSessionResponseDto> {
-    if (
-      !(
-        (currentUser && currentUser.id === request.userId) ||
-        (await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageUser))
-      )
-    )
+    if (!(
+      (currentUser && currentUser.id === request.userId) ||
+      (await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageUser))
+    ))
       return {
         error: RevokeUserSessionResponseError.PERMISSION_DENIED
       };

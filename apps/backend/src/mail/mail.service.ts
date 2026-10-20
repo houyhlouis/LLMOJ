@@ -2,7 +2,7 @@ import { join } from "path";
 
 import { Injectable } from "@nestjs/common";
 
-import nodemailer from "nodemailer";
+import { createTransport, Transporter } from "nodemailer";
 import ejs from "ejs";
 
 import { ConfigService } from "../config/config.service";
@@ -16,10 +16,10 @@ export enum MailTemplate {
 
 @Injectable()
 export class MailService {
-  private readonly transporter: nodemailer.Transporter;
+  private readonly transporter: Transporter;
 
   constructor(private readonly configService: ConfigService) {
-    this.transporter = nodemailer.createTransport(this.configService.config.services.mail.transport);
+    this.transporter = createTransport(this.configService.config.services.mail.transport);
   }
 
   private resolveTemplate(template: string, locale: string): string {

@@ -34,8 +34,8 @@ export async function extensionApi<T = any>(path: string, body?: unknown, confir
           ? "请先确认密码再进行此更改。"
           : "Confirm your password to make this change."
         : zh
-        ? "没有执行此操作的权限。"
-        : "Permission denied.",
+          ? "没有执行此操作的权限。"
+          : "Permission denied.",
       404: zh ? "内容不存在或无权访问。" : "Not found or unavailable.",
       409: zh ? "内容已更新，请刷新后重试。" : "Content changed. Reload and try again."
     };

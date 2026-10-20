@@ -294,12 +294,13 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
             {_(".header.user.permissions")}
           </Dropdown.Item>
         )}
-        {appState.currentUserHasPrivilege("ViewSite") && appState.currentUserHasPrivilege("ManageRegistrationReviews") && (
-          <Dropdown.Item as={Link} href="/registration-reviews">
-            <Icon name="users" />
-            {_(".header.user.registration_reviews")}
-          </Dropdown.Item>
-        )}
+        {appState.currentUserHasPrivilege("ViewSite") &&
+          appState.currentUserHasPrivilege("ManageRegistrationReviews") && (
+            <Dropdown.Item as={Link} href="/registration-reviews">
+              <Icon name="users" />
+              {_(".header.user.registration_reviews")}
+            </Dropdown.Item>
+          )}
         {appState.currentUserHasPrivilege("ManageAiConfiguration") && (
           <Dropdown.Item as={Link} href="/ai/configuration">
             <Icon name="settings" />

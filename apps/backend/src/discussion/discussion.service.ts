@@ -729,12 +729,12 @@ export class DiscussionService {
       operation === "newReply"
         ? UserPrivilegeType.ReplyDiscussion
         : operation === "discussion"
-        ? own
-          ? UserPrivilegeType.EditOwnDiscussion
-          : UserPrivilegeType.EditAnyDiscussion
-        : own
-        ? UserPrivilegeType.EditOwnReply
-        : UserPrivilegeType.ManageDiscussionReplies;
+          ? own
+            ? UserPrivilegeType.EditOwnDiscussion
+            : UserPrivilegeType.EditAnyDiscussion
+          : own
+            ? UserPrivilegeType.EditOwnReply
+            : UserPrivilegeType.ManageDiscussionReplies;
     if (!(await this.userPrivilegeService.permissionDecision(user, permission, true, manager)))
       throw new ForbiddenException();
   }
@@ -920,9 +920,10 @@ export class DiscussionService {
   }
 
   async addReaction(type: DiscussionReactionType, id: number, currentUser: UserEntity, emoji: string): Promise<void> {
-    await (type === DiscussionReactionType.Discussion
-      ? this.discussionReactionRepository
-      : this.discussionReplyReactionRepository
+    await (
+      type === DiscussionReactionType.Discussion
+        ? this.discussionReactionRepository
+        : this.discussionReplyReactionRepository
     )
       .createQueryBuilder()
       .insert()
@@ -941,9 +942,10 @@ export class DiscussionService {
     currentUser: UserEntity,
     emoji: string
   ): Promise<void> {
-    await (type === DiscussionReactionType.Discussion
-      ? this.discussionReactionRepository
-      : this.discussionReplyReactionRepository
+    await (
+      type === DiscussionReactionType.Discussion
+        ? this.discussionReactionRepository
+        : this.discussionReplyReactionRepository
     ).delete({
       [type === DiscussionReactionType.Discussion ? "discussionId" : "discussionReplyId"]: id,
       userId: currentUser.id,

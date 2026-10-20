@@ -8,7 +8,10 @@ const REDIS_LOCK_MAINTAINCE_TASKS = "maintaince-tasks";
 
 @Injectable()
 export class AppService {
-  constructor(private readonly lockService: LockService, private readonly fileService: FileService) {}
+  constructor(
+    private readonly lockService: LockService,
+    private readonly fileService: FileService
+  ) {}
 
   // TODO: Make the site read-only while running maintaince tasks.
   async runMaintainceTasks(): Promise<void> {

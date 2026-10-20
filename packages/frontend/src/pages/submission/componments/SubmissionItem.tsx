@@ -199,8 +199,8 @@ export const SubmissionHeaderMobile: React.FC<SubmissionHeaderMobileProps> = pro
                   props.importantField === "timeUsed"
                     ? ".columns.time"
                     : props.importantField === "memoryUsed"
-                    ? ".columns.memory"
-                    : ".columns.submit_time"
+                      ? ".columns.memory"
+                      : ".columns.submit_time"
                 )}
               </div>
             </div>

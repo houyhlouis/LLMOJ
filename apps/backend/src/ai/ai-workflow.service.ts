@@ -103,10 +103,10 @@ export class AiWorkflowService implements AiWorkflowRunner {
       job.action === "import"
         ? ["import", "source", "translate", "tags", "difficulty", "tutorial", "testdata"]
         : job.action === "all"
-        ? ["source", "translate", "tags", "difficulty", "tutorial", "testdata"]
-        : job.action === "metadata"
-        ? ["source", "translate", "tags", "difficulty"]
-        : [job.action];
+          ? ["source", "translate", "tags", "difficulty", "tutorial", "testdata"]
+          : job.action === "metadata"
+            ? ["source", "translate", "tags", "difficulty"]
+            : [job.action];
     for (let index = 0; index < actions.length; index++) {
       const action = actions[index];
       if (job.state.completed.includes(action)) continue;
@@ -1726,16 +1726,16 @@ export class AiWorkflowService implements AiWorkflowRunner {
             progress.phase === "quality-differential"
               ? 0.52 + 0.12 * ratio
               : progress.phase === "quality-search"
-              ? 0.81 + 0.04 * ratio
-              : ["generate", "validate-inputs", "quality-alternatives"].includes(progress.phase)
-              ? qualityRequest
-                ? 0.64 + 0.17 * ratio
-                : 0.55 + 0.3 * ratio
-              : ["validate-samples", "validate-sample-inputs", "validate-protocol-samples"].includes(progress.phase)
-              ? 0.48 + 0.04 * ratio
-              : progress.phase === "quality-adversarial"
-              ? 0.64
-              : 0.45;
+                ? 0.81 + 0.04 * ratio
+                : ["generate", "validate-inputs", "quality-alternatives"].includes(progress.phase)
+                  ? qualityRequest
+                    ? 0.64 + 0.17 * ratio
+                    : 0.55 + 0.3 * ratio
+                  : ["validate-samples", "validate-sample-inputs", "validate-protocol-samples"].includes(progress.phase)
+                    ? 0.48 + 0.04 * ratio
+                    : progress.phase === "quality-adversarial"
+                      ? 0.64
+                      : 0.45;
           await this.coordinator.checkpoint(
             job,
             `testdata.${

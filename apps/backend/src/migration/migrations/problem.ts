@@ -1,6 +1,7 @@
 /* eslint-disable */
 import path from "path";
 import fs from "fs";
+import os from "os";
 import { Readable } from "stream";
 
 import { Logger } from "@nestjs/common";
@@ -9,7 +10,6 @@ import { EntityManager } from "typeorm";
 import yaml from "js-yaml";
 import { v5 as uuid } from "uuid";
 import unzipper from "unzipper";
-import tempy from "tempy";
 
 import { Locale } from "../../common/locale.type";
 import { isValidFilename } from "../../common/validators";
@@ -324,9 +324,7 @@ async function parseJudgeInfo(
   };
 
   const judgeInfo = typeService.getDefaultJudgeInfo() as
-    | ProblemJudgeInfoTraditional
-    | ProblemJudgeInfoInteraction
-    | ProblemJudgeInfoSubmitAnswer;
+    ProblemJudgeInfoTraditional | ProblemJudgeInfoInteraction | ProblemJudgeInfoSubmitAnswer;
 
   let oldConfig: {
     subtasks: {
@@ -414,7 +412,7 @@ async function parseJudgeInfo(
         scoringType: getScoringType(subtask.type),
         points: subtask.score,
         testcases: subtask.cases.map(caseId => {
-          type Testcase = typeof judgeInfo["subtasks"][0]["testcases"][0];
+          type Testcase = (typeof judgeInfo)["subtasks"][0]["testcases"][0];
           const testcase: Partial<Testcase> = {};
           if (typeof oldConfig.inputFile === "string")
             (testcase as { inputFile: string }).inputFile = oldConfig.inputFile.replace("#", String(caseId));
@@ -624,7 +622,7 @@ export const migrationProblem: MigrationInterface = {
           }
 
           if (md5) {
-            const tempDirectory = tempy.directory({ prefix: `problem_additional_file_${oldProblem.id}_` });
+            const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), `problem_additional_file_${oldProblem.id}_`));
             try {
               const additionalFile = path.join(config.uploads, "additional_file", md5);
 
@@ -650,7 +648,7 @@ export const migrationProblem: MigrationInterface = {
             } catch (e) {
               Logger.error(`Failed to migrate additional files for problem ${displayProblem(oldProblem)}, ${e}`);
             } finally {
-              await fs.promises.rmdir(tempDirectory, { recursive: true });
+              await fs.promises.rm(tempDirectory, { recursive: true, force: true });
             }
           }
         }

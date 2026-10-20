@@ -25,7 +25,7 @@ export class ClusterService {
     private readonly configService: ConfigService
   ) {
     this.enabled = this.configService.config.server.clusters != null;
-    this.isMaster = cluster.isMaster;
+    this.isMaster = cluster.isPrimary;
     this.isWorker = cluster.isWorker || !this.enabled;
   }
 

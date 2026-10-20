@@ -359,8 +359,8 @@ export class TeamService {
             kind === "problem"
               ? titles.get(r.resourceId)
               : kind === "contest"
-              ? contestRows.find(c => c.id === r.resourceId)?.title
-              : discussionRows.find(d => d.id === r.resourceId)?.title,
+                ? contestRows.find(c => c.id === r.resourceId)?.title
+                : discussionRows.find(d => d.id === r.resourceId)?.title,
           archived: r.archived,
           visibility: r.visibility,
           ...(kind === "contest" && permissions.includes("contests")
@@ -887,7 +887,7 @@ export class TeamService {
       if (!resource) throw new NotFoundException();
       resource.visibility = data.visibility;
       resource.invitedUserIds = await this.validUserIds(manager, data.invitedUserIds ?? []);
-      resource.inviteCode = data.visibility === "invite" ? resource.inviteCode ?? uuid() : null;
+      resource.inviteCode = data.visibility === "invite" ? (resource.inviteCode ?? uuid()) : null;
       await manager.save(resource);
       await manager.update(ContestEntity, resource.resourceId, { isPublic: resource.visibility === "public" });
       return { inviteCode: resource.inviteCode };
@@ -1070,8 +1070,8 @@ export class TeamService {
           s.status === "Accepted"
             ? 100
             : ["Fake", "Hacked"].includes(s.status)
-            ? 0
-            : Math.max(0, Math.min(100, Number(s.score) || 0));
+              ? 0
+              : Math.max(0, Math.min(100, Number(s.score) || 0));
         const best = submissions.sort((a, b) => score(b) - score(a) || b.id - a.id)[0];
         results[item.problemId] = best
           ? { score: score(best), status: best.status, submissionId: best.id, accepted: best.status === "Accepted" }
@@ -1241,8 +1241,8 @@ export class TeamService {
           !Number.isSafeInteger(size) || size < 0 || size !== upload.size
             ? "FILE_SIZE_MISMATCH"
             : size + Number(team.quotaUsed) > Math.min(Number(team.quotaLimit), TEAM_FILE_QUOTA)
-            ? "TEAM_QUOTA_EXCEEDED"
-            : null,
+              ? "TEAM_QUOTA_EXCEEDED"
+              : null,
         manager,
         // Team files aren't judged, and can be large: hashed in the background, not while the team is locked
         false
@@ -1322,7 +1322,7 @@ export class TeamService {
           teamId: team.id,
           token: uuid(),
           userId: data.userId ?? null,
-          maxUses: data.userId ? 1 : data.maxUses ?? 1,
+          maxUses: data.userId ? 1 : (data.maxUses ?? 1),
           uses: 0,
           expiresAt,
           active: true

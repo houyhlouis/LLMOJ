@@ -49,8 +49,10 @@ export interface SubmissionExtraInfo<JudgeInfo, SubmissionContent> {
 
 export { SubmissionProgressType, SubmissionStatus } from "@libreoj/judge-protocol";
 
-export interface SubmissionTask<JudgeInfo, SubmissionContent, TestcaseResult, ExtraParameters>
-  extends Task<SubmissionExtraInfo<JudgeInfo, SubmissionContent>, SubmissionProgress<TestcaseResult>> {
+export interface SubmissionTask<JudgeInfo, SubmissionContent, TestcaseResult, ExtraParameters> extends Task<
+  SubmissionExtraInfo<JudgeInfo, SubmissionContent>,
+  SubmissionProgress<TestcaseResult>
+> {
   events: {
     compiling(): void;
     compiled(compile: { success: boolean; message: OmittableString }): void;

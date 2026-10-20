@@ -192,8 +192,7 @@ export type SubmissionFinishedProgress<TestcaseResult> = SubmissionProgressDetai
 };
 
 export type SubmissionProgress<TestcaseResult = unknown> =
-  | SubmissionActiveProgress<TestcaseResult>
-  | SubmissionFinishedProgress<TestcaseResult>;
+  SubmissionActiveProgress<TestcaseResult> | SubmissionFinishedProgress<TestcaseResult>;
 
 export interface JudgeClientSystemInfo {
   os: string;

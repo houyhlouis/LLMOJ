@@ -57,6 +57,7 @@ LLMOJ 是基于 LibreOJ 的在线评测系统，提供 AI 辅助出题功能。�
 | [前端配置](Frontend-Configuration.zh-CN.md) | 本地构建前端；可选的 CDN 设置 |
 | [环境变量](Environment.zh-CN.md) | 运行、安装和构建用的环境变量；维护脚本 |
 | [发布](Publishing.zh-CN.md) | 用 GitHub Desktop 应用更新、发布本 Wiki 和创建版本 |
+| [依赖与工具链](Dependencies.zh-CN.md) | 受支持的 Node.js、pnpm 和库版本，暂缓升级的部分，依赖清单与安全通告检查 |
 
 完整安装（`--role all`）包含网站、存储和本机评测，也可以再接入远程评测机。仅网页安装（`--role web`）不构建本机评测环境：提交由远程评测机评测，已更新的评测机（协议版本 4）也负责 AI 验证标程和生成测试数据（见[分布式评测](Distributed-Judging.zh-CN.md)）。
 

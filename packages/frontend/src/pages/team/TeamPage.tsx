@@ -440,8 +440,8 @@ export default observer(function TeamPage({
                         activeTab === "problems"
                           ? "/p/id/" + row.id
                           : activeTab === "contests"
-                          ? "/contest/" + row.id
-                          : "/d/" + row.id
+                            ? "/contest/" + row.id
+                            : "/d/" + row.id
                       }
                     >
                       {row.title || "#" + row.id}
@@ -473,8 +473,8 @@ export default observer(function TeamPage({
                               activeTab === "problems"
                                 ? "/p/id/" + row.id + "/edit"
                                 : activeTab === "contests"
-                                ? "/contest/" + row.id + "/edit"
-                                : "/d/" + row.id + "/edit"
+                                  ? "/contest/" + row.id + "/edit"
+                                  : "/d/" + row.id + "/edit"
                             }
                           >
                             {tr("编辑", "Edit")}

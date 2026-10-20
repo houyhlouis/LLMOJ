@@ -27,7 +27,7 @@ const noAttemptPenalty = (status: string) =>
   ["CompilationError", "FileError", "ConfigurationError", "SystemError", "JudgementFailed", "Canceled"].includes(
     status
   );
-const effectiveScore = (s: ScoringSubmission) => (invalidated(s.status) ? 0 : s.score ?? 0);
+const effectiveScore = (s: ScoringSubmission) => (invalidated(s.status) ? 0 : (s.score ?? 0));
 
 /** NOI: latest; IOI: best; strict IOI: per-subtask best; ICPC: solved count and penalty. */
 export function scoreContest(

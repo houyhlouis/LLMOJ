@@ -4,7 +4,7 @@
 
 import { createGetApi, createPostApi } from "@/api";
 
-export const list = createGetApi<{ mine: string }, void>("team/list");
+export const list = createGetApi<{ mine: string; query?: string; page?: string }, void>("team/list");
 export const get = createPostApi<ApiTypes.TeamRequestDto, void>("team/get", {});
 export const joinPreview = createPostApi<ApiTypes.TeamRequestDto, void>("team/joinPreview", {});
 export const create = createPostApi<ApiTypes.TeamRequestDto, void>("team/create", {});

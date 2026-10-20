@@ -45,8 +45,8 @@ export function discussionVisibilitySql(user: UserEntity, decisions: DiscussionV
   const hiddenProblem = decisions.hiddenProblemWithoutGrant
     ? "1 = 1"
     : decisions.hiddenProblemWithGrant
-    ? legacyHidden
-    : "0 = 1";
+      ? legacyHidden
+      : "0 = 1";
   const problemAcl = `(discussion.problemId IS NULL OR EXISTS (
     SELECT 1 FROM problem visible_problem WHERE visible_problem.id = discussion.problemId
       AND ${teamResourceVisibilitySql("problem", "visible_problem.id", user)}

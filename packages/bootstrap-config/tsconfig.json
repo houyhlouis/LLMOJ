@@ -8,15 +8,14 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
     "strict": true,
     "module": "esnext",
     "strictBindCallApply": true,
-    "noFallthroughCasesInSwitch": false,
-    "baseUrl": "./"
+    "noFallthroughCasesInSwitch": false
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist"]

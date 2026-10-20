@@ -1,5 +1,7 @@
 import { Column, Entity, Index, PrimaryGeneratedColumn } from "typeorm";
 
+import { JsonColumn } from "../database/json-column";
+
 export interface JudgeRuntimeDetails {
   node: string;
   os: string;
@@ -35,7 +37,7 @@ export class JudgeRuntimeEntity {
   @Column({ type: "char", length: 64 })
   sandboxImage: string;
 
-  @Column({ type: "json" })
+  @JsonColumn()
   details: JudgeRuntimeDetails;
 
   @Column({ type: "datetime" })

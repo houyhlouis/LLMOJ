@@ -93,8 +93,8 @@ const ContestsPage = observer(({ data, page }: { data: any; page: number }) => {
                     {Date.now() < +new Date(c.startTime)
                       ? tr("未开始", "Upcoming")
                       : Date.now() < +new Date(c.endTime)
-                      ? tr("进行中", "Running")
-                      : tr("已结束", "Ended")}
+                        ? tr("进行中", "Running")
+                        : tr("已结束", "Ended")}
                   </Table.Cell>
                 </Table.Row>
               ))}

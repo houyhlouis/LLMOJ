@@ -1,5 +1,13 @@
 /// <reference types="vite/client" />
-/// <reference types="vite-plugin-compile-time/client" />
+
+// vite-plugin-compile-time's client types, which its package doesn't export
+interface ImportMeta {
+  compileTime: <T>(id: string) => T;
+}
+
+// Fonts imported for their CSS
+declare module "@fontsource/*";
+declare module "typeface-*";
 
 // Extending Window object
 

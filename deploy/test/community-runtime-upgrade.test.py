@@ -185,10 +185,10 @@ class RuntimeUpgradeTests(unittest.TestCase):
                 with self.assertRaisesRegex(u.UpgradeError, 'contract path|Incomplete'):
                     self.up.compatibility(self.source)
 
-    def test_dependencies_infrastructure_and_other_shared_packages_remain_rejected(self):
+    def test_infrastructure_and_other_shared_packages_remain_rejected(self):
+        # Dependency changes are installed and checked separately (upgrade.test.py); shared code still isn't accepted
         self.runtime_fixture()
-        for relative in ('pnpm-lock.yaml', 'apps/judge/package.json', 'packages/simple-sandbox/package.json',
-                         'packages/shared/src/index.ts', 'infra/unreviewed.txt'):
+        for relative in ('packages/shared/src/index.ts', 'infra/unreviewed.txt', 'packages/shared/README.md'):
             with self.subTest(path=relative):
                 path = self.source/relative
                 existed = path.exists()

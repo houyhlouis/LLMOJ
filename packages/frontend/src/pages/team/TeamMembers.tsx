@@ -34,7 +34,7 @@ interface TeamMembersProps {
   error: string;
 }
 
-const memberStatus = (member: any) => ({ member: "active", applicant: "pending" }[member?.status] || member?.status);
+const memberStatus = (member: any) => ({ member: "active", applicant: "pending" })[member?.status] || member?.status;
 const permissionLabels = () => [
   { value: "settings", text: tr("团队设置", "Team settings") },
   { value: "members", text: tr("成员管理", "Member management") },
@@ -90,7 +90,7 @@ export default observer(function TeamMembers({
       active: tr("正式成员", "Member"),
       pending: tr("待审核", "Pending"),
       blocked: tr("黑名单", "Blocked")
-    }[memberStatus(member)] || member.status);
+    })[memberStatus(member)] || member.status;
   const filtered = members.filter(member => {
     const query = search.trim().toLowerCase();
     return (
@@ -427,8 +427,8 @@ export default observer(function TeamMembers({
                       memberStatus(member) === "blocked"
                         ? "red"
                         : memberStatus(member) === "pending"
-                        ? "yellow"
-                        : undefined
+                          ? "yellow"
+                          : undefined
                     }
                   >
                     {stateText(member)}
@@ -633,10 +633,10 @@ export default observer(function TeamMembers({
                             {valid
                               ? tr("有效", "Active")
                               : !invitation.active
-                              ? tr("已停用", "Disabled")
-                              : invitation.uses >= invitation.maxUses
-                              ? tr("次数用尽", "Exhausted")
-                              : tr("已过期", "Expired")}
+                                ? tr("已停用", "Disabled")
+                                : invitation.uses >= invitation.maxUses
+                                  ? tr("次数用尽", "Exhausted")
+                                  : tr("已过期", "Expired")}
                           </Label>
                         </div>
                       </Table.Cell>

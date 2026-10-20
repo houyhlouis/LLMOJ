@@ -1,3 +1,5 @@
+import { ApiPropertyOptional } from "@nestjs/swagger";
+
 import { IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
 import { Type } from "class-transformer";
 
@@ -34,5 +36,8 @@ export class HackRequestDto {
 
   @IsOptional() @IsString() @MaxLength(20) validatorLanguage?: string;
 
-  @IsOptional() mine?: boolean | string;
+  // A query string's "1" or "true" (a body may send a boolean)
+  @ApiPropertyOptional({ type: String })
+  @IsOptional()
+  mine?: boolean | string;
 }

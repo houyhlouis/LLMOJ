@@ -2,6 +2,8 @@ import { Column, Entity, Index, PrimaryGeneratedColumn } from "typeorm";
 
 import type { ContestRule, ContestRuleOptions } from "./contest-rules";
 
+import { JsonColumn } from "../database/json-column";
+
 export type { ContestRule } from "./contest-rules";
 
 @Entity("contest")
@@ -16,7 +18,7 @@ export class ContestEntity {
 
   @Column({ type: "varchar", length: 16 }) rule: ContestRule;
 
-  @Column({ type: "json", nullable: true }) ruleOptions: ContestRuleOptions;
+  @JsonColumn({ nullable: true }) ruleOptions: ContestRuleOptions;
 
   @Column({ type: "datetime" }) @Index() startTime: Date;
 
@@ -24,13 +26,13 @@ export class ContestEntity {
 
   @Column() ownerId: number;
 
-  @Column({ type: "json" }) adminIds: number[];
+  @JsonColumn() adminIds: number[];
 
   @Column({ default: false }) @Index() isPublic: boolean;
 
   @Column({ default: false }) hideStatistics: boolean;
 
-  @Column({ type: "json" }) languages: string[];
+  @JsonColumn() languages: string[];
 
   @Column({ type: "datetime" }) createdAt: Date;
 }

@@ -1,6 +1,9 @@
 {
   "compilerOptions": {
-    "module": "commonjs",
+    "module": "nodenext",
+    "strict": false,
+    "types": ["node"],
+    "skipLibCheck": true,
     "esModuleInterop": true,
     "declaration": true,
     "removeComments": true,

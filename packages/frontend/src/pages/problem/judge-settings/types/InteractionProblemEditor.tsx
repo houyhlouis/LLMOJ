@@ -68,10 +68,10 @@ function parseInteractorConfig(
       interactor.interface !== "shm"
         ? null
         : Number.isSafeInteger(interactor.sharedMemorySize) &&
-          interactor.sharedMemorySize >= 4 &&
-          interactor.sharedMemorySize <= 128
-        ? interactor.sharedMemorySize
-        : 4,
+            interactor.sharedMemorySize >= 4 &&
+            interactor.sharedMemorySize <= 128
+          ? interactor.sharedMemorySize
+          : 4,
     language: language,
     compileAndRunOptions:
       language === interactor.language

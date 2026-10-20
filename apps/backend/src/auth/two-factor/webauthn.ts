@@ -75,8 +75,8 @@ function decodeCborItem(data: Buffer, offset: number, depth: number): [value: un
       size === 2
         ? decodeHalfFloat(data.readUInt16BE(offset + 1))
         : size === 4
-        ? data.readFloatBE(offset + 1)
-        : data.readDoubleBE(offset + 1);
+          ? data.readFloatBE(offset + 1)
+          : data.readDoubleBE(offset + 1);
     return [value, offset + 1 + size];
   }
   const [length, next] = cborLength(data, offset + 1, additional);

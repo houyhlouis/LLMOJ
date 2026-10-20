@@ -243,8 +243,8 @@ const AuditView: React.FC<AuditViewProps> = props => {
                 value === ""
                   ? setFirstObjectId("")
                   : Number.isSafeInteger(Number(value))
-                  ? setFirstObjectId(value)
-                  : null
+                    ? setFirstObjectId(value)
+                    : null
               }
             />
             <Form.Input
@@ -257,8 +257,8 @@ const AuditView: React.FC<AuditViewProps> = props => {
                 value === ""
                   ? setSecondObjectId("")
                   : Number.isSafeInteger(Number(value))
-                  ? setSecondObjectId(value)
-                  : null
+                    ? setSecondObjectId(value)
+                    : null
               }
             />
           </div>

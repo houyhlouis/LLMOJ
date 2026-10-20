@@ -22,15 +22,15 @@ import { restrictProperties } from "../../common/restrict-properties";
 import { ProblemTypeServiceInterface } from "../../problem-type-service.interface";
 
 @Injectable()
-export class ProblemTypeTraditionalService
-  implements
-    ProblemTypeServiceInterface<
-      ProblemJudgeInfoTraditional,
-      SubmissionContentTraditional,
-      SubmissionTestcaseResultTraditional
-    >
-{
-  constructor(private configService: ConfigService, private codeLanguageService: CodeLanguageService) {}
+export class ProblemTypeTraditionalService implements ProblemTypeServiceInterface<
+  ProblemJudgeInfoTraditional,
+  SubmissionContentTraditional,
+  SubmissionTestcaseResultTraditional
+> {
+  constructor(
+    private configService: ConfigService,
+    private codeLanguageService: CodeLanguageService
+  ) {}
 
   getDefaultJudgeInfo(): ProblemJudgeInfoTraditional {
     return {

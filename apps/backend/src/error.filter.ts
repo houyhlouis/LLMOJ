@@ -29,7 +29,7 @@ export class ErrorFilter implements ExceptionFilter {
     const contextType = host.getType();
     let request: RequestWithSession & RequestWithId;
     // Unhandled errors are only described in server logs; clients get a stable code and an ID to quote.
-    let requestId = randomUUID();
+    let requestId: string = randomUUID();
     if (contextType === "http") {
       request = host.switchToHttp().getRequest<RequestWithSession & RequestWithId>();
       requestId = request.requestId ?? requestId;

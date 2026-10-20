@@ -73,16 +73,17 @@ import { HealthModule } from "./health/health.module";
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
+    // Every route, the root included (Express 5's route syntax names the wildcard)
     consumer.apply(RequestIdMiddleware).forRoutes({
-      path: "*",
+      path: "{*splat}",
       method: RequestMethod.ALL
     });
     consumer.apply(AuthMiddleware).forRoutes({
-      path: "*",
+      path: "{*splat}",
       method: RequestMethod.ALL
     });
     consumer.apply(MetricsMiddleware).forRoutes({
-      path: "*",
+      path: "{*splat}",
       method: RequestMethod.ALL
     });
   }

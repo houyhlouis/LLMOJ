@@ -162,12 +162,12 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
     const reason = !ctx.enabled
       ? "Self evaluation is disabled for this contest"
       : !ctx.active
-      ? "Self evaluation is outside the contest period"
-      : !ctx.judgeInfo.selfEval
-      ? "A manager must configure the formal make.cpp and std.cpp programs before the contest"
-      : set && (set.recipeHash !== ctx.recipeHash || set.configHash !== ctx.configHash)
-      ? "The prepared set no longer matches this problem configuration; a manager must prepare it again before the contest"
-      : undefined;
+        ? "Self evaluation is outside the contest period"
+        : !ctx.judgeInfo.selfEval
+          ? "A manager must configure the formal make.cpp and std.cpp programs before the contest"
+          : set && (set.recipeHash !== ctx.recipeHash || set.configHash !== ctx.configHash)
+            ? "The prepared set no longer matches this problem configuration; a manager must prepare it again before the contest"
+            : undefined;
     return {
       enabled: ctx.enabled && ctx.active && !reason,
       reason,

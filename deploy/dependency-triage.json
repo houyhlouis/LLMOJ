@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "block": {
+    "places": [
+      "server"
+    ],
+    "severities": [
+      "critical",
+      "high"
+    ]
+  },
+  "buildTools": [
+    "@babel/plugin-proposal-class-properties",
+    "@babel/plugin-proposal-decorators",
+    "@esbuild-plugins/node-modules-polyfill",
+    "@types/blueimp-md5",
+    "@types/chart.js",
+    "@types/css",
+    "@types/flat",
+    "@types/gravatar",
+    "@types/html-minifier-terser",
+    "@types/js-yaml",
+    "@types/lodash",
+    "@types/markdown-it",
+    "@types/node",
+    "@types/object-path",
+    "@types/prismjs",
+    "@types/react",
+    "@types/react-dom",
+    "@types/serialize-javascript",
+    "@types/streamsaver",
+    "@types/svgo",
+    "@types/twemoji",
+    "@types/ua-parser-js",
+    "@types/uuid",
+    "@types/validator",
+    "@vitejs/plugin-legacy",
+    "@vitejs/plugin-react",
+    "babel-plugin-import",
+    "babel-plugin-prismjs",
+    "browserslist-generator",
+    "css-url-relative-plugin",
+    "customize-cra",
+    "cz-conventional-changelog",
+    "dtsgenerator",
+    "esbuild-plugin-browserslist",
+    "fs-extra",
+    "git-commit-info",
+    "husky",
+    "less",
+    "monaco-themes",
+    "node-fetch",
+    "node-html-parser",
+    "prettier",
+    "purgecss",
+    "rollup-plugin-node-polyfills",
+    "rollup-plugin-visualizer",
+    "sass",
+    "serialize-javascript",
+    "serve",
+    "svgo",
+    "terser",
+    "typescript",
+    "vite",
+    "vite-plugin-compile-time",
+    "vite-plugin-ejs",
+    "vite-plugin-externals",
+    "vite-plugin-html-minifier-terser",
+    "vite-plugin-prismjs",
+    "vite-plugin-public-path",
+    "vite-plugin-purgecss"
+  ],
+  "accepted": [
+    {
+      "advisory": "GHSA-j4fx-xxwh-2485",
+      "package": "jsondiffpatch",
+      "decision": "not-reachable",
+      "reason": "The backend only computes diffs of submission progress (diff); the vulnerable patch APIs are used by browsers, on deltas the backend made. The frontend's copy is updated with the frontend build.",
+      "reviewBy": "2027-01-31"
+    },
+    {
+      "advisory": "GHSA-c475-qrg2-pj4r",
+      "package": "basic-ftp",
+      "decision": "not-reachable",
+      "reason": "Reached only through proxy-agent's PAC support, to fetch a PAC file from an ftp: URL; the event report proxy is a configured http(s) or socks URL. get-uri accepts no basic-ftp with the fix (it requires ^5.3.1).",
+      "reviewBy": "2027-01-31"
+    }
+  ]
+}

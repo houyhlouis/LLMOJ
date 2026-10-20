@@ -1125,9 +1125,12 @@ export async function startAiRunner() {
     server.listen({ fd: listener }, () => resolve());
   });
   await pruneAbandonedOutputs();
-  const cleanupTimer = setInterval(() => {
-    pruneAbandonedOutputs().catch(() => winston.warn("Could not clean an abandoned AI output directory"));
-  }, 60 * 60 * 1000);
+  const cleanupTimer = setInterval(
+    () => {
+      pruneAbandonedOutputs().catch(() => winston.warn("Could not clean an abandoned AI output directory"));
+    },
+    60 * 60 * 1000
+  );
   cleanupTimer.unref();
   winston.info("Local AI generator ready; execution shares judge slots");
 }

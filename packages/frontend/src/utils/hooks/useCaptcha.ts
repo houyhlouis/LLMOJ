@@ -10,7 +10,7 @@ export const CaptchaAction = {
   SubmitProblem: "submit_problem"
 } as const;
 
-export type CaptchaAction = typeof CaptchaAction[keyof typeof CaptchaAction];
+export type CaptchaAction = (typeof CaptchaAction)[keyof typeof CaptchaAction];
 
 export type CaptchaResult =
   | {

@@ -221,7 +221,7 @@ export function canonicalizeAiEditorStatement(value: unknown): AiEditorStatement
           }
           continue;
         }
-        const target = classify(section.sectionTitle, section.text || "");
+        const target = classify(section.sectionTitle, typeof section.text === "string" ? section.text : "");
         if (target) append(target.field, section.text, target.keepHeading ? section.sectionTitle : undefined);
       }
     }
@@ -242,14 +242,12 @@ export function canonicalizeAiEditorStatement(value: unknown): AiEditorStatement
         textSection("description"),
         textSection("input"),
         textSection("output"),
-        ...samples.map(
-          (_sample, sampleId): AiEditorSection => ({
-            type: ProblemContentSectionType.Sample,
-            sectionTitle: samples.length > 1 ? `${titles[locale].sample} ${sampleId + 1}` : titles[locale].sample,
-            text: "",
-            sampleId
-          })
-        ),
+        ...samples.map((_sample, sampleId): AiEditorSection => ({
+          type: ProblemContentSectionType.Sample,
+          sectionTitle: samples.length > 1 ? `${titles[locale].sample} ${sampleId + 1}` : titles[locale].sample,
+          text: "",
+          sampleId
+        })),
         textSection("limitsAndHints")
       ]
     };

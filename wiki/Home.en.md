@@ -57,6 +57,7 @@ The member list (`/u`) opens from **View all** in the **Top Users** panel on the
 | [Frontend configuration](Frontend-Configuration.md) | Building the frontend locally; optional CDN settings |
 | [Environment](Environment.md) | Environment variables for running, installing and building; maintenance scripts |
 | [Publishing](Publishing.md) | Applying updates with GitHub Desktop, publishing this wiki, and releases |
+| [Dependencies](Dependencies.md) | Supported Node.js, pnpm and library versions, what's held back, the inventory and the advisory check |
 
 A full installation (`--role all`) runs the website, storage and a local judge, and can use remote judge machines too. A website-only installation (`--role web`) builds no local judging environment: remote judges handle submissions, and up-to-date ones (protocol version 4) also run AI validation and test data generation (see [Distributed judging](Distributed-Judging.md)).
 

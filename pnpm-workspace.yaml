@@ -3,11 +3,18 @@ packages:
   - packages/*
   - infra/frontend-cdn
 
+# The toolchain every package shares (see wiki/Dependencies.md): Node.js 24's type definitions, one TypeScript and one
+# Prettier.
 catalog:
-  prettier: 2.7.1
+  "@types/node": 24.19.2
+  prettier: 3.9.10
+  tsx: 4.23.15
+  typescript: 6.0.3
 
 overrides:
-  "@types/node": 18.6.3
+  "@types/node": "catalog:"
+  # urllib (of ali-oss, for apps/bootstrap-static) can use proxy-agent 5, whose PAC support runs vm2; it isn't needed
+  "urllib>proxy-agent": "-"
   "tsup>esbuild": 0.15.5
   "vite-plugin-compile-time>esbuild": 0.15.5
   "vite@2>esbuild": 0.15.5
@@ -15,11 +22,15 @@ overrides:
 
 allowBuilds:
   "@nestjs/core": false
+  # Swagger UI's usage reporting
+  "@scarf/scarf": false
   "@swc/core": true
   bcrypt: true
   core-js: false
   esbuild: true
   sharp: true
+  # The import resolver's binaries come as optional platform packages
+  unrs-resolver: false
   workerd: true
 
 peerDependencyRules:

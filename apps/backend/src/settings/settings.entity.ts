@@ -1,10 +1,12 @@
-import { Entity, PrimaryColumn, Column } from "typeorm";
+import { Entity, PrimaryColumn } from "typeorm";
+
+import { JsonColumn } from "../database/json-column";
 
 @Entity("settings")
 export class SettingsEntity {
   @PrimaryColumn({ type: "varchar", length: 30 })
   key: string;
 
-  @Column({ type: "json" })
+  @JsonColumn()
   value: unknown;
 }

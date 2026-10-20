@@ -122,38 +122,41 @@ const HackPage = observer(function HackPage({ initial, embedded }: { initial: Ha
         />
       )}
       <HackTestcase record={record} />
-      {record.canManage && record.status !== "Success" && record.status !== "Pending" && record.status !== "Running" && (
-        <Popup
-          on="click"
-          open={confirmOpen}
-          onOpen={() => setConfirmOpen(true)}
-          onClose={() => setConfirmOpen(false)}
-          trigger={<Button loading={busy} icon="refresh" content={tr("重新评测 Hack", "Rejudge hack")} />}
-          content={
-            <Button
-              negative
-              loading={busy}
-              disabled={busy}
-              content={tr("确认重新评测", "Confirm rejudge")}
-              onClick={async () => {
-                setBusy(true);
-                setError("");
-                try {
-                  await hackApi("rejudge", { id: record.id });
-                  if (active.current) await refresh();
-                } catch (e) {
-                  if (active.current) setError(errorText(e));
-                } finally {
-                  if (active.current) {
-                    setBusy(false);
-                    setConfirmOpen(false);
+      {record.canManage &&
+        record.status !== "Success" &&
+        record.status !== "Pending" &&
+        record.status !== "Running" && (
+          <Popup
+            on="click"
+            open={confirmOpen}
+            onOpen={() => setConfirmOpen(true)}
+            onClose={() => setConfirmOpen(false)}
+            trigger={<Button loading={busy} icon="refresh" content={tr("重新评测 Hack", "Rejudge hack")} />}
+            content={
+              <Button
+                negative
+                loading={busy}
+                disabled={busy}
+                content={tr("确认重新评测", "Confirm rejudge")}
+                onClick={async () => {
+                  setBusy(true);
+                  setError("");
+                  try {
+                    await hackApi("rejudge", { id: record.id });
+                    if (active.current) await refresh();
+                  } catch (e) {
+                    if (active.current) setError(errorText(e));
+                  } finally {
+                    if (active.current) {
+                      setBusy(false);
+                      setConfirmOpen(false);
+                    }
                   }
-                }
-              }}
-            />
-          }
-        />
-      )}
+                }}
+              />
+            }
+          />
+        )}
     </>
   );
 });

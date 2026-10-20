@@ -94,16 +94,14 @@ export class GroupController {
     @CurrentUser() currentUser: UserEntity,
     @Body() request: CreateGroupRequestDto
   ): Promise<CreateGroupResponseDto> {
-    if (
-      !(
-        currentUser &&
-        (await this.userPrivilegeService.permissionDecision(
-          currentUser,
-          UserPrivilegeType.CreateGroup,
-          await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageUserGroup)
-        ))
-      )
-    )
+    if (!(
+      currentUser &&
+      (await this.userPrivilegeService.permissionDecision(
+        currentUser,
+        UserPrivilegeType.CreateGroup,
+        await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageUserGroup)
+      ))
+    ))
       return {
         error: CreateGroupResponseError.PERMISSION_DENIED
       };
@@ -136,12 +134,9 @@ export class GroupController {
     @CurrentUser() currentUser: UserEntity,
     @Body() request: DeleteGroupRequestDto
   ): Promise<DeleteGroupResponseDto> {
-    if (
-      !(
-        currentUser &&
-        (await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageUserGroup))
-      )
-    )
+    if (!(
+      currentUser && (await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageUserGroup))
+    ))
       return {
         error: DeleteGroupResponseError.PERMISSION_DENIED
       };
@@ -170,12 +165,9 @@ export class GroupController {
     @CurrentUser() currentUser: UserEntity,
     @Body() request: RenameGroupRequestDto
   ): Promise<RenameGroupResponseDto> {
-    if (
-      !(
-        currentUser &&
-        (await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageUserGroup))
-      )
-    )
+    if (!(
+      currentUser && (await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageUserGroup))
+    ))
       return {
         error: RenameGroupResponseError.PERMISSION_DENIED
       };
@@ -224,12 +216,10 @@ export class GroupController {
         error: AddUserToGroupResponseError.NO_SUCH_GROUP
       };
 
-    if (
-      !(
-        (await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageUserGroup)) ||
-        (await this.groupService.isGroupAdmin(currentUser.id, group.id))
-      )
-    )
+    if (!(
+      (await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageUserGroup)) ||
+      (await this.groupService.isGroupAdmin(currentUser.id, group.id))
+    ))
       return {
         error: AddUserToGroupResponseError.PERMISSION_DENIED
       };
@@ -271,12 +261,10 @@ export class GroupController {
         error: RemoveUserFromGroupResponseError.NO_SUCH_GROUP
       };
 
-    if (
-      !(
-        (await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageUserGroup)) ||
-        (await this.groupService.isGroupAdmin(currentUser.id, group.id))
-      )
-    )
+    if (!(
+      (await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageUserGroup)) ||
+      (await this.groupService.isGroupAdmin(currentUser.id, group.id))
+    ))
       return {
         error: RemoveUserFromGroupResponseError.PERMISSION_DENIED
       };

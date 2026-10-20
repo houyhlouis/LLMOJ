@@ -1,6 +1,8 @@
 {
     "compilerOptions": {
-        "module": "commonjs",
+        "module": "nodenext",
+        "strict": false,
+        "types": ["node"],
         "removeComments": true,
         "preserveConstEnums": true,
         "sourceMap": true,

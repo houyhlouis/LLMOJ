@@ -13,7 +13,10 @@ export const ZIP_LIMITS = {
   files: 4096
 };
 export class ArchiveError extends Error {
-  constructor(public readonly code: string, message = code) {
+  constructor(
+    public readonly code: string,
+    message = code
+  ) {
     super(message);
   }
 }

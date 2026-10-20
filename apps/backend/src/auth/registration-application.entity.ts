@@ -3,6 +3,7 @@ import { Column, Entity, Index, JoinColumn, OneToOne, PrimaryGeneratedColumn } f
 import { RegistrationReviewStatus } from "./registration-review.entity";
 
 import { UserEntity } from "../user/user.entity";
+import { JsonColumn } from "../database/json-column";
 
 // This identifier belongs to the private application queue, never to the user table.
 @Entity("registration_application")
@@ -30,7 +31,7 @@ export class RegistrationApplicationEntity {
   passwordHash: string;
 
   // Verified legacy authentication audit rows are archived by the upgrader only.
-  @Column({ type: "json", nullable: true, select: false })
+  @JsonColumn({ nullable: true, select: false })
   legacyAccountAudit: unknown;
 
   @Column({ type: "enum", enum: RegistrationReviewStatus, default: RegistrationReviewStatus.Pending })

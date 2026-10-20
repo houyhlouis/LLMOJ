@@ -3,6 +3,7 @@ import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } 
 import { ContestEntity } from "./contest.entity";
 
 import { UserEntity } from "../user/user.entity";
+import { JsonColumn } from "../database/json-column";
 
 @Entity("contest_summary")
 @Index(["contestId", "userId"], { unique: true })
@@ -19,7 +20,7 @@ export class ContestSummaryEntity {
 
   @Column({ type: "mediumtext" }) content: string;
 
-  @Column({ type: "json" }) problems: { contestProblemId: number; content: string; minutes: number }[];
+  @JsonColumn() problems: { contestProblemId: number; content: string; minutes: number }[];
 
   @Column({ type: "datetime" }) updatedAt: Date;
 }

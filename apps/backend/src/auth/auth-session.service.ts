@@ -244,12 +244,10 @@ export class AuthSessionService {
       lastAccessTime: string,
       sessionInfo: string
     ][];
-    return result.map(
-      ([sessionId, lastAccessTime, sessionInfo]): SessionInfo => ({
-        sessionId: Number(sessionId),
-        lastAccessTime: Number(lastAccessTime),
-        ...JSON.parse(sessionInfo)
-      })
-    );
+    return result.map(([sessionId, lastAccessTime, sessionInfo]): SessionInfo => ({
+      sessionId: Number(sessionId),
+      lastAccessTime: Number(lastAccessTime),
+      ...JSON.parse(sessionInfo)
+    }));
   }
 }

@@ -23,7 +23,10 @@ import { teamResourceAccess, teamResourceVisibilitySql } from "../team/team-acce
  */
 @Injectable()
 export class ContestAccessService {
-  constructor(@InjectDataSource() private readonly db: DataSource, private readonly privileges: UserPrivilegeService) {}
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly privileges: UserPrivilegeService
+  ) {}
 
   /** See `isContestManager` */
   async manager(user: UserEntity, contest: ContestEntity) {

@@ -10,11 +10,12 @@ It tests every database change on a copy of your database before touching the re
 
 - Installations made by the installer, with the `all` or `web` role, using the default service layout and the local MariaDB, Redis and MinIO.
 - Changes to the site's code, the judge and the sandbox. On an `all` installation, a changed sandbox or judge is rebuilt and tested before switching over (see [the judge self-test](Judge-Configuration.md#sandbox-syscall-filter-and-self-test)).
+- Changes to dependencies and the lockfile: see [Dependency changes](#dependency-changes).
 - The database changes made by LLMOJ's own features, each checked against its exact expected form. See [Feature upgrades](Community-Upgrade.md) for the list.
 
 It refuses:
 - installations managed with Git, custom layouts, custom database connections, `EnvironmentFile` overrides of the backend or judge, or custom AI directories;
-- database differences it doesn't recognize, and changes to dependencies, lockfiles or the Node.js and pnpm versions (24.21.0 and 11.13.1);
+- database differences it doesn't recognize, and changes to the Node.js and pnpm versions (24.21.0 and 11.13.1; see [Dependencies](Dependencies.md));
 - removing or changing values the judge protocol or the database already uses (new values may be added at the end).
 
 These need a separate, planned migration. Don't get round a refusal by deleting data or reinstalling.
@@ -45,7 +46,7 @@ The script turns `main` into a specific commit before downloading it; use `--ref
 
 The upgrader then:
 1. takes the maintenance lock, which keeps backups and judge resizing out, and checks the services and free disk space;
-2. builds the new version with its own copy of the dependencies and checks the files;
+2. builds the new version with its own copy of the dependencies, installing the new ones if they changed, checks the files, and checks that the new backend accepts your `config/backend.yaml`;
 3. backs up the configuration, the AI master key and the database, loads the backup into a temporary database, and tests every schema and data change there;
 4. stops Nginx, the judge and the backend, makes a fresh database backup and checks it again;
 5. switches to the new files and applies the database changes;
@@ -53,11 +54,21 @@ The upgrader then:
 
 The judge runs as the account `libreoj-judge`, and only its [sandbox launcher](Judge-Configuration.md#the-judges-account-and-its-sandbox-launcher) runs as root. On an `all` installation, the upgrader creates that account before the judge's self-test if it doesn't exist yet. The plan shows it as `judgeAccount`. An account of that name that can log in is refused. A rollback keeps the account; an older judge runs as root and doesn't use it.
 
-Backups and build logs stay in `<prefix>/backups/upgrade/<UTC time>-<random>/`, and the upgrader prints the path. They contain secrets, so keep them private, and delete old ones yourself when you no longer need them; the upgrader never deletes data or backups. After an upgrade completes, it deletes only the build's copy of the dependencies (`staging/node_modules`, about 1 GiB), which nothing uses afterwards, not even a rollback. Upgrade backups from before this version still hold that copy; [doctor](Operations-Configuration.md#doctor) tells you how many. For an upgrade that completed, you can delete it: `sudo rm -rf /opt/LLMOJ/backups/upgrade/<UTC time>-<random>/staging/node_modules`.
+Backups and build logs stay in `<prefix>/backups/upgrade/<UTC time>-<random>/`, and the upgrader prints the path. They contain secrets, so keep them private, and delete old ones yourself when you no longer need them; the upgrader never deletes data or backups. After an upgrade completes, it deletes only the build's copy of the dependencies (`staging/node_modules`, about 1 GiB), which nothing uses afterwards, not even a rollback. When the upgrade changed the dependencies, that copy became the installed one instead, and the previous dependencies stay in `previous/node_modules` for a rollback. Upgrade backups from before this version still hold that copy; [doctor](Operations-Configuration.md#doctor) tells you how many. For an upgrade that completed, you can delete it: `sudo rm -rf /opt/LLMOJ/backups/upgrade/<UTC time>-<random>/staging/node_modules`.
 
 The upgrader installs `/etc/systemd/system/libreoj-backend.service.d/90-libreoj-schema-sync.conf`, which sets `LIBREOJ_SCHEMA_SYNC=0` so that the backend never changes the database structure by itself; the upgrader makes those changes explicitly. Your other drop-ins, the Nginx configuration, credentials and judge capacity are left alone.
 
 Settings saved in the site, such as the [registration mode](Registration-Approval.md) and the homepage, are kept.
+
+## Dependency changes
+
+When the new version changes `package.json` files, `pnpm-lock.yaml`, `pnpm-workspace.yaml` or `.npmrc`, the upgrader installs the new lockfile (frozen: exactly the locked versions, checked against their hashes) into the build's copy of the dependencies. It downloads the new packages from the npm registry into `<prefix>/runtime/pnpm-store`, so the server needs to reach `registry.npmjs.org`. Only the packages that `allowBuilds` in `pnpm-workspace.yaml` allows run install scripts.
+
+The plan shows the change as `dependencies`: how many packages the new lockfile has and how many it adds and removes, each changed direct dependency of the backend, judge, frontend, judge protocol and sandbox, and the packages allowed to run install scripts (`buildScriptsChanged` says whether that list changed).
+
+With new dependencies, every native add-on is rebuilt and the sandbox check and the judge's self-test run, as for a sandbox change. The new dependencies are switched in with the code, during the maintenance window. A rollback, automatic or with `--rollback`, restores the previous ones from the backup.
+
+The Node.js and pnpm versions can't change this way. An upgrade whose `packageManager` names another pnpm, or whose installer pins another Node.js, is refused. See [Dependencies](Dependencies.md) for the supported versions.
 
 ## Upgrading from a local source tree
 

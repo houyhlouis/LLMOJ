@@ -47,7 +47,10 @@ export interface AiStatementText {
 export class AiError extends Error {
   candidateFailure?: boolean;
 
-  constructor(public code: string, detail = "") {
+  constructor(
+    public code: string,
+    detail = ""
+  ) {
     super(detail ? `${code}: ${detail}` : code);
   }
 }

@@ -1,5 +1,7 @@
 import { Column, Entity, Index, PrimaryGeneratedColumn } from "typeorm";
 
+import { JsonColumn } from "../database/json-column";
+
 export const TEAM_PERMISSIONS = [
   "settings",
   "members",
@@ -9,7 +11,7 @@ export const TEAM_PERMISSIONS = [
   "discussions",
   "files"
 ] as const;
-export type TeamPermission = typeof TEAM_PERMISSIONS[number];
+export type TeamPermission = (typeof TEAM_PERMISSIONS)[number];
 export type TeamJoinPolicy = "open" | "approval" | "closed";
 export type TeamMemberStatus = "member" | "applicant" | "blocked";
 export type TeamResourceKind = "problem" | "contest" | "discussion" | "assignment";
@@ -63,7 +65,7 @@ export class TeamMemberEntity {
 
   @Column({ type: "varchar", length: 2000, default: "" }) application: string;
 
-  @Column({ type: "json" }) permissions: TeamPermission[];
+  @JsonColumn() permissions: TeamPermission[];
 
   @Column({ type: "datetime" }) joinedAt: Date;
 }
@@ -93,7 +95,7 @@ export class TeamResourceEntity {
 
   @Column({ type: "varchar", length: 16, default: "private" }) visibility: TeamResourceVisibility;
 
-  @Column({ type: "json" }) invitedUserIds: number[];
+  @JsonColumn() invitedUserIds: number[];
 
   @Column({ type: "char", length: 36, nullable: true }) @Index({ unique: true }) inviteCode: string | null;
 
@@ -135,13 +137,13 @@ export class TeamAssignmentEntity {
 
   @Column({ type: "mediumtext" }) description: string;
 
-  @Column({ type: "json" }) items: TeamAssignmentItem[];
+  @JsonColumn() items: TeamAssignmentItem[];
 
   @Column({ type: "datetime", nullable: true }) deadline: Date | null;
 
-  @Column({ type: "json" }) assignedUserIds: number[];
+  @JsonColumn() assignedUserIds: number[];
 
-  @Column({ type: "json" }) assignedGroupIds: number[];
+  @JsonColumn() assignedGroupIds: number[];
 
   @Column({ default: false }) archived: boolean;
 
@@ -179,7 +181,7 @@ export class TeamFileUploadEntity {
   @Column({ type: "bigint", transformer: { to: (value: number) => value, from: (value: string) => Number(value) } })
   size: number;
 
-  @Column({ type: "json" }) parts: string[];
+  @JsonColumn() parts: string[];
 
   @Column({ type: "datetime" }) expiresAt: Date;
 }

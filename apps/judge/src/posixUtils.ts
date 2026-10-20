@@ -21,7 +21,10 @@ export class Disposer {
 export class FileDescriptor {
   private closed = false;
 
-  constructor(public fd: number, private disposer: Disposer) {
+  constructor(
+    public fd: number,
+    private disposer: Disposer
+  ) {
     this.setCloseOnExec(true);
     disposer.add(() => this.close());
   }

@@ -31,7 +31,10 @@ export class FileContentHashService implements OnModuleInit, OnModuleDestroy {
 
   private skippedInPass = 0;
 
-  constructor(private readonly fileService: FileService, private readonly redisService: RedisService) {}
+  constructor(
+    private readonly fileService: FileService,
+    private readonly redisService: RedisService
+  ) {}
 
   onModuleInit(): void {
     this.timer = setInterval(() => {

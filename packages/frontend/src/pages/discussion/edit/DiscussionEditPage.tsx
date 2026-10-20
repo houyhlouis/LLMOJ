@@ -132,8 +132,8 @@ let DiscussionEditPage: React.FC<DiscussionEditPageProps> = props => {
             props.discussion
               ? `/d/${props.discussion.meta.id}`
               : type === "Solution" && problem
-              ? { pathname: getProblemUrl(problem.meta), query: { tab: "solutions" } }
-              : "/d"
+                ? { pathname: getProblemUrl(problem.meta), query: { tab: "solutions" } }
+                : "/d"
           )
         }
         onSubmit={onSubmit}
@@ -147,12 +147,10 @@ DiscussionEditPage = observer(DiscussionEditPage);
 
 export default {
   new: defineRoute(async request => {
-    if (
-      !(
-        (appState.currentUser && appState.serverPreference.security.allowEveryoneCreateDiscussion) ||
-        appState.currentUserHasPrivilege("ManageDiscussion")
-      )
-    ) {
+    if (!(
+      (appState.currentUser && appState.serverPreference.security.allowEveryoneCreateDiscussion) ||
+      appState.currentUserHasPrivilege("ManageDiscussion")
+    )) {
       throw new RouteError(makeToBeLocalizedText(`discussion_edit.errors.PERMISSION_DENIED`));
     }
 

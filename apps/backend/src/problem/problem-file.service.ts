@@ -89,7 +89,7 @@ export class ProblemFileService {
       await options.authorize();
       for (const file of files) {
         const uuid = archiveUuid();
-        const entry: typeof prepared[number] = { filename: file.filename, size: file.size, uuid };
+        const entry: (typeof prepared)[number] = { filename: file.filename, size: file.size, uuid };
         prepared.push(entry);
         // eslint-disable-next-line no-await-in-loop, no-bitwise -- Keep file handles, imports, and transaction operations ordered. Combine filesystem flags without weakening NOFOLLOW protections.
         const input = await fs.promises.open(file.path, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);

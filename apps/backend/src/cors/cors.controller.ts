@@ -5,7 +5,7 @@ import { ApiOperation, ApiTags } from "@nestjs/swagger";
 
 import serialize from "serialize-javascript";
 import { minify as minifyJs } from "terser";
-import cheerio from "cheerio";
+import { load as loadHtml } from "cheerio";
 
 import { ConfigService } from "../config/config.service";
 
@@ -20,7 +20,7 @@ const xdomainScript = minifyJs(fs.readFileSync(require.resolve("xdomain/dist/xdo
 
 // streamSaver
 const streamSaverMitmHtml = (async () => {
-  const $ = cheerio.load(fs.readFileSync(require.resolve("streamsaver/mitm.html"), "utf-8"));
+  const $ = loadHtml(fs.readFileSync(require.resolve("streamsaver/mitm.html"), "utf-8"));
   const script = $("script").html();
   const minifiedScript = (await minifyJs(script)).code;
   return `<script>${minifiedScript}</script>`;

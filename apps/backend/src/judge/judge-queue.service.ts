@@ -148,9 +148,7 @@ interface JudgeJobRow {
 }
 
 type ReleaseOutcome =
-  | JudgeJobAttemptOutcome.Disconnected
-  | JudgeJobAttemptOutcome.Expired
-  | JudgeJobAttemptOutcome.Abandoned;
+  JudgeJobAttemptOutcome.Disconnected | JudgeJobAttemptOutcome.Expired | JudgeJobAttemptOutcome.Abandoned;
 
 /**
  * The judge queue, stored in the database (table `judge_job`). A job is added in the same transaction as its task's

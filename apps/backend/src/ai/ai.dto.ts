@@ -69,9 +69,7 @@ export class StartAiJobDto {
   @IsOptional() @IsBoolean() automatic?: boolean;
 
   @IsOptional() @IsIn(["Traditional", "Interaction", "Communication"]) problemType?:
-    | "Traditional"
-    | "Interaction"
-    | "Communication";
+    "Traditional" | "Interaction" | "Communication";
 
   @IsOptional() @IsIn(["run-twice", "grader"]) communicationMode?: "run-twice" | "grader";
 }

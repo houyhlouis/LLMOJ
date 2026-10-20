@@ -3,7 +3,7 @@ import crypto from "crypto";
 
 import Queue from "promise-queue";
 import winston from "winston";
-import LRUCache from "lru-cache";
+import { LRUCache } from "lru-cache";
 
 import config from "./config";
 import rpc from "./rpc";

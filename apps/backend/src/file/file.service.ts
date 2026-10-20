@@ -9,8 +9,7 @@ import { InjectRepository } from "@nestjs/typeorm";
 
 import { Repository, EntityManager, In, IsNull, MoreThan } from "typeorm";
 import { v4 as UUID } from "uuid";
-import { Client as MinioClient, ClientOptions } from "minio";
-import * as minioHelpers from "minio/dist/main/helpers";
+import { Client as MinioClient, ClientOptions, CopyDestinationOptions, CopySourceOptions } from "minio";
 
 import { FileEntity } from "./file.entity";
 
@@ -51,10 +50,6 @@ async function hashLocalFile(path: string): Promise<string> {
   await pipeline(fs.createReadStream(path), hashing(hash), new Writable({ write: (chunk, encoding, done) => done() }));
   return hash.digest("hex");
 }
-
-// MinIO 7 exposes these constructors from its helpers module, while its public
-// declarations expose their types from minio. Composition copies on the server.
-const minioCopy = minioHelpers as Pick<typeof import("minio"), "CopySourceOptions" | "CopyDestinationOptions">;
 
 // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURIComponent
 function encodeRFC5987ValueChars(str: string) {
@@ -197,11 +192,11 @@ export class FileService implements OnModuleInit {
           return sha256;
         }
         if (Buffer.isBuffer(streamOrBufferOrFile)) {
-          await this.minioClient.putObject(this.bucket, uuid, streamOrBufferOrFile, {});
+          await this.minioClient.putObject(this.bucket, uuid, streamOrBufferOrFile);
           return createHash("sha256").update(streamOrBufferOrFile).digest("hex");
         }
         const hash = createHash("sha256");
-        await this.minioClient.putObject(this.bucket, uuid, streamOrBufferOrFile.pipe(hashing(hash)), {});
+        await this.minioClient.putObject(this.bucket, uuid, streamOrBufferOrFile.pipe(hashing(hash)));
         return hash.digest("hex");
         /* eslint-enable no-await-in-loop */
       } catch (e) {
@@ -371,9 +366,7 @@ export class FileService implements OnModuleInit {
     try {
       actualSize = (await this.minioClient.statObject(this.bucket, uploadInfo.uuid)).size;
     } catch (e) {
-      if (e.message === "The specified key does not exist.") {
-        return "FILE_NOT_UPLOADED";
-      }
+      if (isMissingObject(e)) return "FILE_NOT_UPLOADED";
       throw e;
     }
 
@@ -503,22 +496,14 @@ export class FileService implements OnModuleInit {
         try {
           stored = await this.minioClient.statObject(this.bucket, part.uuid);
         } catch (error) {
-          if (
-            error.code === "NoSuchKey" ||
-            error.code === "NotFound" ||
-            error.message === "The specified key does not exist."
-          )
-            throw new BadRequestException("FILE_NOT_UPLOADED");
+          if (isMissingObject(error)) throw new BadRequestException("FILE_NOT_UPLOADED");
           throw error;
         }
         if (stored.size !== part.size) throw new BadRequestException("FILE_SIZE_MISMATCH");
-        return new minioCopy.CopySourceOptions({ Bucket: this.bucket, Object: part.uuid, MatchETag: stored.etag });
+        return new CopySourceOptions({ Bucket: this.bucket, Object: part.uuid, MatchETag: stored.etag });
       })
     );
-    await this.minioClient.composeObject(
-      new minioCopy.CopyDestinationOptions({ Bucket: this.bucket, Object: uuid }),
-      sources
-    );
+    await this.minioClient.composeObject(new CopyDestinationOptions({ Bucket: this.bucket, Object: uuid }), sources);
   }
 
   async discardTeamUploadObjects(uuids: string[]): Promise<void> {
@@ -556,7 +541,7 @@ export class FileService implements OnModuleInit {
    */
   deleteUnfinishedUploadedFile(uuid: string): void {
     this.minioClient.removeObject(this.bucket, uuid).catch(e => {
-      if (e.message === "The specified key does not exist.") return;
+      if (isMissingObject(e)) return;
       logger.error(`Failed to delete unfinished uploaded file ${uuid}: ${e}`);
     });
   }

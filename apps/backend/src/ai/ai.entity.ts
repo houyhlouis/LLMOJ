@@ -1,5 +1,7 @@
 import { Entity, Column, PrimaryColumn, Index, CreateDateColumn, UpdateDateColumn } from "typeorm";
 
+import { JsonColumn } from "../database/json-column";
+
 @Entity("ai_configuration")
 export class AiConfigurationEntity {
   @PrimaryColumn() userId: number;
@@ -10,15 +12,7 @@ export class AiConfigurationEntity {
 }
 
 export type AiAction =
-  | "metadata"
-  | "tags"
-  | "source"
-  | "difficulty"
-  | "translate"
-  | "tutorial"
-  | "testdata"
-  | "all"
-  | "import";
+  "metadata" | "tags" | "source" | "difficulty" | "translate" | "tutorial" | "testdata" | "all" | "import";
 export type AiJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 @Entity("ai_job")
@@ -41,7 +35,7 @@ export class AiJobEntity {
 
   @Column({ type: "varchar", length: 80, default: "queued" }) step: string;
 
-  @Column({ type: "json" }) input: {
+  @JsonColumn() input: {
     count: number;
     markdown?: string;
     image?: string;
@@ -51,7 +45,7 @@ export class AiJobEntity {
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Persisted AI checkpoints contain versioned model and runner payloads; keep backward compatibility.
-  @Column({ type: "json" }) state: Record<string, any>;
+  @JsonColumn() state: Record<string, any>;
 
   @Column({ type: "text", nullable: true }) error: string;
 

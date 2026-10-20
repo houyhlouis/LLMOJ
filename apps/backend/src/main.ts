@@ -45,7 +45,7 @@ async function initialize(): Promise<[packageInfo: any, configService: ConfigSer
       )})`
     : "";
 
-  if (cluster.isMaster) Logger.log(`Starting ${packageInfo.name} version ${appVersion}${gitRepoVersion}`, "Bootstrap");
+  if (cluster.isPrimary) Logger.log(`Starting ${packageInfo.name} version ${appVersion}${gitRepoVersion}`, "Bootstrap");
 
   // Create nestjs app
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -90,6 +90,8 @@ async function initialize(): Promise<[packageInfo: any, configService: ConfigSer
   // image (at most 15 MB of base64, see StartAiJobDto), so keep a margin without exposing the heap.
   app.use(json({ limit: JSON_BODY_LIMIT }));
   app.set("trust proxy", configService.config.server.trustProxy);
+  // Query strings are parsed as they were before Express 5 (whose default parser reads no nested parameters)
+  app.set("query parser", "extended");
 
   const options = new DocumentBuilder()
     .setTitle("LLMOJ API")

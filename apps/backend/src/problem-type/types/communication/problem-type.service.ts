@@ -14,14 +14,11 @@ import { ProblemTypeServiceInterface } from "../../problem-type-service.interfac
 import { restrictProperties } from "../../common/restrict-properties";
 
 @Injectable()
-export class ProblemTypeCommunicationService
-  implements
-    ProblemTypeServiceInterface<
-      ProblemJudgeInfoCommunication,
-      SubmissionContentInteraction,
-      SubmissionTestcaseResultInteraction
-    >
-{
+export class ProblemTypeCommunicationService implements ProblemTypeServiceInterface<
+  ProblemJudgeInfoCommunication,
+  SubmissionContentInteraction,
+  SubmissionTestcaseResultInteraction
+> {
   constructor(private readonly interaction: ProblemTypeInteractionService) {}
 
   getDefaultJudgeInfo(): ProblemJudgeInfoCommunication {

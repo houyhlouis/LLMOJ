@@ -1,0 +1,54 @@
+name: Dependencies
+
+# The locked dependencies' inventory (CycloneDX) and their known advisories (see wiki/Dependencies.md). It runs when
+# the dependencies or their triage change, and every week, since advisories are published about unchanged versions.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/dependencies.yml
+      - '**/package.json'
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - deploy/dependency-audit.mjs
+      - deploy/dependency-triage.json
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/dependencies.yml
+      - '**/package.json'
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - deploy/dependency-audit.mjs
+      - deploy/dependency-triage.json
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Inventory and advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      # The inventory and the audit read the lockfile and the installed packages; nothing is built
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node deploy/dependency-audit.mjs sbom sbom.cdx.json
+      - run: node deploy/dependency-audit.mjs audit --json dependency-audit.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-inventory
+          path: |
+            sbom.cdx.json
+            dependency-audit.json
+          if-no-files-found: ignore

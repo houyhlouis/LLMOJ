@@ -123,7 +123,10 @@ class QrSymbol {
 
   private readonly reserved: boolean[][];
 
-  constructor(readonly version: number, private readonly level: QrErrorCorrection) {
+  constructor(
+    readonly version: number,
+    private readonly level: QrErrorCorrection
+  ) {
     this.size = version * 4 + 17;
     this.modules = Array.from({ length: this.size }, () => new Array<boolean>(this.size).fill(false));
     this.reserved = Array.from({ length: this.size }, () => new Array<boolean>(this.size).fill(false));

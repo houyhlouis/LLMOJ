@@ -104,7 +104,9 @@ declare namespace ApiTypes {
     /**
      * PublicKeyCredentialCreationOptions with base64url binary fields.
      */
-    options?: {};
+    options?: {
+      [name: string]: any;
+    };
   }
   export interface BeginTotpSetupResponseDto {
     error?:
@@ -177,7 +179,7 @@ declare namespace ApiTypes {
     username?: string;
   }
   export interface ConfirmTotpSetupRequestDto {
-    code: string; // [object Object]
+    code: string; // ^\d{6}$
   }
   export interface ContestRequestDto {
     id?: number;
@@ -296,7 +298,9 @@ declare namespace ApiTypes {
     problemId?: number;
   }
   export interface DiscussionOrReplyReactionsDto {
-    count: {};
+    count: {
+      [name: string]: number;
+    };
     currentUserReactions: string[];
   }
   export interface DiscussionPermissionsDto {
@@ -344,7 +348,7 @@ declare namespace ApiTypes {
     error?: "NO_SUCH_SUBMISSION" | "PERMISSION_DENIED";
   }
   export interface FileUploadInfoDto {
-    uuid?: string;
+    uuid?: string; // uuid
     size: number;
   }
   export interface FinishPasskeyRegistrationRequestDto {
@@ -559,7 +563,9 @@ declare namespace ApiTypes {
       /**
        * PublicKeyCredentialRequestOptions with base64url binary fields.
        */
-      passkey?: {};
+      passkey?: {
+        [name: string]: any;
+      };
     };
   }
   export interface GetSessionInfoResponseDto {
@@ -858,6 +864,7 @@ declare namespace ApiTypes {
     memberCount: number;
   }
   export interface HackRequestDto {
+    mine?: string;
     id?: number;
     problemId?: number;
     submissionId?: number;
@@ -870,14 +877,15 @@ declare namespace ApiTypes {
     referenceSubmissionId?: number;
     standardCode?: string;
     standardLanguage?: string;
-    standardCompileAndRunOptions?: {};
-    standardFileIo: {
-      inputFilename?: string;
-      outputFilename?: string;
+    standardCompileAndRunOptions?: {
+      [name: string]: string;
+    };
+    standardFileIo?: {
+      inputFilename: string;
+      outputFilename: string;
     };
     validatorCode?: string;
     validatorLanguage?: string;
-    mine?: {};
   }
   export interface HeaderParameters {
     "X-Proof-Of-Work": ApiTypes.Parameters.XProofOfWork;
@@ -1136,7 +1144,7 @@ declare namespace ApiTypes {
      * A SYZOJ 2 username is allowed to check if a user is not migrated.
      */
     username?: string;
-    email?: string;
+    email?: string; // email
     password: string;
   }
   export interface LoginResponseDto {
@@ -1152,7 +1160,7 @@ declare namespace ApiTypes {
     twoFactorChallenge?: ApiTypes.TwoFactorChallengeDto;
   }
   export interface MigrateUserRequestDto {
-    email?: string;
+    email?: string; // email
     oldUsername?: string;
     oldPassword: string;
     newUsername?: string;
@@ -1167,7 +1175,7 @@ declare namespace ApiTypes {
   }
   namespace Parameters {
     export type ContestId = number;
-    export type Email = string;
+    export type Email = string; // email
     export type GroupId = string;
     export type Hacker = string;
     export type HackerId = number;
@@ -1182,7 +1190,13 @@ declare namespace ApiTypes {
     export type Query = string;
     export type ReferenceSubmissionId = number;
     export type StandardCode = string;
-    export type StandardFileIo = any;
+    export interface StandardCompileAndRunOptions {
+      [name: string]: string;
+    }
+    export interface StandardFileIo {
+      inputFilename: string;
+      outputFilename: string;
+    }
     export type StandardLanguage = string;
     export type Status = string;
     export type SubmissionId = number;
@@ -1195,10 +1209,10 @@ declare namespace ApiTypes {
     export type XProofOfWork = string;
   }
   export interface PasskeyAssertionDto {
-    id: string; // [object Object]
-    clientDataJSON: string; // [object Object]
-    authenticatorData: string; // [object Object]
-    signature: string; // [object Object]
+    id: string;
+    clientDataJSON: string;
+    authenticatorData: string;
+    signature: string;
   }
   export interface PasskeyInfoDto {
     id: number;
@@ -1211,9 +1225,9 @@ declare namespace ApiTypes {
     lastUsedAt?: string; // date-time
   }
   export interface PasskeyRegistrationDto {
-    id: string; // [object Object]
-    clientDataJSON: string; // [object Object]
-    attestationObject: string; // [object Object]
+    id: string;
+    clientDataJSON: string;
+    attestationObject: string;
     transports?: string[];
   }
   export interface PreferenceConfig {
@@ -1417,6 +1431,7 @@ declare namespace ApiTypes {
     titleLocale: "en_US" | "zh_CN";
   }
   export interface QueryParameters {
+    mine?: ApiTypes.Parameters.Mine;
     id?: ApiTypes.Parameters.Id;
     problemId?: ApiTypes.Parameters.ProblemId;
     submissionId?: ApiTypes.Parameters.SubmissionId;
@@ -1429,6 +1444,7 @@ declare namespace ApiTypes {
     referenceSubmissionId?: ApiTypes.Parameters.ReferenceSubmissionId;
     standardCode?: ApiTypes.Parameters.StandardCode;
     standardLanguage?: ApiTypes.Parameters.StandardLanguage;
+    standardCompileAndRunOptions?: ApiTypes.Parameters.StandardCompileAndRunOptions;
     standardFileIo?: ApiTypes.Parameters.StandardFileIo;
     validatorCode?: ApiTypes.Parameters.ValidatorCode;
     validatorLanguage?: ApiTypes.Parameters.ValidatorLanguage;
@@ -1522,7 +1538,7 @@ declare namespace ApiTypes {
     scores?: number[];
   }
   export interface QueryUserMigrationInfoRequestDto {
-    email?: string;
+    email?: string; // email
     oldUsername?: string;
   }
   export interface QueryUserMigrationInfoResponseDto {
@@ -1566,7 +1582,7 @@ declare namespace ApiTypes {
   }
   export interface RegisterRequestDto {
     username: string;
-    email: string;
+    email: string; // email
     emailVerificationCode?: string;
     password: string;
   }
@@ -1614,11 +1630,7 @@ declare namespace ApiTypes {
   }
   export interface RemoveUserFromGroupResponseDto {
     error?:
-      | "PERMISSION_DENIED"
-      | "NO_SUCH_USER"
-      | "NO_SUCH_GROUP"
-      | "USER_NOT_IN_GROUP"
-      | "GROUP_ADMIN_CAN_NOT_BE_REMOVED";
+      "PERMISSION_DENIED" | "NO_SUCH_USER" | "NO_SUCH_GROUP" | "USER_NOT_IN_GROUP" | "GROUP_ADMIN_CAN_NOT_BE_REMOVED";
   }
   export interface RenameGroupRequestDto {
     groupId: number;
@@ -1645,7 +1657,7 @@ declare namespace ApiTypes {
     key?: string;
   }
   export interface ResetPasswordRequestDto {
-    email: string;
+    email: string; // email
     emailVerificationCode?: string;
     newPassword: string;
   }
@@ -1713,22 +1725,22 @@ declare namespace ApiTypes {
     contestId?: number;
     submissionId?: number;
     page?: number;
-    content: {
-      language?: string;
-      code?: string;
-      compileAndRunOptions?: {};
+    content?: {
+      language: string;
+      code: string;
+      compileAndRunOptions: {};
     };
     generatorCode?: string;
     standardCode?: string;
     subtaskIds?: number[];
     attestSameGenerator?: boolean;
-    standardFileIo: {
-      inputFilename?: string;
-      outputFilename?: string;
+    standardFileIo?: {
+      inputFilename: string;
+      outputFilename: string;
     };
   }
   export interface SendEmailVerificationCodeRequestDto {
-    email: string;
+    email: string; // email
     type: "Register" | "ChangeEmail" | "ResetPassword";
     locale: "en_US" | "zh_CN";
   }
@@ -2109,7 +2121,7 @@ declare namespace ApiTypes {
     action?: "approve" | "reject" | "remove" | "block" | "unblock" | "setGroup" | "note" | "permissions";
     groupId?: number | null;
     note?: string;
-    permissions?: "settings" | "members" | "problems" | "contests" | "assignments" | "discussions" | "files";
+    permissions?: ("settings" | "members" | "problems" | "contests" | "assignments" | "discussions" | "files")[];
     sourceProblemId?: number;
     title?: string;
     subtitle?: string;
@@ -2129,10 +2141,10 @@ declare namespace ApiTypes {
     assignedUserIds?: number[];
     assignedGroupIds?: number[];
     size?: number;
-    uuid?: string;
+    uuid?: string; // uuid
     part?: number;
     uploadInfo?: ApiTypes.FileUploadInfoDto;
-    token?: string;
+    token?: string; // uuid
     maxUses?: number;
     expiresAt?: string;
   }
@@ -2174,7 +2186,9 @@ declare namespace ApiTypes {
     /**
      * PublicKeyCredentialRequestOptions with base64url binary fields.
      */
-    passkey?: {};
+    passkey?: {
+      [name: string]: any;
+    };
   }
   export interface TwoFactorStatusDto {
     enabled: boolean;
@@ -2265,7 +2279,7 @@ declare namespace ApiTypes {
   export interface UpdateUserProfileRequestDto {
     userId: number;
     username?: string;
-    email?: string;
+    email?: string; // email
     publicEmail: boolean;
     avatarInfo: string;
     nickname: string;
@@ -2274,14 +2288,10 @@ declare namespace ApiTypes {
   }
   export interface UpdateUserProfileResponseDto {
     error?:
-      | "PERMISSION_DENIED"
-      | "NO_SUCH_USER"
-      | "DUPLICATE_USERNAME"
-      | "DUPLICATE_EMAIL"
-      | "REAUTHENTICATION_REQUIRED";
+      "PERMISSION_DENIED" | "NO_SUCH_USER" | "DUPLICATE_USERNAME" | "DUPLICATE_EMAIL" | "REAUTHENTICATION_REQUIRED";
   }
   export interface UpdateUserSelfEmailRequestDto {
-    email: string;
+    email: string; // email
     emailVerificationCode?: string;
   }
   export interface UpdateUserSelfEmailResponseDto {
@@ -2294,7 +2304,7 @@ declare namespace ApiTypes {
   export interface UserInformationDto {
     organization: string;
     location: string;
-    url: string;
+    url: string; // uri
     telegram: string;
     qq: string;
     github: string;
@@ -2314,7 +2324,9 @@ declare namespace ApiTypes {
   }
   export interface UserPreferenceCodeDto {
     defaultLanguage?: string;
-    defaultCompileAndRunOptions?: {};
+    defaultCompileAndRunOptions?: {
+      [name: string]: string;
+    };
   }
   export interface UserPreferenceCodeFormatterDto {
     disableByDefault?: boolean;

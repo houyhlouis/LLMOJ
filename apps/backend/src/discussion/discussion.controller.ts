@@ -424,8 +424,8 @@ export class DiscussionController {
       request.queryRepliesType === GetDiscussionAndRepliesRequestQueryRepliesType.HeadTail
         ? headTakeCount + tailTakeCount
         : request.queryRepliesType === GetDiscussionAndRepliesRequestQueryRepliesType.IdRange
-        ? idRangeTakeCount
-        : 0;
+          ? idRangeTakeCount
+          : 0;
     if (realTakeCount > this.configService.config.queryLimit.discussionReplies)
       return {
         error: GetDiscussionAndRepliesResponseError.TAKE_TOO_MANY
@@ -468,9 +468,7 @@ export class DiscussionController {
             (async () =>
               Object.fromEntries(
                 await Promise.all(
-                  (
-                    await this.userService.findUsersByExistingIds(replyEntities.map(reply => reply.publisherId))
-                  ).map(
+                  (await this.userService.findUsersByExistingIds(replyEntities.map(reply => reply.publisherId))).map(
                     async user =>
                       [user.id, await this.userService.getUserMeta(user, currentUser)] as [number, UserMetaDto]
                   )

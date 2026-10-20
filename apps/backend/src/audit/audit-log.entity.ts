@@ -1,6 +1,7 @@
 import { Entity, ManyToOne, Column, JoinColumn, Index, PrimaryGeneratedColumn } from "typeorm";
 
 import { UserEntity } from "../user/user.entity";
+import { JsonColumn } from "../database/json-column";
 
 export enum AuditLogObjectType {
   User = "User",
@@ -62,6 +63,6 @@ export class AuditLogEntity {
   /**
    * Some details to describe the event
    */
-  @Column({ type: "json", nullable: true })
+  @JsonColumn({ nullable: true })
   details?: unknown;
 }

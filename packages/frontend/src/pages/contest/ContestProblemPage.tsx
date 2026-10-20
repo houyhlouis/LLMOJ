@@ -163,8 +163,8 @@ function ContestProblemPage({ detail, initial }: { detail: any; initial: any }) 
             ? tr("函数接口（C++ grader）", "Function interface (C++ grader)")
             : tr("通信（两次独立运行）", "Communication (two separate runs)")
           : data.problem.inputFilename
-          ? `${tr("文件输入输出", "File I/O")}: ${data.problem.inputFilename} / ${data.problem.outputFilename}`
-          : tr("标准输入输出", "Standard I/O")}
+            ? `${tr("文件输入输出", "File I/O")}: ${data.problem.inputFilename} / ${data.problem.outputFilename}`
+            : tr("标准输入输出", "Standard I/O")}
       </p>
       {data.content
         .filter((section: any) => isVisibleProblemSection(section, data.samples))

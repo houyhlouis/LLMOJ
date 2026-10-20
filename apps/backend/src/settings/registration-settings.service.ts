@@ -10,7 +10,7 @@ import { UserEntity } from "../user/user.entity";
 import { AuditLogEntity } from "../audit/audit-log.entity";
 
 export const REGISTRATION_MODES = ["open", "approval", "closed"] as const;
-export type RegistrationMode = typeof REGISTRATION_MODES[number];
+export type RegistrationMode = (typeof REGISTRATION_MODES)[number];
 
 export interface RegistrationPolicySnapshot {
   registrationMode: RegistrationMode;

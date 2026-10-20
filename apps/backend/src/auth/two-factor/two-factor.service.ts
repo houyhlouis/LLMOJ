@@ -181,7 +181,7 @@ export class TwoFactorService {
       enabled,
       totp: !!settings?.totpSecret,
       totpEnabledAt: settings?.totpSecret ? settings.totpEnabledAt : null,
-      recoveryCodesRemaining: enabled ? settings?.recoveryCodes?.length ?? 0 : 0,
+      recoveryCodesRemaining: enabled ? (settings?.recoveryCodes?.length ?? 0) : 0,
       passkeys: passkeys.map(({ id, name, createdAt, lastUsedAt, rpId }) => ({ id, name, createdAt, lastUsedAt, rpId }))
     };
   }

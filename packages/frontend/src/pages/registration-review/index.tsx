@@ -289,8 +289,8 @@ export const RegistrationReviewPage = observer(() => {
                   selection.decision === "rejected"
                     ? ".confirm_reject"
                     : selection.review.status === "rejected"
-                    ? ".confirm_reapprove"
-                    : ".confirm_approve",
+                      ? ".confirm_reapprove"
+                      : ".confirm_approve",
                   {
                     username: selection.review.username
                   }

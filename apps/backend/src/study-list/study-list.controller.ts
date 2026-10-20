@@ -55,7 +55,10 @@ class SaveDto {
 }
 @Controller("studyList")
 export class StudyListController {
-  constructor(private readonly studyLists: StudyListService, private readonly privileges: UserPrivilegeService) {}
+  constructor(
+    private readonly studyLists: StudyListService,
+    private readonly privileges: UserPrivilegeService
+  ) {}
 
   private async authorized(user: UserEntity) {
     if (!user || !(await this.privileges.userHasPrivilege(user, UserPrivilegeType.ManageStudyLists)))
