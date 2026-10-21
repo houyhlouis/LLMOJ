@@ -60,6 +60,16 @@ The upgrader installs `/etc/systemd/system/libreoj-backend.service.d/90-libreoj-
 
 Settings saved in the site, such as the [registration mode](Registration-Approval.md) and the homepage, are kept.
 
+## The database at startup
+
+Before it serves anything, the backend compares the database with the tables and columns its version uses, the same comparison the upgrader's schema check makes:
+
+- **Something it needs is missing** (a table or a column): it doesn't start, and its log names what's missing. This happens when a database was restored from an older version, or the code was updated without the upgrader. Upgrade the database with the upgrader, or restore a backup that matches the installed version.
+- **A column is defined differently, or an index is missing**: it starts, logs the first differences, and [doctor](Operations-Configuration.md#doctor) warns about them. The site works, though perhaps more slowly or less strictly; tell the project if an upgrade left such a difference.
+- **What a newer version added** (columns, indexes): ignored, so a rollback starts as before.
+
+`LIBREOJ_SCHEMA_CHECK=0` in the backend's environment skips the check, for example to export data from a damaged installation. Don't leave it set.
+
 ## Dependency changes
 
 When the new version changes `package.json` files, `pnpm-lock.yaml`, `pnpm-workspace.yaml` or `.npmrc`, the upgrader installs the new lockfile (frozen: exactly the locked versions, checked against their hashes) into the build's copy of the dependencies. It downloads the new packages from the npm registry into `<prefix>/runtime/pnpm-store`, so the server needs to reach `registry.npmjs.org`. Only the packages that `allowBuilds` in `pnpm-workspace.yaml` allows run install scripts.

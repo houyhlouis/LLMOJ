@@ -57,7 +57,8 @@ const { JudgeGateway, aiExecutionLimit } = load("judge.gateway.ts", {
   "socket.io-msgpack-parser": {},
   "proxy-addr": () => "127.0.0.1",
   "@libreoj/judge-protocol": protocol,
-  "./judge-queue.service": { LEASE_RENEW_INTERVAL: 30000 },
+  "./judge-queue.service": { LEASE_RENEW_INTERVAL: 30000, JudgeTaskPriorityType: { LiveContest: 0 } },
+  "../settings/judge-policy.service": { JudgePolicyService: class JudgePolicyService {} },
   "./judge-client.service": { REDIS_CHANNEL_JUDGE_CLIENT_CHANGED: "judge-client-changed" },
   "./judge-job.entity": {
     JudgeJobAttemptOutcome: { Disconnected: "Disconnected", Abandoned: "Abandoned", Expired: "Expired" }
@@ -81,6 +82,8 @@ function fixture() {
   const renewed = [];
   const canceled = [];
   const claims = [];
+  const claimOptions = [];
+  const contest = { running: false };
   const owners = [];
   const stored = [];
   const recorded = [];
@@ -105,13 +108,15 @@ function fixture() {
       isJudgeClientOnline: async () => true
     },
     {
-      claim: async (owner, taskTypes) => {
+      claim: async (owner, taskTypes, options) => {
         claims.push([owner.connectionId, taskTypes]);
+        claimOptions.push(options);
         owners.push(owner);
         const next = queue.shift();
         if (next instanceof Error) throw next;
         return next ? { task: next, fence: ++fence } : null;
       },
+      liveContestRunning: async () => contest.running,
       waitForJobs: async () => {
         waits++;
         if (waits > 1000) throw new Error("waiting forever");
@@ -127,7 +132,12 @@ function fixture() {
       },
       signTaskUploads: async (taskMeta, files) => {
         signedUploads.push([taskMeta, files]);
-        return files.map(file => ({ name: file.name, url: "https://storage.invalid/", extraFormData: {}, fileFieldName: "file" }));
+        return files.map(file => ({
+          name: file.name,
+          url: "https://storage.invalid/",
+          extraFormData: {},
+          fileFieldName: "file"
+        }));
       }
     },
     {
@@ -178,6 +188,8 @@ function fixture() {
     renewed,
     canceled,
     claims,
+    claimOptions,
+    contest,
     owners,
     stored,
     recorded,
@@ -225,7 +237,9 @@ test("progress is only accepted from the client the task was leased to, with tha
 
   // The returned value is the Socket.IO acknowledgement, sent once the progress has been processed.
   assert.equal(await gateway.onProgress(a.client, { taskMeta: meta, progress: { done: true } }), true);
-  assert.deepEqual(progress, [["task-a", { fence: 1, connectionId: "socket-1", judgeRuntimeId: null }, { done: true }]]);
+  assert.deepEqual(progress, [
+    ["task-a", { fence: 1, connectionId: "socket-1", judgeRuntimeId: null }, { done: true }]
+  ]);
 });
 
 test("an acknowledged task stays assigned for late progress from older clients, then its lease is released", async t => {
@@ -405,7 +419,10 @@ test("a judge client's announced runtime is recorded, and its leases and results
   assert.deepEqual(recorded, [[1, runtime()]]);
   assert.deepEqual(stored.at(-1), [1, capabilities({ protocolVersion: 3, runtime: runtime() })]);
   assert.equal(owners.at(-1).judgeRuntimeId, 41);
-  assert.equal(await gateway.onProgress(a.client, { taskMeta: { taskId: "task-a", type: "Submission" }, progress: {} }), true);
+  assert.equal(
+    await gateway.onProgress(a.client, { taskMeta: { taskId: "task-a", type: "Submission" }, progress: {} }),
+    true
+  );
   assert.deepEqual(progress.at(-1)[1], { fence: 1, connectionId: "socket-1", judgeRuntimeId: 41 });
 
   // Another judge machine with the same software is another runtime
@@ -449,16 +466,30 @@ test("generated files are only signed for a task assigned to the requesting judg
   const { gateway, queue, signedUploads, connect } = fixture();
   const a = await connect(1);
   const b = await connect(2);
-  await gateway.onCapabilities(a.client, capabilities({ protocolVersion: 4, taskTypes: ["Submission", "AiExecution"] }));
+  await gateway.onCapabilities(
+    a.client,
+    capabilities({ protocolVersion: 4, taskTypes: ["Submission", "AiExecution"] })
+  );
   queue.push(aiTask("ai-1"));
   await gateway.onConsumeTask(a.client, 0);
   const files = [{ name: "1.in", size: 4 }];
   assert.deepEqual(await gateway.onRequestUploads(b.client, { taskId: "ai-1", files }), [], "not its task");
-  for (const invalid of [null, { taskId: "ai-1" }, { taskId: "ai-1", files: [{ name: 1, size: 4 }] }, { taskId: "ai-1", files: [{ name: "1.in", size: 1.5 }] }])
+  for (const invalid of [
+    null,
+    { taskId: "ai-1" },
+    { taskId: "ai-1", files: [{ name: 1, size: 4 }] },
+    { taskId: "ai-1", files: [{ name: "1.in", size: 1.5 }] }
+  ])
     assert.deepEqual(await gateway.onRequestUploads(a.client, invalid), []);
   assert.deepEqual(signedUploads, []);
-  const targets = await gateway.onRequestUploads(a.client, { taskId: "ai-1", files: [{ name: "1.in", size: 4, extra: "dropped" }] });
-  assert.deepEqual(targets.map(target => target.name), ["1.in"]);
+  const targets = await gateway.onRequestUploads(a.client, {
+    taskId: "ai-1",
+    files: [{ name: "1.in", size: 4, extra: "dropped" }]
+  });
+  assert.deepEqual(
+    targets.map(target => target.name),
+    ["1.in"]
+  );
   assert.deepEqual(signedUploads, [[{ taskId: "ai-1", type: "AiExecution" }, files]]);
 });
 
@@ -467,7 +498,12 @@ test("AI runs leave a judge client's other threads to other work", async () => {
   const a = await connect(1);
   await gateway.onCapabilities(
     a.client,
-    capabilities({ protocolVersion: 4, taskTypes: ["Submission", "AiExecution"], consumerThreads: 3, aiExecutionSlots: 6 })
+    capabilities({
+      protocolVersion: 4,
+      taskTypes: ["Submission", "AiExecution"],
+      consumerThreads: 3,
+      aiExecutionSlots: 6
+    })
   );
   for (let i = 0; i < 3; i++) {
     queue.push(aiTask(`ai-${i}`));
@@ -479,7 +515,51 @@ test("AI runs leave a judge client's other threads to other work", async () => {
     "two of three threads at most"
   );
   assert.equal(aiExecutionLimit(null), 0);
-  assert.equal(aiExecutionLimit(capabilities({ consumerThreads: 1, aiExecutionSlots: 4 })), 0, "a single thread runs none");
-  assert.equal(aiExecutionLimit(capabilities({ consumerThreads: 8, aiExecutionSlots: 2 })), 2, "nor more than its AI slots");
+  assert.equal(
+    aiExecutionLimit(capabilities({ consumerThreads: 1, aiExecutionSlots: 4 })),
+    0,
+    "a single thread runs none"
+  );
+  assert.equal(
+    aiExecutionLimit(capabilities({ consumerThreads: 8, aiExecutionSlots: 2 })),
+    2,
+    "nor more than its AI slots"
+  );
   assert.equal(aiExecutionLimit(capabilities({ consumerThreads: 3, aiExecutionSlots: 0 })), 1);
+});
+
+test("while a contest runs, judge machines keep the policy's task threads for its submissions", async () => {
+  const { gateway, queue, claimOptions, contest, connect } = fixture();
+  gateway.judgePolicyService = { current: async () => ({ contestReservedThreads: 1, agingMinutes: 30 }) };
+  const options = liveContestOnly => ({ liveContestOnly, agingSeconds: 1800 });
+  const a = await connect(1);
+  await gateway.onCapabilities(a.client, capabilities({ consumerThreads: 3 }));
+  contest.running = true;
+  // Two of the three threads take other work; the third is kept for the contest
+  queue.push(submissionTask("practice-1", []), submissionTask("practice-2", []));
+  await gateway.onConsumeTask(a.client, 0);
+  await gateway.onConsumeTask(a.client, 1);
+  queue.push({ ...submissionTask("contest-1", []), priorityType: 0, priority: -1e-7 });
+  await gateway.onConsumeTask(a.client, 2);
+  assert.deepEqual(claimOptions, [options(false), options(false), options(true)]);
+  assert(
+    a.emitted.some(([event, threadId, task]) => event === "task" && threadId === 2 && task.taskId === "contest-1")
+  );
+
+  // No thread is kept while no contest runs, or on a judge machine with no more threads than the policy keeps
+  claimOptions.length = 0;
+  contest.running = false;
+  const b = await connect(2);
+  await gateway.onCapabilities(b.client, capabilities({ consumerThreads: 2 }));
+  queue.push(submissionTask("practice-3", []), submissionTask("practice-4", []));
+  await gateway.onConsumeTask(b.client, 0);
+  await gateway.onConsumeTask(b.client, 1);
+  contest.running = true;
+  const c = await connect(3);
+  await gateway.onCapabilities(c.client, capabilities({ consumerThreads: 1 }));
+  const legacy = await connect(4);
+  queue.push(submissionTask("practice-5", []), submissionTask("practice-6", []));
+  await gateway.onConsumeTask(c.client, 0);
+  await gateway.onConsumeTask(legacy.client, 0);
+  assert.deepEqual(claimOptions, [options(false), options(false), options(false), options(false)]);
 });

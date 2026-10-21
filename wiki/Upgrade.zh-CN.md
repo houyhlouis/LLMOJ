@@ -60,6 +60,16 @@ sudo bash /tmp/llmoj-upgrade.zh-CN.sh --prefix /opt/LLMOJ --plan
 
 在网站中保存的设置（例如[注册模式](Registration-Approval.zh-CN.md)和首页内容）都会保留。
 
+## 启动时检查数据库
+
+后端在提供任何服务之前，会把数据库与其版本使用的数据表和列进行比较，比较方式与升级器的数据库结构检查相同：
+
+- **缺少它需要的内容**（数据表或列）：它不会启动，并在日志中列出缺少的内容。数据库是从较旧版本恢复的，或者没有通过升级器更新代码时会发生这种情况。请用升级器升级数据库，或恢复与已安装版本相符的备份。
+- **列的定义不同，或缺少索引**：它照常启动，在日志中列出最先发现的差异，[doctor](Operations-Configuration.zh-CN.md#运行-doctor) 也会发出警告。网站可以工作，但可能更慢或约束更少；如果是升级留下了这样的差异，请告诉项目维护者。
+- **更新版本添加的内容**（列、索引）：忽略，因此回滚后照常启动。
+
+在后端的环境中设置 `LIBREOJ_SCHEMA_CHECK=0` 可以跳过检查，例如为了从损坏的安装中导出数据。用完请删除该设置。
+
 ## 依赖变更
 
 新版本修改了 `package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml` 或 `.npmrc` 时，升级器把新的锁文件安装（frozen：严格使用锁定的版本，并校验哈希）到构建用的依赖副本中。新的软件包从 npm 仓库下载到 `<prefix>/runtime/pnpm-store`，因此服务器需要能访问 `registry.npmjs.org`。只有 `pnpm-workspace.yaml` 的 `allowBuilds` 允许的软件包才会运行安装脚本。

@@ -45,6 +45,8 @@ return {
 
   "site.registration_mode.update": "Change the registration mode",
   "site.ai_policy.update": "Change the site AI settings",
+  "site.judge_policy.update": "Change the site judging settings",
+  "site.ai_endpoints.update": "Change the approved AI addresses",
 
   "group.create": "Create group [firstObject]",
   "group.delete": "Delete group [firstObject]",

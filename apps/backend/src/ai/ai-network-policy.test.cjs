@@ -29,8 +29,9 @@ require.extensions[".ts"] = (module, filename) =>
     }).outputText,
     filename
   );
-const { providerRequest, listModels, generateText, validateBaseUrl, isPublicAddress, isAllowedPrivateHost } =
-  require(path.join(backendRoot, "src/ai/ai-provider.ts"));
+const { providerRequest, listModels, generateText, validateBaseUrl, isPublicAddress, isAllowedPrivateHost } = require(
+  path.join(backendRoot, "src/ai/ai-provider.ts")
+);
 const { withAiRuntime } = require(path.join(backendRoot, "src/ai/ai-runtime.ts"));
 const { AiError } = require(path.join(backendRoot, "src/ai/ai.types.ts"));
 const initialAllowlist = process.env.HYHOJ_AI_PRIVATE_HOSTS;
@@ -140,7 +141,11 @@ async function withPrivateHosts(value, work) {
 // The AI service allows private destinations in the runtime of a site administrator's own configuration.
 function asUser(allowPrivateNetwork, work) {
   return withAiRuntime(
-    { ownerId: allowPrivateNetwork ? 1 : 2, record: async () => {}, allowPrivateNetwork: async () => allowPrivateNetwork },
+    {
+      ownerId: allowPrivateNetwork ? 1 : 2,
+      record: async () => {},
+      allowPrivateNetwork: async () => allowPrivateNetwork
+    },
     work
   );
 }
@@ -152,7 +157,10 @@ function syntheticConfig(f, hostname) {
 async function proveBlocked(f, hostname) {
   const config = syntheticConfig(f, hostname);
   await assert.rejects(listModels(config), errorCode("PRIVATE_ENDPOINT_BLOCKED"));
-  await assert.rejects(asUser(false, () => listModels(config)), errorCode("PRIVATE_ENDPOINT_BLOCKED"));
+  await assert.rejects(
+    asUser(false, () => listModels(config)),
+    errorCode("PRIVATE_ENDPOINT_BLOCKED")
+  );
   await assert.rejects(
     asUser(false, () => generateText(config, "Synthetic local test.", "Reply synthetic-ok.")),
     errorCode("PRIVATE_ENDPOINT_BLOCKED")
@@ -173,7 +181,14 @@ async function proveSyntheticModelsAndChat(f, hostname) {
 }
 
 test("public and non-public addresses are classified, including IPv4-mapped IPv6", () => {
-  for (const address of ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111", "::ffff:8.8.8.8", "::ffff:808:808", "64:ff9b::808:808"])
+  for (const address of [
+    "8.8.8.8",
+    "1.1.1.1",
+    "2606:4700:4700::1111",
+    "::ffff:8.8.8.8",
+    "::ffff:808:808",
+    "64:ff9b::808:808"
+  ])
     assert.equal(isPublicAddress(address), true, address);
   for (const address of [
     "127.0.0.1",
@@ -229,7 +244,10 @@ test("HYHOJ_AI_PRIVATE_HOSTS matches hosts and optional ports exactly", () => {
   ])
     assert.equal(isAllowedPrivateHost(new URL(url), env), false, url);
   assert.equal(isAllowedPrivateHost(new URL("http://127.0.0.1/v1"), {}), false);
-  assert.equal(isAllowedPrivateHost(new URL("https://127.0.0.1/v1"), { HYHOJ_AI_PRIVATE_HOSTS: "127.0.0.1:443" }), true);
+  assert.equal(
+    isAllowedPrivateHost(new URL("https://127.0.0.1/v1"), { HYHOJ_AI_PRIVATE_HOSTS: "127.0.0.1:443" }),
+    true
+  );
 });
 
 // A parent with concurrency:false keeps the temporary DNS override and shared
@@ -408,36 +426,40 @@ test("AI provider private-address policy regression", { concurrency: false, time
     }
   });
 
-  await t.test("a name resolving to any non-public address is blocked before connecting", { timeout: 4000 }, async () => {
-    const f = await fixture();
-    const originalLookup = dns.promises.lookup;
-    const hostname = "synthetic-rebinding-provider.invalid";
-    try {
-      for (const records of [
-        [{ address: "127.0.0.1", family: 4 }],
-        [
-          { address: "8.8.8.8", family: 4 },
-          { address: "127.0.0.1", family: 4 }
-        ],
-        [{ address: "::ffff:7f00:1", family: 6 }],
-        [{ address: "169.254.169.254", family: 4 }]
-      ]) {
-        dns.promises.lookup = async (name, options) => {
-          assert.equal(name, hostname, "No external hostname may be resolved by this test.");
-          assert.equal(options.all, true);
-          return records;
-        };
-        await assert.rejects(
-          asUser(false, () => providerRequest("http://" + hostname + ":" + f.port + "/models", {}, undefined, 1000)),
-          errorCode("PRIVATE_ENDPOINT_BLOCKED")
-        );
+  await t.test(
+    "a name resolving to any non-public address is blocked before connecting",
+    { timeout: 4000 },
+    async () => {
+      const f = await fixture();
+      const originalLookup = dns.promises.lookup;
+      const hostname = "synthetic-rebinding-provider.invalid";
+      try {
+        for (const records of [
+          [{ address: "127.0.0.1", family: 4 }],
+          [
+            { address: "8.8.8.8", family: 4 },
+            { address: "127.0.0.1", family: 4 }
+          ],
+          [{ address: "::ffff:7f00:1", family: 6 }],
+          [{ address: "169.254.169.254", family: 4 }]
+        ]) {
+          dns.promises.lookup = async (name, options) => {
+            assert.equal(name, hostname, "No external hostname may be resolved by this test.");
+            assert.equal(options.all, true);
+            return records;
+          };
+          await assert.rejects(
+            asUser(false, () => providerRequest("http://" + hostname + ":" + f.port + "/models", {}, undefined, 1000)),
+            errorCode("PRIVATE_ENDPOINT_BLOCKED")
+          );
+        }
+        assert.equal(f.requests.length, 0);
+      } finally {
+        dns.promises.lookup = originalLookup;
+        await f.close();
       }
-      assert.equal(f.requests.length, 0);
-    } finally {
-      dns.promises.lookup = originalLookup;
-      await f.close();
     }
-  });
+  );
 
   await t.test("DNS is resolved once then pinned into a real HTTP connection", { timeout: 4000 }, async () => {
     const f = await fixture();
@@ -481,4 +503,123 @@ test("AI provider private-address policy regression", { concurrency: false, time
       dns.promises.lookup = originalLookup;
     }
   });
+});
+
+const { parseAiEndpointPolicy, normalizeEndpointUrl, endpointMatches, aiEndpointRefusal } = require(
+  path.join(backendRoot, "src/settings/ai-endpoint-policy.service.ts")
+);
+
+test("approved AI endpoints: stored form, matching and the refusal rules", () => {
+  assert.equal(normalizeEndpointUrl("http://10.0.0.5:8000/v1/"), "http://10.0.0.5:8000/v1");
+  assert.equal(normalizeEndpointUrl("https://LLM.example.org"), "https://llm.example.org");
+  for (const invalid of ["ftp://x", "https://u:p@x/v1", "https://x/v1?key=1", "https://x/#a", "not a url", 5])
+    assert.equal(normalizeEndpointUrl(invalid), null, String(invalid));
+
+  const endpoint = { name: "Lab", type: "chat", baseUrl: "http://10.0.0.5:8000/v1" };
+  const policy = parseAiEndpointPolicy({
+    customEndpoints: "approved",
+    endpoints: [{ ...endpoint, baseUrl: "http://10.0.0.5:8000/v1/" }]
+  });
+  assert.deepEqual(policy, { customEndpoints: "approved", endpoints: [endpoint] });
+  for (const invalid of [
+    null,
+    [],
+    { customEndpoints: "any", endpoints: [] },
+    { customEndpoints: "public" },
+    { customEndpoints: "public", endpoints: [{ ...endpoint, name: " " }] },
+    { customEndpoints: "public", endpoints: [{ ...endpoint, type: "gopher" }] },
+    { customEndpoints: "public", endpoints: [{ ...endpoint, baseUrl: "http://10.0.0.5:8000/v1?x=1" }] },
+    { customEndpoints: "public", endpoints: [endpoint, { ...endpoint, name: "Again" }] },
+    {
+      customEndpoints: "public",
+      endpoints: new Array(51).fill(0).map((_, i) => ({ ...endpoint, baseUrl: `http://h${i}/v1` }))
+    }
+  ])
+    assert.equal(parseAiEndpointPolicy(invalid), null, JSON.stringify(invalid)?.slice(0, 80));
+
+  const matches = url => endpointMatches(endpoint, new URL(url));
+  assert.equal(matches("http://10.0.0.5:8000/v1/chat/completions"), true);
+  assert.equal(matches("http://10.0.0.5:8000/v1"), true);
+  assert.equal(matches("http://10.0.0.5:8000/v10/models"), false, "a path prefix ends at a slash");
+  assert.equal(matches("http://10.0.0.5:8001/v1/models"), false, "another port");
+  assert.equal(matches("https://10.0.0.5:8000/v1/models"), false, "another scheme");
+  assert.equal(endpointMatches({ baseUrl: "http://10.0.0.5:8000" }, new URL("http://10.0.0.5:8000/any/path")), true);
+
+  const refusal = (customEndpoints, url, options) =>
+    aiEndpointRefusal({ customEndpoints, endpoints: [endpoint] }, new URL(url), {
+      privateDestination: false,
+      administrator: false,
+      serverApproved: false,
+      ...options
+    });
+  // Private addresses need an approval, whatever the policy for public ones
+  assert.equal(refusal("public", "http://10.0.0.5:8000/v1/models", { privateDestination: true }), null);
+  assert.equal(
+    refusal("public", "http://10.0.0.6/v1/models", { privateDestination: true }),
+    "PRIVATE_ENDPOINT_BLOCKED"
+  );
+  assert.equal(
+    refusal("public", "http://10.0.0.6/v1/models", { privateDestination: true, serverApproved: true }),
+    null
+  );
+  // Public addresses need one only where the site allows only approved addresses
+  assert.equal(refusal("public", "https://api.example.com/v1/models"), null);
+  assert.equal(refusal("approved", "https://api.example.com/v1/models"), "ENDPOINT_NOT_APPROVED");
+  // Site administrators may use any address
+  assert.equal(
+    refusal("approved", "http://10.0.0.6/v1/models", { privateDestination: true, administrator: true }),
+    null
+  );
+});
+
+test("approved AI endpoints are enforced for every provider request of an account", { timeout: 15000 }, async () => {
+  const { AiJobCoordinator } = require(path.join(backendRoot, "src/ai/ai-job-coordinator.service.ts"));
+  const f = await fixture();
+  try {
+    let policy = { customEndpoints: "public", endpoints: [] };
+    let administrator = false;
+    // The coordinator's own runtime, with the services it reads stubbed
+    const coordinator = Object.assign(Object.create(AiJobCoordinator.prototype), {
+      usage: { context: ownerId => ({ ownerId, record: async () => {} }) },
+      endpointPolicies: { current: async () => policy },
+      db: { getRepository: () => ({ findOneBy: async () => ({ isAdmin: administrator }) }) }
+    });
+    const asAccount = work => coordinator.withRuntime(2, undefined, work);
+    const config = syntheticConfig(f);
+
+    await assert.rejects(
+      asAccount(() => listModels(config)),
+      errorCode("PRIVATE_ENDPOINT_BLOCKED")
+    );
+    assert.equal(f.requests.length, 0, "A refused request must not reach the provider.");
+
+    // Approving the address (here a path above the configured one) lets the account use it
+    policy = { customEndpoints: "approved", endpoints: [{ name: "Lab", type: "chat", baseUrl: f.origin }] };
+    assert.deepEqual(await asAccount(() => listModels(config)), ["synthetic-model"]);
+    assert.equal(
+      await asAccount(() => generateText(config, "Synthetic local test.", "Reply synthetic-ok.")),
+      "synthetic-ok"
+    );
+
+    // Another port of the same host isn't approved
+    policy = {
+      customEndpoints: "approved",
+      endpoints: [{ name: "Lab", type: "chat", baseUrl: `http://127.0.0.1:${f.port === 1 ? 2 : 1}` }]
+    };
+    const before = f.requests.length;
+    await assert.rejects(
+      asAccount(() => listModels(config)),
+      errorCode("PRIVATE_ENDPOINT_BLOCKED")
+    );
+    assert.equal(f.requests.length, before);
+
+    // The server's environment list still approves, and administrators may use any address
+    await withPrivateHosts("127.0.0.1", async () =>
+      assert.deepEqual(await asAccount(() => listModels(config)), ["synthetic-model"])
+    );
+    administrator = true;
+    assert.deepEqual(await asAccount(() => listModels(config)), ["synthetic-model"]);
+  } finally {
+    await f.close();
+  }
 });

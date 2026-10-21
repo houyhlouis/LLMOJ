@@ -567,6 +567,14 @@ class Doctor:
         else:
             r.add(OK, 'queue', say(f'{int(queued)} submissions wait', f'{int(queued)} 个提交在等待')
                   + (say(f', the oldest for {duration_text(oldest)}', f'，最早的已等待 {duration_text(oldest)}') if queued else ''))
+        changed = value('libreoj_database_schema_differences', kind='changed')
+        if known(changed) and changed:
+            r.add(WARN, 'schema', say(f'The database differs from this release\'s definitions in {int(changed)} ways it works with, such as a column type or a missing index (the backend log names them when it starts)',
+                                      f'数据库与当前版本的定义有 {int(changed)} 处不同（例如列类型或缺少的索引），后端仍可运行（后端启动时会在日志中列出）'))
+        contest = value('libreoj_judge_queued_jobs_by_class', **{'class': 'live_contest'})
+        if known(contest) and contest >= 10:
+            r.add(WARN, 'contest', say(f'{int(contest)} submissions to running contests wait; see "Judging" in Site management to keep task threads for them',
+                                       f'{int(contest)} 个进行中比赛的提交在等待；可在网站管理的“评测”中为它们保留任务线程'))
         expired = value('libreoj_judge_expired_leases')
         if known(expired) and expired:
             r.add(WARN, 'leases', say(f'{int(expired)} judging tasks lost their judge machine and weren\'t queued again yet',
@@ -585,6 +593,17 @@ class Doctor:
         elif known(ai_queued, ai_oldest) and ai_queued and ai_oldest >= 1800:
             r.add(WARN, 'ai', say(f'{int(ai_queued)} AI jobs wait; the oldest for {duration_text(ai_oldest)}',
                                   f'{int(ai_queued)} 个 AI 任务在等待；最早的已等待 {duration_text(ai_oldest)}'))
+        approved, approved_only = value('libreoj_ai_approved_endpoints'), value('libreoj_ai_approved_endpoints_only')
+        if known(approved, approved_only) and approved_only == 1:
+            r.add(INFO, 'ai-addresses', say(f'Accounts can use only the {int(approved)} AI addresses approved in Site management',
+                                            f'账号只能使用网站管理中批准的 {int(approved)} 个 AI 地址'))
+        elif known(approved) and approved:
+            r.add(INFO, 'ai-addresses', say(f'{int(approved)} AI addresses are approved in Site management; other public addresses are allowed',
+                                            f'网站管理中批准了 {int(approved)} 个 AI 地址；其他公网地址也允许使用'))
+        unreported = value('libreoj_ai_unreported_usage_last_day')
+        if known(unreported) and unreported:
+            r.add(INFO, 'ai-usage', say(f'{int(unreported)} AI requests in the last day had no usage reported; they count at their maximum',
+                                        f'过去一天有 {int(unreported)} 个 AI 请求没有报告用量，按最大值计入'))
         errors = sum(m.get('libreoj_ai_worker_errors', {}).values())
         if errors:
             r.add(WARN, 'ai', say(f'The AI job scheduler had {int(errors)} errors since the backend started (see its log)',

@@ -16,7 +16,7 @@
 | `HYHOJ_AI_RUNNER_SOCKET` | 后端 | `/opt/LLMOJ/data/judge/ai-runner.sock` | 本机 AI 任务的 socket。必须与本机 `judge.yaml` 中的 `aiRunnerSocket` 一致 |
 | `LLMOJ_AI_EXECUTION` | 后端 | 自动 | AI 任务在哪里运行程序：`local`（本机 AI 任务的 socket）或 `judges`（评测队列，任意协议版本 4 的评测机；见[分布式评测](Distributed-Judging.zh-CN.md#ai)）。未设置时，socket 存在则为 `local`，否则为 `judges`。评测机生成的文件在发布前先下载到后端的 `TMPDIR`（`data/tmp`），每个任务最多 8 GiB |
 | `HYHOJ_ARCHIVE_WORK_DIRECTORY` | 后端 | `/opt/LLMOJ/data/backend-archives` | 压缩包的临时空间，包括检查中的 AI ZIP 附件 |
-| `HYHOJ_AI_PRIVATE_HOSTS` | 后端 | 无 | 所有用户都可以使用的内网或本机服务商主机，用逗号或空格分隔，可带端口，例如 `llm.lan, 10.0.0.5:8000, [fd00::5]:8080`。不设置时，内网、本机回环和链路本地地址只能用于站点管理员自己的配置。公网地址无需列出 |
+| `HYHOJ_AI_PRIVATE_HOSTS` | 后端 | 无 | 在[站点管理中批准的地址](AI.zh-CN.md#账号可以使用哪些地址)之外，为所有账号批准的主机，用逗号或空格分隔，可带端口，例如 `llm.lan, 10.0.0.5:8000, [fd00::5]:8080`。建议使用站点管理：无需重启，并能看到谁在使用哪些地址 |
 
 这些都是绝对的文件系统路径，不是 URL。设置它们不会移动已有数据，也不会修改另一个服务的配置；`HYHOJ_ROOT` 在运行时不会改变它们。
 

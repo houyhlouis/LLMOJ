@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """Check that a backup made by deploy/backup.sh can be restored, without touching the running site.
 
-The archive is checked against its .sha256 file and unpacked into a private temporary directory. A separate MariaDB
-is started on that copy of the database (no network, its own socket) to check every table, then the stored files
-are compared with the database, and the key files are tried on the encrypted values they protect. Finally the
-temporary MariaDB is stopped and the copy deleted. Nothing secret is printed.
+The archive is checked against its .sha256 file, decrypted if backup.sh encrypted it (with the private key in the
+GnuPG keyring), and unpacked into a private temporary directory. A separate MariaDB is started on that copy of the
+database (no network, its own socket) to check every table, then the stored files are compared with the database,
+and a temporary MinIO on the copy of the storage reads every file whose content hash is recorded to compare it.
+The key files are tried on the encrypted values they protect. Finally the temporary servers are stopped and the copy
+deleted. Nothing secret is printed.
 """
 import argparse
+import datetime
 import hashlib
+import hmac
+import http.client
 import json
 import os
+import socket
+import urllib.parse
 from pathlib import Path
 import pwd
 import re
@@ -46,17 +53,71 @@ class Refused(Exception):
     """The backup failed a check that the following checks depend on."""
 
 
+def free_port():
+    with socket.socket() as probe:
+        probe.bind(('127.0.0.1', 0))
+        return probe.getsockname()[1]
+
+
+class Storage:
+    """Reads objects from a MinIO server with S3 signature version 4 (path style, region us-east-1)."""
+
+    def __init__(self, port, access_key, secret_key):
+        self.host = f'127.0.0.1:{port}'
+        self.access_key = access_key
+        self.secret_key = secret_key
+
+    def signed_headers(self, path, method='GET', body=b''):
+        now = datetime.datetime.now(datetime.timezone.utc)
+        stamp, day = now.strftime('%Y%m%dT%H%M%SZ'), now.strftime('%Y%m%d')
+        empty = hashlib.sha256(body).hexdigest()
+        names = 'host;x-amz-content-sha256;x-amz-date'
+        canonical = f'{method}\n{path}\n\nhost:{self.host}\nx-amz-content-sha256:{empty}\nx-amz-date:{stamp}\n\n{names}\n{empty}'
+        scope = f'{day}/us-east-1/s3/aws4_request'
+        to_sign = f'AWS4-HMAC-SHA256\n{stamp}\n{scope}\n{hashlib.sha256(canonical.encode()).hexdigest()}'
+        key = ('AWS4' + self.secret_key).encode()
+        for part in (day, 'us-east-1', 's3', 'aws4_request'):
+            key = hmac.new(key, part.encode(), hashlib.sha256).digest()
+        signature = hmac.new(key, to_sign.encode(), hashlib.sha256).hexdigest()
+        return {'Host': self.host, 'x-amz-content-sha256': empty, 'x-amz-date': stamp,
+                'Authorization': f'AWS4-HMAC-SHA256 Credential={self.access_key}/{scope}, SignedHeaders={names}, Signature={signature}'}
+
+    def digest(self, bucket, key):
+        """The SHA-256 and size of an object's content, or None if it can't be read."""
+        path = f'/{bucket}/{urllib.parse.quote(key, safe="")}'
+        connection = http.client.HTTPConnection(self.host, timeout=300)
+        try:
+            connection.request('GET', path, headers=self.signed_headers(path))
+            response = connection.getresponse()
+            if response.status != 200:
+                response.read()
+                return None
+            digest, size = hashlib.sha256(), 0
+            for block in iter(lambda: response.read(1024 * 1024), b''):
+                digest.update(block)
+                size += len(block)
+            return digest.hexdigest(), size
+        except (OSError, http.client.HTTPException):
+            return None
+        finally:
+            connection.close()
+
+
 class Verifier:
-    def __init__(self, backup, prefix, work_dir, keep=False, mysql_user='mysql', out=print):
+    def __init__(self, backup, prefix, work_dir, keep=False, mysql_user='mysql', out=print, contents=True,
+                 storage_user='nobody'):
         self.backup = Path(backup)
         self.prefix = Path(prefix)
         self.work_dir = Path(work_dir)
         self.keep = keep
         self.mysql_user = mysql_user
+        self.storage_user = storage_user
+        self.check_contents = contents
         self.out = out
         self.items = []
         self.directory = None
         self.server = None
+        self.minio = None
 
     def add(self, level, message):
         self.items.append((level, message))
@@ -111,16 +172,35 @@ class Verifier:
         self.files += member.isreg()
         return member
 
+    def decrypt(self):
+        """An encrypted backup (.gpg) is decrypted into the private directory, with the keyring's private key."""
+        gpg = shutil.which('gpg')
+        if not gpg:
+            raise Refused(say('The backup is encrypted, and gpg isn\'t installed here', '备份已加密，但本机未安装 gpg'))
+        decrypted = self.directory/'.archive.tar.gz'
+        result = subprocess.run([gpg, '--batch', '--quiet', '--yes', '--decrypt', '--output', str(decrypted), str(self.backup)],
+                                stdin=subprocess.DEVNULL, capture_output=True, timeout=3600)
+        if result.returncode or not decrypted.is_file():
+            decrypted.unlink(missing_ok=True)
+            raise Refused(say('The encrypted backup can\'t be decrypted: import the private key it was encrypted for '
+                              '(gpg --import) on this machine first', '无法解密已加密的备份：请先在本机导入其加密所用的私钥（gpg --import）'))
+        self.add(OK, say('The encrypted backup was decrypted with the private key', '已用私钥解密加密的备份'))
+        return decrypted
+
     def unpack(self):
         self.directory = Path(tempfile.mkdtemp(prefix='llmoj-verify-', dir=self.work_dir))
         # The temporary MariaDB (as its own user) must be able to reach its copy of the database inside.
         os.chmod(self.directory, 0o711)
         self.unpacked, self.files = 0, 0
+        archive_file = self.decrypt() if self.backup.name.endswith('.gpg') else self.backup
         try:
-            with tarfile.open(self.backup, 'r:gz') as archive:
+            with tarfile.open(archive_file, 'r:gz') as archive:
                 archive.extractall(self.directory, numeric_owner=True, filter=self.member_filter)
         except (tarfile.TarError, EOFError, OSError, ValueError) as error:
             raise Refused(say(f'The archive can\'t be unpacked ({type(error).__name__})', f'无法解开归档（{type(error).__name__}）'))
+        finally:
+            if archive_file != self.backup:
+                archive_file.unlink(missing_ok=True)
         for required in ('config/backend.yaml', 'data/mariadb'):
             if not (self.directory/required).exists():
                 raise Refused(say(f'The backup has no {required}', f'备份中没有 {required}'))
@@ -247,6 +327,7 @@ class Verifier:
                    if (entry.is_dir(follow_symlinks=False) and os.path.isfile(os.path.join(entry.path, 'xl.meta')))
                    or entry.is_file(follow_symlinks=False)}
         missing = [uuid for uuid in uuids if uuid not in present]
+        self.missing_files = set(missing)
         if missing:
             self.add(FAIL, say(f'{len(missing)} of {len(uuids)} files are missing from storage, e.g. {", ".join(missing[:3])}',
                                f'存储中缺少 {len(uuids)} 个文件中的 {len(missing)} 个，例如 {", ".join(missing[:3])}'))
@@ -257,7 +338,102 @@ class Verifier:
             self.add(INFO, say(f'{unused} stored objects belong to no file (unfinished uploads; maintenance deletes them)',
                                f'{unused} 个存储对象不属于任何文件（未完成的上传；维护任务会删除它们）'))
 
-    # 4. Keys
+    # 4. The stored files' contents, read from a temporary MinIO on the copy
+
+    def start_storage(self):
+        minio = self.prefix/'runtime/minio'
+        if not os.access(minio, os.X_OK):
+            return say(f'MinIO isn\'t installed at {minio}', f'{minio} 没有安装 MinIO')
+        environment = {}
+        try:
+            for line in (self.directory/'config/minio.env').read_text().splitlines():
+                key, separator, value = line.partition('=')
+                if separator and key.strip().startswith('MINIO_'):
+                    environment[key.strip()] = value.strip()
+        except OSError:
+            pass
+        if not environment.get('MINIO_ROOT_USER') or not environment.get('MINIO_ROOT_PASSWORD'):
+            return say('config/minio.env has no storage credentials', 'config/minio.env 中没有存储凭据')
+        data = self.directory/'data/minio'
+        account = pwd.getpwnam(self.storage_user)
+        if os.geteuid() == 0:
+            for path in [data, *data.rglob('*')]:
+                if not path.is_symlink():
+                    os.chown(path, account.pw_uid, account.pw_gid)
+        port, console = free_port(), free_port()
+        account_options = {'user': account.pw_uid, 'group': account.pw_gid, 'extra_groups': []} if os.geteuid() == 0 else {}
+        self.minio = subprocess.Popen(
+            [str(minio), 'server', '--quiet', '--address', f'127.0.0.1:{port}', '--console-address', f'127.0.0.1:{console}', str(data)],
+            env={'PATH': '/usr/bin:/bin', 'HOME': str(data), 'MINIO_BROWSER': 'off', **environment},
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, **account_options)
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline and self.minio.poll() is None:
+            connection = http.client.HTTPConnection(f'127.0.0.1:{port}', timeout=5)
+            try:
+                connection.request('GET', '/minio/health/ready')
+                if connection.getresponse().status == 200:
+                    self.storage = Storage(port, environment['MINIO_ROOT_USER'], environment['MINIO_ROOT_PASSWORD'])
+                    return None
+            except (OSError, http.client.HTTPException):
+                pass
+            finally:
+                connection.close()
+            time.sleep(0.5)
+        return say('MinIO can\'t start on the copy of the storage', '无法在存储副本上启动 MinIO')
+
+    def contents(self):
+        if not self.check_contents:
+            self.add(INFO, say('The files\' contents weren\'t read (--no-contents)', '未读取文件内容（--no-contents）'))
+            return
+        if not (self.directory/'data/minio'/self.bucket).is_dir():
+            return
+        if not self.rows("SHOW COLUMNS FROM `file` LIKE 'sha256'"):
+            self.add(INFO, say('This backup records no content hashes (it was made before they were); the files\' contents weren\'t compared',
+                               '此备份没有记录内容哈希（在开始记录之前生成）；未比较文件内容'))
+            return
+        # A file already reported missing isn't reported again
+        rows = [row for row in self.rows('SELECT uuid, sha256, size FROM `file` WHERE sha256 IS NOT NULL')
+                if row[0] not in getattr(self, 'missing_files', set())]
+        unrecorded = int(self.rows('SELECT COUNT(*) FROM `file` WHERE sha256 IS NULL')[0][0])
+        if unrecorded:
+            self.add(INFO, say(f'{unrecorded} files have no recorded content hash yet (the backend computes them); their contents weren\'t compared',
+                               f'{unrecorded} 个文件尚未记录内容哈希（后端会计算）；未比较其内容'))
+        if not rows:
+            return
+        problem = self.start_storage()
+        if problem:
+            self.add(WARN, problem + say(': the files\' contents weren\'t read', '：未读取文件内容'))
+            return
+        total = sum(int(size) for _, _, size in rows)
+        self.out(say(f'        Reading {len(rows)} files ({size_text(total)})…', f'        正在读取 {len(rows)} 个文件（{size_text(total)}）…'))
+        unreadable, different = [], []
+        for uuid, recorded, size in rows:
+            result = self.storage.digest(self.bucket, uuid)
+            if result is None:
+                unreadable.append(uuid)
+            elif result != (recorded, int(size)):
+                different.append(uuid)
+        if unreadable:
+            self.add(FAIL, say(f'{len(unreadable)} files can\'t be read from the copy of the storage, e.g. {", ".join(unreadable[:3])}',
+                               f'{len(unreadable)} 个文件无法从存储副本读取，例如 {", ".join(unreadable[:3])}'))
+        if different:
+            self.add(FAIL, say(f'{len(different)} files differ from their recorded content hash or size, e.g. {", ".join(different[:3])}',
+                               f'{len(different)} 个文件与记录的内容哈希或大小不符，例如 {", ".join(different[:3])}'))
+        if not unreadable and not different:
+            self.add(OK, say(f'The contents of all {len(rows)} files match their recorded hashes ({size_text(total)} read)',
+                             f'全部 {len(rows)} 个文件的内容与记录的哈希一致（读取了 {size_text(total)}）'))
+
+    def stop_storage(self):
+        if not self.minio or self.minio.poll() is not None:
+            return
+        self.minio.send_signal(signal.SIGTERM)
+        try:
+            self.minio.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            self.minio.kill()
+            self.minio.wait()
+
+    # 5. Keys
 
     def keys(self):
         ai = [row[0] for row in self.rows('SELECT encrypted FROM ai_configuration LIMIT 20')] if 'ai_configuration' in self.table_names else []
@@ -305,6 +481,7 @@ class Verifier:
             self.server.wait()
 
     def cleanup(self):
+        self.stop_storage()
         self.stop_database()
         if self.directory and self.directory.exists():
             if self.keep:
@@ -316,7 +493,8 @@ class Verifier:
     def run(self):
         self.out(say(f'Checking {self.backup}', f'检查 {self.backup}'))
         try:
-            for step in (self.checksum, self.unpack, self.configuration, self.start_database, self.tables, self.objects, self.keys):
+            for step in (self.checksum, self.unpack, self.configuration, self.start_database, self.tables, self.objects,
+                         self.contents, self.keys):
                 step()
         except Refused as refusal:
             self.add(FAIL, str(refusal))
@@ -332,7 +510,7 @@ class Verifier:
 def main(argv=None):
     parser = argparse.ArgumentParser(description=say('Check that a backup made by deploy/backup.sh can be restored',
                                                      '检查 deploy/backup.sh 生成的备份能否恢复'))
-    parser.add_argument('backup', help=say('the .tar.gz file', '.tar.gz 文件'))
+    parser.add_argument('backup', help=say('the .tar.gz (or encrypted .tar.gz.gpg) file', '.tar.gz（或加密的 .tar.gz.gpg）文件'))
     here = Path(__file__).resolve().parents[1]
     parser.add_argument('--prefix', default=os.environ.get('HYHOJ_ROOT') or (str(here) if (here/'runtime').is_dir() else '/opt/LLMOJ'),
                         help=say('the installation whose MariaDB and Node.js are used', '使用其 MariaDB 和 Node.js 的安装目录'))
@@ -340,13 +518,15 @@ def main(argv=None):
     parser.add_argument('--work-dir', default='/var/tmp', help=say('where the temporary copy goes (default /var/tmp)',
                                                                   '临时副本的位置（默认 /var/tmp）'))
     parser.add_argument('--keep', action='store_true', help=say('keep the unpacked copy for inspection', '保留解开的副本以便检查'))
+    parser.add_argument('--no-contents', action='store_true', help=say('don\'t read the stored files to compare their contents',
+                                                                       '不读取存储的文件来比较其内容'))
     args = parser.parse_args(argv)
     if os.geteuid() != 0:
         print(say('Run as root: the backup is private, and the temporary database runs as the mysql user.',
                   '请以 root 运行：备份是私有的，临时数据库以 mysql 用户运行。'), file=sys.stderr)
         return 2
     os.umask(0o077)
-    verifier = Verifier(args.backup, args.prefix, args.work_dir, keep=args.keep)
+    verifier = Verifier(args.backup, args.prefix, args.work_dir, keep=args.keep, contents=not args.no_contents)
 
     def interrupted(signum, frame):
         raise KeyboardInterrupt

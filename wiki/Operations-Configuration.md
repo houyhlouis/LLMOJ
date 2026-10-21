@@ -99,16 +99,16 @@ sudo bash /opt/LLMOJ/deploy/doctor.sh
 | --- | --- |
 | Installation | The version and the last upgrade; an upgrade that stopped halfway |
 | Services | Each service runs and hasn't been restarting after failures; `libreoj.target` starts at boot |
-| Backend | The backend answers and reaches the database, Redis and object storage; Nginx passes requests to it; HTTPS certificates set in `nginx.conf` are valid for at least 14 more days |
+| Backend | The backend answers and reaches the database, Redis and object storage; Nginx passes requests to it; HTTPS certificates set in `nginx.conf` are valid for at least 14 more days; the database matches the release's definitions (see [The database at startup](Upgrade.md#the-database-at-startup)) |
 | Redis | It saves its data to disk; how full it is (writes fail when it's full); that it never evicts keys; its number of connections |
 | Database, object storage | MariaDB and MinIO answer; the size of the site's data |
 | Judging on this server | The sandbox image is the configured one; the judge can limit CPU, memory and processes; its workspaces are mounted; the AI runner socket exists |
-| Work queues | Connected judge machines, waiting submissions and how long the oldest has waited, tasks that lost their judge machine, failed tasks, how far the problem and user counts are behind, waiting AI jobs. Needs the backend's [metrics](#metrics), which the installer turns on. |
+| Work queues | Connected judge machines, waiting submissions and how long the oldest has waited, waiting submissions to running contests, tasks that lost their judge machine, failed tasks, how far the problem and user counts are behind, waiting AI jobs, which AI addresses accounts may use, AI requests whose usage wasn't reported. Needs the backend's [metrics](#metrics), which the installer turns on. |
 | This server | Free disk space and file entries, available memory, whether the clock is synchronized |
 | Files and permissions | Configuration, keys, data directories and backups have the owners the installer gives them, and other users can't read them |
 | Backups | The age of the latest `backup.sh` backup; the space upgrade backups use |
 
-Each line is **OK**, **INFO**, **WARN** or **FAIL**, and the command exits with 1 if anything failed, otherwise 0. `--json` prints the result as JSON, for monitoring; `--prefix` checks another installation directory. Doctor doesn't run programs in the sandbox, because that competes with judging: for an in-depth check of the sandbox and every language, run `sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh`.
+Each line is **OK**, **INFO**, **WARN** or **FAIL**, and the command exits with 1 if anything failed, otherwise 0. [Runbook](Runbook.md) says what to do about each warning and failure. `--json` prints the result as JSON, for monitoring; `--prefix` checks another installation directory. Doctor doesn't run programs in the sandbox, because that competes with judging: for an in-depth check of the sandbox and every language, run `sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh`.
 
 ### Liveness and readiness
 
@@ -132,10 +132,14 @@ With `metrics` set in `backend.yaml` (the installer sets `127.0.0.1:2020`), `htt
 | `libreoj_judge_oldest_queued_job_seconds` | How long the oldest waiting task has waited | it keeps growing |
 | `libreoj_judge_expired_leases` | Tasks whose judge machine stopped answering and that aren't queued again yet | it stays above 0 for more than a minute |
 | `libreoj_judge_failed_jobs_last_day` | Tasks that failed in the last 24 hours | above 0: see **Judge queue** on the **Judge Machine** page |
+| `libreoj_judge_queued_jobs_by_class{class}` | Waiting tasks by [class](Distributed-Judging.md#which-task-comes-next): `live_contest`, `practice`, `rejudge`, `hack_and_self_evaluation`, `ai` | `live_contest` stays above 0 |
 | `libreoj_statistics_outbox_pending`, `libreoj_statistics_outbox_oldest_seconds` | [Count changes](#submission-and-accepted-counts) not applied yet, and the age of the oldest | the age passes a few minutes |
 | `libreoj_ai_jobs{state}`, `libreoj_ai_oldest_queued_job_seconds` | AI jobs `queued` and `running`, and how long the oldest has waited | |
 | `libreoj_ai_provider_requests{state}` | Model requests `running`, and `waiting` for a free slot under the AI limits in **Site management** | many wait for long |
 | `libreoj_ai_paused` | 1 while AI is paused | |
+| `libreoj_ai_unreported_usage_last_day` | AI requests in the last 24 hours whose provider reported no usage; they count against budgets at their maximum | it grows: the provider may not report usage |
+| `libreoj_ai_approved_endpoints`, `libreoj_ai_approved_endpoints_only` | [AI addresses](AI.md#which-addresses-accounts-may-use) approved in **Site management**, and 1 when accounts may use only those | |
+| `libreoj_database_schema_differences{kind}` | How the database differs from the release's definitions, as the backend found when it started: `changed` (a column definition, a missing index), `extra` (what a newer release added) | `changed` is above 0 |
 | `libreoj_ai_worker_errors{stage}` | Errors of the AI job scheduler (`worker`) and internal errors of jobs (`job`) since the backend started | it grows: see the backend log |
 | `libreoj_error_count{error}` | Server errors by type, including lost database or Redis connections | it grows |
 | `libreoj_request_sql_queries{api}` | SQL queries per request, by address | a page's average grows with the amount of data (a query per item) |
@@ -197,11 +201,47 @@ It backs up `/opt/LLMOJ`, or the directory given with `--prefix` (or `HYHOJ_ROOT
 1. refuses to run while an installation, upgrade or judge resize is in progress;
 2. stops the site's services, so the site is down while it runs;
 3. writes `config`, `data` and `deploy` to `backups/libreoj-<UTC time>.tar.gz` with a `.sha256` checksum, leaving out `data/judge`, `data/tmp`, `data/nginx` and `data/ai-generated`;
-4. starts again whatever was running before, even if the backup failed; a site that was stopped stays stopped.
+4. starts again whatever was running before, even if the backup failed; a site that was stopped stays stopped;
+5. with the options below, copies the backup elsewhere and deletes older ones, after the site is back.
 
-The backup doesn't include the sandbox image, the installed runtimes, systemd drop-ins in `/etc/systemd/system`, unpublished AI results in `data/ai-generated` or remote judges. Keep copies of anything else you need, store backups on another machine, and practise restoring one.
+| Option | What it does |
+| --- | --- |
+| `--encrypt-to KEY.asc` | Encrypts the backup for an OpenPGP public key file, as it's written: the backup is `libreoj-<UTC time>.tar.gz.gpg`, and no unencrypted copy is ever on disk. Only the matching private key reads it; keep that key off the server, so a stolen backup or a compromised server doesn't expose the site's secrets. |
+| `--copy-to DESTINATION` | Copies the backup and its `.sha256` with `rsync`, to a directory (for example a mounted network share) or to `user@host:directory` over SSH, using root's SSH keys. A failed copy leaves the backup in place and exits with 3. |
+| `--keep N` | After a successful backup, keeps only the newest `N` backups in `backups/` (upgrade backups in `backups/upgrade` are never touched). The copies elsewhere are for you to rotate. |
 
-A backup holds every secret of the site. To keep a copy elsewhere encrypted, for example with GnuPG and a key whose private part isn't on the server: `gpg --encrypt --recipient YOUR-KEY-ID libreoj-<UTC time>.tar.gz`, then copy the `.gpg` file and the `.sha256` file.
+The `.sha256` file names the backup by its file name, so `sha256sum -c libreoj-<UTC time>.tar.gz.sha256` checks a copy wherever it is.
+
+To make the key, on another machine: `gpg --quick-gen-key "LLMOJ backups" future-default encrypt never`, then `gpg --armor --export "LLMOJ backups" > llmoj-backups.asc`, and copy only `llmoj-backups.asc` to the server. Keep the private key (`gpg --armor --export-secret-keys "LLMOJ backups"`) safe: without it, an encrypted backup can't be restored.
+
+To back up every night at 3:00, keeping a week of backups here and a copy on another machine, create `/etc/systemd/system/llmoj-backup.service`:
+
+```ini
+[Unit]
+Description=LLMOJ backup
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/LLMOJ/deploy/backup.sh --encrypt-to /root/llmoj-backups.asc --copy-to backup@nas.example.org:llmoj/ --keep 7
+```
+
+and `/etc/systemd/system/llmoj-backup.timer`:
+
+```ini
+[Unit]
+Description=Nightly LLMOJ backup
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+then run `sudo systemctl daemon-reload && sudo systemctl enable --now llmoj-backup.timer`. Every run takes the site down for a short while; choose a quiet time.
+
+The backup doesn't include the sandbox image, the installed runtimes, systemd drop-ins in `/etc/systemd/system`, unpublished AI results in `data/ai-generated` or remote judges. Keep copies of anything else you need, store backups on another machine, and practise restoring one. A backup holds every secret of the site: encrypt the ones that leave the server.
 
 ### Verifying a backup
 
@@ -211,18 +251,21 @@ sudo bash /opt/LLMOJ/deploy/verify-backup.sh /opt/LLMOJ/backups/libreoj-<UTC tim
 
 `verify-backup.zh-CN.sh` prints the same in Chinese. It checks that the backup can be restored, while the site keeps running:
 
-1. the archive matches its `.sha256` file and holds only what `backup.sh` writes: no paths or links that leave it, no device files;
+1. the archive matches its `.sha256` file and holds only what `backup.sh` writes: no paths or links that leave it, no device files. An encrypted backup (`.tar.gz.gpg`) is decrypted with the private key in root's GnuPG keyring: import it first (`sudo gpg --import llmoj-backups-private.asc`) on the machine that verifies, preferably not the server itself;
 2. it unpacks the archive into a private temporary directory in `/var/tmp`. Use `--work-dir` for another directory with room for the unpacked backup; it must be under `/var/tmp` or `/tmp`, the only places outside its own where AppArmor lets MariaDB work;
 3. it starts a separate MariaDB on that copy of the database, without network access and on its own socket, and runs `CHECK TABLE` on every table;
 4. it checks that each file the database lists is in the backup's object storage;
-5. it tries `data/ai/master.key` and `data/ai/two-factor.key` on the saved AI settings and authenticator secrets they protect;
-6. it stops that MariaDB and deletes the copy. `--keep` keeps the copy for inspection; delete it afterwards, because it holds secrets.
+5. it starts a temporary MinIO on that copy of the storage (on the local interface only, as an unprivileged user) and reads every file whose content hash the database records, comparing the hash and the size. `--no-contents` skips this, which reads the whole storage;
+6. it tries `data/ai/master.key` and `data/ai/two-factor.key` on the saved AI settings and authenticator secrets they protect;
+7. it stops the temporary servers and deletes the copy. `--keep` keeps the copy for inspection; delete it afterwards, because it holds secrets.
 
 It prints counts, never contents or secrets, and exits with 1 if the backup can't be restored as it is. While it runs, it needs disk space for the unpacked copy and some memory for the temporary MariaDB, which gets a 64 MB buffer pool. It can't show that a restored site judges submissions: for that, practise a restore on a spare machine.
 
 ### Restoring a backup
 
-Restore into an installation of the same LLMOJ version, with the same role (site and judge, or site only) and installation directory. On a new machine, install that version first. These steps replace the site's configuration and data with the backup's; the current ones are moved aside, not deleted. The site is down while you do this:
+Restore into an installation of the same LLMOJ version, with the same role (site and judge, or site only) and installation directory. On a new machine, install that version first. The backend refuses to start on a database that lacks tables or columns its version needs ([The database at startup](Upgrade.md#the-database-at-startup)), so a backup of an older version needs that version installed, then an upgrade. These steps replace the site's configuration and data with the backup's; the current ones are moved aside, not deleted. The site is down while you do this.
+
+An encrypted backup is decrypted first, where the private key is: `gpg --output libreoj-<UTC time>.tar.gz --decrypt libreoj-<UTC time>.tar.gz.gpg`. Then:
 
 ```bash
 sudo bash /opt/LLMOJ/deploy/verify-backup.sh /path/to/libreoj-<UTC time>.tar.gz

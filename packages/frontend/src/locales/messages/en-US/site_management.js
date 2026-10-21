@@ -30,6 +30,65 @@ return {
   invalid_response: "The server returned unrecognized settings. Reload and try again.",
   save_unconfirmed:
     "Could not confirm the save result: {error} Reload settings to check; your current selection has been kept.",
+  judging: {
+    title: "Judging",
+    introduction:
+      "How judge machines choose their next task. Submissions to contests that haven't ended always come first, then other new submissions, rejudges, hacks and self-evaluation, and AI runs. Changes apply within a few seconds.",
+    fields: {
+      contestReservedThreads: "Task threads each judge machine keeps for running contests",
+      agingMinutes: "Minutes before a waiting task is moved ahead"
+    },
+    notes: {
+      contestReservedThreads:
+        "While a contest is running, each judge machine leaves this many of its task threads for contest submissions once its other tasks fill the rest, so a long rejudge or AI run can't delay a contest. A judge machine needs more task threads than this to keep any. 0 keeps none.",
+      agingMinutes:
+        "Once a task has waited this long, it gets every fifth free task thread, whatever its kind, so nothing waits forever behind newer work. Contest submissions still go first. 0 turns this off."
+    },
+    invalid: "Enter whole numbers within the allowed ranges.",
+    saved: "Judging settings saved. Judge machines use them within a few seconds."
+  },
+  ai_endpoints: {
+    title: "AI addresses",
+    introduction:
+      "Which provider, search and MCP addresses accounts may use in their AI configuration. A private or local address (such as a model server on your network) is reached from this server, not from the user's browser, so it needs your approval. Site administrators can use any address.",
+    custom_label: "Addresses that aren't approved",
+    custom: {
+      public: "Allow public addresses; private and local ones need approval",
+      approved: "Allow only approved addresses"
+    },
+    custom_notes:
+      "With only approved addresses, users choose from the list below, and a configuration with another address isn't saved or used. Changes apply within a few seconds.",
+    approved_title: "Approved addresses",
+    none_approved: "No address is approved.",
+    name: "Name shown to users",
+    type: "API",
+    base_url: "Base URL",
+    remove: "Remove",
+    remove_named: "Remove {name}",
+    add: "Add address",
+    approved_notes:
+      "An approved Base URL covers every request at or below its path on the same scheme, host and port. Hosts listed in the server's HYHOJ_AI_PRIVATE_HOSTS are approved as well.",
+    invalid: "Each approved address needs a name and an http or https Base URL without a password, query or fragment.",
+    saved: "AI addresses saved. They apply within a few seconds.",
+    usage_title: "Addresses in use",
+    usage_introduction:
+      "The addresses accounts saved in their AI configuration, and whether they can use them. Loading resolves each host once.",
+    usage_load: "Show addresses in use",
+    usage_reload: "Reload",
+    usage_none: "No account has saved an AI configuration.",
+    accounts: "Accounts",
+    accounts_with_administrators: "{count} (administrators: {administrators})",
+    status: "Status",
+    statuses: {
+      approved: "Approved",
+      public: "Public address",
+      private: "Private: administrators only",
+      not_approved: "Not approved: administrators only"
+    },
+    unresolved: "The host name didn't resolve.",
+    approve: "Approve",
+    approval_unsaved: "Added above; save to approve."
+  },
   ai: {
     title: "AI",
     introduction:

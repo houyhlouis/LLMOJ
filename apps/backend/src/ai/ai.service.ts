@@ -1,11 +1,21 @@
-import { Injectable, Inject } from "@nestjs/common";
+import { promises as dns } from "dns";
+import { isIP } from "net";
+
+import { Injectable, Inject, Optional } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 
 import { Repository } from "typeorm";
 
 import { AiJobEntity } from "./ai.entity";
 import { AiConfiguration, AiError, providerPresets } from "./ai.types";
-import { generateText, listModels, searchWeb, validateBaseUrl } from "./ai-provider";
+import {
+  generateText,
+  isAllowedPrivateHost,
+  isPublicAddress,
+  listModels,
+  searchWeb,
+  validateBaseUrl
+} from "./ai-provider";
 import { SaveAiConfigurationDto, StartAiJobDto } from "./ai.dto";
 import { normalizeLlmConfiguration } from "./ai-validation";
 import { resolveAiImportType } from "./ai-import-type";
@@ -20,6 +30,12 @@ import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeType } from "../user/user-privilege.service";
 import { ProblemAccessService } from "../problem/problem-access.service";
 import { FileService } from "../file/file.service";
+import {
+  AiEndpointPolicy,
+  AiEndpointPolicyService,
+  DEFAULT_AI_ENDPOINT_POLICY,
+  endpointMatches
+} from "../settings/ai-endpoint-policy.service";
 
 // Model listing and connection tests call providers directly rather than through the job scheduler.
 // Bound how many run at the same time per user, and for the whole site (one backend process).
@@ -52,6 +68,8 @@ export class AiService {
 
   @Inject(AiAdmissionService) private readonly admission: AiAdmissionService;
 
+  @Optional() @Inject(AiEndpointPolicyService) private readonly endpointPolicies?: AiEndpointPolicyService;
+
   constructor(
     @InjectRepository(AiJobEntity) private readonly jobs: Repository<AiJobEntity>,
     private readonly problemAccess: ProblemAccessService,
@@ -80,18 +98,128 @@ export class AiService {
     return { signedUploadRequest: signed, attachmentToken };
   }
 
+  private async endpointPolicy(): Promise<AiEndpointPolicy> {
+    return (await this.endpointPolicies?.current()) ?? DEFAULT_AI_ENDPOINT_POLICY;
+  }
+
   async getConfiguration(user: UserEntity) {
     await this.coordinator.requirePrivilege(user, UserPrivilegeType.ManageAiConfiguration);
     const config = await this.configuration.config(user.id);
+    const endpoints = await this.endpointPolicy();
+    const approved = (types: string[]) =>
+      endpoints.endpoints
+        .filter(endpoint => types.includes(endpoint.type))
+        .map(({ name, type, baseUrl }) => ({ name, type, baseUrl }));
     return {
       llm: { ...config.llm, apiKey: undefined, hasKey: !!config.llm.apiKey },
       search: { ...config.search, apiKey: undefined, hasKey: !!config.search.apiKey },
       autoOnSave: false,
       maxConcurrentJobs: config.maxConcurrentJobs,
       parallelism: { min: 1, max: 8, globalMax: 8, maxQueuedJobs: 100 },
-      presets: providerPresets,
-      sitePolicy: await this.userPolicy()
+      // The site's approved endpoints first; other providers only where custom addresses are allowed
+      presets: [
+        ...approved(["chat", "responses", "anthropic"]),
+        ...(endpoints.customEndpoints === "public" || user.isAdmin ? providerPresets : [])
+      ],
+      searchPresets: approved(["tavily", "mcp"]),
+      sitePolicy: { ...(await this.userPolicy()), approvedEndpointsOnly: endpoints.customEndpoints === "approved" }
     };
+  }
+
+  /**
+   * The addresses accounts saved in their AI configurations, for site administrators: how many accounts use each,
+   * and whether requests to it are approved, allowed as a public address, or refused for accounts other than site
+   * administrators' (private or local, or not approved where only approved addresses may be used).
+   */
+  async endpointUsage(user: UserEntity) {
+    if (!user?.isAdmin) throw new AiError("PERMISSION_DENIED");
+    const policy = await this.endpointPolicy();
+    const saved = await this.configuration.savedEndpoints();
+    const administrators = new Set(
+      saved.length
+        ? (
+            await this.jobs.manager
+              .getRepository(UserEntity)
+              .createQueryBuilder("user")
+              .select("user.id", "id")
+              .where("user.id IN (:...ids)", { ids: [...new Set(saved.map(row => row.userId))] })
+              .andWhere("user.isAdmin = 1")
+              .getRawMany<{ id: number }>()
+          ).map(row => Number(row.id))
+        : []
+    );
+    const groups = new Map<string, { kind: "model" | "search"; type: string; baseUrl: string; users: Set<number> }>();
+    for (const row of saved)
+      for (const [kind, endpoint] of [
+        ["model", row.llm],
+        ["search", row.search]
+      ] as const) {
+        if (!endpoint) continue;
+        let url: URL;
+        try {
+          url = new URL(endpoint.baseUrl);
+        } catch {
+          continue;
+        }
+        const baseUrl = `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+        const key = `${kind} ${endpoint.type} ${baseUrl}`;
+        if (!groups.has(key)) groups.set(key, { kind, type: endpoint.type, baseUrl, users: new Set() });
+        groups.get(key).users.add(row.userId);
+      }
+    // Each host is resolved once, as a request would (a few seconds at most)
+    const hosts = new Map<string, Promise<"public" | "private" | "unresolved">>();
+    const destination = (url: URL) => {
+      const hostname = url.hostname.replace(/^\[|\]$/g, "");
+      if (!hosts.has(hostname))
+        hosts.set(
+          hostname,
+          (async () => {
+            const lookup = isIP(hostname)
+              ? Promise.resolve([{ address: hostname }])
+              : dns.lookup(hostname, { all: true });
+            const timeout = new Promise<null>(resolve => setTimeout(() => resolve(null), 3000).unref());
+            const records = await Promise.race([lookup, timeout]).catch((): null => null);
+            if (!records?.length) return "unresolved";
+            return records.every(record => isPublicAddress(record.address)) ? "public" : "private";
+          })()
+        );
+      return hosts.get(hostname);
+    };
+    const endpoints = await Promise.all(
+      [...groups.values()].map(async group => {
+        const url = new URL(group.baseUrl);
+        const approved = isAllowedPrivateHost(url) || policy.endpoints.some(endpoint => endpointMatches(endpoint, url));
+        const reached = await destination(url);
+        return {
+          kind: group.kind,
+          type: group.type,
+          baseUrl: group.baseUrl,
+          accounts: group.users.size,
+          administratorAccounts: [...group.users].filter(id => administrators.has(id)).length,
+          destination: reached,
+          status: approved
+            ? "approved"
+            : reached === "private"
+              ? "private"
+              : policy.customEndpoints === "approved"
+                ? "not_approved"
+                : "public"
+        };
+      })
+    );
+    return { endpoints: endpoints.sort((a, b) => b.accounts - a.accounts || a.baseUrl.localeCompare(b.baseUrl)) };
+  }
+
+  /** Where only approved addresses may be used, a configuration with another one isn't saved. */
+  private async requireApprovedEndpoints(user: UserEntity, config: AiConfiguration) {
+    const policy = await this.endpointPolicy();
+    if (policy.customEndpoints !== "approved" || user.isAdmin) return;
+    const approved = (baseUrl: string) =>
+      policy.endpoints.some(endpoint => endpointMatches(endpoint, new URL(baseUrl)));
+    // Search is checked once it's set up: a key, or an MCP server (which may need none)
+    const searchUsed = !!config.search.apiKey || config.search.type === "mcp";
+    if (!approved(config.llm.baseUrl) || (searchUsed && !approved(config.search.baseUrl)))
+      throw new AiError("ENDPOINT_NOT_APPROVED");
   }
 
   async saveConfiguration(user: UserEntity, value: SaveAiConfigurationDto) {
@@ -119,6 +247,7 @@ export class AiService {
       },
       autoOnSave: false
     };
+    await this.requireApprovedEndpoints(user, config);
     await this.configuration.save(user.id, config);
     await this.coordinator.recordAiAudit(user, "configuration.save", undefined, {
       llmType: config.llm.type,

@@ -26,11 +26,46 @@ import { FileService } from "../file/file.service";
 
 // Smaller means higher priority
 // With the same priority value, the smaller ID means higher priority
+// A job's priority is its class minus a fraction below 1 (see makeSubmissionPriority), so the class is its rounding.
 export enum JudgeTaskPriorityType {
+  // Submissions to a contest that hasn't ended
+  LiveContest = 0,
+  // Other new submissions
   High = 1,
+  // Rejudges and preparing self-evaluation
   Medium = 2,
+  // Hacks and self-evaluation
   Low = 3,
+  // AI runs
   Lowest = 4
+}
+
+/** The class of a job's priority. */
+export function judgeTaskPriorityTypeOf(priority: number): JudgeTaskPriorityType {
+  return Math.min(
+    JudgeTaskPriorityType.Lowest,
+    Math.max(JudgeTaskPriorityType.LiveContest, Math.round(Number(priority) || 0))
+  );
+}
+
+// How the classes are named in metrics
+const JUDGE_CLASS_NAMES: Record<JudgeTaskPriorityType, string> = {
+  [JudgeTaskPriorityType.LiveContest]: "live_contest",
+  [JudgeTaskPriorityType.High]: "practice",
+  [JudgeTaskPriorityType.Medium]: "rejudge",
+  [JudgeTaskPriorityType.Low]: "hack_and_self_evaluation",
+  [JudgeTaskPriorityType.Lowest]: "ai"
+};
+
+// Jobs of the live contest class have a priority below this
+const LIVE_CONTEST_PRIORITY_LIMIT = JudgeTaskPriorityType.LiveContest + 0.5;
+
+/** What a judge thread may be given (see JudgeGateway.onConsumeTask). */
+export interface JudgeClaimOptions {
+  // Only submissions to running contests: the thread is kept for them
+  liveContestOnly?: boolean;
+  // Every AGED_TURN-th task goes to the job waiting longest, once it has waited this long (0: never)
+  agingSeconds?: number;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
@@ -118,6 +153,13 @@ const POLL_INTERVAL = 5 * 1000;
 const CLAIM_CANDIDATES = 8;
 const MAX_CLAIM_ROUNDS = 10;
 
+// One task in this many goes to a job that has waited longer than the aging time, so no class waits forever while
+// new submissions still get most of the judging
+const AGED_TURN = 5;
+
+// Whether a contest is running is read this often
+const LIVE_CONTEST_CACHE = 10 * 1000;
+
 // A task whose preparation fails (e.g. the database is briefly unavailable) is retried with a growing delay, up to
 // MAX_PREPARATION_FAILURES times (about 15 minutes).
 const MAX_PREPARATION_FAILURES = 10;
@@ -173,6 +215,11 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
 
   // Active task IDs without a queued or leased job in the previous recovery scan: recovered if still so.
   private tasksMissingJobs = new Set<string>();
+
+  // Tasks this process gave out since the last one that went to an aged job
+  private claimsSinceAged = 0;
+
+  private liveContest: { running: Promise<boolean>; until: number } = null;
 
   @Optional() @Inject(FileService) private readonly fileService: FileService;
 
@@ -234,6 +281,22 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
 
   private readonly metricFailedJobs = this.metricsService.gauge("libreoj_judge_failed_jobs_last_day", [], async gauge =>
     gauge.set((await this.queueReading()).failedLastDay)
+  );
+
+  // Waiting jobs by class (see JudgeTaskPriorityType); a class with none reads 0
+  private readonly metricQueuedByClass = this.metricsService.gauge(
+    "libreoj_judge_queued_jobs_by_class",
+    ["class"],
+    async gauge => {
+      const rows: { class: string | number; jobs: string | number }[] = await this.connection.query(
+        `SELECT LEAST(?, GREATEST(?, ROUND(priority))) AS class, COUNT(*) AS jobs FROM judge_job
+         WHERE state = ? GROUP BY 1`,
+        [JudgeTaskPriorityType.Lowest, JudgeTaskPriorityType.LiveContest, JudgeJobState.Queued]
+      );
+      const counts = new Map(rows.map(row => [Number(row.class), Number(row.jobs)]));
+      for (const [type, name] of Object.entries(JUDGE_CLASS_NAMES))
+        gauge.set({ class: name }, counts.get(Number(type)) ?? 0);
+    }
   );
 
   async onModuleInit(): Promise<void> {
@@ -307,29 +370,67 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /** Whether a contest is running now, as of at most a few seconds ago. */
+  async liveContestRunning(): Promise<boolean> {
+    if (!this.liveContest || this.liveContest.until <= Date.now()) {
+      const running = this.connection
+        .query("SELECT 1 FROM contest WHERE startTime <= NOW() AND endTime > NOW() LIMIT 1")
+        .then((rows: unknown[]) => rows.length > 0);
+      this.liveContest = { running, until: Date.now() + LIVE_CONTEST_CACHE };
+      running.catch(() => {
+        if (this.liveContest?.running === running) this.liveContest = null;
+      });
+    }
+    return await this.liveContest.running;
+  }
+
   /**
    * Leases the next available job of one of `taskTypes` to a judge client connection and prepares its task.
    * Returns `null` if there's no job to judge now.
    */
   async claim(
     owner: JudgeJobOwner,
-    taskTypes: JudgeTaskType[] = Object.values(JudgeTaskType)
+    taskTypes: JudgeTaskType[] = Object.values(JudgeTaskType),
+    options: JudgeClaimOptions = {}
   ): Promise<LeasedJudgeTask> {
     if (taskTypes.length === 0) return null;
     /* eslint-disable no-await-in-loop */
     for (let round = 0; round < MAX_CLAIM_ROUNDS; round++) {
-      const candidates: JudgeJobRow[] = await this.connection.query(
+      let candidates: JudgeJobRow[] = await this.connection.query(
         `SELECT taskId, type, priority, fence, createdAt FROM judge_job
-         WHERE state = ? AND availableAt <= NOW(3) AND type IN (?)
+         WHERE state = ? AND availableAt <= NOW(3) AND type IN (?)${options.liveContestOnly ? " AND priority < ?" : ""}
          ORDER BY priority, createdAt LIMIT ${CLAIM_CANDIDATES}`,
-        [JudgeJobState.Queued, taskTypes]
+        [JudgeJobState.Queued, taskTypes, ...(options.liveContestOnly ? [LIVE_CONTEST_PRIORITY_LIMIT] : [])]
       );
+      // An aged turn, unless a running contest's submission waits
+      let agedIds = new Set<string>();
+      if (
+        options.agingSeconds > 0 &&
+        !options.liveContestOnly &&
+        this.claimsSinceAged >= AGED_TURN - 1 &&
+        candidates.length > 0 &&
+        Number(candidates[0].priority) >= LIVE_CONTEST_PRIORITY_LIMIT
+      ) {
+        const aged: JudgeJobRow[] = await this.connection.query(
+          `SELECT taskId, type, priority, fence, createdAt FROM judge_job
+           WHERE state = ? AND availableAt <= NOW(3) AND type IN (?) AND createdAt <= NOW(3) - INTERVAL ? SECOND
+           ORDER BY createdAt LIMIT ${CLAIM_CANDIDATES}`,
+          [JudgeJobState.Queued, taskTypes, options.agingSeconds]
+        );
+        agedIds = new Set(aged.map(job => job.taskId));
+        // Nothing waited that long: look again after the next AGED_TURN tasks
+        if (aged.length === 0) this.claimsSinceAged = 0;
+        candidates = [...aged, ...candidates.filter(job => !agedIds.has(job.taskId))];
+      }
       let contended = false;
       for (const job of candidates) {
         const fence = Number(job.fence) + 1;
         if (await this.lease(job, fence, owner)) {
           const task = await this.prepare(job, fence, owner);
-          if (task) return { task, fence };
+          if (task) {
+            this.claimsSinceAged = agedIds.has(job.taskId) ? 0 : this.claimsSinceAged + 1;
+            return { task, fence };
+          }
         } else contended = true;
       }
       // Every candidate was tried; if other consumers took some, there may be more jobs behind them

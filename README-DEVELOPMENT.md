@@ -52,67 +52,19 @@ The judge's sandbox image is built with Docker, and submissions run in the nativ
 
 ## Tests
 
-Tests are run with `node --test` or `python3` from the repository root. CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the following on every push; run the parts you touch before committing.
-
 ```bash
-# backend, by area
-node --test --test-concurrency=1 apps/backend/src/ai/*.test.cjs
-node apps/backend/src/access/access-permissions.test.cjs
-node --test --test-concurrency=1 apps/backend/src/access/capability-cache.test.cjs \
-  apps/backend/src/access/route-access.test.cjs apps/backend/src/access/permission-matrix.mariadb.test.cjs \
-  apps/backend/src/site-management/*.test.cjs
-node --test --test-concurrency=1 apps/backend/src/discussion/*.test.cjs apps/backend/src/team/*.test.cjs \
-  apps/backend/src/hack/*.test.cjs apps/backend/src/self-eval/*.test.cjs apps/backend/src/contest/*.test.cjs \
-  apps/backend/src/judge/*.test.cjs apps/backend/src/auth/*.test.cjs apps/backend/src/auth/two-factor/*.test.cjs \
-  apps/backend/src/submission/*.test.cjs apps/backend/src/problem/*.test.cjs apps/backend/src/file/*.test.cjs \
-  apps/backend/src/database/*.test.cjs apps/backend/src/study-list/*.test.cjs
-node --test --test-concurrency=1 apps/backend/src/health/*.test.cjs apps/backend/src/common/*.test.cjs \
-  apps/backend/src/metrics/*.test.cjs apps/backend/src/redis/*.test.cjs
-
-# judge
-node --test apps/judge/src/aiQuality.test.cjs apps/judge/src/task/hack/hack.test.cjs \
-  apps/judge/src/task/self-eval/self-eval.test.cjs apps/judge/src/rpc.test.cjs \
-  apps/judge/src/executionScheduler.test.cjs apps/judge/src/selfTestConfig.test.cjs apps/judge/src/fileContent.test.cjs \
-  apps/judge/src/task/ai-execution/ai-execution.test.cjs
-
-# frontend
-node --test packages/frontend/test/*.test.cjs
-
-# database schema and migrations
-node --test deploy/test/upgrade-schema.test.mjs deploy/test/community-schema.test.mjs \
-  deploy/test/team-storage.test.mjs deploy/test/upgrade-registration.test.mjs
-node --test deploy/test/community-schema.mariadb.test.mjs deploy/test/initialize-schema.test.mjs
-node --test deploy/fake-migration.test.cjs
-
-# installer, upgrader and wiki
-python3 deploy/test/install-flow.test.py
-python3 deploy/test/backup.test.py
-python3 deploy/test/doctor.test.py
-python3 deploy/test/verify-backup.test.py
-node --test deploy/test/backup-keys.test.mjs deploy/test/dependency-audit.test.mjs
-sudo python3 deploy/test/community-upgrade.test.py
-sudo python3 deploy/test/community-runtime-upgrade.test.py
-python3 deploy/test/wiki-export.test.py
+pnpm test
 ```
 
-Other deployment tests aren't in CI because they need root, systemd or a real installation layout:
+runs every suite, through [deploy/test/run-tests.mjs](deploy/test/run-tests.mjs), and ends with a summary. Name groups to run only those, for example `pnpm test backend frontend`: `ai`, `judge`, `backend`, `frontend`, `deploy` and `wiki`. Build first (`pnpm build`): the schema and API contract suites read the built backend. CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the same lists with `--ci`, except the deployment suites that need Ubuntu 26.04's Python and system tools; those run with `pnpm test` on such a machine.
 
-```bash
-sudo python3 deploy/test/upgrade.test.py
-sudo python3 deploy/test/install-support.test.py
-sudo python3 deploy/test/install-network.test.py
-sudo python3 deploy/test/judge-config.test.py      # needs node on sudo's PATH
-sudo python3 deploy/test/resize-judge.test.py
-sudo python3 deploy/test/admin-output.test.py
-sudo python3 deploy/test/redis-host.test.py
-sudo python3 deploy/test/sandbox-staging.test.py
-sudo python3 deploy/test/verify-backup.test.py     # the full check needs the MariaDB server, Node.js and python3-cryptography
-python3 deploy/test/judge-capacity.test.py
-python3 deploy/test/judge-prompt.test.py
-python3 deploy/test/github-entry.test.py
-python3 deploy/test/docker-support.test.py
-node --test deploy/test/bootstrap-admin.test.mjs
-```
+Suites that need something this machine lacks skip those cases, and the summary says what was missing:
+
+- **MariaDB:** the [database tests](#database-tests) below need their variables;
+- **redis-server**, for the judge queue and Redis suites;
+- **root**, for the deployment suites' cases that create accounts, mount file systems or run services. The runner uses passwordless `sudo` when it can, as CI does, and runs Python with `-B` so that no root-owned cache files appear in the tree;
+- **MinIO** (`LLMOJ_MINIO_BINARY`, or an installation's `runtime/minio`), for the backup verifier's content check;
+- **2 GiB in `TMPDIR`**, for the AI suites' ZIP archives. The runner uses `/var/tmp` when the temporary directory is smaller.
 
 These use temporary directories and simulated services: they don't replace trying an installation or upgrade on a real Ubuntu server.
 

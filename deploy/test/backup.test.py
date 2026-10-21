@@ -18,9 +18,9 @@ WEB = [unit for unit in ALL if unit != "libreoj-judge.service"]
 
 
 class Backup(unittest.TestCase):
-    def run_backup(self, installed, active, fail="", hold_lock=False):
+    def run_backup(self, installed, active, fail="", hold_lock=False, arguments=(), prepare=None, inspect=None):
         source = (DEPLOY / "backup.sh").read_text()
-        root_check = 'if [ "$EUID" -ne 0 ]; then exec sudo bash "$0" --prefix "$libreoj_backup_root"; fi\n'
+        root_check = 'if [ "$EUID" -ne 0 ]; then exec sudo bash "$0" "${libreoj_backup_args[@]}"; fi\n'
         self.assertIn(root_check, source)
         with tempfile.TemporaryDirectory(prefix="llmoj-backup-") as temporary:
             directory = Path(temporary)
@@ -30,6 +30,8 @@ class Backup(unittest.TestCase):
             (root / "config/backend.yaml").write_text("synthetic: true\n")
             (root / "data/mariadb/table").write_text("rows")
             (root / "data/judge/cache").write_text("excluded")
+            if prepare:
+                prepare(directory, root)
             lock_directory = directory / "run-lock"
             script = source.replace(root_check, "").replace("/run/libreoj-installer", str(lock_directory))
             trace = directory / "calls.txt"
@@ -52,7 +54,8 @@ tar() { if [[ "$FLOW_FAIL" == tar ]]; then return 2; fi; command tar "$@"; }
                 fcntl.flock(lock_file, fcntl.LOCK_EX)
             try:
                 result = subprocess.run(
-                    ["/bin/bash", "-c", prelude + script, "backup.sh", "--prefix", str(root)],
+                    ["/bin/bash", "-c", prelude + script, "backup.sh", "--prefix", str(root),
+                     *[str(argument).replace("{directory}", str(directory)) for argument in arguments]],
                     env={**os.environ, "FLOW_TRACE": str(trace), "FLOW_FAIL": fail,
                          "FLOW_INSTALLED": " ".join(installed), "FLOW_ACTIVE": " ".join(active)},
                     capture_output=True, text=True, timeout=30)
@@ -61,6 +64,8 @@ tar() { if [[ "$FLOW_FAIL" == tar ]]; then return 2; fi; command tar "$@"; }
                     lock_file.close()
             calls = trace.read_text().splitlines() if trace.exists() else []
             backups = sorted(path.name for path in (root / "backups").glob("*")) if (root / "backups").exists() else []
+            if inspect:
+                inspect(directory, root)
             return result, calls, backups
 
     def actions(self, calls):
@@ -108,6 +113,72 @@ tar() { if [[ "$FLOW_FAIL" == tar ]]; then return 2; fi; command tar "$@"; }
         result, calls, backups = self.run_backup(ALL, ALL, hold_lock=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Another installation, upgrade or maintenance task is running", result.stderr)
+        self.assertEqual(calls, [])
+        self.assertEqual(backups, [])
+
+
+    def test_keep_deletes_only_the_oldest_backups_after_a_successful_backup(self):
+        def prepare(directory, root):
+            (root / "backups").mkdir()
+            for stamp in ("20240101T000000Z", "20250101T000000Z", "20260101T000000Z"):
+                (root / f"backups/libreoj-{stamp}.tar.gz").write_text("old")
+                (root / f"backups/libreoj-{stamp}.tar.gz.sha256").write_text("old")
+            (root / "backups/upgrade").mkdir()
+        result, _, backups = self.run_backup(ALL, ALL, arguments=("--keep", "2"), prepare=prepare)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        archives = [name for name in backups if name.endswith(".tar.gz")]
+        self.assertEqual(len(archives), 2)
+        self.assertIn("libreoj-20260101T000000Z.tar.gz", archives)
+        self.assertNotIn("libreoj-20240101T000000Z.tar.gz.sha256", backups)
+        self.assertIn("upgrade", backups, "upgrade backups are never touched")
+        self.assertIn("Deleted the older backup libreoj-20250101T000000Z.tar.gz", result.stdout)
+        for invalid in ("x", "-1", "99999"):
+            result, calls, _ = self.run_backup(ALL, ALL, arguments=("--keep", invalid))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(calls, [])
+
+    def test_copy_to_a_directory_with_a_checksum_that_checks_there(self):
+        result, _, backups = self.run_backup(ALL, ALL, arguments=("--copy-to", "{directory}/offsite/"),
+                                             prepare=lambda directory, root: (directory / "offsite").mkdir(),
+                                             inspect=lambda directory, root: self.copied.extend(
+                                                 [sorted(p.name for p in (directory / "offsite").iterdir()),
+                                                  subprocess.run(["sha256sum", "-c", "--quiet", *[p.name for p in (directory / "offsite").glob("*.sha256")]],
+                                                                 cwd=directory / "offsite").returncode]))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.copied[0], backups)
+        self.assertEqual(self.copied[1], 0)
+
+    def setUp(self):
+        self.copied = []
+
+    def test_encrypted_backups_never_exist_unencrypted_and_need_the_private_key(self):
+        def prepare(directory, root):
+            home = directory / "gnupg"
+            home.mkdir(mode=0o700)
+            subprocess.run(["gpg", "--homedir", str(home), "--batch", "--passphrase", "", "--quick-gen-key",
+                            "LLMOJ backup test <backup@example.invalid>", "future-default", "default", "never"],
+                           check=True, capture_output=True)
+            exported = subprocess.run(["gpg", "--homedir", str(home), "--armor", "--export"], check=True, capture_output=True)
+            (directory / "backup-key.asc").write_bytes(exported.stdout)
+            (directory / "not-a-key.asc").write_text("not a key")
+
+        def inspect(directory, root):
+            for archive in (root / "backups").glob("*.gpg"):
+                decrypted = subprocess.run(["gpg", "--homedir", str(directory / "gnupg"), "--batch", "--decrypt", str(archive)],
+                                           capture_output=True)
+                listing = subprocess.run(["tar", "-tz"], input=decrypted.stdout, capture_output=True)
+                self.copied.append(listing.stdout.decode())
+        result, calls, backups = self.run_backup(ALL, ALL, arguments=("--encrypt-to", "{directory}/backup-key.asc"),
+                                                 prepare=prepare, inspect=inspect)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(backups), 2)
+        self.assertTrue(backups[0].endswith(".tar.gz.gpg") and backups[1].endswith(".tar.gz.gpg.sha256"), backups)
+        self.assertIn("config/backend.yaml", self.copied[0])
+        self.assertNotIn("data/judge/cache", self.copied[0])
+        # A file that isn't a usable public key is refused before anything is stopped
+        result, calls, backups = self.run_backup(ALL, ALL, arguments=("--encrypt-to", "{directory}/not-a-key.asc"), prepare=prepare)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not an OpenPGP public key", result.stderr)
         self.assertEqual(calls, [])
         self.assertEqual(backups, [])
 

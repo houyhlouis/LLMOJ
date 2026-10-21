@@ -1234,6 +1234,12 @@ class Upgrade:
             if int(limited):
                 fail(say('Rollback refused: the older release would ignore the AI pause and budgets saved in Site management; turn them off there before downgrading, or repair this release',
                          '拒绝回滚：旧版本会忽略在网站管理中保存的 AI 暂停和预算；请先在网站管理中关闭它们再回滚，或修复当前版本'))
+        # An older backend ignores the approved AI addresses: accounts could use any public address again.
+        if previous_backend.exists() and not (previous_backend/'dist/settings/ai-endpoint-policy.service.js').is_file():
+            restricted = self.sql("SELECT COUNT(*) FROM `settings` WHERE `key`='ai-endpoints' AND (COALESCE(JSON_TYPE(`value`), '') <> 'OBJECT' OR COALESCE(JSON_UNQUOTE(JSON_EXTRACT(`value`, '$.customEndpoints')), '') <> 'public')", 'libreoj')
+            if int(restricted):
+                fail(say('Rollback refused: the older release would ignore the "only approved AI addresses" setting in Site management; allow public addresses there before downgrading, or repair this release',
+                         '拒绝回滚：旧版本会忽略网站管理中“只允许已批准的 AI 地址”的设置；请先在网站管理中允许公网地址再回滚，或修复当前版本'))
         for table in ('registration_review', 'registration_application'):
             exists = self.sql(f"SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='libreoj' AND TABLE_NAME='{table}'")
             if exists == '1' and int(self.sql(f"SELECT COUNT(*) FROM `{table}` WHERE status <> 'approved'", 'libreoj')):

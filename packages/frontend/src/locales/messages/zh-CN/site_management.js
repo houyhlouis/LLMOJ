@@ -26,6 +26,64 @@ return {
   request_failed: "请求未完成，请重试。",
   invalid_response: "服务器返回了无法识别的设置，请重新加载后重试。",
   save_unconfirmed: "未能确认保存结果：{error} 请重新加载设置核对，当前选择暂未清除。",
+  judging: {
+    title: "评测",
+    introduction:
+      "评测机如何选择下一个任务。尚未结束的比赛的提交总是最先评测，其次是其他新提交、重测、Hack 和自测，最后是 AI 运行。修改在几秒内生效。",
+    fields: {
+      contestReservedThreads: "每台评测机为进行中的比赛保留的任务线程数",
+      agingMinutes: "等待多少分钟后提前处理"
+    },
+    notes: {
+      contestReservedThreads:
+        "比赛进行期间，当评测机的其他任务占满其余线程时，它会为比赛提交留出这么多任务线程，这样长时间的重测或 AI 运行不会拖慢比赛。评测机的任务线程数需要多于这个数才会保留。0 表示不保留。",
+      agingMinutes:
+        "任务等待超过这个时间后，无论种类，每五个空闲任务线程中会有一个分给它，这样任何任务都不会因为更新的任务而一直等待。比赛提交仍然最先评测。0 表示关闭。"
+    },
+    invalid: "请输入允许范围内的整数。",
+    saved: "评测设置已保存，评测机会在几秒内使用。"
+  },
+  ai_endpoints: {
+    title: "AI 地址",
+    introduction:
+      "账号的 AI 配置中可以使用哪些服务商、搜索和 MCP 地址。内网或本机地址（例如你网络中的模型服务器）是从本服务器访问的，而不是从用户的浏览器访问，因此需要你批准。站点管理员可以使用任何地址。",
+    custom_label: "未批准的地址",
+    custom: {
+      public: "允许公网地址；内网和本机地址需要批准",
+      approved: "只允许已批准的地址"
+    },
+    custom_notes:
+      "只允许已批准的地址时，用户从下面的列表中选择；使用其他地址的配置不会被保存或使用。修改在几秒内生效。",
+    approved_title: "已批准的地址",
+    none_approved: "没有已批准的地址。",
+    name: "向用户显示的名称",
+    type: "API",
+    base_url: "Base URL",
+    remove: "移除",
+    remove_named: "移除 {name}",
+    add: "添加地址",
+    approved_notes:
+      "批准的 Base URL 涵盖相同协议、主机和端口下，该路径及其下的所有请求。服务器 HYHOJ_AI_PRIVATE_HOSTS 中列出的主机同样视为已批准。",
+    invalid: "每个已批准的地址都需要名称，以及不含密码、查询参数或片段的 http 或 https Base URL。",
+    saved: "AI 地址已保存，几秒内生效。",
+    usage_title: "使用中的地址",
+    usage_introduction: "各账号在 AI 配置中保存的地址，以及它们能否使用。加载时会对每个主机名解析一次。",
+    usage_load: "显示使用中的地址",
+    usage_reload: "重新加载",
+    usage_none: "还没有账号保存 AI 配置。",
+    accounts: "账号数",
+    accounts_with_administrators: "{count}（其中管理员 {administrators}）",
+    status: "状态",
+    statuses: {
+      approved: "已批准",
+      public: "公网地址",
+      private: "内网地址：仅管理员可用",
+      not_approved: "未批准：仅管理员可用"
+    },
+    unresolved: "主机名无法解析。",
+    approve: "批准",
+    approval_unsaved: "已添加到上方，保存后生效。"
+  },
   ai: {
     title: "AI",
     introduction:

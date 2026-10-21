@@ -14,6 +14,8 @@ import {
   SiteSettings
 } from "./api";
 import AiPolicySection from "./AiPolicySection";
+import JudgePolicySection from "./JudgePolicySection";
+import AiEndpointsSection from "./AiEndpointsSection";
 import style from "./SiteManagementPage.module.less";
 
 export const SiteManagementPage = observer(() => {
@@ -202,7 +204,9 @@ export const SiteManagementPage = observer(() => {
               setReload(value => value + 1);
             }}
           />
+          <JudgePolicySection />
           <AiPolicySection />
+          <AiEndpointsSection />
         </div>
       )}
     </>

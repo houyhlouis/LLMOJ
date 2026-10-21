@@ -16,6 +16,7 @@ import {
   RateLimiterAbstract,
   IRateLimiterOptions
 } from "rate-limiter-flexible";
+import { DataSource } from "typeorm";
 
 import { AppModule } from "./app.module";
 import { ConfigService } from "./config/config.service";
@@ -23,6 +24,9 @@ import { MigrationService } from "./migration/migration.service";
 import { ErrorFilter } from "./error.filter";
 import { ClusterService } from "./cluster/cluster.service";
 import { RequestLogger } from "./common/request-logger";
+import { MetricsService } from "./metrics/metrics.service";
+import { isSchemaSyncEnabled } from "./database/database.providers";
+import { checkSchemaCompatibility, describeMissing, isSchemaCheckEnabled } from "./database/schema-compatibility";
 
 // eslint-disable-next-line no-extend-native
 String.prototype.format = function format(...args) {
@@ -105,6 +109,28 @@ async function initialize(): Promise<[packageInfo: any, configService: ConfigSer
   return [packageInfo, configService, app];
 }
 
+/**
+ * Before serving anything, the database must have every table and column this release uses: a database restored
+ * from an older release, or not upgraded, is refused instead of failing request by request. What a newer release
+ * added is fine, so a rollback still starts. Other differences are logged and reported by doctor.sh.
+ */
+async function checkSchema(app: NestExpressApplication) {
+  if (!cluster.isPrimary || isSchemaSyncEnabled() || !isSchemaCheckEnabled()) return;
+  const differences = await checkSchemaCompatibility(app.get(DataSource));
+  if (differences.missing.length) throw new Error(describeMissing(differences));
+  if (differences.changed.length)
+    Logger.warn(
+      `The database differs from this release in ${differences.changed.length} ways it works with: ${differences.changed
+        .slice(0, 3)
+        .join("; ")}${differences.changed.length > 3 ? "; ..." : ""}`,
+      "Bootstrap"
+    );
+  app.get(MetricsService).gauge("libreoj_database_schema_differences", ["kind"], gauge => {
+    gauge.set({ kind: "changed" }, differences.changed.length);
+    gauge.set({ kind: "extra" }, differences.extra.length);
+  });
+}
+
 async function runMigration(app: NestExpressApplication, migrationConfigFile: string) {
   const migrationService = app.get(MigrationService);
   await migrationService.migrate(migrationConfigFile, app);
@@ -128,6 +154,7 @@ async function bootstrap() {
     await runMigration(app, migrationConfigFile);
   // Start Nest.js app
   else {
+    await checkSchema(app);
     const clusterService = app.get(ClusterService);
     await clusterService.initialization(async () => await startApp(packageInfo, configService, app));
   }

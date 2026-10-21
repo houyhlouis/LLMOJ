@@ -57,6 +57,23 @@ Judge tasks are stored in the database (table `judge_job`), not only in Redis: a
 - Site administrators see the queue at the bottom of **Judge Machine**: tasks waiting or being judged, the judge holding each, retries, and the tasks given up in the last 7 days. The `libreoj_judge_jobs` metric reports waiting and running tasks.
 - Every lease is recorded in `judge_job_attempt` with how it ended. Finished tasks and their records are deleted after 30 days.
 
+## Which task comes next
+
+When a judge's task thread is free, it gets the waiting task of the first class, and within a class the one queued first:
+
+1. **Live contests:** new submissions to a contest that hasn't ended.
+2. **Practice:** other new submissions. A user with many submissions waiting, or who used much judging time in the last 15 minutes, comes after others (`preference.serverSideOnly.dynamicTaskPriority` in `backend.yaml`).
+3. **Rejudges**, and preparing Self Eval.
+4. **Hacks** and **Self Eval** runs.
+5. **AI** program runs. A judge runs at most its AI slots of them at once, and always keeps a thread for other work.
+
+Two settings in **Site management** → **Judging** change this. They apply within a few seconds and are recorded in the audit log:
+
+- **Task threads each judge machine keeps for running contests** (0 by default): while a contest is running, a judge whose other tasks fill all but this many of its threads gives the rest only to contest submissions. A long rejudge or AI run then can't delay a contest. A judge needs more task threads than this to keep any, and the threads idle when no contest submission waits.
+- **Minutes before a waiting task is moved ahead** (30 by default): once a task has waited this long, every fifth task a backend process gives out goes to the task waiting longest, whatever its class, unless a contest submission waits. Rejudges, hacks and AI runs then keep moving while new submissions arrive. 0 turns this off.
+
+The `libreoj_judge_queued_jobs_by_class` [metric](Operations-Configuration.md#metrics) shows the waiting tasks by class, and [doctor](Operations-Configuration.md#doctor) warns when contest submissions wait.
+
 ## Draining, keys and capabilities
 
 These actions are on the **Judge Machine** page for site administrators. Every change is recorded in the audit log (`judge_client.add`, `delete`, `reset_key`, `drain`, `resume`).

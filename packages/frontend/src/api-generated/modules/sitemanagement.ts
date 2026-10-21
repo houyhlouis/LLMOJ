@@ -14,3 +14,15 @@ export const updateAiPolicy = createPostApi<ApiTypes.AiPolicyDto, ApiTypes.AiPol
   "site-management/updateAiPolicy",
   {}
 );
+export const getJudgePolicy = createGetApi<void, ApiTypes.JudgePolicyDto>("site-management/getJudgePolicy");
+export const updateJudgePolicy = createPostApi<ApiTypes.JudgePolicyDto, ApiTypes.JudgePolicyDto>(
+  "site-management/updateJudgePolicy",
+  {}
+);
+export const getAiEndpointPolicy = createGetApi<void, ApiTypes.AiEndpointPolicyDto>(
+  "site-management/getAiEndpointPolicy"
+);
+export const updateAiEndpointPolicy = createPostApi<ApiTypes.AiEndpointPolicyDto, ApiTypes.AiEndpointPolicyDto>(
+  "site-management/updateAiEndpointPolicy",
+  {}
+);

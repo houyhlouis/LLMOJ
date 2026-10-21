@@ -60,6 +60,30 @@ export class AiConfigurationService implements OnModuleInit {
     return config;
   }
 
+  /** The provider and search addresses every account saved, for the site administrators' review. */
+  async savedEndpoints(): Promise<
+    Array<{ userId: number; llm: { type: string; baseUrl: string }; search: { type: string; baseUrl: string } | null }>
+  > {
+    const rows = await this.configurations.find();
+    return rows.flatMap(row => {
+      let config: AiConfiguration;
+      try {
+        config = this.decrypt(row.encrypted);
+      } catch {
+        return [];
+      }
+      // Search is in use once it has a key, or is an MCP server (which may need none)
+      const searchUsed = !!config.search?.apiKey || config.search?.type === "mcp";
+      return [
+        {
+          userId: row.userId,
+          llm: { type: config.llm.type, baseUrl: config.llm.baseUrl },
+          search: searchUsed ? { type: config.search.type, baseUrl: config.search.baseUrl } : null
+        }
+      ];
+    });
+  }
+
   /** Stores the user's configuration, encrypted. */
   async save(userId: number, config: AiConfiguration) {
     await this.configurations.save({ userId, encrypted: this.encrypt(config) });

@@ -22,9 +22,21 @@ Saving doesn't start any AI work; start actions from the import page or a proble
 
 **Base URLs** must use HTTP or HTTPS, be 1 to 2000 characters and contain no user name, password, query or fragment. LLMOJ adds the path itself, so don't include `/chat/completions`, `/responses`, `/messages` or `/models`; for MCP, give the full endpoint.
 
-**Private addresses.** Requests go out from the server, so private-network, loopback and link-local addresses would let users reach the server's own network. Only site administrators' own configurations, and hosts the server administrator lists in `HYHOJ_AI_PRIVATE_HOSTS` (see [AI environment](AI-Environment.md)), may use them; other users get `PRIVATE_ENDPOINT_BLOCKED`. Every resolved address is checked and pinned for the connection, and redirects aren't followed.
+**Private addresses** need a site administrator's approval: see [Which addresses accounts may use](#which-addresses-accounts-may-use).
 
 Set up [HTTPS](HTTPS.md) before anyone enters keys on a public site.
+
+## Which addresses accounts may use
+
+Model, search and MCP requests go out from the server, not from the user's browser. A private-network, loopback or link-local address would therefore let a user reach the server's own network, so it needs approval. Site administrators decide in **Site management** → **AI addresses**:
+
+- **Approved addresses.** Each has a name, the API it speaks and a Base URL. An approved Base URL covers every request at or below its path, on the same scheme, host and port. Users see approved addresses first among the presets on the AI configuration page (search and MCP ones on the **Search / MCP** tab). Hosts listed in the server's `HYHOJ_AI_PRIVATE_HOSTS` ([AI environment](AI-Environment.md)) count as approved too.
+- **Addresses that aren't approved.** Either public addresses are allowed (the default; private and local ones still need approval), or only approved addresses are. In the second case, a configuration with another address isn't saved (`ENDPOINT_NOT_APPROVED`), and requests to it are refused, also for configurations saved before.
+- **Addresses in use.** The section lists the addresses accounts have saved, how many accounts use each and whether they can: approved, a public address, or refused for accounts other than administrators' (a private address, or one not approved where only approved addresses are allowed). **Approve** adds one to the list, ready to save.
+
+Site administrators' own configurations may use any address. A refused private address gives `PRIVATE_ENDPOINT_BLOCKED`. Every resolved address is checked and pinned for the connection, so a host name can't switch to a private address afterwards, and redirects aren't followed. Changes apply within a few seconds and are recorded in the audit log.
+
+A downgrade to a version without approved addresses is refused while only approved addresses are allowed: allow public addresses first.
 
 ## Configuration fields
 

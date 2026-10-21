@@ -32,6 +32,27 @@ declare namespace ApiTypes {
   export interface AddUserToGroupResponseDto {
     error?: "PERMISSION_DENIED" | "NO_SUCH_USER" | "NO_SUCH_GROUP" | "USER_ALREADY_IN_GROUP";
   }
+  export interface AiApprovedEndpointDto {
+    /**
+     * Shown to users who choose it.
+     */
+    name: string;
+    /**
+     * The API it speaks.
+     */
+    type: "chat" | "responses" | "anthropic" | "tavily" | "mcp";
+    /**
+     * Requests with this origin, at or below this path, are approved.
+     */
+    baseUrl: string;
+  }
+  export interface AiEndpointPolicyDto {
+    /**
+     * Whether accounts may use public addresses that aren't approved. Private ones always need approval.
+     */
+    customEndpoints: "public" | "approved";
+    endpoints: ApiTypes.AiApprovedEndpointDto[];
+  }
   export interface AiJobIdDto {
     id: string;
   }
@@ -1063,6 +1084,16 @@ declare namespace ApiTypes {
     preparationFailures: number;
     lastError?: string;
     finishedAt?: string; // date-time
+  }
+  export interface JudgePolicyDto {
+    /**
+     * Task threads each judge machine keeps for submissions to running contests while one runs; 0 keeps none.
+     */
+    contestReservedThreads: number;
+    /**
+     * Minutes after which a waiting job gets every fifth task; 0 turns this off.
+     */
+    agingMinutes: number;
   }
   export interface JudgeQueueStatusDto {
     queued: number;

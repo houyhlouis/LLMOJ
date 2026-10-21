@@ -32,7 +32,13 @@ import { ProblemFileService } from "../problem/problem-file.service";
 import { ProblemLockService } from "../problem/problem-lock.service";
 import { UserEntity } from "../user/user.entity";
 import { ProblemEntity, ProblemType } from "../problem/problem.entity";
-import { JudgeQueueService, JudgeTaskPriorityType, JudgeTask, JudgeTaskExtraInfo } from "../judge/judge-queue.service";
+import {
+  JudgeQueueService,
+  JudgeTaskPriorityType,
+  JudgeTask,
+  JudgeTaskExtraInfo,
+  judgeTaskPriorityTypeOf
+} from "../judge/judge-queue.service";
 import { JudgeTaskCompletion, JudgeTaskService } from "../judge/judge-task-service.interface";
 import { ProblemFileType } from "../problem/problem-file.entity";
 import { ProblemDataVersionService } from "../problem/problem-data-version.service";
@@ -286,10 +292,23 @@ export class SubmissionJudgingService implements JudgeTaskService<SubmissionProg
         userOccupiedTimeRecently,
         avgEveryUsersOccupiedTimeRecently,
         stdEveryUsersOccupiedTimeRecently,
-        isRejudge ? JudgeTaskPriorityType.Medium : JudgeTaskPriorityType.High
+        isRejudge
+          ? JudgeTaskPriorityType.Medium
+          : (await this.isLiveContestSubmission(submission, transactionalEntityManager))
+            ? JudgeTaskPriorityType.LiveContest
+            : JudgeTaskPriorityType.High
       ),
       transactionalEntityManager
     );
+  }
+
+  /** A new submission to a contest that hasn't ended is judged before practice (see JudgeTaskPriorityType). */
+  private async isLiveContestSubmission(submission: SubmissionEntity, manager: EntityManager): Promise<boolean> {
+    if (!submission.contestId) return false;
+    const rows: unknown[] = await manager.query("SELECT 1 FROM contest WHERE id = ? AND endTime > NOW()", [
+      submission.contestId
+    ]);
+    return rows.length > 0;
   }
 
   async rejudgeSubmission(submission: SubmissionEntity, actingUser?: UserEntity): Promise<void> {
@@ -483,7 +502,7 @@ export class SubmissionJudgingService implements JudgeTaskService<SubmissionProg
       const task = new JudgeTask<SubmissionTaskExtraInfo>(
         submission.taskId,
         JudgeTaskType.Submission,
-        JudgeTaskPriorityType.High,
+        judgeTaskPriorityTypeOf(priotity),
         priotity,
         {
           problemType,

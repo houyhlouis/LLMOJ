@@ -16,7 +16,7 @@ The installer sets these in the services' systemd units, using your installation
 | `HYHOJ_AI_RUNNER_SOCKET` | backend | `/opt/LLMOJ/data/judge/ai-runner.sock` | The local AI worker's socket. Must match `aiRunnerSocket` in the local `judge.yaml`. |
 | `LLMOJ_AI_EXECUTION` | backend | automatic | Where AI jobs run their programs: `local` (the local AI worker's socket) or `judges` (the judge queue, on any judge of protocol version 4; see [Distributed judging](Distributed-Judging.md#ai)). Without it, `local` when the socket exists, otherwise `judges`. Files a judge generates are downloaded to the backend's `TMPDIR` (`data/tmp`) before they're published, up to 8 GiB for a job. |
 | `HYHOJ_ARCHIVE_WORK_DIRECTORY` | backend | `/opt/LLMOJ/data/backend-archives` | Temporary space for archives, including AI ZIP attachments while they're checked |
-| `HYHOJ_AI_PRIVATE_HOSTS` | backend | none | Private or local provider hosts every user may use, separated by commas or spaces, each with an optional port, for example `llm.lan, 10.0.0.5:8000, [fd00::5]:8080`. Without it, private, loopback and link-local addresses are limited to site administrators' own configurations. Public addresses need no listing. |
+| `HYHOJ_AI_PRIVATE_HOSTS` | backend | none | Hosts approved for every account, in addition to the [addresses approved in Site management](AI.md#which-addresses-accounts-may-use), separated by commas or spaces, each with an optional port, for example `llm.lan, 10.0.0.5:8000, [fd00::5]:8080`. Prefer Site management, which needs no restart and shows who uses what. |
 
 These are absolute file system paths, not URLs. Setting one doesn't move existing data or change the other service's configuration, and `HYHOJ_ROOT` doesn't change them at runtime.
 

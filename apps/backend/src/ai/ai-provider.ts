@@ -193,11 +193,10 @@ async function rawProviderRequest(
   if (!records.length) throw new AiError("PROVIDER_NETWORK_ERROR");
   // Every resolved address is checked, and the connection is pinned to these addresses below. A private or
   // local destination is reachable from the server, not from the user, so it needs the server's permission.
-  if (
-    records.some(record => !isPublicAddress(record.address)) &&
-    !isAllowedPrivateHost(url) &&
-    !(await currentAiRuntime()?.allowPrivateNetwork?.())
-  )
+  const privateDestination = records.some(record => !isPublicAddress(record.address));
+  const context = currentAiRuntime();
+  if (context?.checkEndpoint) await context.checkEndpoint(url, privateDestination);
+  else if (privateDestination && !isAllowedPrivateHost(url) && !(await context?.allowPrivateNetwork?.()))
     throw new AiError("PRIVATE_ENDPOINT_BLOCKED");
   if (signal?.aborted) throw aiCancellationError(signal);
   const data = body === undefined ? null : JSON.stringify(body);
@@ -267,7 +266,8 @@ async function rawProviderRequest(
 
 /**
  * DNS is checked and pinned for each request; redirects are intentionally not followed. Private and local
- * destinations require `HYHOJ_AI_PRIVATE_HOSTS` or a runtime context that allows them (site administrators).
+ * destinations need an approval (Site management, or `HYHOJ_AI_PRIVATE_HOSTS`) or a runtime context that allows
+ * them (site administrators).
  */
 export async function providerRequest(
   urlText: string,

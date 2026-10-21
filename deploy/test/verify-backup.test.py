@@ -29,6 +29,10 @@ spec.loader.exec_module(v)
 
 NODE = next((str(path) for path in (Path('/opt/LLMOJ/runtime/node/bin/node'),) if os.access(path, os.X_OK)), None) or shutil.which('node')
 SECRETS = ('session-secret-5e1d', 'database-password-0a7b', 'minio-secret-9f22')
+# A real MinIO makes the fixture's storage readable, so the files' contents are compared; without it the storage is
+# only a directory layout. It runs on the test's own temporary copy.
+MINIO = os.environ.get('LLMOJ_MINIO_BINARY') or next(
+    (path for path in ('/opt/LLMOJ/runtime/minio',) if os.access(path, os.X_OK)), None)
 
 
 def checksum(path):
@@ -182,13 +186,19 @@ class FullCheckTests(unittest.TestCase):
 security:
   sessionSecret: {SECRETS[0]}
 ''')
-        for name in ('minio.env', 'secrets.json'):
-            (site/'config'/name).write_text('private\n')
+        (site/'config/secrets.json').write_text('private\n')
         (site/'config/install-complete.json').write_text(json.dumps({'role': 'all', 'root': '/opt/LLMOJ', 'sourceCommit': 'abc123def4567'}))
         cls.files = [f'0000000{i}-0000-4000-8000-000000000000' for i in range(3)]
-        for uuid in cls.files + ['ffffffff-0000-4000-8000-000000000000']:
-            (site/'data/minio/oj-files'/uuid).mkdir()
-            (site/'data/minio/oj-files'/uuid/'xl.meta').write_bytes(b'XL2 ')
+        cls.contents = {uuid: os.urandom(1000 * (i + 1)) + b'end' for i, uuid in enumerate(cls.files)}
+        if MINIO:
+            (site/'config/minio.env').write_text(f'MINIO_ROOT_USER=llmojtest\nMINIO_ROOT_PASSWORD={SECRETS[2]}\n')
+            (cls.prefix/'runtime/minio').symlink_to(MINIO)
+            cls.store(site/'data/minio', {**cls.contents, 'ffffffff-0000-4000-8000-000000000000': b'unfinished upload'})
+        else:
+            (site/'config/minio.env').write_text('private\n')
+            for uuid in cls.files + ['ffffffff-0000-4000-8000-000000000000']:
+                (site/'data/minio/oj-files'/uuid).mkdir()
+                (site/'data/minio/oj-files'/uuid/'xl.meta').write_bytes(b'XL2 ')
         datadir = site/'data/mariadb'
         run = cls.base/'build-run'
         mysql = pwd.getpwnam('mysql')
@@ -210,12 +220,13 @@ security:
             time.sleep(0.5)
         ai = [encrypt_ai(cls.ai_key, json.dumps({'apiKey': 'sk-model-key'})) for _ in range(2)]
         totp = encrypt_two_factor(cls.two_factor_key, 1, b'totp-secret-bytes')
-        files = ', '.join(f"('{uuid}', 10)" for uuid in cls.files)
+        files = ', '.join(f"('{uuid}', {len(cls.contents[uuid])}, '{hashlib.sha256(cls.contents[uuid]).hexdigest()}')"
+                          for uuid in cls.files)
         sql(f'''CREATE DATABASE oj_site; USE oj_site;
 CREATE TABLE `user` (id INT PRIMARY KEY); INSERT INTO `user` VALUES (1), (2);
 CREATE TABLE problem (id INT PRIMARY KEY); INSERT INTO problem VALUES (1);
 CREATE TABLE submission (id INT PRIMARY KEY, problemId INT); INSERT INTO submission VALUES (1, 1), (2, 1), (3, 1);
-CREATE TABLE `file` (uuid CHAR(36) PRIMARY KEY, size INT); INSERT INTO `file` VALUES {files};
+CREATE TABLE `file` (uuid CHAR(36) PRIMARY KEY, size INT, sha256 CHAR(64)); INSERT INTO `file` VALUES {files};
 CREATE TABLE ai_configuration (userId INT PRIMARY KEY, encrypted LONGTEXT);
 INSERT INTO ai_configuration VALUES (1, '{ai[0]}'), (2, '{ai[1]}');
 CREATE TABLE user_two_factor (userId INT PRIMARY KEY, totpSecret VARCHAR(255));
@@ -223,6 +234,44 @@ INSERT INTO user_two_factor VALUES (1, '{totp}'), (2, NULL);''')
         server.terminate()
         server.wait(timeout=120)
         shutil.rmtree(run)
+
+    @classmethod
+    def store(cls, directory, objects):
+        """Puts the objects into a real MinIO's storage in `directory`, as the site's MinIO would have."""
+        port = v.free_port()
+        server = subprocess.Popen([MINIO, 'server', '--quiet', '--address', f'127.0.0.1:{port}', '--console-address',
+                                   f'127.0.0.1:{v.free_port()}', str(directory)],
+                                  env={'PATH': '/usr/bin:/bin', 'HOME': str(directory), 'MINIO_BROWSER': 'off',
+                                       'MINIO_ROOT_USER': 'llmojtest', 'MINIO_ROOT_PASSWORD': SECRETS[2]},
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        storage = v.Storage(port, 'llmojtest', SECRETS[2])
+        try:
+            import http.client
+            for _ in range(240):
+                connection = http.client.HTTPConnection(storage.host, timeout=5)
+                try:
+                    connection.request('GET', '/minio/health/ready')
+                    if connection.getresponse().status == 200:
+                        break
+                except OSError:
+                    pass
+                finally:
+                    connection.close()
+                time.sleep(0.25)
+            for path, body in [('/oj-files', b''), *((f'/oj-files/{uuid}', content) for uuid, content in objects.items())]:
+                connection = http.client.HTTPConnection(storage.host, timeout=30)
+                try:
+                    connection.request('PUT', path, body=body, headers=storage.signed_headers(path, 'PUT', body))
+                    response = connection.getresponse()
+                    # The bucket's directory may exist already
+                    assert response.status == 200 or (path == '/oj-files' and response.status == 409), \
+                        (path, response.status, response.read()[:200])
+                    response.read()
+                finally:
+                    connection.close()
+        finally:
+            server.terminate()
+            server.wait(timeout=60)
 
     def backup(self, name, change=None):
         """An archive of the site as backup.sh writes it, after `change(copy)` on a copy."""
@@ -256,6 +305,7 @@ INSERT INTO user_two_factor VALUES (1, '{totp}'), (2, NULL);''')
         for expected in ('matches its checksum', 'The configuration is complete', 'Redis data is included',
                          'A temporary MariaDB started', '6 tables: 2 users, 1 problems, 3 submissions, 3 files',
                          'Every table passes CHECK TABLE', 'All 3 files the database lists are in storage',
+                         *(['The contents of all 3 files match their recorded hashes'] if MINIO else []),
                          '1 stored objects belong to no file', 'data/ai/master.key decrypts the saved AI settings (2 checked)',
                          'data/ai/two-factor.key decrypts the authenticator secrets (1 checked)', 'The backup can be restored'):
             self.assertIn(expected, text)
@@ -284,6 +334,39 @@ INSERT INTO user_two_factor VALUES (1, '{totp}'), (2, NULL);''')
         code, text = self.verify(self.backup('broken', damage))
         self.assertEqual(code, 1)
         self.assertRegex(text, r"MariaDB can't start on the backup's database|Damaged tables|query on the copy")
+
+
+    @unittest.skipUnless(MINIO, 'needs MinIO (LLMOJ_MINIO_BINARY) to store real objects')
+    def test_a_file_whose_content_differs_from_its_recorded_hash(self):
+        def damage(copy):
+            # Rewritten through MinIO: the stored file no longer has the content the database recorded
+            self.store(copy/'data/minio', {self.files[2]: b'replaced content'})
+        code, text = self.verify(self.backup('replaced', damage))
+        self.assertEqual(code, 1, text)
+        self.assertIn(f'1 files differ from their recorded content hash or size, e.g. {self.files[2]}', text)
+
+    @unittest.skipUnless(shutil.which('gpg'), 'needs gpg')
+    def test_encrypted_backup_is_verified_with_the_private_key_only(self):
+        plain = self.backup('to-encrypt')
+        home = self.base/'gnupg'
+        home.mkdir(mode=0o700, exist_ok=True)
+        gpg = ['gpg', '--homedir', str(home), '--batch', '--quiet']
+        subprocess.run([*gpg, '--passphrase', '', '--quick-gen-key', 'LLMOJ verify test <verify@example.invalid>',
+                        'future-default', 'default', 'never'], check=True, capture_output=True)
+        encrypted = Path(str(plain) + '.gpg')
+        subprocess.run([*gpg, '--trust-model', 'always', '--recipient', 'verify@example.invalid', '--output', str(encrypted),
+                        '--encrypt', str(plain)], check=True)
+        checksum(encrypted)
+        with patch.dict(os.environ, {'GNUPGHOME': str(home)}):
+            code, text = self.verify(encrypted)
+        self.assertEqual(code, 0, text)
+        self.assertIn('The encrypted backup was decrypted with the private key', text)
+        self.assertIn('The backup can be restored', text)
+        with patch.dict(os.environ, {'GNUPGHOME': str(self.base/'no-keys')}):
+            (self.base/'no-keys').mkdir(mode=0o700, exist_ok=True)
+            code, text = self.verify(encrypted)
+        self.assertEqual(code, 1)
+        self.assertIn("can't be decrypted: import the private key", text)
 
 
 if __name__ == '__main__':

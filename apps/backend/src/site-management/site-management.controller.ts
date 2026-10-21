@@ -3,10 +3,18 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 
 import { Request } from "express";
 
-import { AiPolicyDto, SiteManagementSettingsDto, UpdateRegistrationModeRequestDto } from "./site-management.dto";
+import {
+  AiEndpointPolicyDto,
+  AiPolicyDto,
+  JudgePolicyDto,
+  SiteManagementSettingsDto,
+  UpdateRegistrationModeRequestDto
+} from "./site-management.dto";
 
 import { RegistrationSettingsService } from "../settings/registration-settings.service";
 import { AiPolicyService } from "../settings/ai-policy.service";
+import { JudgePolicyService } from "../settings/judge-policy.service";
+import { AiEndpointPolicyService } from "../settings/ai-endpoint-policy.service";
 import { CurrentUser } from "../common/user.decorator";
 import { UserEntity } from "../user/user.entity";
 import { AuthSessionService } from "../auth/auth-session.service";
@@ -19,6 +27,8 @@ export class SiteManagementController {
   constructor(
     private readonly registrationSettings: RegistrationSettingsService,
     private readonly aiPolicy: AiPolicyService,
+    private readonly judgePolicy: JudgePolicyService,
+    private readonly aiEndpoints: AiEndpointPolicyService,
     private readonly sessions: AuthSessionService
   ) {}
 
@@ -61,5 +71,39 @@ export class SiteManagementController {
   ): Promise<AiPolicyDto> {
     await this.confirmAdministrator(user, request);
     return await this.aiPolicy.update(user, body, request.ip);
+  }
+
+  @Get("getJudgePolicy")
+  @ApiOperation({ summary: "Get how judge machines choose their tasks (site administrators only)." })
+  async getJudgePolicy(@CurrentUser() user: UserEntity): Promise<JudgePolicyDto> {
+    return await this.judgePolicy.getForAdministrator(user);
+  }
+
+  @Post("updateJudgePolicy")
+  @ApiOperation({ summary: "Change how judge machines choose their tasks, within seconds (site administrators only)." })
+  async updateJudgePolicy(
+    @CurrentUser() user: UserEntity,
+    @Body() body: JudgePolicyDto,
+    @Req() request: Request
+  ): Promise<JudgePolicyDto> {
+    await this.confirmAdministrator(user, request);
+    return await this.judgePolicy.update(user, body, request.ip);
+  }
+
+  @Get("getAiEndpointPolicy")
+  @ApiOperation({ summary: "Get the approved AI addresses and whether others may be used (site administrators only)." })
+  async getAiEndpointPolicy(@CurrentUser() user: UserEntity): Promise<AiEndpointPolicyDto> {
+    return await this.aiEndpoints.getForAdministrator(user);
+  }
+
+  @Post("updateAiEndpointPolicy")
+  @ApiOperation({ summary: "Change the approved AI addresses, effective within seconds (site administrators only)." })
+  async updateAiEndpointPolicy(
+    @CurrentUser() user: UserEntity,
+    @Body() body: AiEndpointPolicyDto,
+    @Req() request: Request
+  ): Promise<AiEndpointPolicyDto> {
+    await this.confirmAdministrator(user, request);
+    return await this.aiEndpoints.update(user, body, request.ip);
   }
 }

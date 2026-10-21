@@ -52,67 +52,19 @@ node packages/frontend/scripts/generate-api.js --from-backend-build
 
 ## 测试
 
-在仓库根目录用 `node --test` 或 `python3` 运行测试。CI（[.github/workflows/ci.yml](.github/workflows/ci.yml)）每次推送都会运行下面这些；提交前请运行你修改的部分。
-
 ```bash
-# 后端，按模块
-node --test --test-concurrency=1 apps/backend/src/ai/*.test.cjs
-node apps/backend/src/access/access-permissions.test.cjs
-node --test --test-concurrency=1 apps/backend/src/access/capability-cache.test.cjs \
-  apps/backend/src/access/route-access.test.cjs apps/backend/src/access/permission-matrix.mariadb.test.cjs \
-  apps/backend/src/site-management/*.test.cjs
-node --test --test-concurrency=1 apps/backend/src/discussion/*.test.cjs apps/backend/src/team/*.test.cjs \
-  apps/backend/src/hack/*.test.cjs apps/backend/src/self-eval/*.test.cjs apps/backend/src/contest/*.test.cjs \
-  apps/backend/src/judge/*.test.cjs apps/backend/src/auth/*.test.cjs apps/backend/src/auth/two-factor/*.test.cjs \
-  apps/backend/src/submission/*.test.cjs apps/backend/src/problem/*.test.cjs apps/backend/src/file/*.test.cjs \
-  apps/backend/src/database/*.test.cjs apps/backend/src/study-list/*.test.cjs
-node --test --test-concurrency=1 apps/backend/src/health/*.test.cjs apps/backend/src/common/*.test.cjs \
-  apps/backend/src/metrics/*.test.cjs apps/backend/src/redis/*.test.cjs
-
-# 评测机
-node --test apps/judge/src/aiQuality.test.cjs apps/judge/src/task/hack/hack.test.cjs \
-  apps/judge/src/task/self-eval/self-eval.test.cjs apps/judge/src/rpc.test.cjs \
-  apps/judge/src/executionScheduler.test.cjs apps/judge/src/selfTestConfig.test.cjs apps/judge/src/fileContent.test.cjs \
-  apps/judge/src/task/ai-execution/ai-execution.test.cjs
-
-# 前端
-node --test packages/frontend/test/*.test.cjs
-
-# 数据库结构与迁移
-node --test deploy/test/upgrade-schema.test.mjs deploy/test/community-schema.test.mjs \
-  deploy/test/team-storage.test.mjs deploy/test/upgrade-registration.test.mjs
-node --test deploy/test/community-schema.mariadb.test.mjs deploy/test/initialize-schema.test.mjs
-node --test deploy/fake-migration.test.cjs
-
-# 安装器、升级器和 Wiki
-python3 deploy/test/install-flow.test.py
-python3 deploy/test/backup.test.py
-python3 deploy/test/doctor.test.py
-python3 deploy/test/verify-backup.test.py
-node --test deploy/test/backup-keys.test.mjs deploy/test/dependency-audit.test.mjs
-sudo python3 deploy/test/community-upgrade.test.py
-sudo python3 deploy/test/community-runtime-upgrade.test.py
-python3 deploy/test/wiki-export.test.py
+pnpm test
 ```
 
-其他部署测试需要 root、systemd 或真实的安装布局，因此不在 CI 中：
+通过 [deploy/test/run-tests.mjs](deploy/test/run-tests.mjs) 运行所有测试，最后输出汇总。指定分组可以只运行这些分组，例如 `pnpm test backend frontend`：`ai`、`judge`、`backend`、`frontend`、`deploy` 和 `wiki`。请先构建（`pnpm build`）：数据库结构和 API 契约测试读取构建好的后端。CI（[.github/workflows/ci.yml](.github/workflows/ci.yml)）用 `--ci` 运行相同的列表，但不包括需要 Ubuntu 26.04 的 Python 和系统工具的部署测试；这些测试在这样的机器上用 `pnpm test` 运行。
 
-```bash
-sudo python3 deploy/test/upgrade.test.py
-sudo python3 deploy/test/install-support.test.py
-sudo python3 deploy/test/install-network.test.py
-sudo python3 deploy/test/judge-config.test.py      # sudo 的 PATH 中需要有 node
-sudo python3 deploy/test/resize-judge.test.py
-sudo python3 deploy/test/admin-output.test.py
-sudo python3 deploy/test/redis-host.test.py
-sudo python3 deploy/test/sandbox-staging.test.py
-sudo python3 deploy/test/verify-backup.test.py     # 全部检查需要 MariaDB 服务器、Node.js 和 python3-cryptography
-python3 deploy/test/judge-capacity.test.py
-python3 deploy/test/judge-prompt.test.py
-python3 deploy/test/github-entry.test.py
-python3 deploy/test/docker-support.test.py
-node --test deploy/test/bootstrap-admin.test.mjs
-```
+需要本机缺少的条件的测试会跳过相应用例，汇总会列出缺少什么：
+
+- **MariaDB：** 下面的[数据库测试](#数据库测试)需要设置各自的变量；
+- **redis-server**，用于评测队列和 Redis 测试；
+- **root**，用于部署测试中创建账户、挂载文件系统或运行服务的用例。运行器在可以时使用免密码的 `sudo`（与 CI 相同），并用 `-B` 运行 Python，以免在源码树中出现属于 root 的缓存文件；
+- **MinIO**（`LLMOJ_MINIO_BINARY`，或某个安装的 `runtime/minio`），用于备份检查器的内容检查；
+- **`TMPDIR` 中 2 GiB 空间**，用于 AI 测试的 ZIP 归档。临时目录较小时，运行器改用 `/var/tmp`。
 
 这些测试使用临时目录和模拟的服务：它们不能代替在真实 Ubuntu 服务器上试装或试升级。
 

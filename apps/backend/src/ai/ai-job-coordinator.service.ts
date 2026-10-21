@@ -14,6 +14,7 @@ import { DataSource, EntityManager, In, Repository } from "typeorm";
 
 import { AiJobEntity } from "./ai.entity";
 import { AiError } from "./ai.types";
+import { isAllowedPrivateHost } from "./ai-provider";
 import { StartAiJobDto } from "./ai.dto";
 import { importSourceCandidates } from "./ai-source-search";
 import { AiResponseCheckpointEntity } from "./ai-usage.entity";
@@ -27,6 +28,7 @@ import { withAiRuntime, aiWorkerLockName } from "./ai-runtime";
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
 import { AiPolicy, AiPolicyService, DEFAULT_AI_POLICY } from "../settings/ai-policy.service";
+import { AiEndpointPolicyService, aiEndpointRefusal } from "../settings/ai-endpoint-policy.service";
 import { ProblemService } from "../problem/problem.service";
 import { ProblemAccessService, ProblemPermissionType } from "../problem/problem-access.service";
 import { ProblemEntity } from "../problem/problem.entity";
@@ -55,6 +57,8 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
   @Inject(AiAdmissionService) private readonly admission: AiAdmissionService;
 
   @Inject(AiPolicyService) private readonly policies: AiPolicyService;
+
+  @AuditOptional() @Inject(AiEndpointPolicyService) private readonly endpointPolicies?: AiEndpointPolicyService;
 
   @AuditOptional() @Inject(MetricsService) private readonly metricsService: MetricsService;
 
@@ -251,6 +255,21 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
       gauge.set({ state: "waiting" }, load.waiting);
     });
     this.metricsService.gauge("libreoj_ai_paused", [], async gauge => gauge.set((await this.policy()).paused ? 1 : 0));
+    // Requests whose usage the provider never reported: they count at their reserved maximum (see AiAdmissionService)
+    this.metricsService.gauge("libreoj_ai_unreported_usage_last_day", [], async gauge => {
+      const [row]: { count: string | number }[] = await this.db.query(
+        "SELECT COUNT(*) AS count FROM ai_reservation WHERE settledAt IS NOT NULL AND createdAt >= NOW() - INTERVAL 1 DAY"
+      );
+      gauge.set(Number(row?.count ?? 0));
+    });
+    if (this.endpointPolicies) {
+      this.metricsService.gauge("libreoj_ai_approved_endpoints", [], async gauge =>
+        gauge.set((await this.endpointPolicies.current()).endpoints.length)
+      );
+      this.metricsService.gauge("libreoj_ai_approved_endpoints_only", [], async gauge =>
+        gauge.set((await this.endpointPolicies.current()).customEndpoints === "approved" ? 1 : 0)
+      );
+    }
   }
 
   /**
@@ -300,6 +319,18 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
         ...context,
         signal,
         allowPrivateNetwork: async () => await this.isSiteAdministrator(ownerId),
+        ...(this.endpointPolicies
+          ? {
+              checkEndpoint: async (url: URL, privateDestination: boolean) => {
+                const refusal = aiEndpointRefusal(await this.endpointPolicies.current(), url, {
+                  privateDestination,
+                  administrator: false,
+                  serverApproved: isAllowedPrivateHost(url)
+                });
+                if (refusal && !(await this.isSiteAdministrator(ownerId))) throw new AiError(refusal);
+              }
+            }
+          : {}),
         // Every provider request of this owner, from a job or from the configuration page, is admitted here.
         ...(this.admission ? { admit: metadata => this.admission.admit(ownerId, job?.id, metadata, signal) } : {})
       },
@@ -307,7 +338,7 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  /** Site administrators control the server, so their own AI configuration may use private or local hosts. */
+  /** Site administrators control the server, so their own AI configuration may use any address. */
   private async isSiteAdministrator(userId: number): Promise<boolean> {
     return (await this.db.getRepository(UserEntity).findOneBy({ id: userId }))?.isAdmin === true;
   }

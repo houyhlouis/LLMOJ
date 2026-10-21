@@ -43,6 +43,10 @@ export class AiController {
     return this.call(() => this.ai.saveConfiguration(user, body));
   }
 
+  @Post("listEndpointUsage") listEndpointUsage(@CurrentUser() user: UserEntity) {
+    return this.call(() => this.ai.endpointUsage(user));
+  }
+
   @Post("models") models(@CurrentUser() user: UserEntity) {
     return this.call(() => this.ai.models(user));
   }

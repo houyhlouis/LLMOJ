@@ -165,8 +165,12 @@ const errors: Record<string, [string, string]> = {
     "Model discovery is unsupported; enter the model ID manually."
   ],
   PRIVATE_ENDPOINT_BLOCKED: [
-    "内网或本机 API 地址仅限站点管理员使用；其他用户需要服务器管理员将主机加入 HYHOJ_AI_PRIVATE_HOSTS。",
-    "Private or local API hosts are limited to site administrators unless the server administrator lists the host in HYHOJ_AI_PRIVATE_HOSTS."
+    "内网或本机 API 地址需要站点管理员在“站点管理”中批准后才能使用。",
+    "A private or local API address can be used only once a site administrator approves it in Site management."
+  ],
+  ENDPOINT_NOT_APPROVED: [
+    "本站只允许使用站点管理员批准的 API 地址。请从预设中选择一个，或请管理员批准此地址。",
+    "This site allows only API addresses a site administrator approved. Choose one from the presets, or ask an administrator to approve this address."
   ],
   AI_PAUSED: [
     "站点管理员已暂停 AI：排队中的任务会在恢复后继续。",

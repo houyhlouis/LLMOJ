@@ -6,6 +6,7 @@ import { createGetApi, createPostApi } from "@/api";
 
 export const getConfiguration = createPostApi<void, void>("ai/getConfiguration", {});
 export const saveConfiguration = createPostApi<ApiTypes.SaveAiConfigurationDto, void>("ai/saveConfiguration", {});
+export const listEndpointUsage = createPostApi<void, void>("ai/listEndpointUsage", {});
 export const models = createPostApi<void, void>("ai/models", {});
 export const test = createPostApi<ApiTypes.AiTestDto, void>("ai/test", {});
 export const prepareAttachment = createPostApi<ApiTypes.AiPrepareAttachmentDto, void>("ai/prepareAttachment", {});

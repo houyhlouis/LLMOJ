@@ -63,7 +63,7 @@ const cases = {
     }
   },
   ...Object.fromEntries(
-    ["updateRegistrationMode", "updateAiPolicy"].map(route => [
+    ["updateRegistrationMode", "updateAiPolicy", "updateJudgePolicy", "updateAiEndpointPolicy"].map(route => [
       `site setting ${route}`,
       async (user, recent) => {
         let changes = 0;
@@ -77,10 +77,12 @@ const cases = {
         const site = new SiteManagementController(
           { updateRegistrationMode: change },
           { update: change },
+          { update: change },
+          { update: change },
           sessions(recent)
         );
         try {
-          await site[route](user, route === "updateAiPolicy" ? {} : { registrationMode: "closed" }, req);
+          await site[route](user, route === "updateRegistrationMode" ? { registrationMode: "closed" } : {}, req);
           return { changes };
         } catch (error) {
           return {
@@ -155,6 +157,8 @@ test("users who may not make a change are refused without being asked for a pass
     "user privileges",
     "site setting updateRegistrationMode",
     "site setting updateAiPolicy",
+    "site setting updateJudgePolicy",
+    "site setting updateAiEndpointPolicy",
     "judge machine addJudgeClient",
     "judge machine resetJudgeClientKey",
     "judge machine getJudgeClientKey"

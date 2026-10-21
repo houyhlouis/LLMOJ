@@ -28,9 +28,11 @@ import { JudgeClientChange, JudgeClientService, REDIS_CHANNEL_JUDGE_CLIENT_CHANG
 import { JudgeClientEntity } from "./judge-client.entity";
 
 import {
+  JudgeClaimOptions,
   JudgeQueueService,
   JudgeTask,
   JudgeTaskExtraInfo,
+  JudgeTaskPriorityType,
   LEASE_RENEW_INTERVAL,
   LeasedJudgeTask
 } from "./judge-queue.service";
@@ -45,6 +47,7 @@ import { EventReportService, EventReportType } from "../event-report/event-repor
 import { RedisService } from "../redis/redis.service";
 import { LockService } from "../redis/lock.service";
 import { MetricsService } from "../metrics/metrics.service";
+import { JudgePolicyService } from "../settings/judge-policy.service";
 import { SOCKET_IO_MAX_MESSAGE_SIZE } from "../socket-io.constants";
 
 // A task sent to a judge client connection, under the lease with this fence.
@@ -184,6 +187,8 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
   @Optional() @Inject(MetricsService) private readonly metricsService: MetricsService;
 
   @Optional() @Inject(JudgeRuntimeService) private readonly judgeRuntimeService: JudgeRuntimeService;
+
+  @Optional() @Inject(JudgePolicyService) private readonly judgePolicyService: JudgePolicyService;
 
   constructor(
     private readonly judgeClientService: JudgeClientService,
@@ -512,6 +517,28 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     }
   }
 
+  /**
+   * While a contest is running, a judge machine keeps the policy's number of task threads for its submissions: once
+   * its other tasks fill the rest, a thread asking for a task gets only those. It needs more threads than it keeps.
+   */
+  private async claimOptions(state: JudgeClientState): Promise<JudgeClaimOptions> {
+    if (!this.judgePolicyService) return {};
+    const policy = await this.judgePolicyService.current();
+    const threads = state.capabilities?.consumerThreads ?? 0;
+    const reserved = policy.contestReservedThreads;
+    const otherTasks = [...state.assignedTasks.values()].filter(
+      ({ task }) => task.priorityType !== JudgeTaskPriorityType.LiveContest
+    ).length;
+    return {
+      liveContestOnly:
+        reserved > 0 &&
+        threads > reserved &&
+        otherTasks >= threads - reserved &&
+        (await this.judgeQueueService.liveContestRunning()),
+      agingSeconds: policy.agingMinutes * 60
+    };
+  }
+
   @SubscribeMessage("consumeTask")
   async onConsumeTask(@ConnectedSocket() client: Socket, @MessageBody() threadId: number): Promise<void> {
     const state = this.mapSessionIdToJudgeClient.get(client.id);
@@ -538,7 +565,8 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
       try {
         leased = await this.judgeQueueService.claim(
           { connectionId: client.id, judgeClientId: state.judgeClient.id, judgeRuntimeId },
-          taskTypes
+          taskTypes,
+          await this.claimOptions(state)
         );
       } catch (e) {
         // The client waits for a task for this thread until it reconnects, so never give up on its request.

@@ -23,6 +23,7 @@ const timers = [];
 vm.runInNewContext(
   ts.transpileModule(
     `export class Gateway {
+      async claimOptions(state: any) ${methodBody("claimOptions")}
       async onConsumeTask(client: any, threadId: number) ${methodBody("onConsumeTask")}
       onTaskAcknowledged(client: any, state: any, assignment: any) ${methodBody("onTaskAcknowledged")}
       onCancelTask(taskId: string) ${methodBody("onCancelTask")}
@@ -41,6 +42,7 @@ vm.runInNewContext(
     },
     JudgeJobAttemptOutcome: { Disconnected: "Disconnected", Abandoned: "Abandoned" },
     LEGACY_TASK_TYPES: ["Submission"],
+    JudgeTaskPriorityType: { LiveContest: 0 },
     JudgeTaskType: require("@libreoj/judge-protocol").JudgeTaskType,
     // AI runs are covered by judge-gateway-scope.test.cjs
     aiExecutionLimit: () => 0,
@@ -54,7 +56,7 @@ const { Gateway } = moduleObject.exports;
 const plain = value => JSON.parse(JSON.stringify(value));
 const evidence = {
   scope:
-    "Actual onConsumeTask, onTaskAcknowledged and onCancelTask method bodies extracted by TypeScript AST; mocked sockets and queue. No live judge/database interruption.",
+    "Actual claimOptions, onConsumeTask, onTaskAcknowledged and onCancelTask method bodies extracted by TypeScript AST; mocked sockets and queue. No live judge/database interruption.",
   sourceSha256: crypto.createHash("sha256").update(source).digest("hex"),
   cases: []
 };

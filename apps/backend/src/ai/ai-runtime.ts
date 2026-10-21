@@ -67,6 +67,11 @@ export interface AiRuntimeContext {
   signal?: AbortSignal;
   /** Whether the owner may reach private and local provider addresses not listed in HYHOJ_AI_PRIVATE_HOSTS. */
   allowPrivateNetwork?: () => Promise<boolean>;
+  /**
+   * Throws if the owner may not send a request to `url`, whose resolved addresses are private or local if
+   * `privateDestination`; see AiEndpointPolicyService. Replaces allowPrivateNetwork when given.
+   */
+  checkEndpoint?: (url: URL, privateDestination: boolean) => Promise<void>;
   /** Site pause, budgets and concurrency, checked before every provider request; see AiAdmissionService. */
   admit?: (metadata: AiRequestMetadata) => Promise<AiAdmission>;
   record: (record: AiUsageRecord, reservationId?: string) => Promise<void>;

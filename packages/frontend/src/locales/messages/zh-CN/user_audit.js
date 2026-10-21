@@ -45,6 +45,8 @@ return {
 
   "site.registration_mode.update": "修改注册方式",
   "site.ai_policy.update": "修改全站 AI 设置",
+  "site.judge_policy.update": "修改全站评测设置",
+  "site.ai_endpoints.update": "修改已批准的 AI 地址",
 
   "group.create": "创建用户组 [firstObject]",
   "group.delete": "删除用户组 [firstObject]",

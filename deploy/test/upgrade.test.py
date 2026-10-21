@@ -37,6 +37,7 @@ class FakeHost:
         self.registration_override = None
         self.registration_policy_corrupt = False
         self.ai_policy_limited = False
+        self.ai_endpoints_restricted = False
         self.queries = []
         self.fail_start = None
         self.fail_install = False
@@ -86,6 +87,7 @@ class FakeHost:
             elif 'FROM `registration_application`' in query: output=str(self.pending_applications).encode()
             elif "FROM `settings`" in query and "'registration-policy'" in query: output=str(int(self.registration_override is not None or self.registration_policy_corrupt)).encode()
             elif "FROM `settings`" in query and "'ai-policy'" in query: output=str(int(self.ai_policy_limited)).encode()
+            elif "FROM `settings`" in query and "'ai-endpoints'" in query: output=str(int(self.ai_endpoints_restricted)).encode()
             elif 'FROM `submission`' in query or 'FROM `ai_job`' in query: output=str(self.queued).encode()
             elif query.startswith('SELECT COUNT'): output=b'0'
         elif args[0]=='mariadb-dump': kwargs['output'].write(b'-- synthetic logical SQL backup\n'+b'x'*200)
@@ -552,6 +554,26 @@ class UpgradeTests(unittest.TestCase):
         for clause in ("JSON_TYPE(`value`)", "'$.paused'", "'$.userDailyTokens'", "'$.userDailyRequests'"):
             self.assertIn(clause, query)
         self.assertNotIn('jobRequests', query)
+    def test_rollback_to_backend_without_approved_ai_addresses_refuses_an_approved_only_site(self):
+        self.prepare(); self.up.activate(); self.host.ai_endpoints_restricted=True
+        before=len(self.host.calls)
+        with self.assertRaisesRegex(u.UpgradeError, 'only approved AI addresses'):
+            self.up.rollback(manual=True)
+        self.assertFalse(any(c[0]=='service' for c in self.host.calls[before:]))
+        self.assertEqual((self.root/'apps/backend/dist/main.js').read_text(), 'new backend')
+        self.host.ai_endpoints_restricted=False
+        self.up.rollback(manual=True)
+        self.assertEqual(self.up.manifest['status'], 'rolled-back')
+        query=next(c for c in self.host.queries if "'ai-endpoints'" in c)
+        for clause in ("JSON_TYPE(`value`)", "'$.customEndpoints'", "<> 'public'"):
+            self.assertIn(clause, query)
+    def test_rollback_to_endpoint_aware_backend_keeps_the_approved_only_setting(self):
+        previous_service=self.root/'apps/backend/dist/settings/ai-endpoint-policy.service.js'
+        previous_service.parent.mkdir(parents=True)
+        previous_service.write_text('old endpoint-aware backend')
+        self.prepare(); self.up.activate(); self.host.ai_endpoints_restricted=True
+        self.up.rollback(manual=True)
+        self.assertEqual(self.up.manifest['status'], 'rolled-back')
     def test_rollback_to_policy_aware_backend_retains_override(self):
         previous_service=self.root/'apps/backend/dist/settings/registration-settings.service.js'
         previous_service.parent.mkdir(parents=True)

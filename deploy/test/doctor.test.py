@@ -356,6 +356,26 @@ class DoctorTests(unittest.TestCase):
         self.assertReported(report, d.WARN, r'All 2 connected judge machines are draining')
         self.assertReported(report, d.INFO, r'AI is paused')
 
+        # Approved AI addresses, unreported AI usage and waiting contest submissions
+        self.host.answers['http://127.0.0.1:2020/metrics'] = (200, metrics(**{
+            'libreoj_ai_approved_endpoints': 'libreoj_ai_approved_endpoints 3',
+            'libreoj_ai_approved_endpoints_only': 'libreoj_ai_approved_endpoints_only 1',
+            'libreoj_ai_unreported_usage_last_day': 'libreoj_ai_unreported_usage_last_day 4',
+            'libreoj_judge_queued_jobs_by_class': 'libreoj_judge_queued_jobs_by_class{class="live_contest"} 12\nlibreoj_judge_queued_jobs_by_class{class="practice"} 40',
+            'libreoj_database_schema_differences': 'libreoj_database_schema_differences{kind="changed"} 2\nlibreoj_database_schema_differences{kind="extra"} 5'}).encode())
+        report, _ = self.run_doctor()
+        self.assertReported(report, d.WARN, r'differs from this release.s definitions in 2 ways')
+        self.assertReported(report, d.INFO, r'only the 3 AI addresses approved')
+        self.assertReported(report, d.INFO, r'4 AI requests in the last day had no usage reported')
+        self.assertReported(report, d.WARN, r'12 submissions to running contests wait')
+        self.host.answers['http://127.0.0.1:2020/metrics'] = (200, metrics(**{
+            'libreoj_ai_approved_endpoints': 'libreoj_ai_approved_endpoints 2',
+            'libreoj_ai_approved_endpoints_only': 'libreoj_ai_approved_endpoints_only 0',
+            'libreoj_judge_queued_jobs_by_class': 'libreoj_judge_queued_jobs_by_class{class="live_contest"} 3'}).encode())
+        report, _ = self.run_doctor()
+        self.assertReported(report, d.INFO, r'2 AI addresses are approved in Site management; other public addresses are allowed')
+        self.assertFalse(self.found(report, d.WARN, r'running contests wait'))
+
     def test_sandbox_cgroups_and_workspaces(self):
         (self.install.root/'runtime/sandbox-rootfs').unlink()
         (self.install.root/'runtime/rootfs-other').mkdir()

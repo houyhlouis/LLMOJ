@@ -18,6 +18,6 @@
     "dev": "pnpm build:artifacts && pnpm --recursive --parallel --if-present run dev",
     "format": "pnpm --recursive --if-present run format",
     "lint": "pnpm --filter @libreoj/judge-protocol run build && pnpm --recursive --if-present run lint",
-    "test": "pnpm --recursive --if-present run test"
+    "test": "node deploy/test/run-tests.mjs"
   }
 }

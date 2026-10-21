@@ -153,6 +153,14 @@ export const AiConfigurationPage = observer(function AiConfigurationPage() {
             )}
           </Message>
         )}
+        {config?.sitePolicy?.approvedEndpointsOnly && (
+          <Message info>
+            {aiText(
+              "本站只允许使用站点管理员批准的地址：请从预设中选择服务商和搜索服务。",
+              "This site allows only addresses a site administrator approved: choose the provider and search service from the presets."
+            )}
+          </Message>
+        )}
         {message && (
           <Message positive={!pending} info={pending}>
             {message}
@@ -323,6 +331,24 @@ export const AiConfigurationPage = observer(function AiConfigurationPage() {
                   </>
                 ) : (
                   <>
+                    {config.searchPresets?.length > 0 && (
+                      <Form.Field>
+                        <label>{aiText("搜索服务预设", "Search service preset")}</label>
+                        <Dropdown
+                          fluid
+                          selection
+                          placeholder={aiText("选择站点批准的搜索服务", "Choose a search service the site approved")}
+                          options={config.searchPresets.map((preset, i) => ({ key: i, value: i, text: preset.name }))}
+                          onChange={(_e, { value }) => {
+                            const preset = config.searchPresets[Number(value)];
+                            setConfig(previous => ({
+                              ...previous,
+                              search: { ...previous.search, type: preset.type, baseUrl: preset.baseUrl }
+                            }));
+                          }}
+                        />
+                      </Form.Field>
+                    )}
                     <Form.Select
                       label={aiText("搜索接口", "Search API")}
                       value={config.search.type}

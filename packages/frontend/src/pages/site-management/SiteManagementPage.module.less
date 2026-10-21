@@ -24,3 +24,24 @@
 .limit {
   margin: 20px 0;
 }
+.endpoint {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--theme-border);
+}
+// The address takes the row; the remove button sits level with its field
+.endpointAddress {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  > :first-child {
+    flex: 1;
+    margin-bottom: 0 !important;
+  }
+}
+.usageTable {
+  display: block;
+  overflow-x: auto;
+}
+.address {
+  word-break: break-all;
+}

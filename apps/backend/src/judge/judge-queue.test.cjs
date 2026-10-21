@@ -235,7 +235,9 @@ test(
     assert.equal(hashedClaim.task.taskId, hashedTask);
     assert.deepEqual(hashedClaim.task.fileHashes, { [pinned]: "a".repeat(64), [recorded]: "b".repeat(64) });
     assert.deepEqual(new Set(lookups[0]), new Set([hashedTask, pinned, recorded, unrecorded]));
-    const [hashedAttempt] = await ds.query("SELECT judgeRuntimeId FROM judge_job_attempt WHERE taskId = ?", [hashedTask]);
+    const [hashedAttempt] = await ds.query("SELECT judgeRuntimeId FROM judge_job_attempt WHERE taskId = ?", [
+      hashedTask
+    ]);
     assert.equal(Number(hashedAttempt.judgeRuntimeId), 9);
     const onTaskProgress = tasks.onTaskProgress;
     let completionRuntime;
@@ -251,7 +253,10 @@ test(
     assert.equal(completionRuntime, 9);
     assert.equal((await job(hashedTask)).state, "Finished");
     // Without an announced runtime, none is recorded
-    assert.equal((await ds.query("SELECT judgeRuntimeId FROM judge_job_attempt WHERE taskId = ?", [sooner]))[0].judgeRuntimeId, null);
+    assert.equal(
+      (await ds.query("SELECT judgeRuntimeId FROM judge_job_attempt WHERE taskId = ?", [sooner]))[0].judgeRuntimeId,
+      null
+    );
 
     // A judge client disconnects: its job is queued again. A second backend judges it with fence 2, and the old
     // connection's result is refused.
@@ -465,5 +470,117 @@ test(
     assert(
       status.jobs.some(value => value.taskId === poison && value.state === "Failed" && value.unfinishedLeases === 4)
     );
+  }
+);
+
+test("job classes follow their priority, including live contests", () => {
+  const { judgeTaskPriorityTypeOf, JudgeTaskPriorityType: T } = require("./judge-queue.service.ts");
+  const { makeSubmissionPriority } = require("../submission/submission-priority.ts");
+  for (const type of [T.LiveContest, T.High, T.Medium, T.Low, T.Lowest]) {
+    assert.equal(judgeTaskPriorityTypeOf(makeSubmissionPriority(123456, 9, 900, 10, 3, type)), type);
+    assert.equal(judgeTaskPriorityTypeOf(makeSubmissionPriority(1, 0, 0, 0, 0, type)), type);
+  }
+  // Hacks and self-evaluation add a fraction of their ID
+  assert.equal(judgeTaskPriorityTypeOf(T.Low + 987654 / 1e9), T.Low);
+  assert.equal(judgeTaskPriorityTypeOf(NaN), T.LiveContest);
+  assert.equal(judgeTaskPriorityTypeOf(99), T.Lowest);
+});
+
+test(
+  "judge queue classes: threads kept for live contests, and aged jobs get every fifth task",
+  { skip, timeout: 120000 },
+  async t => {
+    const database = JSON.parse(fs.readFileSync(configPath, "utf8")).services.database;
+    assert.match(database.database, /^llmoj_test_judge_queue$/, "Use only the dedicated disposable test database");
+    const redisService = await startRedis(t);
+    const ds = new DataSource({
+      ...database,
+      entities: [JudgeJobEntity, JudgeJobAttemptEntity],
+      synchronize: false,
+      logging: false
+    });
+    await ds.initialize();
+    assert.equal((await ds.query("SHOW TABLES")).length, 0, "Test database must be empty; no table is removed");
+    t.after(async () => {
+      for (const table of ["judge_job", "judge_job_attempt", "contest"])
+        await ds.query(`DROP TABLE IF EXISTS \`${table}\``);
+      await ds.destroy();
+    });
+    await ds.synchronize();
+    // Only what the queue reads of contests
+    await ds.query(
+      "CREATE TABLE contest (id int NOT NULL PRIMARY KEY, startTime datetime NOT NULL, endTime datetime NOT NULL)"
+    );
+
+    const tasks = fakeTaskService(ds);
+    const queue = new JudgeQueueService(ds, redisService, metrics());
+    queue.registerTaskType("Submission", tasks);
+    await queue.onModuleInit();
+    t.after(() => queue.onModuleDestroy());
+    const owner = { connectionId: "socket-1", judgeClientId: 1 };
+    const add = async (name, priority, minutesAgo = 0) => {
+      const taskId = crypto.randomUUID();
+      tasks.active.set(taskId, priority);
+      await queue.enqueue(taskId, "Submission", priority);
+      if (minutesAgo)
+        await ds.query("UPDATE judge_job SET createdAt = NOW(3) - INTERVAL ? MINUTE WHERE taskId = ?", [
+          minutesAgo,
+          taskId
+        ]);
+      return { name, taskId };
+    };
+    const names = new Map();
+    const enqueue = async (name, priority, minutesAgo) => {
+      const { taskId } = await add(name, priority, minutesAgo);
+      names.set(taskId, name);
+    };
+    const next = async options => {
+      const claimed = await queue.claim(owner, ["Submission"], options);
+      return claimed && names.get(claimed.task.taskId);
+    };
+
+    // Live contest submissions come before practice, whatever their age
+    await enqueue("practice", 1 - 1e-7, 5);
+    await enqueue("contest", -1e-7);
+    assert.equal(await next(), "contest");
+    assert.equal(await next(), "practice");
+
+    // A thread kept for live contests gets nothing else
+    await enqueue("rejudge", 2 - 1e-7);
+    assert.equal(await next({ liveContestOnly: true }), null);
+    await enqueue("contest-2", -1e-7);
+    assert.equal(await next({ liveContestOnly: true }), "contest-2");
+    assert.equal(await next(), "rejudge");
+
+    // With aging, every fifth task goes to the job waiting longest once it has waited long enough; the others follow
+    // the classes. Without aging, the old rejudge waits behind every practice submission.
+    queue.claimsSinceAged = 0;
+    await enqueue("old-rejudge", 2 - 1e-7, 120);
+    for (let i = 0; i < 6; i++) await enqueue(`practice-${i}`, 1 - 1e-7);
+    const order = [];
+    for (let i = 0; i < 7; i++) order.push(await next({ agingSeconds: 3600 }));
+    assert.equal(order.indexOf("old-rejudge"), 4, order.join(" "));
+    // A waiting live contest submission is never passed over for an aged job
+    queue.claimsSinceAged = 0;
+    await enqueue("old-hack", 3 - 1e-7, 120);
+    for (let i = 0; i < 4; i++) await enqueue(`practice-late-${i}`, 1 - 1e-7);
+    for (let i = 0; i < 4; i++) assert.match(await next({ agingSeconds: 3600 }), /^practice-late-/);
+    await enqueue("contest-3", -1e-7);
+    assert.equal(await next({ agingSeconds: 3600 }), "contest-3");
+    assert.equal(await next({ agingSeconds: 3600 }), "old-hack");
+    await enqueue("old-rejudge-2", 2 - 1e-7, 120);
+    await enqueue("practice-new", 1 - 1e-7);
+    assert.equal(await next({ agingSeconds: 0 }), "practice-new");
+    assert.equal(await next({ agingSeconds: 0 }), "old-rejudge-2");
+
+    // Whether a contest is running now
+    assert.equal(await queue.liveContestRunning(), false);
+    await ds.query("INSERT INTO contest VALUES (1, NOW() - INTERVAL 1 HOUR, NOW() + INTERVAL 1 HOUR)");
+    queue.liveContest = null;
+    assert.equal(await queue.liveContestRunning(), true);
+    await ds.query("UPDATE contest SET endTime = NOW() - INTERVAL 1 MINUTE");
+    assert.equal(await queue.liveContestRunning(), true, "read again only after a few seconds");
+    queue.liveContest = null;
+    assert.equal(await queue.liveContestRunning(), false);
   }
 );

@@ -14,6 +14,7 @@
 | `LIBREOJ_JUDGE_CONFIG_FILE` | 评测机 YAML 文件的路径（必填）；安装后为 `<root>/config/judge.yaml` |
 | `LIBREOJ_JUDGE_LOG_LEVEL` | 评测机日志级别：`error`、`warn`、`info`（默认）或 `debug` |
 | `LIBREOJ_SCHEMA_SYNC` | 后端启动时是否可以修改数据库结构。安装的服务只有在它恰好为 `1` 时才会这样做；`0` 在所有环境中都关闭。安装时用 `deploy/initialize-schema.mjs` 创建数据库，[升级器](Upgrade.zh-CN.md)执行经过检查的修改并把它设为 `0`。不要为了绕过升级器的检查而打开它 |
+| `LIBREOJ_SCHEMA_CHECK` | 设为 `0` 时跳过后端[启动时对数据库的检查](Upgrade.zh-CN.md#启动时检查数据库)；否则，缺少其版本所需数据表或列的数据库会被拒绝。仅用于紧急情况 |
 | `LIBREOJ_LOG_SQL` | 记录每条 SQL 查询。任何非空值都会开启，包括 `0` 或 `false`；删除该变量即可关闭 |
 | `LIBREOJ_SLOW_QUERY_MS` | 记录耗时达到该毫秒数的 SQL 查询（不含参数）；默认 `1000`。每分钟最多记录 10 条；[指标](Operations-Configuration.zh-CN.md#指标)统计全部 |
 | `NODE_ENV` | 安装的服务中为 `production`，此时后端只记录警告和错误 |

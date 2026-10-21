@@ -58,6 +58,28 @@ test('a new database gets the complete current schema, and running again changes
     const second = run('--root', root, '--config', configPath);
     assert.equal(second.status, 0, second.stderr);
     assert.equal(await tables(), created);
+
+    // What the backend checks when it starts (apps/backend/src/database/schema-compatibility.ts)
+    const { checkSchemaCompatibility } = require(path.join(root, 'apps/backend/dist/database/schema-compatibility.js'));
+    assert.deepEqual(await checkSchemaCompatibility(ds), { missing: [], changed: [], extra: [] });
+    // A newer release's additions don't matter; a column of another definition or a missing index is reported
+    await ds.query('ALTER TABLE `judge_job` ADD `qaNewerColumn` int NULL');
+    await ds.query('CREATE INDEX `IDX_qa_newer` ON `judge_job` (`qaNewerColumn`)');
+    await ds.query('ALTER TABLE `judge_job` MODIFY `type` varchar(30) NOT NULL');
+    await ds.query('DROP INDEX `IDX_' + (await ds.query("SELECT INDEX_NAME AS n FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'judge_job' AND COLUMN_NAME = 'leaseUntil'"))[0].n.slice(4) + '` ON `judge_job`');
+    let differences = await checkSchemaCompatibility(ds);
+    assert.deepEqual(differences.missing, []);
+    assert.deepEqual(differences.extra.sort(), ['column judge_job.qaNewerColumn', 'index judge_job.IDX_qa_newer']);
+    assert.equal(differences.changed.length, 2, JSON.stringify(differences.changed));
+    // A table or column this release needs is missing: the backend refuses to start
+    await ds.query('ALTER TABLE `judge_job` DROP COLUMN `availableAt`');
+    await ds.query('DROP TABLE `judge_job_attempt`');
+    differences = await checkSchemaCompatibility(ds);
+    // (TypeORM renames the newer release's column to the missing one; the missing one is still named)
+    assert.deepEqual(differences.missing.sort(), ['column judge_job.availableAt', 'table judge_job_attempt'], JSON.stringify(differences));
+    await ds.query('ALTER TABLE `judge_job` DROP COLUMN `qaNewerColumn`');
+    differences = await checkSchemaCompatibility(ds);
+    assert.deepEqual(differences.missing.sort(), ['column judge_job.availableAt', 'table judge_job_attempt'], JSON.stringify(differences));
   } finally {
     if (owned) {
       await ds.query('SET FOREIGN_KEY_CHECKS=0');
