@@ -1,15 +1,28 @@
+// The built-in checkers as a program of their own. The judge (src/checkers/builtin.ts) starts it for each check with
+// a time limit and a cap on the message it reads back, instead of forking the multithreaded judge process.
+//
+//   builtin_checker integers
+//   builtin_checker floats PRECISION
+//   builtin_checker tokens|lines CASE_SENSITIVE (0 or 1)
+//   builtin_checker binary
+//
+// The contestant's output is descriptor 3 and the answer descriptor 4. The result is testlib's message on standard
+// error, as when the checkers ran in a forked judge; the exit status is testlib's.
+
 #include <cerrno>
-#include <cstdint>
+#include <climits>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <string>
-#include <system_error>
+#include <vector>
+
+#include <dirent.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 #include <testlib.h>
-#include <napi.h>
-#include <signal.h>
-#include <sys/wait.h>
-#include <cstdio>
 
 #include "integers.h"
 #include "floats.h"
@@ -17,128 +30,78 @@
 #include "tokens.h"
 #include "binary.h"
 
-// Node.js does some clean-ups with atexit(), we need to register another atexit() handler
-// in the child process to be called before Node.js's handler to exit immediately.
-void preventNodejsCleanup() {
-    fflush(stderr);
-    _exit(0);
+namespace {
+
+const int OUTPUT_DESCRIPTOR = 3, ANSWER_DESCRIPTOR = 4;
+// Not one of testlib's exit statuses, so the judge can't take it for a verdict
+const int USAGE_ERROR = 64;
+
+[[noreturn]] void usageError(const char *message) {
+    std::fprintf(stderr, "Invalid built-in checker arguments: %s\n", message);
+    std::fflush(stderr);
+    // Without testlib's exit handlers, which would report that no checker was registered
+    _exit(USAGE_ERROR);
 }
 
-class BuiltinCheckerWorker : public Napi::AsyncWorker {
-private:
-    std::string outputFile, answerFile;
-    std::function<void ()> checkerFunction;
-
-    std::string message;
-
-public:
-    BuiltinCheckerWorker(
-        Napi::Function &&callback,
-        std::string &&outputFile,
-        std::string &&answerFile,
-        std::function<void ()> checkerFunction
-    ) : Napi::AsyncWorker(callback), outputFile(outputFile), answerFile(answerFile), checkerFunction(checkerFunction) {}
-
-    void Execute() {
-        pid_t pid = 0;
-        try {
-            int pipeFd[2];
-            if (pipe(pipeFd) != 0) {
-                throw std::system_error(errno, std::system_category(), "pipe");
-            }
-
-            pid = fork();
-            if (pid == -1) {
-                // Failed
-                close(pipeFd[0]);
-                close(pipeFd[1]);
-                throw std::system_error(errno, std::system_category(), "fork");
-            } else if (pid == 0) {
-                // Child
-                atexit(preventNodejsCleanup);
-
-                close(STDIN_FILENO);
-                close(STDOUT_FILENO);
-
-                setpgid(0, 0);
-
-                dup2(pipeFd[1], STDERR_FILENO);
-                close(pipeFd[0]);
-                // registerTestlib(3, ...) omitted argv[0], but registerTestlibCmd requires it.
-                char programName[] = "";
-                char inputFile[] = "/dev/null";
-                char *checkerArgv[] = {programName, inputFile, outputFile.data(), answerFile.data()};
-                registerTestlibCmd(4, checkerArgv);
-                checkerFunction();
-                quitf(_fail, "Builtin checker returned without reporting a result");
-            }
-
-            // Parent
-            close(pipeFd[1]);
-
-            const size_t BUFFER_SIZE = 64 * 1024;
-            char buffer[BUFFER_SIZE];
-
-            ssize_t size;
-            while ((size = read(pipeFd[0], buffer, BUFFER_SIZE)) > 0) {
-                message.append(buffer, size);
-            }
-
-            if (size == -1) {
-                close(pipeFd[0]);
-                throw std::system_error(errno, std::system_category(), "read");
-            }
-        }
-        catch (std::exception &ex) {
-            SetError(ex.what());
-        }
-        catch (...) {
-            SetError("Unknown error");
-        }
-
-        kill(pid, SIGKILL);
-        waitpid(pid, NULL, 0);
+// Only the output, the answer and standard error stay open: a descriptor the judge didn't mark close-on-exec
+// mustn't reach code that parses a contestant's output.
+void closeOtherDescriptors() {
+#ifdef SYS_close_range
+    if (syscall(SYS_close_range, ANSWER_DESCRIPTOR + 1, UINT_MAX, 0) == 0) return;
+#endif
+    DIR *directory = opendir("/proc/self/fd");
+    if (!directory) usageError("can't list open descriptors");
+    const int own = dirfd(directory);
+    std::vector<int> descriptors;
+    while (dirent *entry = readdir(directory)) {
+        char *end;
+        const long fd = std::strtol(entry->d_name, &end, 10);
+        if (*end == '\0' && end != entry->d_name && fd > ANSWER_DESCRIPTOR && fd != own) descriptors.push_back(fd);
     }
-
-    void OnOK() {
-        auto env = Env();
-        Callback().Call({env.Undefined(), Napi::String::New(env, message)});
-    }
-};
-
-void runBuiltinChecker(const Napi::CallbackInfo &info, std::function<void ()> checkerFunction) {
-    auto worker = new BuiltinCheckerWorker(
-        info[3].As<Napi::Function>(),
-        info[0].As<Napi::String>().Utf8Value(),
-        info[1].As<Napi::String>().Utf8Value(),
-        checkerFunction
-    );
-    worker->Queue();
+    closedir(directory);
+    for (const int fd : descriptors) close(fd);
 }
 
-Napi::Object Init(Napi::Env env, Napi::Object exports) {
-    // testlib is registered only in forked checker workers, while its default
-    // finalizer also runs in the Node host process and would force exit code 3.
-    disableFinalizeGuard();
-
-    exports.Set("runBuiltinChecker", Napi::Function::New(env, [] (const Napi::CallbackInfo &info) {
-        const auto config = info[2].As<Napi::Object>();
-        auto type = config.Get("type").As<Napi::String>().Utf8Value();
-        if (type == "integers")
-            runBuiltinChecker(info, builtinCheckerIntegers);
-        else if (type == "floats") {
-            const int precision = config.Get("precision").As<Napi::Number>().Int32Value();
-            runBuiltinChecker(info, std::bind(builtinCheckerFloats, precision));
-        } else if (type == "tokens") {
-            const bool caseSensitive = config.Get("caseSensitive").As<Napi::Boolean>().Value();
-            runBuiltinChecker(info, std::bind(builtinCheckerTokens, caseSensitive));
-        } else if (type == "lines") {
-            const bool caseSensitive = config.Get("caseSensitive").As<Napi::Boolean>().Value();
-            runBuiltinChecker(info, std::bind(builtinCheckerLines, caseSensitive));
-        } else
-            runBuiltinChecker(info, builtinCheckerBinary);
-    }));
-    return exports;
+bool parseFlag(const char *value) {
+    if (std::strcmp(value, "0") == 0) return false;
+    if (std::strcmp(value, "1") == 0) return true;
+    usageError("expected 0 or 1");
 }
 
-NODE_API_MODULE(NODE_MODULE_NAME, Init)
+int parsePrecision(const char *value) {
+    char *end;
+    errno = 0;
+    const long precision = std::strtol(value, &end, 10);
+    if (errno || *value == '\0' || *end != '\0' || precision < INT_MIN || precision > INT_MAX)
+        usageError("expected an integer precision");
+    return int(precision);
+}
+
+std::function<void()> selectChecker(int argc, char *argv[]) {
+    if (argc < 2) usageError("no checker type");
+    const std::string type = argv[1];
+    const int parameters = argc - 2;
+    if (type == "integers" && parameters == 0) return builtinCheckerIntegers;
+    if (type == "floats" && parameters == 1) return std::bind(builtinCheckerFloats, parsePrecision(argv[2]));
+    if (type == "tokens" && parameters == 1) return std::bind(builtinCheckerTokens, parseFlag(argv[2]));
+    if (type == "lines" && parameters == 1) return std::bind(builtinCheckerLines, parseFlag(argv[2]));
+    if (type == "binary" && parameters == 0) return builtinCheckerBinary;
+    usageError("unknown checker type or wrong number of parameters");
+}
+
+}  // namespace
+
+int main(int argc, char *argv[]) {
+    const std::function<void()> checker = selectChecker(argc, argv);
+    closeOtherDescriptors();
+
+    char programName[] = "builtin_checker";
+    char inputFile[] = "/dev/null";
+    char outputFile[32], answerFile[32];
+    std::snprintf(outputFile, sizeof outputFile, "/proc/self/fd/%d", OUTPUT_DESCRIPTOR);
+    std::snprintf(answerFile, sizeof answerFile, "/proc/self/fd/%d", ANSWER_DESCRIPTOR);
+    char *checkerArgv[] = {programName, inputFile, outputFile, answerFile};
+    registerTestlibCmd(4, checkerArgv);
+    checker();
+    quitf(_fail, "Builtin checker returned without reporting a result");
+}

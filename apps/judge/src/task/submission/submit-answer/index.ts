@@ -16,9 +16,10 @@ import { ConfigurationError } from "../../../error";
 import { runBuiltinChecker } from "../../../checkers/builtin";
 import { runCustomChecker, validateCustomChecker } from "../../../checkers/custom";
 import * as fsNative from "../../../fsNative";
+import rpc from "../../../rpc";
 
 import { runCommonTask } from "../common";
-import { SubmissionFileUnzipResult } from "../submissionFile";
+import { ARCHIVE_ERROR_MESSAGES, SubmissionFileUnzipResult } from "../submissionFile";
 
 export * from "./judgeInfo";
 
@@ -103,6 +104,11 @@ async function runTestcase(
     result.status = TestcaseStatusSubmitAnswer.OutputLimitExceeded;
   } else if (!fileUnzipResult?.success) {
     result.status = TestcaseStatusSubmitAnswer.FileError;
+    // Missing files have no message, as before
+    if (fileUnzipResult?.error)
+      result.systemMessage =
+        ARCHIVE_ERROR_MESSAGES[fileUnzipResult.error] ||
+        `Couldn't read the file from the archive (${fileUnzipResult.error}).`;
   } else {
     const workingDirectory = {
       outside: safelyJoinPath(taskWorkingDirectory, "working"),
@@ -192,7 +198,7 @@ export async function runTask(
   const preparationTasks = [
     (async () => {
       await task.file.waitForDownload();
-      unzipResult = await task.file.unzip(wantedFiles);
+      unzipResult = await task.file.unzip(wantedFiles, () => rpc.isCanceled(task.taskId));
       task.events.compiling(); // Show "Compiling" status after file is downloaded
     })(),
     (async () => {

@@ -10,6 +10,8 @@ import getLanguage from "./languages";
 import { runSandbox, CpuAffinityStrategy, SANDBOX_INSIDE_PATH_BINARY, SANDBOX_INSIDE_PATH_WORKING } from "./sandbox";
 import { runTaskQueued } from "./taskQueue";
 import { ensureDirectoryEmpty, safelyJoinPath } from "./utils";
+import { runBuiltinChecker } from "./checkers/builtin";
+import { Checker } from "./checkers";
 
 /**
  * Compiles and runs a program in every language and option the judge supports on this host, through the same code
@@ -296,6 +298,37 @@ function checkProbe(output: string): string {
   return "namespaces, ptrace, keyrings, io_uring and bpf refused; threads and processes work";
 }
 
+// Each built-in checker on an accepted and a wrong output, in the program the judge starts for them
+const BUILTIN_CHECKERS: [Checker, string, string, string][] = [
+  [{ type: "integers" }, "1 2 3\n", "1 2 3", "1 2 4"],
+  [{ type: "floats", precision: 6 }, "0.5 1e3\n", "0.5000001 1000", "0.51 1000"],
+  [{ type: "tokens", caseSensitive: false }, "Yes no\n", "YES\nNO", "yes yes"],
+  [{ type: "lines", caseSensitive: true }, "a b\nc\n", "a b  \nc", "a  b\nc"],
+  [{ type: "binary" }, "\u0000\u0001", "\u0000\u0001", "\u0000\u0002"]
+];
+
+async function checkBuiltinCheckers(): Promise<string> {
+  return await runTaskQueued({ memory: 0 }, async taskWorkingDirectory => {
+    const answer = safelyJoinPath(taskWorkingDirectory, "answer.txt");
+    const output = safelyJoinPath(taskWorkingDirectory, "output.txt");
+    for (const [checker, answerText, accepted, wrong] of BUILTIN_CHECKERS) {
+      await fs.promises.writeFile(answer, answerText);
+      for (const [text, score] of [
+        [accepted, 100],
+        [wrong, 0]
+      ] as const) {
+        await fs.promises.writeFile(output, text);
+        const result = await runBuiltinChecker(output, answer, checker);
+        if (typeof result === "string" || "data" in result)
+          throw new Error(`${checker.type}: ${JSON.stringify(result)}`);
+        if (result.score !== score)
+          throw new Error(`${checker.type} gave ${result.score} for ${JSON.stringify(text)}: ${result.checkerMessage}`);
+      }
+    }
+    return BUILTIN_CHECKERS.map(([checker]) => checker.type).join(", ");
+  });
+}
+
 /** @return Whether every case passed. */
 export async function runSelfTest(only?: string[]): Promise<boolean> {
   // Limits the server sends judges when they connect, at their defaults
@@ -314,8 +347,20 @@ export async function runSelfTest(only?: string[]): Promise<boolean> {
     testCase => !only || only.includes(testCase.language) || only.includes(testCase.name)
   );
   let failed = 0;
-  await Promise.all(
-    selected.map(async testCase => {
+  const checkers = !only || only.includes("checkers");
+  await Promise.all([
+    checkers &&
+      (async () => {
+        const started = Date.now();
+        try {
+          const detail = await checkBuiltinCheckers();
+          process.stdout.write(`✔ Built-in checkers: ${detail} (${((Date.now() - started) / 1000).toFixed(1)}s)\n`);
+        } catch (e) {
+          failed++;
+          process.stdout.write(`✖ Built-in checkers: ${e instanceof Error ? e.message : String(e)}\n`);
+        }
+      })(),
+    ...selected.map(async testCase => {
       const started = Date.now();
       try {
         const output = await runCase(testCase);
@@ -328,9 +373,8 @@ export async function runSelfTest(only?: string[]): Promise<boolean> {
         process.stdout.write(`✖ ${testCase.name}: ${e instanceof Error ? e.message : String(e)}\n`);
       }
     })
-  );
-  process.stdout.write(
-    failed ? `${failed} of ${selected.length} checks failed\n` : `All ${selected.length} checks passed\n`
-  );
+  ]);
+  const total = selected.length + (checkers ? 1 : 0);
+  process.stdout.write(failed ? `${failed} of ${total} checks failed\n` : `All ${total} checks passed\n`);
   return failed === 0;
 }

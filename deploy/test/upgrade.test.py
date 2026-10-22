@@ -731,4 +731,34 @@ class HealthTests(unittest.TestCase):
         self.assertIsNotNone(error)
 
 
+class JudgeConnectionTests(unittest.TestCase):
+    """After starting the judge, the upgrade (and a rollback) waits for it to connect instead of checking once: its
+    session ends when it stops, and its launcher takes some seconds before it connects again."""
+    class Host:
+        def __init__(self, failures):
+            self.failures, self.checks = failures, 0
+        def run(self, args, **kwargs):
+            assert kwargs.get('check') is False and str(args[-1]) == 'verify-judge'
+            self.checks += 1
+            return subprocess.CompletedProcess(args, 1 if self.checks <= self.failures else 0, b'', b'')
+
+    def wait(self, failures):
+        up=u.Upgrade.__new__(u.Upgrade); up.host=self.Host(failures); up.node=Path('/node'); up.root=Path('/opt/LLMOJ')
+        clock=[0.0]
+        def sleep(seconds): clock[0]+=seconds
+        with patch.object(u.time,'sleep',sleep), patch.object(u.time,'monotonic',lambda: clock[0]):
+            try:
+                up.wait_for_judge(); return up.host.checks, None
+            except u.UpgradeError as error:
+                return up.host.checks, error
+
+    def test_a_judge_that_connects_after_a_few_seconds_passes(self):
+        checks, error=self.wait(5)
+        self.assertIsNone(error); self.assertEqual(checks, 6)
+
+    def test_a_judge_that_never_connects_fails_after_the_wait(self):
+        checks, error=self.wait(10**6)
+        self.assertIn('did not connect', str(error)); self.assertEqual(checks, u.JUDGE_CONNECT_SECONDS//2+1)
+
+
 if __name__=='__main__': unittest.main(verbosity=2)

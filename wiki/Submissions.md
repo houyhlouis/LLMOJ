@@ -17,6 +17,22 @@ The preview shows the submission's normal page (1100 × 720 pixels, smaller on s
 
 A submission's page and the submission list update while the submission is judged. If the connection drops, the page says so and retries, and offers to reload when it can't reconnect. Screen readers hear the result when judging finishes. See [Keyboard and screen readers](Accessibility.md#live-updates).
 
+## Answer archives
+
+For a **Submit answer** problem, the submitted ZIP archive holds the output files. The judge reads only the files the problem asks for, by their names in the archive: UTF-8 names, or GB18030 names from Chinese Windows. A test case gets:
+
+| Result | When |
+| --- | --- |
+| **Output Limit Exceeded** | Its file is larger than the output limit, or no longer fits once the files before it in the archive take up 4 GiB. |
+| **File Error**, "The archive contains this file more than once." | Its name appears twice, also when the two differ only in Unicode form (é written as one character or two). Before, one of them was judged, whichever was written last. |
+| **File Error**, "This file inflates to more bytes than the archive says it holds." | Its data is larger than the size the archive records. Such a file stops unpacking as soon as it passes that size. |
+| **File Error**, "This file's data in the archive is damaged …" | Its data doesn't inflate, or doesn't match its size or checksum. |
+| **File Error**, "The archive uses a feature that isn't supported …" | It's encrypted, or compressed with a method other than stored or deflated. |
+| **File Error**, "The submitted file isn't a ZIP archive that can be read." | The whole archive can't be read: not a ZIP file, truncated, or with more than 65,536 entries. Every test case gets it. Before, this was a **System Error**. |
+| **File Error** (no message) | Its file isn't in the archive, as before. |
+
+Other files in the archive are skipped without being unpacked. Each judging of a submission, rejudges included, unpacks into a private directory of its own, which is removed before the judge takes its next task. A judge whose disk lacks the space the archive's files declare, plus 256 MiB, ends the submission with **System Error** instead of filling the disk.
+
 ## Test data versions and earlier results
 
 A submission is judged with the problem's judging data as it was when it was submitted: the judge settings, the test data files and the samples it runs form a **data version**, numbered per problem (#1, #2, …). Editing the problem afterwards doesn't change how a waiting submission is judged; submissions made after the edit use the new version. **Rejudge** always uses the problem's current data.

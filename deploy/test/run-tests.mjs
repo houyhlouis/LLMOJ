@@ -32,14 +32,16 @@ const BACKEND_SUITES = [
   'apps/backend/src/auth/*.test.cjs', 'apps/backend/src/site-management/*.test.cjs', 'apps/backend/src/database/*.test.cjs',
   'apps/backend/src/study-list/*.test.cjs', 'apps/backend/src/auth/two-factor/*.test.cjs', 'apps/backend/src/health/*.test.cjs',
   'apps/backend/src/common/*.test.cjs', 'apps/backend/src/metrics/*.test.cjs', 'apps/backend/src/redis/*.test.cjs',
-  'apps/backend/src/file/file-maintenance.test.cjs', 'apps/backend/src/file/file-content-hash.test.cjs'
+  'apps/backend/src/file/file-maintenance.test.cjs', 'apps/backend/src/file/file-content-hash.test.cjs',
+  'apps/backend/src/archive/*.test.cjs'
 ];
 
 const JUDGE_SUITES = [
   'apps/judge/src/aiQuality.test.cjs', 'apps/judge/src/task/hack/hack.test.cjs', 'apps/judge/src/task/self-eval/self-eval.test.cjs',
   'apps/judge/src/rpc.test.cjs', 'apps/judge/src/executionScheduler.test.cjs', 'apps/judge/src/selfTestConfig.test.cjs',
   'apps/judge/src/fileContent.test.cjs', 'apps/judge/src/task/ai-execution/ai-execution.test.cjs',
-  'apps/judge/src/launcher/policy.test.cjs'
+  'apps/judge/src/launcher/policy.test.cjs', 'apps/judge/src/checkers/builtin.test.cjs',
+  'apps/judge/src/task/submission/submissionFile.test.cjs'
 ];
 
 // The Python suites of deploy/test. Those CI runs too; the others need Ubuntu 26.04's Python and tools, as installed

@@ -1,13 +1,28 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { closeSync, openSync } from "node:fs";
 import fs from "node:fs/promises";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
-const require = createRequire(import.meta.url),
-  native = require(process.env.HYHOJ_TEST_CHECKER_BINARY || "../../build/Release/builtin_checkers.node"),
-  run = promisify(native.runBuiltinChecker),
+const program =
+    process.env.HYHOJ_TEST_CHECKER_BINARY || new URL("../../build/Release/builtin_checker", import.meta.url).pathname,
   dir = await fs.mkdtemp(path.join(tmpdir(), "hyhoj-tokens-"));
+// The judge's call: the output and the answer as descriptors 3 and 4, testlib's message on standard error
+async function run(actual, expected, checker) {
+  const args = [checker.type];
+  if (checker.type === "floats") args.push(String(checker.precision));
+  if ("caseSensitive" in checker) args.push(checker.caseSensitive ? "1" : "0");
+  const files = [openSync(actual, "r"), openSync(expected, "r")];
+  try {
+    const child = spawn(program, args, { stdio: ["ignore", "ignore", "pipe", ...files] });
+    let message = "";
+    child.stderr.on("data", chunk => (message += chunk));
+    await new Promise((resolve, reject) => child.on("error", reject).on("close", resolve));
+    return message;
+  } finally {
+    files.forEach(closeSync);
+  }
+}
 const cases = [
   ["missing terminal newline", "1 2", "1 2\n", true, true],
   ["trailing spaces", "1 2   \n\n", "1 2\n", true, true],

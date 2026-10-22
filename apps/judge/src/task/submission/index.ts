@@ -298,7 +298,12 @@ export default async function onSubmission<JudgeInfo, SubmissionContent, Testcas
     finish(isConfigurationError ? SubmissionStatus.ConfigurationError : SubmissionStatus.SystemError, 0, systemMessage);
     if (!isConfigurationError) winston.error(`Error on submission task ${task.taskId}, ${e.stack || e}`);
   } finally {
-    // Remove downloaded submission file
-    if (task.file) task.file.dispose();
+    // Remove this attempt's copy of the submitted file before the task counts as done
+    if (task.file)
+      await task.file
+        .dispose()
+        .catch(error =>
+          winston.error(`Failed to remove the submitted file of task ${task.taskId}: ${error.stack || error}`)
+        );
   }
 }

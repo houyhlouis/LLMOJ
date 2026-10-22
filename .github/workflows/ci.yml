@@ -135,6 +135,9 @@ jobs:
       - if: steps.changes.outputs.native == 'true'
         run: pnpm --filter @libreoj/judge test:native
       - if: steps.changes.outputs.native == 'true'
+        name: Check the built-in checker program as the judge starts it
+        run: node --test apps/judge/src/checkers/builtin.test.cjs
+      - if: steps.changes.outputs.native == 'true'
         run: |
           sudo systemd-run \
             --wait \

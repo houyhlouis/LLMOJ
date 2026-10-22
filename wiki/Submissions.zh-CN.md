@@ -17,6 +17,22 @@
 
 提交评测期间，它的页面和评测列表会实时更新。连接中断时页面会提示并自动重试，无法重新连接时会提供刷新按钮。评测完成时读屏软件会读出结果。见[键盘与读屏软件](Accessibility.zh-CN.md#实时更新)。
 
+## 答案压缩包
+
+对于 **提交答案** 题，提交的 ZIP 压缩包中包含各个输出文件。评测机只读取题目需要的文件，按压缩包中的文件名匹配：UTF-8 文件名，或来自中文 Windows 的 GB18030 文件名。测试点的结果：
+
+| 结果 | 情形 |
+| --- | --- |
+| **Output Limit Exceeded** | 文件超过输出限制，或压缩包中排在它前面的文件已占满 4 GiB，它放不下。 |
+| **File Error**，“The archive contains this file more than once.” | 同名文件出现两次，包括只在 Unicode 形式上不同的名字（é 写成一个字符或两个字符）。以前会评测其中最后写入的那个。 |
+| **File Error**，“This file inflates to more bytes than the archive says it holds.” | 文件数据比压缩包记录的大小更大。一旦超过该大小，解压立即停止。 |
+| **File Error**，“This file's data in the archive is damaged …” | 文件数据无法解压，或与记录的大小、校验和不符。 |
+| **File Error**，“The archive uses a feature that isn't supported …” | 文件已加密，或使用了 stored 和 deflated 以外的压缩方式。 |
+| **File Error**，“The submitted file isn't a ZIP archive that can be read.” | 整个压缩包无法读取：不是 ZIP 文件、文件被截断，或超过 65,536 个条目。所有测试点都得到此结果。以前这会导致 **System Error**。 |
+| **File Error**（无消息） | 压缩包中没有该文件，与以前相同。 |
+
+压缩包中的其他文件会被跳过，不会解压。每次评测（包括重测）都解压到自己独立的私有目录，评测机在接下一个任务之前将其删除。如果评测机磁盘的剩余空间不足以容纳压缩包所声明的文件再加 256 MiB，提交以 **System Error** 结束，而不会把磁盘写满。
+
 ## 测试数据版本与此前的评测结果
 
 提交按照提交时题目的评测数据进行评测：评测设置、测试数据文件以及要运行的样例构成一个 **数据版本**，每道题目单独编号（#1、#2……）。此后修改题目，不会改变正在等待的提交的评测方式；修改之后的提交使用新版本。**重测** 总是使用题目当前的数据。

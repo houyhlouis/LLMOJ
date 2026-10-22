@@ -8,11 +8,9 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 
 include_directories(${CMAKE_JS_INC})
 
-# Builtin Checkers
-add_library(
-    builtin_checkers
-    SHARED
-    ${CMAKE_JS_SRC}
+# Builtin Checkers: a program the judge starts for each check (src/checkers/builtin.ts), next to the add-ons
+add_executable(
+    builtin_checker
     "native/builtin_checkers/builtin_checkers.cc"
     "native/builtin_checkers/integers.h"
     "native/builtin_checkers/floats.h"
@@ -20,14 +18,8 @@ add_library(
     "native/builtin_checkers/tokens.h"
     "native/builtin_checkers/binary.h"
 )
-set_target_properties(builtin_checkers PROPERTIES PREFIX "" SUFFIX ".node")
-target_include_directories(builtin_checkers PRIVATE 
-    ${CMAKE_SOURCE_DIR}/node_modules/node-addon-api 
-    ${CMAKE_SOURCE_DIR}/node_modules/node-addon-api/src
-    ${CMAKE_JS_INC}
-    "vendor/testlib"
-)
-target_link_libraries(builtin_checkers PRIVATE ${CMAKE_JS_LIB})
+set_target_properties(builtin_checker PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
+target_include_directories(builtin_checker PRIVATE "vendor/testlib")
 
 # POSIX
 add_library(

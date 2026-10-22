@@ -66,6 +66,8 @@ DEPLOYED_PROJECTS = ('apps/backend', 'apps/judge', 'packages/frontend', 'package
 GUARD = '[Service]\nEnvironment=LIBREOJ_SCHEMA_SYNC=0\n'
 GUARD_NAME = '90-libreoj-schema-sync.conf'
 SERVICES = ('mariadb', 'redis', 'minio', 'backend', 'nginx')
+# How long a judge started again may take to connect to the backend before the upgrade (or rollback) counts as failed
+JUDGE_CONNECT_SECONDS = 120
 GIB = 1024 ** 3
 # This digest is reviewed together with the code changes, never learned from the
 # target archive. Updating the contract requires updating this frozen pin too.
@@ -83,7 +85,7 @@ COMMUNITY_RUNTIME_PATHS = frozenset({
 # installed node_modules and rootfs are reused. Changes are verified by the staged build, the judge regression
 # tests, a native rebuild and a real sandbox run instead of a hash list.
 RUNTIME_SOURCE_PREFIXES = ('apps/judge/', 'packages/judge-protocol/', 'packages/simple-sandbox/')
-# Native inputs of each package rebuilt with cmake-js, and the addons the rebuild must produce.
+# Native inputs of each package rebuilt with cmake-js, and the add-ons (and programs) the rebuild must produce.
 NATIVE_PACKAGES = {
     'packages/simple-sandbox': {
         'name': 'simple-sandbox',
@@ -93,13 +95,15 @@ NATIVE_PACKAGES = {
     'apps/judge': {
         'name': '@libreoj/judge',
         'inputs': ('apps/judge/native/', 'apps/judge/CMakeLists.txt', 'apps/judge/vendor/'),
-        'addons': ('builtin_checkers.node', 'fs_native.node', 'posix.node')
+        # builtin_checker: the program the judge starts for each built-in check
+        'addons': ('builtin_checker', 'fs_native.node', 'posix.node')
     }
 }
 JUDGE_REGRESSIONS = ('apps/judge/src/task/hack/hack.test.cjs', 'apps/judge/src/task/self-eval/self-eval.test.cjs',
                      'apps/judge/src/rpc.test.cjs', 'apps/judge/src/executionScheduler.test.cjs',
                      'apps/judge/src/selfTestConfig.test.cjs', 'apps/judge/src/fileContent.test.cjs',
-                     'apps/judge/src/task/ai-execution/ai-execution.test.cjs', 'apps/judge/src/launcher/policy.test.cjs')
+                     'apps/judge/src/task/ai-execution/ai-execution.test.cjs', 'apps/judge/src/launcher/policy.test.cjs',
+                     'apps/judge/src/checkers/builtin.test.cjs', 'apps/judge/src/task/submission/submissionFile.test.cjs')
 # A judge with the sandbox launcher runs as this account; only the launcher runs as root.
 LAUNCHER = 'apps/judge/src/launcher/main.ts'
 JUDGE_ACCOUNT = 'libreoj-judge'
@@ -1073,6 +1077,20 @@ class Upgrade:
             time.sleep(1)
         fail('New backend health check failed')
 
+    def wait_for_judge(self):
+        """Waits until the judge just started has connected to the backend, as the installer does. The backend ends a
+        judge's session when it stops, and connecting again takes it a few seconds (its sandbox launcher prepares its
+        directories first), so a single check right after starting it fails with nothing wrong."""
+        deadline = time.monotonic() + JUDGE_CONNECT_SECONDS
+        while True:
+            check = self.host.run([self.node, self.root/'deploy/bootstrap-services.mjs', '--root', self.root, '--phase', 'verify-judge'],
+                                  check=False, timeout=60)
+            if check.returncode == 0:
+                return
+            if time.monotonic() >= deadline:
+                fail(f'The judge did not connect to the backend within {JUDGE_CONNECT_SECONDS} seconds (see journalctl -u libreoj-judge.service)')
+            time.sleep(2)
+
     def discard_staged_dependencies(self):
         """The build's copy of the dependencies isn't used after a completed upgrade: the installed ones stay in place
         and a rollback restores only what `previous/` holds. Without this, every upgrade backup keeps about 1 GiB."""
@@ -1091,7 +1109,7 @@ class Upgrade:
         if self.role == 'all' and self.states['libreoj-judge.service']:
             self.host.service('start', 'libreoj-judge.service')
             if verify:
-                self.host.run([self.node, self.root/'deploy/bootstrap-services.mjs', '--root', self.root, '--phase', 'verify-judge'], timeout=180)
+                self.wait_for_judge()
         # Start nginx last, so a failed migration/build health check cannot admit users.
         if self.states['libreoj-nginx.service']:
             self.host.service('start', 'libreoj-nginx.service')

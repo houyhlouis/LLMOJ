@@ -890,6 +890,9 @@ importers:
 
   packages/judge-protocol:
     devDependencies:
+      '@types/node':
+        specifier: 24.19.2
+        version: 24.19.2
       prettier:
         specifier: 'catalog:'
         version: 3.9.10

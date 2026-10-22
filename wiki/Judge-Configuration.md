@@ -130,13 +130,20 @@ A seccomp filter also refuses system calls that judged programs don't need (`san
 
 These calls fail with "operation not permitted", including through the 32-bit system call table (`-m32` programs and `int 0x80`); x32 calls fail too. `clone3` reports "not implemented", so that the C library falls back to `clone`, whose flags the filter can check. If the filter can't be installed, nothing runs.
 
-To check this judge, compiling and running every language through the judge's own code and probing the filter with 64-bit and 32-bit programs:
+**Built-in checkers** (integers, floats, tokens, lines and binary) compare an output with its answer outside the sandbox, as the judge's account. They run in a small program of their own, `apps/judge/build/Release/builtin_checker`, which the judge starts for each check:
+- with only the output and the answer open (the program closes any other descriptor it was given);
+- for at most 120 seconds, reading back at most 1 MiB of message;
+- killing only that program, and only while it still runs.
+
+A check that times out, writes too much or crashes gives that test case **Judgement Failed** with the reason. If the program can't be started at all, for example when the judge has no descriptors left, the submission fails with **System Error**, as before. Before this, the checkers ran in a copy of the judge process made with `fork`, which kept one descriptor open per check.
+
+To check this judge, compiling and running every language through the judge's own code, running each built-in checker, and probing the filter with 64-bit and 32-bit programs:
 
 ```bash
 sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh
 ```
 
-It prints one line per check and takes from a few seconds to a minute. It uses its own temporary directories and never the judge's key, so it can run while the judge is working, though it competes with judging for CPU. `--only cpp,java` checks only some languages. The upgrader runs it with the new version, before switching over, whenever the judge or the sandbox changes.
+It prints one line per check and takes from a few seconds to a minute. It uses its own temporary directories and never the judge's key, so it can run while the judge is working, though it competes with judging for CPU. `--only cpp,java` checks only some languages; add `checkers` for the built-in checkers. The upgrader runs it with the new version, before switching over, whenever the judge or the sandbox changes.
 
 **What the sandbox can't do.** Programs in the sandbox share the server's kernel, so a kernel vulnerability could still let one escape. The filter reduces how much of the kernel they can reach, but doesn't prove isolation. The judge itself runs without privileges, but its small sandbox launcher has to run as root. For contests open to the public:
 - run judges on their own machines, not on the web server;
