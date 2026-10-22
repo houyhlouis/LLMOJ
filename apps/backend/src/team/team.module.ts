@@ -8,6 +8,7 @@ import { ProblemModule } from "../problem/problem.module";
 import { DiscussionModule } from "../discussion/discussion.module";
 import { FileModule } from "../file/file.module";
 import { AuditModule } from "../audit/audit.module";
+import { ContestModule } from "../contest/contest.module";
 
 @Module({
   imports: [
@@ -15,7 +16,8 @@ import { AuditModule } from "../audit/audit.module";
     forwardRef(() => ProblemModule),
     forwardRef(() => DiscussionModule),
     forwardRef(() => FileModule),
-    forwardRef(() => AuditModule)
+    forwardRef(() => AuditModule),
+    forwardRef(() => ContestModule)
   ],
   providers: [TeamService],
   controllers: [TeamController]

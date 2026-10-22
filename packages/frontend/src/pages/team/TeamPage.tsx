@@ -435,17 +435,24 @@ export default observer(function TeamPage({
               {visible(resources[activeTab]).map(row => (
                 <Table.Row key={row.id}>
                   <Table.Cell>
-                    <Link
-                      href={
-                        activeTab === "problems"
-                          ? "/p/id/" + row.id
-                          : activeTab === "contests"
-                            ? "/contest/" + row.id
-                            : "/d/" + row.id
-                      }
-                    >
-                      {row.title || "#" + row.id}
-                    </Link>
+                    {row.unavailable ? (
+                      // The team has it, but a site-wide setting keeps it from you
+                      <span>
+                        {"#" + row.id} <Label size="mini">{tr("不可用", "Unavailable to you")}</Label>
+                      </span>
+                    ) : (
+                      <Link
+                        href={
+                          activeTab === "problems"
+                            ? "/p/id/" + row.id
+                            : activeTab === "contests"
+                              ? "/contest/" + row.id
+                              : "/d/" + row.id
+                        }
+                      >
+                        {row.title || "#" + row.id}
+                      </Link>
+                    )}
                     {row.archived && <Label size="mini">{tr("已归档", "Archived")}</Label>}
                     {activeTab === "contests" && (
                       <Label size="mini">
@@ -564,6 +571,14 @@ export default observer(function TeamPage({
               </Table.Body>
             </Table>
             <Header as="h3">{tr("完成情况", "Progress")}</Header>
+            {assignment.resultsVisible === false && (
+              <Message info>
+                {tr(
+                  "你没有查看提交记录的权限，因此这里不显示成绩。",
+                  "You don't have permission to view submissions, so results aren't shown here."
+                )}
+              </Message>
+            )}
             <div className={style.table}>
               <Table basic="very" unstackable>
                 <Table.Header>
@@ -581,7 +596,7 @@ export default observer(function TeamPage({
                       <Table.Cell>
                         <Link href={"/u/" + row.username}>{row.note || row.username}</Link>
                       </Table.Cell>
-                      <Table.Cell>{row.total}</Table.Cell>
+                      <Table.Cell>{row.total ?? "—"}</Table.Cell>
                       {(assignment.details || []).map(item => {
                         const score = row.problems?.[item.problemId];
                         return (

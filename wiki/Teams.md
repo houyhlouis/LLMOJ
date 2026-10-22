@@ -61,6 +61,8 @@ Problems, contests, discussions and assignments can be archived and restored. Ar
 
 Build an ordered list of problems, with sections and a note for each problem. Without a deadline it's a study list; with one it's an assignment. Assign it to members, groups or the whole team. The results show each member's best score per problem and their total, and can be exported as CSV.
 
+Results follow the site's permissions, as the submission list does. Without the permission to view submissions, an assignment shows no results, in its export too. A problem you can't view shows as unavailable, without its title or results, and doesn't count towards totals. In the team's problem, contest and discussion lists, items you can't open show **Unavailable to you** instead of their titles: being in a team never lifts a site-wide denial.
+
 For an assignment, only ordinary submissions made by the deadline count; contest submissions don't. Fake and Hacked submissions score 0 and never count as accepted. Seeing assignment results doesn't let anyone read other members' code. Exports include team notes, and content that a spreadsheet could treat as a formula is escaped.
 
 ## Files

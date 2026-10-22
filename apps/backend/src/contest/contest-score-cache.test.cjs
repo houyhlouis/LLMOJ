@@ -71,7 +71,7 @@ test("scores are reused until a submission of the contest changes", async () => 
   const { service, rows, reads } = fixture({ revisions: { revision: async () => revision } });
   const first = await service.contestScores(contest, problems);
   assert.deepEqual(first, scoreContest(contest.rule, contest.startTime, problems, rows));
-  assert.deepEqual(reads.selected, ["s.id", "s.submitterId", "s.contestProblemId", "s.submitTime", "s.status", "s.score"]);
+  assert.deepEqual(reads.selected, ["s.id", "s.submitterId", "s.contestProblemId", "s.submitTime", "s.status", "s.score", "s.problemDataVersionId"]);
   await service.contestScores(contest, problems);
   await service.contestScores(contest, problems);
   assert.equal(reads.count, 1);

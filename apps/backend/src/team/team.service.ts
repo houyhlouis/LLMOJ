@@ -49,9 +49,11 @@ import { ProblemSampleEntity } from "../problem/problem-sample.entity";
 import { ProblemTagMapEntity } from "../problem/problem-tag-map.entity";
 import { LocalizedContentEntity, LocalizedContentType } from "../localized-content/localized-content.entity";
 import { Locale } from "../common/locale.type";
-import { DiscussionService } from "../discussion/discussion.service";
+import { DiscussionService, DiscussionPermissionType } from "../discussion/discussion.service";
 import { DiscussionEntity } from "../discussion/discussion.entity";
 import { ContestEntity } from "../contest/contest.entity";
+import { ContestAccessService } from "../contest/contest-access.service";
+import { csvCell, csvDocument } from "../common/csv";
 import { normalizeContestLanguages } from "../contest/contest-languages";
 
 import { isContestRule } from "../contest/contest-rules";
@@ -71,11 +73,8 @@ function text(value: unknown, limit: number, required = false): string {
     throw new BadRequestException("Invalid text");
   return value;
 }
-export function teamCsvCell(value: unknown): string {
-  const content = String(value ?? "");
-  // eslint-disable-next-line no-control-regex -- Spreadsheet formulas can start after whitespace/control bytes.
-  return `"${(/^[\s\u0000-\u001f]*[=+@-]/u.test(content) ? `'${content}` : content).replace(/"/g, '""')}"`;
-}
+/** See common/csv.ts */
+export const teamCsvCell = (value: unknown) => csvCell(value == null ? null : String(value));
 
 @Injectable()
 export class TeamService {
@@ -87,7 +86,8 @@ export class TeamService {
     private readonly problemAccess: ProblemAccessService,
     private readonly discussions: DiscussionService,
     private readonly files: FileService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly contestAccess: ContestAccessService
   ) {}
 
   private async isManager(user: UserEntity, db: DataSource | EntityManager = this.db): Promise<boolean> {
@@ -342,12 +342,25 @@ export class TeamService {
       contestIds.length ? this.db.getRepository(ContestEntity).findBy({ id: In(contestIds) }) : [],
       discussionIds.length ? this.db.getRepository(DiscussionEntity).findBy({ id: In(discussionIds) }) : []
     ]);
-    const titles = new Map<number, string>(
-      await Promise.all(
-        problemRows.map(
-          async p => [p.id, await this.problems.getProblemLocalizedTitle(p, p.locales[0])] as [number, string]
-        )
-      )
+    // A resource's title only for those who may open it: being in the team doesn't lift a site-wide denial
+    const titles = new Map<string, string>(
+      (
+        await Promise.all([
+          ...problemRows.map(async p =>
+            (await this.problemAccess.userHasPermission(user, p, ProblemPermissionType.View))
+              ? [`problem:${p.id}`, await this.problems.getProblemLocalizedTitle(p, p.locales[0])]
+              : null
+          ),
+          ...contestRows.map(async c =>
+            (await this.contestAccess.canView(user, c)) ? [`contest:${c.id}`, c.title] : null
+          ),
+          ...discussionRows.map(async d =>
+            (await this.discussions.userHasPermission(user, d, DiscussionPermissionType.View))
+              ? [`discussion:${d.id}`, d.title]
+              : null
+          )
+        ])
+      ).filter(Boolean) as [string, string][]
     );
     const mapped = (kind: TeamResourceKind) =>
       visible
@@ -355,12 +368,9 @@ export class TeamService {
         .map(r => ({
           id: r.resourceId,
           resourceId: r.resourceId,
-          title:
-            kind === "problem"
-              ? titles.get(r.resourceId)
-              : kind === "contest"
-                ? contestRows.find(c => c.id === r.resourceId)?.title
-                : discussionRows.find(d => d.id === r.resourceId)?.title,
+          ...(titles.has(`${kind}:${r.resourceId}`)
+            ? { title: titles.get(`${kind}:${r.resourceId}`) }
+            : { unavailable: true }),
           archived: r.archived,
           visibility: r.visibility,
           ...(kind === "contest" && permissions.includes("contests")
@@ -1048,46 +1058,10 @@ export class TeamService {
       await this.db.getRepository(TeamMemberEntity).findBy({ teamId: team.id, status: "member" })
     ).filter(m => this.assigned(assignment, m) && (canManage || m.userId === user.id));
     const userRows = await this.users.findUsersByExistingIds(members.map(m => m.userId));
-    const scores = new Map<number, SubmissionEntity[]>();
-    if (members.length && assignment.items.length) {
-      const qb = this.db
-        .getRepository(SubmissionEntity)
-        .createQueryBuilder("s")
-        .where("s.submitterId IN (:...ids) AND s.problemId IN (:...problems) AND s.contestId IS NULL", {
-          ids: members.map(m => m.userId),
-          problems: assignment.items.map(i => i.problemId)
-        });
-      if (assignment.deadline) qb.andWhere("s.submitTime <= :deadline", { deadline: assignment.deadline });
-      const submissions = await qb.orderBy("s.id", "ASC").getMany();
-      submissions.forEach(s => scores.set(s.submitterId, [...(scores.get(s.submitterId) ?? []), s]));
-    }
-    const rows = members.map((m, i) => {
-      const results = {};
-      let total = 0;
-      for (const item of assignment.items) {
-        const submissions = (scores.get(m.userId) ?? []).filter(s => s.problemId === item.problemId && s.score != null);
-        const score = (s: SubmissionEntity) =>
-          s.status === "Accepted"
-            ? 100
-            : ["Fake", "Hacked"].includes(s.status)
-              ? 0
-              : Math.max(0, Math.min(100, Number(s.score) || 0));
-        const best = submissions.sort((a, b) => score(b) - score(a) || b.id - a.id)[0];
-        results[item.problemId] = best
-          ? { score: score(best), status: best.status, submissionId: best.id, accepted: best.status === "Accepted" }
-          : { score: 0, status: null, submissionId: null, accepted: false };
-        total += best ? score(best) : 0;
-      }
-      return {
-        userId: m.userId,
-        username: userRows[i]?.username ?? String(m.userId),
-        note: canManage ? m.note : undefined,
-        groupId: m.groupId,
-        total,
-        problems: results
-      };
-    });
+    // Results are what the submission list would show the viewer: they need the right to view submissions, and to
+    // view each problem. An unavailable problem keeps its place in the assignment, without a title or results.
     const details = [];
+    const visibleProblemIds: number[] = [];
     for (const item of assignment.items) {
       // eslint-disable-next-line no-await-in-loop
       const problem = await this.problems.findProblemById(item.problemId);
@@ -1098,32 +1072,69 @@ export class TeamService {
       // eslint-disable-next-line no-await-in-loop -- Only fetch a title after its view authorization succeeds.
       const title = available ? await this.problems.getProblemLocalizedTitle(problem, problem.locales[0]) : undefined;
       details.push(!available ? { ...item, unavailable: true } : { ...item, title });
+      if (available) visibleProblemIds.push(item.problemId);
     }
-    return { assignment, details, rows, canManage };
+    const resultsVisible = await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewSubmission);
+    const resultProblemIds = resultsVisible ? visibleProblemIds : [];
+    const scores = new Map<number, SubmissionEntity[]>();
+    if (members.length && resultProblemIds.length) {
+      const qb = this.db
+        .getRepository(SubmissionEntity)
+        .createQueryBuilder("s")
+        .where("s.submitterId IN (:...ids) AND s.problemId IN (:...problems) AND s.contestId IS NULL", {
+          ids: members.map(m => m.userId),
+          problems: resultProblemIds
+        });
+      if (assignment.deadline) qb.andWhere("s.submitTime <= :deadline", { deadline: assignment.deadline });
+      const submissions = await qb.orderBy("s.id", "ASC").getMany();
+      submissions.forEach(s => scores.set(s.submitterId, [...(scores.get(s.submitterId) ?? []), s]));
+    }
+    const rows = members.map((m, i) => {
+      const results = {};
+      let total = 0;
+      for (const problemId of resultProblemIds) {
+        const submissions = (scores.get(m.userId) ?? []).filter(s => s.problemId === problemId && s.score != null);
+        const score = (s: SubmissionEntity) =>
+          s.status === "Accepted"
+            ? 100
+            : ["Fake", "Hacked"].includes(s.status)
+              ? 0
+              : Math.max(0, Math.min(100, Number(s.score) || 0));
+        const best = submissions.sort((a, b) => score(b) - score(a) || b.id - a.id)[0];
+        results[problemId] = best
+          ? { score: score(best), status: best.status, submissionId: best.id, accepted: best.status === "Accepted" }
+          : { score: 0, status: null, submissionId: null, accepted: false };
+        total += best ? score(best) : 0;
+      }
+      return {
+        userId: m.userId,
+        username: userRows[i]?.username ?? String(m.userId),
+        note: canManage ? m.note : undefined,
+        groupId: m.groupId,
+        total: resultsVisible ? total : null,
+        problems: results
+      };
+    });
+    return { assignment, details, rows, canManage, resultsVisible };
   }
 
   async exportAssignment(user: UserEntity, data: TeamRequestDto) {
     await this.access(user, data.teamId, "assignments");
     const { assignment, rows } = await this.assignment(user, data);
+    // Results the viewer may not see are blank, as on the page
     return {
       filename: `team-${data.teamId}-assignment-${assignment.id}.csv`,
-      csv: `\ufeff${[
-        ["用户ID", "用户名", "分组ID", "备注", "总分", ...assignment.items.map(i => `题目${i.problemId}`)]
-          .map(teamCsvCell)
-          .join(","),
-        ...rows.map(row =>
-          [
-            row.userId,
-            row.username,
-            row.groupId,
-            row.note,
-            row.total,
-            ...assignment.items.map(i => row.problems[i.problemId].score)
-          ]
-            .map(teamCsvCell)
-            .join(",")
-        )
-      ].join("\r\n")}`
+      csv: csvDocument([
+        ["用户ID", "用户名", "分组ID", "备注", "总分", ...assignment.items.map(i => `题目${i.problemId}`)],
+        ...rows.map(row => [
+          row.userId,
+          row.username,
+          row.groupId,
+          row.note,
+          row.total,
+          ...assignment.items.map(i => row.problems[i.problemId]?.score)
+        ])
+      ])
     };
   }
 

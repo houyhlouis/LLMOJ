@@ -58,6 +58,24 @@ export interface CheckerResult {
   checkerMessage?: OmittableString;
 }
 
+/**
+ * A checker's score: the token at the start of `text` (after spaces), which ends with a space or the end of the text,
+ * from 0 to 100. testlib's points may have a decimal part, as quitp prints them; Lemon and legacy checkers give a whole
+ * number. "malformed": not such a number (37abc, 1e2, -5, NaN, Infinity, 37.5 for a whole number, nothing);
+ * "range": a number above 100.
+ */
+export function parseCheckerScore(text: string, decimal: boolean): number | "malformed" | "range" {
+  const token = /^[ \t\r\n]*(\S+)(?=\s|$)/.exec(text)?.[1];
+  if (!token || !(decimal ? /^\d+(\.\d+)?$/ : /^\d+$/).test(token)) return "malformed";
+  const score = Number(token);
+  return score <= 100 ? score : "range";
+}
+
+/**
+ * The verdict in testlib's message. "points X" is the score X (0 to 100, with a decimal part if it has one), and
+ * "partially correct (N)" the score N / 2. A score that isn't a whole number or is out of range is the checker's
+ * failure (Judgement Failed), never a truncated or capped score.
+ */
 export function parseTestlibMessage(message: OmittableString): CheckerResult | OmittableString {
   const friendlyMessage = message || "(empty)";
   const messagePlain = omittableStringToString(message);
@@ -73,23 +91,22 @@ export function parseTestlibMessage(message: OmittableString): CheckerResult | O
       checkerMessage: message
     };
   } else if (messagePlain.startsWith("points")) {
-    const match = messagePlain.match(/^points (\d+)/);
-    if (!match) return prependOmittableString("Couldn't parse testlib's message: ", friendlyMessage);
-    const score = parseInt(match[1], 10);
-    if (!(score >= 0 && score <= 100))
-      return prependOmittableString(`Got invalid score ${match[1]} from testlib's message: `, friendlyMessage);
+    const score = messagePlain.startsWith("points ") ? parseCheckerScore(messagePlain.slice(7), true) : "malformed";
+    if (score === "malformed") return prependOmittableString("Couldn't parse testlib's message: ", friendlyMessage);
+    if (score === "range")
+      return prependOmittableString("Got an invalid score from testlib's message: ", friendlyMessage);
     return {
       score,
       checkerMessage: message
     };
   } else if (messagePlain.startsWith("partially correct")) {
-    const match = messagePlain.match(/^partially correct \((\d+)\)/);
+    const match = messagePlain.match(/^partially correct \((\d+)\)(?=\s|$)/);
     if (!match) return prependOmittableString("Couldn't parse testlib's message: ", friendlyMessage);
-    const score = parseInt(match[1], 10);
+    const score = Number(match[1]);
     if (!(score >= 0 && score <= 200))
       return prependOmittableString(`Got invalid score ${match[1]} from testlib's message: `, friendlyMessage);
     return {
-      score: Math.floor(score / 2),
+      score: score / 2,
       checkerMessage: message
     };
   } else if (messagePlain.startsWith("FAIL")) {

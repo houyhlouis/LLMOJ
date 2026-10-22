@@ -7,6 +7,8 @@ export interface ScoringSubmission {
   submitTime: Date;
   status: string;
   score: number;
+  /** The problem data version it was judged with; null for a result from before data versions */
+  problemDataVersionId?: number | null;
   subtasks?: { score: number; fullScore: number }[];
 }
 
@@ -20,6 +22,14 @@ export interface ProblemScore {
   wrong?: number;
   pending?: number;
   subtasks?: { score: number; fullScore: number; submissionId: number }[];
+  /** Strict IOI: how many data versions the user has results for, when more than one: only one version's count */
+  versions?: number;
+}
+
+interface StrictGroup {
+  entry: ProblemScore;
+  exact: number;
+  full: boolean[];
 }
 
 const invalidated = (status: string) => status === "Fake" || status === "Hacked";
@@ -29,7 +39,20 @@ const noAttemptPenalty = (status: string) =>
   );
 const effectiveScore = (s: ScoringSubmission) => (invalidated(s.status) ? 0 : (s.score ?? 0));
 
-/** NOI: latest; IOI: best; strict IOI: per-subtask best; ICPC: solved count and penalty. */
+// A subtask's earned score counts as full credit despite floating-point error in the judge's normalization
+const FULL_CREDIT_TOLERANCE = 1e-9;
+const fullCredit = (subtask: { score: number; fullScore: number }) =>
+  subtask.score >= subtask.fullScore - FULL_CREDIT_TOLERANCE * Math.max(1, subtask.fullScore);
+
+/**
+ * NOI: latest; IOI: best; strict IOI: per-subtask best; ICPC: solved count and penalty.
+ *
+ * Strict IOI combines the best result of each subtask only across submissions judged with the same data version and
+ * the same subtask weights: a changed problem can reorder or redefine subtasks without changing their weights, so
+ * results of different versions never add up. The user's problem score is the best such combination. It's shown
+ * rounded to whole points, and the rounded points rank; it counts as Accepted only when every subtask has full
+ * credit, never because it rounds to 100.
+ */
 export function scoreContest(
   rule: ContestRule,
   startTime: Date,
@@ -45,7 +68,11 @@ export function scoreContest(
     if (!users.has(userId)) users.set(userId, { userId, score: 0, penalty: 0, problems: {} });
     return users.get(userId);
   };
-  const strictLayouts = new Map<string, ProblemScore>();
+  // Strict IOI: each group of compatible results (see below) with its exact score (percent) and which subtasks have
+  // full credit; the group each user's problem shows; the data versions each user has results for
+  const strictGroups = new Map<string, StrictGroup>();
+  const strictChosen = new Map<string, StrictGroup>();
+  const strictVersions = new Map<string, Set<string>>();
   for (const s of [...submissions].sort((a, b) => +a.submitTime - +b.submitTime || a.id - b.id)) {
     if (!problemIds.has(s.contestProblemId)) continue;
     const row = getUser(s.submitterId);
@@ -70,11 +97,11 @@ export function scoreContest(
         if (!prior) row.problems[s.contestProblemId] = makeEntry(0);
         continue;
       }
-      // Never merge incompatible subtask layouts after an administrator changes judge settings.
       if (!s.subtasks?.length && score === 0) {
         if (!prior) row.problems[s.contestProblemId] = makeEntry(0);
         continue;
       }
+      // Results without subtasks (from before they were recorded) are one subtask, fully credited only if Accepted
       const incoming = s.subtasks?.length ? s.subtasks : [{ score, fullScore: 100 }];
       if (
         incoming.some(
@@ -85,28 +112,51 @@ export function scoreContest(
         )
       )
         continue;
-      const layout = `${s.submitterId}:${s.contestProblemId}:${incoming.map(subtask => subtask.fullScore).join(",")}`;
-      const priorLayout = strictLayouts.get(layout);
-      const merged = [...(priorLayout?.subtasks ?? [])];
+      const version = s.problemDataVersionId ?? null;
+      const userProblem = `${s.submitterId}:${s.contestProblemId}`;
+      // Never merge results of different data versions, or of different subtask layouts in one version
+      const group = `${userProblem}:${version ?? "legacy"}:${incoming.map(subtask => subtask.fullScore).join(",")}`;
+      if (!strictVersions.has(userProblem)) strictVersions.set(userProblem, new Set());
+      strictVersions.get(userProblem).add(String(version));
+      const previous = strictGroups.get(group);
+      const merged = [...(previous?.entry.subtasks ?? [])];
+      const full = [...(previous?.full ?? [])];
       let improved = false;
       incoming.forEach((subtask, index) => {
         const earned = Math.max(0, Math.min(subtask.fullScore, subtask.score ?? 0));
-        if (!merged[index] || earned > merged[index].score) {
+        const credited = s.subtasks?.length
+          ? fullCredit({ score: earned, fullScore: subtask.fullScore })
+          : s.status === "Accepted";
+        if (
+          !merged[index] ||
+          earned > merged[index].score ||
+          (earned === merged[index].score && credited && !full[index])
+        ) {
           merged[index] = { score: earned, fullScore: subtask.fullScore, submissionId: s.id };
+          full[index] = credited;
           improved = true;
         }
       });
+      if (previous && !improved) continue;
       const totalFull = merged.reduce((sum, subtask) => sum + subtask.fullScore, 0);
-      const total = merged.reduce((sum, subtask) => sum + subtask.score, 0);
-      const combined = totalFull ? Math.round((total / totalFull) * 100) : 0;
-      const combinedEntry = {
-        ...(improved || !priorLayout ? makeEntry(combined) : priorLayout),
-        score: combined,
-        status: combined === 100 ? "Accepted" : combined > 0 ? "PartiallyCorrect" : s.status,
-        subtasks: merged
+      const exact = totalFull ? (merged.reduce((sum, subtask) => sum + subtask.score, 0) / totalFull) * 100 : 0;
+      const accepted = totalFull > 0 && full.every(Boolean);
+      const state: StrictGroup = {
+        entry: {
+          ...makeEntry(Math.round(exact)),
+          status: accepted ? "Accepted" : exact > 0 ? "PartiallyCorrect" : s.status,
+          subtasks: merged
+        },
+        exact,
+        full
       };
-      strictLayouts.set(layout, combinedEntry);
-      if (!prior || combined > (prior.score ?? -1) || !prior.subtasks) row.problems[s.contestProblemId] = combinedEntry;
+      strictGroups.set(group, state);
+      // The user's problem shows the best group, compared exactly; on a tie the earlier one stays
+      const chosen = strictChosen.get(userProblem);
+      if (!chosen || chosen === previous || exact > chosen.exact) {
+        row.problems[s.contestProblemId] = state.entry;
+        strictChosen.set(userProblem, state);
+      }
     } else {
       const entry = prior ?? { accepted: false, wrong: 0, pending: 0, minutes: 0, submissionId: s.id };
       if (!entry.accepted) {
@@ -117,6 +167,9 @@ export function scoreContest(
       row.problems[s.contestProblemId] = entry;
     }
   }
+  for (const [userProblem, versions] of strictVersions)
+    if (versions.size > 1 && strictChosen.has(userProblem))
+      strictChosen.get(userProblem).entry.versions = versions.size;
   for (const row of users.values())
     for (const problem of problems) {
       const entry = row.problems[problem.id];
@@ -133,8 +186,11 @@ export function scoreContest(
       }
     }
   const rows = [...users.values()].sort((a, b) => b.score - a.score || a.penalty - b.penalty || a.userId - b.userId);
-  return rows.map(row => ({
-    ...row,
-    rank: rows.findIndex(other => other.score === row.score && other.penalty === row.penalty) + 1
-  }));
+  // Equal score and penalty share the rank of the first of them
+  let rank = 0;
+  return rows.map((row, index) => {
+    const previous = rows[index - 1];
+    if (!previous || previous.score !== row.score || previous.penalty !== row.penalty) rank = index + 1;
+    return { ...row, rank };
+  });
 }

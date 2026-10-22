@@ -41,6 +41,7 @@ const { ContestAccessService } = require('../contest/contest-access.service.ts')
 const { ContestProblemService } = require('../contest/contest-problem.service.ts');
 const { ContestScoreService } = require('../contest/contest-score.service.ts');
 const { ContestProblemEntity } = require('../contest/contest-problem.entity.ts');
+const { ContestEntity } = require('../contest/contest.entity.ts');
 const { SubmissionEntity } = require('../submission/submission.entity.ts');
 const { FileService, MinioSignFor } = require('../file/file.service.ts');
 const { FileEntity } = require('../file/file.entity.ts');
@@ -90,8 +91,8 @@ test('team creation, membership, private resources, assignments and files (real 
       getUserMeta: async user => ({ id: user.id, username: user.username, nickname: user.nickname })
     };
     const audit = { log: async () => {} };
-    const teams = new TeamService(db, userService, privilege, problems, problems, discussions, files, audit);
     const contestAccess = new ContestAccessService(db, privilege);
+    const teams = new TeamService(db, userService, privilege, problems, problems, discussions, files, audit, contestAccess);
     const contestProblems = new ContestProblemService(db, contestAccess, problems, problems, problems, files);
     const contests = new ContestService(db, contestAccess, new ContestScoreService(db), contestProblems, {}, files);
     const groups = Object.create(GroupService.prototype);
@@ -226,6 +227,19 @@ test('team creation, membership, private resources, assignments and files (real 
       await teams.acceptContestInvitation(stranger, code);
       assert.equal((await contestAccess.get(stranger, contestId)).manager, false);
       await assert.rejects(teams.acceptContestInvitation(banned, code));
+      // Review N08: a summary stays its writer's, but the contest's current title only while they may open it
+      await contests.summary(stranger, contestId, { content: 'My notes', problems: [{ contestProblemId: cp.id, content: 'Idea', minutes: 12 }] });
+      assert.equal((await contests.summaries(stranger)).summaries[0].title, 'Team Contest');
+      await teams.updateContestAccess(owner, { teamId, contestId, visibility: 'private', invitedUserIds: [] });
+      await db.getRepository(ContestEntity).update(contestId, { title: 'Renamed while private' });
+      const hidden = (await contests.summaries(stranger)).summaries[0];
+      assert.equal(hidden.title, null); assert.equal(hidden.unavailable, true);
+      assert.equal(hidden.content, 'My notes'); assert.equal(hidden.problems[0].content, 'Idea');
+      assert(!JSON.stringify(hidden).includes('Renamed'), 'nothing of the contest as it is now');
+      await assert.rejects(contests.summary(stranger, contestId));
+      await teams.updateContestAccess(owner, { teamId, contestId, visibility: 'invite', invitedUserIds: [stranger.id] });
+      const restored = (await contests.summaries(stranger)).summaries[0];
+      assert.equal(restored.title, 'Renamed while private'); assert.equal(restored.unavailable, undefined);
       await assert.rejects(contests.delete(owner, contestId), /Archive team contests/);
     });
     await run('copy and source editing keep one lock order and safely retry serialization conflicts', async () => {
@@ -294,6 +308,46 @@ test('team creation, membership, private resources, assignments and files (real 
       const csv = (await teams.exportAssignment(owner, { teamId, id: assignmentId })).csv;
       assert(csv.startsWith('\ufeff')); assert(csv.includes("'=external-link"));
       assert.equal(teamCsvCell(' \t=1+1'), '"\' \t=1+1"');
+    });
+    await run('site-wide denials hold in team assignments, their export and the team overview (review N07)', async () => {
+      const deny = permission => ruleRepo.save({ userId: member.id, permission, allowed: false });
+      const allow = permission => ruleRepo.delete({ userId: member.id, permission });
+      const before = await teams.assignment(member, { teamId, id: assignmentId });
+      assert.equal(before.resultsVisible, true); assert.equal(before.rows[0].total, 60);
+      // Without the right to view submissions: the assignment, but no results
+      await deny(P.ViewSubmission);
+      const hidden = await teams.assignment(member, { teamId, id: assignmentId });
+      assert.equal(hidden.resultsVisible, false); assert.equal(hidden.rows[0].total, null); assert.deepEqual(hidden.rows[0].problems, {});
+      assert.deepEqual(hidden.details.map(item => !!item.unavailable), [false, false], 'the problems themselves stay');
+      const overviewWithoutResults = await teams.get(member, teamId);
+      assert(overviewWithoutResults.resources.problems.every(problem => problem.title), 'problem titles need only the right to view problems');
+      await allow(P.ViewSubmission);
+      // Without the right to view problems: the assignment's problems are unavailable, without titles or results
+      await deny(P.ViewProblem);
+      const noProblems = await teams.assignment(member, { teamId, id: assignmentId });
+      assert.deepEqual(noProblems.details.map(item => [!!item.unavailable, item.title]), [[true, undefined], [true, undefined]]);
+      assert.equal(noProblems.rows[0].total, 0); assert.deepEqual(noProblems.rows[0].problems, {});
+      assert.deepEqual(noProblems.details.map(item => item.note), ['', 'Practice'], "the assignment's own notes stay");
+      const noProblemTitles = await teams.get(member, teamId);
+      assert(noProblemTitles.resources.problems.length > 0);
+      for (const problem of noProblemTitles.resources.problems) { assert.equal(problem.title, undefined); assert.equal(problem.unavailable, true); }
+      await allow(P.ViewProblem);
+      // Contests and discussions follow their own rights
+      await deny(P.ViewContest); await deny(P.ViewDiscussion);
+      const overview = await teams.get(member, teamId);
+      assert(overview.resources.contests.length > 0 && overview.resources.discussions.length > 0);
+      for (const kind of ['contests', 'discussions']) for (const resource of overview.resources[kind]) { assert.equal(resource.title, undefined, kind); assert.equal(resource.unavailable, true, kind); }
+      assert(overview.resources.problems.every(problem => problem.title && !problem.unavailable));
+      await allow(P.ViewContest); await allow(P.ViewDiscussion);
+      const restored = await teams.get(member, teamId);
+      for (const kind of ['problems', 'contests', 'discussions']) assert(restored.resources[kind].every(resource => resource.title && !resource.unavailable), kind);
+      // The manager's export leaves blank what the manager may not see
+      await ruleRepo.save({ userId: owner.id, permission: P.ViewSubmission, allowed: false });
+      const csv = (await teams.exportAssignment(owner, { teamId, id: assignmentId })).csv;
+      await ruleRepo.delete({ userId: owner.id, permission: P.ViewSubmission });
+      const memberRow = csv.split('\r\n').find(line => line.startsWith(`${member.id},`));
+      assert(memberRow.endsWith(',"","",""'), memberRow);
+      assert((await teams.exportAssignment(owner, { teamId, id: assignmentId })).csv.split('\r\n').find(line => line.startsWith(`${member.id},`)).includes(',60,'));
     });
     await run('member uploads and downloads, private links, quota checks and recoverable file archives', async () => {
       const prepared = await teams.prepareFileUpload(member, { teamId, size: 4 });

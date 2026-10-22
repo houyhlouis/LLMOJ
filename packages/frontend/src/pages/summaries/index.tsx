@@ -58,7 +58,12 @@ const SummariesPage = observer(({ data, page }: { data: any; page: number }) => 
           {data.summaries.map((s: any) => (
             <article key={s.id} className={style.summaryEntry}>
               <Header as="h3">
-                <Link href={`/contest/${s.contestId}/summary`}>{s.title}</Link>
+                {s.unavailable ? (
+                  // Your notes stay yours; the contest's details only while you may open it
+                  <span className={style.unavailable}>{tr("比赛不可用", "Contest unavailable")}</span>
+                ) : (
+                  <Link href={`/contest/${s.contestId}/summary`}>{s.title}</Link>
+                )}
                 <Header.Subheader>
                   {formatDate(s.updatedAt)} · {tr("总耗时", "Total time")}:{" "}
                   <FormattedNumber value={totalMinutes(s.problems)} maximumSignificantDigits={15} />{" "}

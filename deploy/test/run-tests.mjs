@@ -41,7 +41,7 @@ const JUDGE_SUITES = [
   'apps/judge/src/rpc.test.cjs', 'apps/judge/src/executionScheduler.test.cjs', 'apps/judge/src/selfTestConfig.test.cjs',
   'apps/judge/src/fileContent.test.cjs', 'apps/judge/src/task/ai-execution/ai-execution.test.cjs',
   'apps/judge/src/launcher/policy.test.cjs', 'apps/judge/src/checkers/builtin.test.cjs',
-  'apps/judge/src/task/submission/submissionFile.test.cjs'
+  'apps/judge/src/checkers/score.test.cjs', 'apps/judge/src/task/submission/submissionFile.test.cjs'
 ];
 
 // The Python suites of deploy/test. Those CI runs too; the others need Ubuntu 26.04's Python and tools, as installed

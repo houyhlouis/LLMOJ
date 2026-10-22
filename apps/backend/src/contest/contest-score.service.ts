@@ -41,7 +41,15 @@ export class ContestScoreService {
       const submissions = await this.db
         .getRepository(SubmissionEntity)
         .createQueryBuilder("s")
-        .select(["s.id", "s.submitterId", "s.contestProblemId", "s.submitTime", "s.status", "s.score"])
+        .select([
+          "s.id",
+          "s.submitterId",
+          "s.contestProblemId",
+          "s.submitTime",
+          "s.status",
+          "s.score",
+          "s.problemDataVersionId"
+        ])
         .where("s.contestId = :id AND s.submitTime >= :start AND s.submitTime < :end", {
           id: contest.id,
           start: contest.startTime,
@@ -83,7 +91,10 @@ export class ContestScoreService {
   private async score(
     contest: ContestEntity,
     problems: { id: number; weight: number }[],
-    submissions: Pick<SubmissionEntity, "id" | "submitterId" | "contestProblemId" | "submitTime" | "status" | "score">[]
+    submissions: Pick<
+      SubmissionEntity,
+      "id" | "submitterId" | "contestProblemId" | "submitTime" | "status" | "score" | "problemDataVersionId"
+    >[]
   ) {
     const detailRows =
       contest.rule === "strictioi" && submissions.length

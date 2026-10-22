@@ -17,6 +17,8 @@ import { normalizeContestLanguages } from "./contest-languages";
 
 import type { ContestRequestData } from "./contest-request.dto";
 
+import { csvDocument } from "../common/csv";
+
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeType } from "../user/user-privilege.service";
 import { SubmissionService } from "../submission/submission.service";
@@ -162,39 +164,35 @@ export class ContestService {
     if (scoreboard === "hidden") throw new ForbiddenException("Ranklist is hidden during this contest");
     const problems = await this.contestProblems.problemList(id);
     const rows = await this.scores.contestScores(contest, problems);
-    const users = rows.length
-      ? await this.db.getRepository(UserEntity).findBy({ id: In(rows.map(r => r.userId)) })
-      : [];
+    const users = new Map(
+      (rows.length ? await this.db.getRepository(UserEntity).findBy({ id: In(rows.map(r => r.userId)) }) : []).map(
+        u => [u.id, u.username]
+      )
+    );
     return {
       problems,
-      rows: rows.map(row => ({
-        ...row,
-        username: users.find(u => u.id === row.userId)?.username ?? String(row.userId)
-      }))
+      rows: rows.map(row => ({ ...row, username: users.get(row.userId) ?? String(row.userId) }))
     };
   }
 
   async export(user: UserEntity, id: number) {
     await this.access.requirePrivilege(user, UserPrivilegeType.ExportContest);
     const result = await this.ranklist(user, id);
-    const cell = (value: unknown) =>
-      `"${String(value ?? "")
-        .replace(/"/g, '""')
-        .replace(/^[=+@-]/, "'$&")}"`;
-    const rows = [
-      ["Rank", "User", "Score", "Time (seconds)", ...result.problems.map(p => p.title)],
-      ...result.rows.map(r => [
-        r.rank,
-        r.username,
-        r.score,
-        r.penalty,
-        ...result.problems.map(p => {
-          const x = r.problems[p.id];
-          return x ? (x.score ?? (x.accepted ? "AC" : `-${x.wrong}`)) : "";
-        })
+    return {
+      csv: csvDocument([
+        ["Rank", "User", "Score", "Time (seconds)", ...result.problems.map(p => p.title)],
+        ...result.rows.map(r => [
+          r.rank,
+          r.username,
+          r.score,
+          r.penalty,
+          ...result.problems.map(p => {
+            const x = r.problems[p.id];
+            return x ? (x.score ?? (x.accepted ? "AC" : `-${x.wrong}`)) : "";
+          })
+        ])
       ])
-    ];
-    return { csv: rows.map(row => row.map(cell).join(",")).join("\r\n") };
+    };
   }
 
   async summary(user: UserEntity, id: number, data?: ContestRequestData) {
@@ -222,6 +220,10 @@ export class ContestService {
     return { summary: row ?? { content: "", problems: [] } };
   }
 
+  /**
+   * The user's own summaries. Their notes are always theirs; the contest's title only while they may open the
+   * contest: one they lost access to (left its team, say) is unavailable, under whatever title it has now.
+   */
   async summaries(user: UserEntity, page = 1) {
     await this.access.requirePrivilege(user, UserPrivilegeType.ManageSummaries);
     const [rows, total] = await this.db
@@ -229,7 +231,17 @@ export class ContestService {
       .findAndCount({ where: { userId: user.id }, order: { updatedAt: "DESC" }, skip: (page - 1) * 30, take: 30 });
     return {
       total,
-      summaries: await Promise.all(rows.map(async row => ({ ...row, title: (await row.contest).title })))
+      summaries: await Promise.all(
+        rows.map(async row => {
+          // The summary's own fields: its loaded contest must not go along
+          const { id, contestId, userId, content, problems, updatedAt } = row;
+          const own = { id, contestId, userId, content, problems, updatedAt };
+          const contest = await row.contest;
+          return (await this.access.canView(user, contest))
+            ? { ...own, title: contest.title }
+            : { ...own, title: null, unavailable: true };
+        })
+      )
     };
   }
 

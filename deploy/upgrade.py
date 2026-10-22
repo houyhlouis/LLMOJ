@@ -103,7 +103,8 @@ JUDGE_REGRESSIONS = ('apps/judge/src/task/hack/hack.test.cjs', 'apps/judge/src/t
                      'apps/judge/src/rpc.test.cjs', 'apps/judge/src/executionScheduler.test.cjs',
                      'apps/judge/src/selfTestConfig.test.cjs', 'apps/judge/src/fileContent.test.cjs',
                      'apps/judge/src/task/ai-execution/ai-execution.test.cjs', 'apps/judge/src/launcher/policy.test.cjs',
-                     'apps/judge/src/checkers/builtin.test.cjs', 'apps/judge/src/task/submission/submissionFile.test.cjs')
+                     'apps/judge/src/checkers/builtin.test.cjs', 'apps/judge/src/checkers/score.test.cjs',
+                     'apps/judge/src/task/submission/submissionFile.test.cjs')
 # A judge with the sandbox launcher runs as this account; only the launcher runs as root.
 LAUNCHER = 'apps/judge/src/launcher/main.ts'
 JUDGE_ACCOUNT = 'libreoj-judge'

@@ -33,6 +33,18 @@ For a **Submit answer** problem, the submitted ZIP archive holds the output file
 
 Other files in the archive are skipped without being unpacked. Each judging of a submission, rejudges included, unpacks into a private directory of its own, which is removed before the judge takes its next task. A judge whose disk lacks the space the archive's files declare, plus 256 MiB, ends the submission with **System Error** instead of filling the disk.
 
+## Checker scores
+
+A custom checker gives each test case a score from 0 to 100:
+
+| Checker | Score |
+| --- | --- |
+| testlib, `points X` (`quitp`) | X, with its decimal part: `points 37.5` scores 37.5. Before, the decimal part was dropped (37). |
+| testlib, `partially correct (N)` (`_pc`) | N / 2, with its decimal part: N = 75 scores 37.5 (before, 37) |
+| Lemon, legacy | The whole number it writes |
+
+The score must be a whole token, ended by a space or the end of the message. A malformed score (`points 37abc`, `1e2`, `-5`, a decimal for Lemon) or one above 100 (`points 100.9`) is the checker's failure: **Judgement Failed**, with the reason. Before, such a score was cut short (37, 100). A testlib checker that reports `ok` must also exit successfully, as before. Scores already judged don't change until the submission is rejudged.
+
 ## Test data versions and earlier results
 
 A submission is judged with the problem's judging data as it was when it was submitted: the judge settings, the test data files and the samples it runs form a **data version**, numbered per problem (#1, #2, …). Editing the problem afterwards doesn't change how a waiting submission is judged; submissions made after the edit use the new version. **Rejudge** always uses the problem's current data.

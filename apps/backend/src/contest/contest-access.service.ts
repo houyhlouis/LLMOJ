@@ -41,20 +41,31 @@ export class ContestAccessService {
     if (!Number.isSafeInteger(id) || id < 1) throw new BadRequestException();
     const contest = await this.db.getRepository(ContestEntity).findOneBy({ id });
     if (!contest) throw new NotFoundException();
-    if (!(await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewContest))) throw new ForbiddenException();
+    const access = await this.viewAccess(user, contest);
+    if (!access) throw new ForbiddenException();
+    if (problemAccess && !contestProblemsOpen(contest, access.manager))
+      throw new ForbiddenException({ error: "CONTEST_NOT_STARTED", message: "Contest has not started" });
+    return { contest, manager: access.manager };
+  }
+
+  /** Whether the user may open the contest now (as `get`, without throwing): for pages that mention contests. */
+  async canView(user: UserEntity, contest: ContestEntity) {
+    return !!contest && !!(await this.viewAccess(user, contest));
+  }
+
+  private async viewAccess(user: UserEntity, contest: ContestEntity): Promise<{ manager: boolean } | null> {
+    if (!(await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewContest))) return null;
     const manager = await this.manager(user, contest);
     const team = await teamResourceAccess(this.db, user, "contest", contest.id);
-    if (team === false) throw new ForbiddenException();
+    if (team === false) return null;
     if (
       team === null &&
       !manager &&
-      (!(await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewContest)) ||
-        (!contest.isPublic && !(await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewHiddenContest))))
+      !contest.isPublic &&
+      !(await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewHiddenContest))
     )
-      throw new ForbiddenException();
-    if (problemAccess && !contestProblemsOpen(contest, manager))
-      throw new ForbiddenException({ error: "CONTEST_NOT_STARTED", message: "Contest has not started" });
-    return { contest, manager };
+      return null;
+    return { manager };
   }
 
   /** Requires a signed-in user with the privilege. */

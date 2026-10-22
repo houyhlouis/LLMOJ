@@ -64,7 +64,9 @@ function ContestPage({ initial, tab }: { initial: any; tab: string }) {
   async function exportCsv() {
     try {
       const result = await callContest("export", { id });
-      const url = URL.createObjectURL(new Blob(["\ufeff" + result.csv], { type: "text/csv;charset=utf-8" }));
+      // The server's CSV starts with a byte order mark (for spreadsheets); older servers' didn't
+      const csv = result.csv.startsWith("\ufeff") ? result.csv : "\ufeff" + result.csv;
+      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
       const a = document.createElement("a");
       a.href = url;
       a.download = `contest-${id}.csv`;
@@ -189,6 +191,17 @@ function ContestPage({ initial, tab }: { initial: any; tab: string }) {
                               : detail.contest.rule === "acm"
                                 ? `${x.accepted ? "+" : "−"}${x.wrong || ""}${x.accepted ? ` (${x.minutes})` : ""}`
                                 : (x.score ?? "—")}
+                            {x?.versions > 1 && (
+                              <span
+                                className={style.versionsNote}
+                                title={tr(
+                                  `有 ${x.versions} 个测试数据版本的结果：只合并同一版本的子任务`,
+                                  `Results of ${x.versions} test data versions: only subtasks of one version combine`
+                                )}
+                              >
+                                *
+                              </span>
+                            )}
                           </Table.Cell>
                         );
                       })}

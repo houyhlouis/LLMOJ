@@ -7,6 +7,7 @@ import { safelyJoinPath, readFileLimited } from "../../utils";
 import { readFileOmitted } from "../../omittableString";
 
 import { CustomChecker } from ".";
+import { parseCheckerScore } from "..";
 
 export const checker: CustomChecker = {
   async runChecker(
@@ -38,8 +39,9 @@ export const checker: CustomChecker = {
     const scoreText = await readFileLimited(stdoutFile.outside, SCORE_LENGTH_LIMIT);
     if (!scoreText) return "Legacy checker returned empty score";
 
-    const score = parseInt(scoreText, 10);
-    if (!(score >= 0 && score <= 100)) return `Legacy checker returned an invalid score: ${scoreText || "(empty)"}`;
+    // A whole number from 0 to 100, as the whole first token
+    const score = parseCheckerScore(scoreText, false);
+    if (typeof score !== "number") return `Legacy checker returned an invalid score: ${scoreText || "(empty)"}`;
 
     const MESSAGE_LENGTH_LIMIT = 256;
     const message = await readFileOmitted(stderrFile.outside, MESSAGE_LENGTH_LIMIT);
