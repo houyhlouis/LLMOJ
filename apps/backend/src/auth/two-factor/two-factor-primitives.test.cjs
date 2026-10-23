@@ -216,7 +216,7 @@ test("passkeys need a secure, named origin", () => {
 test("audit actions for sign-in and two-factor changes fit the audit log column", () => {
   const entity = fs.readFileSync(path.join(__dirname, "../../audit/audit-log.entity.ts"), "utf8");
   const length = Number(/length: (\d+) \}\)\s*@Index\(\)\s*action: string/.exec(entity)[1]);
-  for (const file of ["two-factor.controller.ts", "../auth.controller.ts"]) {
+  for (const file of ["two-factor.controller.ts", "../auth.controller.ts", "../../user/user.controller.ts"]) {
     const actions = [...fs.readFileSync(path.join(__dirname, file), "utf8").matchAll(/"(auth\.[a-z_.]+)"/g)].map(
       match => match[1]
     );

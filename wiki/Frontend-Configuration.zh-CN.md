@@ -23,7 +23,7 @@
 
 这样构建的页面从 `/frontend` 加载脚本，并调用同一站点的 API。它们按需加载的依赖库（代码编辑器、数学公式、代码高亮和表情图片）属于构建结果，位于 `/frontend/vendor` 下，不从 CDN 加载任何内容。这些值在脚本中固定。
 
-发布时会重写输出文件和 `index.html`，并生成 `sw.js`，用于移除旧的 service worker 并清除其缓存。不要手动修改发布后的文件，下次构建时修改会丢失。
+发布时会重写输出文件和 `index.html`，并生成 `sw.js`，用于移除旧版 CDN bootstrap 安装的 service worker 及其缓存。那个 worker 是为只提供页面的独立站点设计的：在本站点上，它会用缓存的首页回应 API 请求，还可能把 API 的回应或某人的文件存为首页。仍装有它的浏览器会在下次打开站点时将其移除。不要手动修改发布后的文件，下次构建时修改会丢失。
 
 如需手动重新构建（例如修改了站点名称后），在安装目录中用安装器的 Node.js 和 pnpm 运行下面的命令。请先备份 `public`，完成后在浏览器中检查首页、登录和上传：
 
@@ -53,7 +53,7 @@ sudo env PATH=/opt/LLMOJ/runtime/node/bin:/opt/LLMOJ/runtime/tooling/node_module
 
 ## bootstrap CDN 构建（安装器不使用）
 
-`packages/bootstrap-config/settings.json` 属于另一种通过 CDN 发布前端的方式，继承自上游 LibreOJ。安装器不使用它，也没有在 LLMOJ 中测试过。其中的示例地址指向上游项目的服务器：使用前必须全部替换，否则你的站点会从别人的服务器加载。
+`packages/bootstrap-config/settings.json` 属于另一种通过 CDN 发布前端的方式，继承自上游 LibreOJ。安装器不使用它，也没有在 LLMOJ 中测试过。其中的示例地址指向上游项目的服务器：使用前必须全部替换，否则你的站点会从别人的服务器加载。它的页面不再安装 service worker，而是移除旧版本安装的那个；它的 `/sw.js` 与安装器发布的相同。
 
 文件包含两部分：
 

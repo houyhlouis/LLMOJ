@@ -10,7 +10,7 @@ import { createRegisteredUser } from "./create-registered-user";
 
 import { UserAuthEntity } from "./user-auth.entity";
 
-import { AuthEmailVerificationCodeService } from "./auth-email-verification-code.service";
+import { AuthEmailVerificationCodeService, EmailVerificationCodeType } from "./auth-email-verification-code.service";
 
 import { RegisterResponseError } from "./dto";
 
@@ -58,16 +58,24 @@ export class AuthService {
     // There's a race condition on user inserting. If we do checking before inserting,
     // inserting will still fail if another with same username is inserted after we check
 
-    if (this.configService.config.preference.security.requireEmailVerification) {
-      // Delay for security
-      await delay(DELAY_FOR_SECURITY);
-      if (!(await this.authEmailVerificationCodeService.verify(email, emailVerificationCode)))
-        return [RegisterResponseError.INVALID_EMAIL_VERIFICATION_CODE, null];
-    }
-
+    // Checked before the email code, which a check uses up
     if (!(await this.userService.checkUsernameAvailability(username)))
       return [RegisterResponseError.DUPLICATE_USERNAME, null];
     if (!(await this.userService.checkEmailAvailability(email))) return [RegisterResponseError.DUPLICATE_EMAIL, null];
+
+    if (this.configService.config.preference.security.requireEmailVerification) {
+      // Delay for security
+      await delay(DELAY_FOR_SECURITY);
+      if (
+        (await this.authEmailVerificationCodeService.consume(
+          EmailVerificationCodeType.Register,
+          email,
+          emailVerificationCode
+        )) !== "used"
+      )
+        return [RegisterResponseError.INVALID_EMAIL_VERIFICATION_CODE, null];
+    }
+
     const passwordHash = await this.hashPassword(password);
     try {
       let user: UserEntity = null;
@@ -94,10 +102,6 @@ export class AuthService {
         return null;
       });
       if (modeError) return [modeError, null];
-
-      if (this.configService.config.preference.security.requireEmailVerification) {
-        await this.authEmailVerificationCodeService.revoke(email, emailVerificationCode);
-      }
 
       return [null, user];
     } catch (e) {

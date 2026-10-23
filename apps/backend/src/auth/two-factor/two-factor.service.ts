@@ -1,4 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
+import { join } from "path";
+import fs from "fs";
 
 import { Injectable } from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
@@ -19,13 +21,14 @@ import {
 } from "./totp";
 import {
   base64url,
+  builtInWebAuthnVerifier,
   CeremonyExpectation,
   fromBase64url,
+  RegisteredCredential,
   relyingPartyForOrigin,
-  verifyAssertion,
-  verifyRegistration,
   WEBAUTHN_ALGORITHMS,
-  WebAuthnError
+  WebAuthnError,
+  WebAuthnVerifier
 } from "./webauthn";
 
 import { UserEntity } from "../../user/user.entity";
@@ -106,14 +109,22 @@ const USER_FAILURE_WINDOW_SECONDS = 15 * 60;
 const REDIS_KEY_TOTP_SETUP = "two-factor:totp-setup:%d";
 const REDIS_KEY_PASSKEY_REGISTRATION = "two-factor:passkey-registration:%d";
 const REDIS_KEY_CHALLENGE = "two-factor:challenge:%s";
+const REDIS_KEY_CREDENTIAL_EPOCH = "two-factor:credential-epoch:%d";
 const REDIS_KEY_FAILURES = "two-factor:failures:%d";
 const REDIS_KEY_TOTP_USED_STEP = "two-factor:totp-used:%d:%s:%d";
 
+// Refer to ../scripts/two-factor-challenge.lua
+interface RedisWithTwoFactorChallenge extends Redis {
+  twoFactorChallenge(...args: (string | number)[]): Promise<[status: "OK" | "EXPIRED" | "TOO_MANY", ceremony?: string]>;
+}
+
 @Injectable()
 export class TwoFactorService {
-  private readonly redis: Redis;
+  private readonly redis: RedisWithTwoFactorChallenge;
 
   private keyPromise: Promise<Buffer>;
+
+  private readonly webAuthn: WebAuthnVerifier = builtInWebAuthnVerifier;
 
   constructor(
     @InjectDataSource()
@@ -126,7 +137,11 @@ export class TwoFactorService {
     private readonly lockService: LockService,
     private readonly configService: ConfigService
   ) {
-    this.redis = this.redisService.getClient();
+    this.redis = this.redisService.getClient() as RedisWithTwoFactorChallenge;
+    this.redis.defineCommand("twoFactorChallenge", {
+      numberOfKeys: 2,
+      lua: fs.readFileSync(join(__dirname, "..", "scripts", "two-factor-challenge.lua"), "utf-8")
+    });
   }
 
   /** Authenticator secrets are encrypted with a key in the backend's private state directory. */
@@ -281,6 +296,16 @@ export class TwoFactorService {
         await manager.delete(UserTwoFactorEntity, { userId });
       });
     });
+    await this.endPendingChallenges(userId);
+  }
+
+  /**
+   * Ends the user's unfinished second-factor checks, which a password proved before it changed (a reset, a change
+   * by the user or a user manager) or before an administrator reset the second factors. Checks started afterwards
+   * work as usual.
+   */
+  async endPendingChallenges(userId: number): Promise<void> {
+    await this.redis.incr(REDIS_KEY_CREDENTIAL_EPOCH.format(userId));
   }
 
   private static webAuthnUserId(userId: number): string {
@@ -339,9 +364,9 @@ export class TwoFactorService {
     if (!pending) return { error: TwoFactorError.SETUP_EXPIRED };
     const ceremony: CeremonyExpectation = JSON.parse(pending);
     if (relyingPartyForOrigin(origin)?.origin !== ceremony.origin) return { error: TwoFactorError.INVALID_PASSKEY };
-    let registered: ReturnType<typeof verifyRegistration>;
+    let registered: RegisteredCredential;
     try {
-      registered = verifyRegistration(
+      registered = await this.webAuthn.verifyRegistration(
         {
           clientDataJSON: fromBase64url(credential.clientDataJSON),
           attestationObject: fromBase64url(credential.attestationObject)
@@ -411,9 +436,10 @@ export class TwoFactorService {
     const token = base64url(randomBytes(32));
     const ceremony: CeremonyExpectation = relyingParty && { challenge: base64url(randomBytes(32)), ...relyingParty };
     const key = REDIS_KEY_CHALLENGE.format(token);
+    const epoch = (await this.redis.get(REDIS_KEY_CREDENTIAL_EPOCH.format(userId))) ?? "0";
     await this.redis
       .multi()
-      .hset(key, { userId: String(userId), attempts: "0", ceremony: JSON.stringify(ceremony) })
+      .hset(key, { userId: String(userId), epoch, attempts: "0", ceremony: JSON.stringify(ceremony) })
       .expire(key, CEREMONY_TIMEOUT_SECONDS)
       .exec();
     return {
@@ -435,25 +461,32 @@ export class TwoFactorService {
 
   /**
    * Checks the second factor for a challenge. Returns the user it belongs to; a challenge is consumed by its
-   * first success and by too many failures.
+   * first success and by too many failures, and ends when the user's password changes.
    */
   async verifyChallenge(token: string, origin: unknown, proof: TwoFactorProof): Promise<Result<{ userId: number }>> {
     if (typeof token !== "string" || token.length > 100) return { error: TwoFactorError.CHALLENGE_EXPIRED };
     const key = REDIS_KEY_CHALLENGE.format(token);
-    const challenge = await this.redis.hgetall(key);
-    if (!challenge?.userId) return { error: TwoFactorError.CHALLENGE_EXPIRED };
-    const userId = Number(challenge.userId);
-    if ((await this.redis.hincrby(key, "attempts", 1)) > MAX_CHALLENGE_ATTEMPTS) {
-      await this.redis.del(key);
-      return { error: TwoFactorError.TOO_MANY_ATTEMPTS };
-    }
-    const ceremony: CeremonyExpectation = JSON.parse(challenge.ceremony || "null");
+    const userId = Number(await this.redis.hget(key, "userId"));
+    if (!userId) return { error: TwoFactorError.CHALLENGE_EXPIRED };
+    const challengeStep = (step: "attempt" | "finish") =>
+      this.redis.twoFactorChallenge(
+        key,
+        REDIS_KEY_CREDENTIAL_EPOCH.format(userId),
+        step,
+        userId,
+        MAX_CHALLENGE_ATTEMPTS
+      );
+    const [status, ceremonyJson] = await challengeStep("attempt");
+    if (status === "TOO_MANY") return { error: TwoFactorError.TOO_MANY_ATTEMPTS };
+    if (status !== "OK") return { error: TwoFactorError.CHALLENGE_EXPIRED };
+    const ceremony: CeremonyExpectation = JSON.parse(ceremonyJson || "null");
     // The browser reports the origin; a challenge is only valid where it was issued.
     if (proof.passkey && (!ceremony || relyingPartyForOrigin(origin)?.origin !== ceremony.origin))
       return { error: TwoFactorError.INVALID_PASSKEY };
     const result = await this.verifyProof(userId, proof, ceremony);
     if (result.error) return result;
-    if ((await this.redis.del(key)) !== 1) return { error: TwoFactorError.CHALLENGE_EXPIRED };
+    const [finished] = await challengeStep("finish");
+    if (finished !== "OK") return { error: TwoFactorError.CHALLENGE_EXPIRED };
     return { userId };
   }
 
@@ -525,7 +558,7 @@ export class TwoFactorService {
       return await this.lockUser(userId, async () => {
         const passkey = await this.passkeyRepository.findOneBy({ userId, credentialIdHash });
         if (!passkey || passkey.rpId !== ceremony.rpId) return false;
-        const { signCount } = verifyAssertion(
+        const { signCount } = await this.webAuthn.verifyAssertion(
           {
             clientDataJSON: fromBase64url(assertion.clientDataJSON),
             authenticatorData: fromBase64url(assertion.authenticatorData),

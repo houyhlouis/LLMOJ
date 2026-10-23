@@ -127,7 +127,7 @@ LLMOJ doesn't check that mail can actually be sent. Send yourself a test message
 | Setting | Example | Meaning |
 | --- | --- | --- |
 | `preference.security.registrationMode` | `open` | **Optional.** `open`, `approval` or `closed` (`open` if left out). A mode saved in **Site management** takes precedence. See [Registration approval](Registration-Approval.md). |
-| `preference.security.requireEmailVerification` | `true` | Ask for a code sent by email when registering. Make sure mail works first. Turning it off doesn't affect password resets or email changes, which still use mail. |
+| `preference.security.requireEmailVerification` | `true` | Send a code by email to register, to change an email address and to reset a password. Make sure mail works first. With `false` no codes are sent: registering and changing an address need none, and forgotten passwords can't be reset by email (a user manager can set a new one). |
 | `preference.security.allowUserChangeUsername` | `true` | Users may change their own user name (they also need permission to edit their own profile) |
 | `preference.security.allowEveryoneCreateProblem` | `true` | Signed-in users may create problems unless a permission rule says otherwise |
 | `preference.security.allowNonPrivilegedUserEditPublicProblem` | `true` | A problem's owner, or users with write access to it, may still edit it once it's public |
@@ -138,6 +138,8 @@ LLMOJ doesn't check that mail can actually be sent. Send yourself a test message
 | `preference.security.allowEveryoneCreateDiscussion` | `true` | Signed-in users may start discussions unless a permission rule says otherwise |
 
 The "allow" settings are defaults: explicit permission rules on the **Permissions** page still take precedence. Don't set `captchaEnabled` or `turnstileSiteKey` here: the backend fills them in from `security.captcha`.
+
+**Email verification codes.** A code is for one purpose (registering, changing an address or resetting a password), for the address it was sent to, in any letter case, and, to change an address or reset a password, for the account that asked for it. It works once: of two requests with the same code, even at the same moment, only one succeeds. If the change it allowed then fails, which is rare, request a new code. A code expires after 15 minutes, and a newer code for the same purpose and address replaces it; an address gets at most one code a minute. A code stops working after 5 wrong answers, and each purpose accepts at most 20 wrong answers an hour for an address, whatever codes they were for. The page doesn't say which of these happened; it asks for a new code. Wrong codes for password resets and address changes are recorded in the user's audit log, without the code. Codes sent before an upgrade to this version stop working.
 
 ### `preference.pagination`
 

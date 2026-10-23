@@ -626,6 +626,8 @@ export class UserController {
       const userMigrationInfo = await this.userMigrationService.findUserMigrationInfoByUserId(user.id);
       await this.userMigrationService.changeOldPassword(userMigrationInfo, request.password);
     }
+    // Second-factor checks started with the old password can no longer finish.
+    await this.twoFactorService.endPendingChallenges(user.id);
 
     if (request.userId === user.id) {
       await this.auditService.log("auth.change_password");
@@ -661,7 +663,9 @@ export class UserController {
 
     const error = await this.userService.updateUserSelfEmail(currentUser, request.email, request.emailVerificationCode);
 
-    if (oldEmail !== request.email) {
+    if (error === UpdateUserSelfEmailResponseError.INVALID_EMAIL_VERIFICATION_CODE)
+      await this.auditService.log("auth.change_email_failed.wrong_code", { newEmail: request.email });
+    else if (!error && oldEmail !== request.email) {
       await this.auditService.log("auth.change_email", {
         oldEmail,
         newEmail: request.email

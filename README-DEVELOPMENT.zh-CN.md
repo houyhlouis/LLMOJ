@@ -64,7 +64,8 @@ pnpm test
 - **redis-server**，用于评测队列和 Redis 测试；
 - **root**，用于部署测试中创建账户、挂载文件系统或运行服务的用例。运行器在可以时使用免密码的 `sudo`（与 CI 相同），并用 `-B` 运行 Python，以免在源码树中出现属于 root 的缓存文件；
 - **MinIO**（`LLMOJ_MINIO_BINARY`，或某个安装的 `runtime/minio`），用于备份检查器的内容检查；
-- **`TMPDIR` 中 2 GiB 空间**，用于 AI 测试的 ZIP 归档。临时目录较小时，运行器改用 `/var/tmp`。
+- **`TMPDIR` 中 2 GiB 空间**，用于 AI 测试的 ZIP 归档。临时目录较小时，运行器改用 `/var/tmp`；
+- **Chrome 或 Chromium**（`LLMOJ_TEST_CHROME`，或 `PATH` 中的 `google-chrome` 或 `chromium`），用于检查站点会移除旧 bootstrap service worker 的测试。测试以无界面方式、不带沙箱运行浏览器，只打开本地测试页面。
 
 这些测试使用临时目录和模拟的服务：它们不能代替在真实 Ubuntu 服务器上试装或试升级。
 
@@ -134,6 +135,10 @@ sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh
 ### AI
 
 默认的 AI 测试使用模拟的模型、数据库和沙箱，不需要凭据或沙箱镜像。夹具检查会用本机的 C++ 编译器编译几个小程序。真实的编译、资源限制和协议执行需要可丢弃的后端和评测机。见 [AI 测试说明](apps/backend/src/ai/README.md)和[测试数据验证](wiki/AI.zh-CN.md#测试数据验证与覆盖)。
+
+### 通行密钥
+
+[webauthn-conformance.test.cjs](apps/backend/src/auth/two-factor/webauthn-conformance.test.cjs) 用 W3C 测试向量、必须被拒绝的改动副本，以及一个软件验证器的流程（[webauthn-fixtures.cjs](apps/backend/src/auth/two-factor/webauthn-fixtures.cjs)）检查站点的 WebAuthn 验证器。如需评估其他实现（例如有人维护的库），为 [webauthn.ts](apps/backend/src/auth/two-factor/webauthn.ts) 中的 `WebAuthnVerifier` 接口编写适配器，并用同样的用例运行。只有在结果一致，或每处差异都已弄清时才替换验证器：库通常还会检查证明（attestation），而本站点不要求证明；库也可能接受嵌入其他站点框架中的流程，而本站点会拒绝。
 
 ### 在浏览器中检查
 

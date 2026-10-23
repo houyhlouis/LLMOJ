@@ -7,7 +7,8 @@
  * Suites that need something this machine lacks skip those cases themselves; the summary says what was missing:
  * - MariaDB: the *_TEST_DB_CONFIG variables naming disposable databases (see README-DEVELOPMENT.md);
  * - redis-server, for the judge queue and Redis suites;
- * - root (or passwordless sudo), for the deploy suites' cases that create accounts, mount or run services.
+ * - root (or passwordless sudo), for the deploy suites' cases that create accounts, mount or run services;
+ * - Chrome or Chromium, for the service worker test: LLMOJ_TEST_CHROME, or google-chrome or chromium on PATH.
  * Building the backend first (`pnpm build`) is needed by the schema and API contract suites.
  */
 import fs from 'node:fs';
@@ -90,6 +91,8 @@ const GROUPS = {
       'deploy/test/team-storage.test.mjs', 'deploy/test/upgrade-registration.test.mjs'),
     node('--test', 'deploy/test/community-schema.mariadb.test.mjs', 'deploy/test/initialize-schema.test.mjs'),
     node('--test', 'deploy/test/backup-keys.test.mjs', 'deploy/test/dependency-audit.test.mjs'),
+    // In Chrome or Chromium (LLMOJ_TEST_CHROME, or on PATH); skipped without one
+    node('--test', 'deploy/test/service-worker-retirement.test.mjs'),
     // The first administrator's creation, against a temporary database server
     ...(ci ? [] : [node('--test', 'deploy/test/bootstrap-admin.test.mjs')]),
     ...pythonSuites(ci)
@@ -113,6 +116,9 @@ const missing = [];
 const databases = ['LLMOJ_JUDGE_QUEUE_TEST_DB_CONFIG', 'HYHOJ_SUBMISSION_TEST_DB_CONFIG', 'LLMOJ_SCHEMA_TEST_DB_CONFIG'];
 if (databases.some(name => !process.env[name])) missing.push('the *_TEST_DB_CONFIG MariaDB databases (their suites skip)');
 if (spawnSync('redis-server', ['--version'], { stdio: 'ignore' }).status !== 0) missing.push('redis-server');
+const chrome = process.env.LLMOJ_TEST_CHROME || ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser']
+  .some(name => spawnSync('which', [name], { stdio: 'ignore' }).status === 0);
+if (groups.includes('deploy') && !chrome) missing.push('Chrome or Chromium (the service worker test skips)');
 
 const results = [];
 for (const group of groups)

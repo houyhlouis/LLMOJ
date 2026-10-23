@@ -94,77 +94,83 @@ const assertion = (authenticator, options, overrides = {}) => {
   };
 };
 
+// A disposable schema, Redis and key directory for one test; newService() is another backend process.
+async function setUp(t) {
+  const database = JSON.parse(fs.readFileSync(configPath, "utf8")).services.database;
+  assert.match(database.database, /^llmoj_test_two_factor$/, "Use only the dedicated disposable test database");
+  const redis = await startRedis(t);
+  const stateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "llmoj-two-factor-state-"));
+  t.after(() => fs.rmSync(stateDirectory, { recursive: true, force: true }));
+  const previousStateDirectory = process.env.HYHOJ_AI_STATE_DIR;
+  process.env.HYHOJ_AI_STATE_DIR = stateDirectory;
+  t.after(() => {
+    if (previousStateDirectory === undefined) delete process.env.HYHOJ_AI_STATE_DIR;
+    else process.env.HYHOJ_AI_STATE_DIR = previousStateDirectory;
+  });
+
+  const ds = new DataSource({
+    ...database,
+    entityPrefix: `tf_${crypto.randomBytes(4).toString("hex")}_`,
+    entities: [UserEntity, UserAuthEntity, UserTwoFactorEntity, UserPasskeyEntity],
+    synchronize: true,
+    logging: false
+  });
+  await ds.initialize();
+  t.after(async () => {
+    const runner = ds.createQueryRunner();
+    try {
+      await runner.query("SET FOREIGN_KEY_CHECKS=0");
+      for (const entity of [UserPasskeyEntity, UserTwoFactorEntity, UserAuthEntity, UserEntity])
+        await runner.query(`DROP TABLE IF EXISTS \`${ds.getMetadata(entity).tableName}\``);
+    } finally {
+      await runner.query("SET FOREIGN_KEY_CHECKS=1");
+      await runner.release();
+      await ds.destroy();
+    }
+  });
+
+  const configService = { config: { preference: { siteName: "Test OJ" } } };
+  const newService = (client = redis) => {
+    const redisService = { getClient: () => client };
+    return new TwoFactorService(
+      ds,
+      ds.getRepository(UserTwoFactorEntity),
+      ds.getRepository(UserPasskeyEntity),
+      redisService,
+      new LockService(redisService),
+      configService
+    );
+  };
+  const createUser = async username =>
+    await ds.getRepository(UserEntity).save({
+      username,
+      email: `${username}@example.invalid`,
+      nickname: "",
+      bio: "",
+      avatarInfo: "gravatar:",
+      isAdmin: false,
+      acceptedProblemCount: 0,
+      submissionCount: 0,
+      rating: 0,
+      publicEmail: false,
+      registrationTime: new Date()
+    });
+  return { redis, ds, stateDirectory, newService, createUser };
+}
+
+const codeAt = (secret, offset = 0) => totp.hotp(secret, totp.totpTimeStep(Date.now()) + offset);
+const skip = (!configPath || !redisAvailable) && "needs LLMOJ_TWO_FACTOR_TEST_DB_CONFIG and redis-server";
+
 test(
   "authenticator codes, recovery codes and passkeys as a second sign-in factor",
-  {
-    skip: (!configPath || !redisAvailable) && "needs LLMOJ_TWO_FACTOR_TEST_DB_CONFIG and redis-server",
-    timeout: 120000
-  },
+  { skip, timeout: 120000 },
   async t => {
-    const database = JSON.parse(fs.readFileSync(configPath, "utf8")).services.database;
-    assert.match(database.database, /^llmoj_test_two_factor$/, "Use only the dedicated disposable test database");
-    const redis = await startRedis(t);
-    const stateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "llmoj-two-factor-state-"));
-    t.after(() => fs.rmSync(stateDirectory, { recursive: true, force: true }));
-    const previousStateDirectory = process.env.HYHOJ_AI_STATE_DIR;
-    process.env.HYHOJ_AI_STATE_DIR = stateDirectory;
-    t.after(() => {
-      if (previousStateDirectory === undefined) delete process.env.HYHOJ_AI_STATE_DIR;
-      else process.env.HYHOJ_AI_STATE_DIR = previousStateDirectory;
-    });
-
-    const ds = new DataSource({
-      ...database,
-      entityPrefix: `tf_${crypto.randomBytes(4).toString("hex")}_`,
-      entities: [UserEntity, UserAuthEntity, UserTwoFactorEntity, UserPasskeyEntity],
-      synchronize: true,
-      logging: false
-    });
-    await ds.initialize();
-    t.after(async () => {
-      const runner = ds.createQueryRunner();
-      try {
-        await runner.query("SET FOREIGN_KEY_CHECKS=0");
-        for (const entity of [UserPasskeyEntity, UserTwoFactorEntity, UserAuthEntity, UserEntity])
-          await runner.query(`DROP TABLE IF EXISTS \`${ds.getMetadata(entity).tableName}\``);
-      } finally {
-        await runner.query("SET FOREIGN_KEY_CHECKS=1");
-        await runner.release();
-        await ds.destroy();
-      }
-    });
-
-    const redisService = { getClient: () => redis };
-    const configService = { config: { preference: { siteName: "Test OJ" } } };
-    const newService = () =>
-      new TwoFactorService(
-        ds,
-        ds.getRepository(UserTwoFactorEntity),
-        ds.getRepository(UserPasskeyEntity),
-        redisService,
-        new LockService(redisService),
-        configService
-      );
+    const { redis, ds, stateDirectory, newService, createUser } = await setUp(t);
     const service = newService();
     const settings = ds.getRepository(UserTwoFactorEntity);
     const passkeys = ds.getRepository(UserPasskeyEntity);
-    const createUser = async username =>
-      await ds.getRepository(UserEntity).save({
-        username,
-        email: `${username}@example.invalid`,
-        nickname: "",
-        bio: "",
-        avatarInfo: "gravatar:",
-        isAdmin: false,
-        acceptedProblemCount: 0,
-        submissionCount: 0,
-        rating: 0,
-        publicEmail: false,
-        registrationTime: new Date()
-      });
     const user = await createUser("alice");
     const other = await createUser("bob");
-    const codeAt = (secret, offset = 0) => totp.hotp(secret, totp.totpTimeStep(Date.now()) + offset);
     const clearFailures = async () => await redis.del(`two-factor:failures:${user.id}`);
 
     assert.deepEqual(await service.getStatus(user.id), {
@@ -417,5 +423,104 @@ test(
       /Two-factor encryption key is missing/
     );
     assert.equal(fs.existsSync(path.join(process.env.HYHOJ_AI_STATE_DIR, "two-factor.key")), false);
+  }
+);
+
+test(
+  "credential resets end pending second-factor checks, and attempts from several processes are all counted",
+  { skip, timeout: 120000 },
+  async t => {
+    const { redis, newService, createUser } = await setUp(t);
+    const service = newService();
+    const user = await createUser("carol");
+    const setup = await service.beginTotpSetup(user);
+    const secret = totp.base32Decode(setup.secret);
+    const { recoveryCodes } = await service.confirmTotpSetup(user, codeAt(secret));
+    const laptop = softwareAuthenticator("ES256");
+    const begun = await service.beginPasskeyRegistration(user, origin);
+    await service.finishPasskeyRegistration(user, origin, "Laptop", registration(laptop, begun.options));
+    const clearFailures = async () => await redis.del(`two-factor:failures:${user.id}`);
+
+    // A password reset (or change) after the password was proven: that check can no longer finish, with any factor.
+    let challenge = await service.createChallenge(user.id, origin);
+    const before = await service.createChallenge(user.id, origin);
+    await service.endPendingChallenges(user.id);
+    assert.deepEqual(await service.verifyChallenge(challenge.token, origin, { totpCode: codeAt(secret, 1) }), {
+      error: "CHALLENGE_EXPIRED"
+    });
+    assert.deepEqual(
+      await service.verifyChallenge(before.token, origin, { passkey: assertion(laptop, before.passkey) }),
+      { error: "CHALLENGE_EXPIRED" }
+    );
+    assert.equal(await redis.exists(`two-factor:challenge:${before.token}`), 0, "an ended check is removed");
+    challenge = await service.createChallenge(user.id, origin);
+    assert.deepEqual(await service.verifyChallenge(challenge.token, origin, { recoveryCode: recoveryCodes[0] }), {
+      userId: user.id
+    });
+
+    // A reset while the answer is being checked: the answer was right, but the check no longer finishes.
+    challenge = await service.createChallenge(user.id, origin);
+    const raced = newService();
+    const verifier = raced.webAuthn;
+    raced.webAuthn = {
+      verifyRegistration: verifier.verifyRegistration,
+      async verifyAssertion(...args) {
+        const result = await verifier.verifyAssertion(...args);
+        await service.endPendingChallenges(user.id);
+        return result;
+      }
+    };
+    assert.deepEqual(
+      await raced.verifyChallenge(challenge.token, origin, { passkey: assertion(laptop, challenge.passkey) }),
+      { error: "CHALLENGE_EXPIRED" }
+    );
+
+    // A passkey removed after the check began is refused; the others still work.
+    challenge = await service.createChallenge(user.id, origin);
+    const [saved] = (await service.getStatus(user.id)).passkeys;
+    assert.deepEqual(await service.removePasskey(user.id, saved.id), {});
+    assert.deepEqual(
+      await service.verifyChallenge(challenge.token, origin, { passkey: assertion(laptop, challenge.passkey) }),
+      { error: "INVALID_PASSKEY" }
+    );
+    assert.deepEqual(await service.verifyChallenge(challenge.token, origin, { totpCode: codeAt(secret, 1) }), {
+      userId: user.id
+    });
+
+    // An administrator reset ends pending checks too.
+    challenge = await service.createChallenge(user.id, origin);
+    await service.reset(user.id);
+    assert.deepEqual(await service.verifyChallenge(challenge.token, origin, { recoveryCode: recoveryCodes[1] }), {
+      error: "CHALLENGE_EXPIRED"
+    });
+
+    // Simultaneous wrong answers from two processes: exactly five are checked, and every challenge left behind
+    // still expires.
+    const again = await service.beginTotpSetup(user);
+    const againSecret = totp.base32Decode(again.secret);
+    await service.confirmTotpSetup(user, codeAt(againSecret));
+    const other = new Redis({ port: redis.options.port, host: "127.0.0.1" });
+    t.after(() => other.disconnect());
+    const processes = [service, newService(other)];
+    const nearby = [-2, -1, 0, 1, 2].map(offset => codeAt(againSecret, offset));
+    const wrong = ["000000", "111111", "222222", "333333", "444444", "555555"].find(code => !nearby.includes(code));
+    for (let round = 0; round < 10; round++) {
+      await clearFailures();
+      challenge = await service.createChallenge(user.id, origin);
+      const results = await Promise.all(
+        Array.from({ length: 12 }, (_, i) =>
+          processes[i % 2].verifyChallenge(challenge.token, origin, { totpCode: wrong })
+        )
+      );
+      assert.equal(results.filter(result => result.error === "INVALID_CODE").length, 5, `round ${round}`);
+      assert.equal(
+        results.filter(result => ["TOO_MANY_ATTEMPTS", "CHALLENGE_EXPIRED"].includes(result.error)).length,
+        7,
+        `round ${round}`
+      );
+      for (const key of await redis.keys("two-factor:challenge:*"))
+        assert.notEqual(await redis.ttl(key), -1, `${key} has no expiry`);
+    }
+    await clearFailures();
   }
 );

@@ -30,7 +30,10 @@ import {
 import { escapeLike } from "../database/database.utils";
 import { SubmissionEntity } from "../submission/submission.entity";
 import { ConfigService } from "../config/config.service";
-import { AuthEmailVerificationCodeService } from "../auth/auth-email-verification-code.service";
+import {
+  AuthEmailVerificationCodeService,
+  EmailVerificationCodeType
+} from "../auth/auth-email-verification-code.service";
 import { RegistrationApplicationEntity } from "../auth/registration-application.entity";
 import { AuditLogObjectType, AuditService } from "../audit/audit.service";
 import { delay, DELAY_FOR_SECURITY } from "../common/delay";
@@ -230,7 +233,15 @@ export class UserService {
     if (this.configService.config.preference.security.requireEmailVerification) {
       // Delay for security
       await delay(DELAY_FOR_SECURITY);
-      if (!(await this.authEmailVerificationCodeService.verify(email, emailVerificationCode)))
+      // Used up here, for this account only. If saving the address fails, the user requests a new code.
+      if (
+        (await this.authEmailVerificationCodeService.consume(
+          EmailVerificationCodeType.ChangeEmail,
+          email,
+          emailVerificationCode,
+          user.id
+        )) !== "used"
+      )
         return UpdateUserSelfEmailResponseError.INVALID_EMAIL_VERIFICATION_CODE;
     }
 
@@ -240,10 +251,6 @@ export class UserService {
     } catch (e) {
       if (!(await this.checkEmailAvailability(email))) return UpdateUserSelfEmailResponseError.DUPLICATE_EMAIL;
       throw e;
-    }
-
-    if (this.configService.config.preference.security.requireEmailVerification) {
-      await this.authEmailVerificationCodeService.revoke(email, emailVerificationCode);
     }
 
     return null;

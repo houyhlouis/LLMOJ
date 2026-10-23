@@ -64,7 +64,8 @@ Suites that need something this machine lacks skip those cases, and the summary 
 - **redis-server**, for the judge queue and Redis suites;
 - **root**, for the deployment suites' cases that create accounts, mount file systems or run services. The runner uses passwordless `sudo` when it can, as CI does, and runs Python with `-B` so that no root-owned cache files appear in the tree;
 - **MinIO** (`LLMOJ_MINIO_BINARY`, or an installation's `runtime/minio`), for the backup verifier's content check;
-- **2 GiB in `TMPDIR`**, for the AI suites' ZIP archives. The runner uses `/var/tmp` when the temporary directory is smaller.
+- **2 GiB in `TMPDIR`**, for the AI suites' ZIP archives. The runner uses `/var/tmp` when the temporary directory is smaller;
+- **Chrome or Chromium** (`LLMOJ_TEST_CHROME`, or `google-chrome` or `chromium` on `PATH`), for the test that the site removes the old bootstrap service worker. It runs the browser headless and without its sandbox, on local test pages only.
 
 These use temporary directories and simulated services: they don't replace trying an installation or upgrade on a real Ubuntu server.
 
@@ -134,6 +135,10 @@ CI runs the native tests and the demo whenever native code changes.
 ### AI
 
 Default AI tests use simulated models, databases and sandboxes, and need no credentials or sandbox image. The fixture checks compile small programs with the local C++ compiler. Real compilation, resource limits and protocol execution need a disposable backend and judge. See the [AI test guide](apps/backend/src/ai/README.md) and [test data validation](wiki/AI.md#test-data-validation-and-coverage).
+
+### Passkeys
+
+[webauthn-conformance.test.cjs](apps/backend/src/auth/two-factor/webauthn-conformance.test.cjs) runs the site's WebAuthn verifier on the W3C test vectors, on changed copies of them that must be refused, and on a software authenticator's ceremonies ([webauthn-fixtures.cjs](apps/backend/src/auth/two-factor/webauthn-fixtures.cjs)). To weigh another implementation, such as a maintained library, write an adapter for the `WebAuthnVerifier` interface in [webauthn.ts](apps/backend/src/auth/two-factor/webauthn.ts) and run it on the same cases. Replace the verifier only when the answers agree, or each difference is understood: libraries also check attestation, which this site doesn't request, and may accept ceremonies in another site's frame, which this site refuses.
 
 ### In a browser
 

@@ -23,7 +23,7 @@ And these options:
 
 Pages built this way load their scripts from `/frontend` and call the API on the same site. The libraries they load when needed (the code editor, maths, highlighting and emoji images) are part of the build, under `/frontend/vendor`, so nothing comes from a CDN. These values are fixed in the script.
 
-Publishing rewrites the output files and `index.html`, and adds a `sw.js` that removes any old service worker and clears its caches. Don't edit the published files by hand; your changes would be lost on the next build.
+Publishing rewrites the output files and `index.html`, and adds a `sw.js` that removes the service worker the old CDN bootstrap installed, with its cache. That worker was made for a separate page-only site: on this one it answered API requests with its cached home page and could store an API response, or someone's file, as the home page. Browsers that still have it remove it the next time they open the site. Don't edit the published files by hand; your changes would be lost on the next build.
 
 To rebuild by hand, for example after changing the site name, run this in the installation directory with the installer's Node.js and pnpm. Back up `public` first, and afterwards check the home page, sign-in and uploads in a browser:
 
@@ -53,7 +53,7 @@ Clicking an entry in the submission or hack list opens a preview window, 1100 ×
 
 ## The bootstrap CDN build (not used by the installer)
 
-`packages/bootstrap-config/settings.json` belongs to a separate way of publishing the frontend through a CDN, inherited from upstream LibreOJ. The installer doesn't use it, and it hasn't been tested as part of LLMOJ. Its example addresses point to the upstream project's servers: replace all of them before using it, or your site will load from someone else's.
+`packages/bootstrap-config/settings.json` belongs to a separate way of publishing the frontend through a CDN, inherited from upstream LibreOJ. The installer doesn't use it, and it hasn't been tested as part of LLMOJ. Its example addresses point to the upstream project's servers: replace all of them before using it, or your site will load from someone else's. Its pages no longer install a service worker: they remove the one earlier versions installed, and its `/sw.js` is the same one the installer publishes.
 
 The file has two sections:
 

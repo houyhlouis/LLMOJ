@@ -46,7 +46,7 @@ for (const status of ["pending", "rejected"]) {
         }
       },
       registrationReviews: { status: async () => status },
-      authEmailVerificationCodeService: { verify: async () => true },
+      authEmailVerificationCodeService: { consume: async () => "used" },
       authSessionService: {
         newSession: async () => {
           sessions++;
@@ -88,7 +88,7 @@ test("closed registration is rejected before email codes or database writes", as
     { transaction: () => assert.fail("database written") },
     null,
     null,
-    { verify: () => assert.fail("email code checked") },
+    { consume: () => assert.fail("email code checked") },
     { config: { preference: { security: { registrationMode: "closed", requireEmailVerification: true } } } },
     { getRegistrationMode: async () => "closed" }
   );

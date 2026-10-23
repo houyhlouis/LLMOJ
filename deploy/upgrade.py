@@ -61,6 +61,9 @@ DEPENDENCY_FILES = ('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.n
 # Configuration of the type checker, linter and formatter, which a toolchain update may change in any package. The
 # staged build checks what it configures.
 TOOLING_CONFIGURATION = re.compile(r'(?:^|/)(?:tsconfig(?:\.[\w-]+)?\.json|eslint\.config\.m?js|\.prettierrc(?:\.json)?)$')
+# Shared code that no running service imports: only the frontend build reads it (build-frontend-offline.mjs publishes
+# packages/service-worker/retire-service-worker.js as /sw.js), and every upgrade rebuilds the frontend.
+FRONTEND_BUILD_INPUTS = ('packages/service-worker/',)
 # Projects whose dependencies an installation runs or ships: summarized in the plan.
 DEPLOYED_PROJECTS = ('apps/backend', 'apps/judge', 'packages/frontend', 'packages/judge-protocol', 'packages/simple-sandbox')
 GUARD = '[Service]\nEnvironment=LIBREOJ_SCHEMA_SYNC=0\n'
@@ -630,6 +633,7 @@ class Upgrade:
         changed -= set(self.dependency_changes)
         tooling = {name for name in changed if TOOLING_CONFIGURATION.search(name)}
         changed -= tooling
+        changed -= {name for name in changed if name.startswith(FRONTEND_BUILD_INPUTS)}
         approved_runtime = (community_runtime_transition(source, old_map, source_map, self.deployed_by_upgrade())
                             if changed else set())
         runtime_changes = changed - approved_runtime

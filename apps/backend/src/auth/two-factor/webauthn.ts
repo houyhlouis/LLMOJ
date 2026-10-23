@@ -3,6 +3,9 @@ import { createHash, createPublicKey, KeyObject, timingSafeEqual, verify } from 
 // The parts of WebAuthn Level 2 (https://www.w3.org/TR/webauthn-2/) a relying party needs to register
 // passkeys as a second sign-in factor and to verify their assertions. Attestation statements are not
 // verified: registration requests `attestation: "none"`, so authenticators are not identified.
+//
+// TwoFactorService uses it through WebAuthnVerifier (at the end). webauthn-conformance.test.cjs holds the
+// fixtures any implementation must pass, including the W3C test vectors (WebAuthn Level 3, section 16).
 
 export class WebAuthnError extends Error {}
 
@@ -262,6 +265,9 @@ function checkClientData(clientDataJSON: Buffer, type: string, expected: Ceremon
 function checkAuthenticatorData(authenticatorData: AuthenticatorData, rpId: string) {
   if (!sameBytes(authenticatorData.rpIdHash, sha256(rpId))) throw new WebAuthnError("Relying party mismatch");
   if (!authenticatorData.userPresent) throw new WebAuthnError("User presence was not confirmed");
+  // Only a credential that may be backed up can be (WebAuthn Level 3, sections 7.1 and 7.2)
+  if (authenticatorData.backedUp && !authenticatorData.backupEligible)
+    throw new WebAuthnError("Backed up, but not backup eligible");
 }
 
 export interface RegisteredCredential {
@@ -313,3 +319,25 @@ export function verifyAssertion(
     throw new WebAuthnError("Signature counter did not increase");
   return { signCount: parsed.signCount, userVerified: parsed.userVerified };
 }
+
+/**
+ * What the site needs from a WebAuthn implementation. A rejected response throws WebAuthnError; anything else
+ * thrown is a fault. Another implementation, such as a maintained library behind an adapter, can replace this
+ * module's once it gives the same answers on the fixtures of webauthn-conformance.test.cjs.
+ */
+export interface WebAuthnVerifier {
+  verifyRegistration(
+    response: { clientDataJSON: Buffer; attestationObject: Buffer },
+    expected: CeremonyExpectation
+  ): Promise<RegisteredCredential>;
+  verifyAssertion(
+    response: { clientDataJSON: Buffer; authenticatorData: Buffer; signature: Buffer },
+    expected: CeremonyExpectation,
+    credential: { publicKey: Buffer; signCount: number }
+  ): Promise<{ signCount: number; userVerified: boolean }>;
+}
+
+export const builtInWebAuthnVerifier: WebAuthnVerifier = {
+  verifyRegistration: async (response, expected) => verifyRegistration(response, expected),
+  verifyAssertion: async (response, expected, credential) => verifyAssertion(response, expected, credential)
+};

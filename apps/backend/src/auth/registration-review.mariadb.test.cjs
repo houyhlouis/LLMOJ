@@ -102,7 +102,7 @@ test(
         configService: settings,
         registrationSettings,
         userMigrationService: { findUserMigrationInfoByOldUsername: async () => null },
-        authEmailVerificationCodeService: { verify: async () => true },
+        authEmailVerificationCodeService: { consume: async () => "used" },
         // These accounts sign in with a password alone (two-factor sign-in has its own tests).
         twoFactorService: { isEnabled: async () => false }
       });

@@ -291,6 +291,8 @@ export class AuthController {
     @CurrentUser() currentUser: UserEntity,
     @Body() request: SendEmailVerificationCodeRequestDto
   ): Promise<SendEmailVerificationCodeResponseDto> {
+    // Codes to change an address or reset a password work only for the account they were sent for.
+    let codeUserId: number = null;
     if (request.type === EmailVerificationCodeType.Register) {
       if ((await this.registrationSettings.getRegistrationMode()) === "closed")
         return { error: SendEmailVerificationCodeResponseError.REGISTRATION_CLOSED };
@@ -308,6 +310,7 @@ export class AuthController {
         return {
           error: SendEmailVerificationCodeResponseError.PERMISSION_DENIED
         };
+      codeUserId = currentUser.id;
 
       if (!(await this.userService.checkEmailAvailability(request.email)))
         return {
@@ -330,6 +333,7 @@ export class AuthController {
           return { error: SendEmailVerificationCodeResponseError.REGISTRATION_REJECTED };
         return { error: SendEmailVerificationCodeResponseError.NO_SUCH_USER };
       }
+      codeUserId = user.id;
 
       // Audit logging
       await this.auditService.log(user.id, "auth.request_reset_password");
@@ -341,7 +345,7 @@ export class AuthController {
         errorMessage: "Email verification code disabled."
       };
 
-    const code = await this.authEmailVerificationCodeService.generate(request.email);
+    const code = await this.authEmailVerificationCodeService.generate(request.type, request.email, codeUserId);
     if (!code)
       return {
         error: SendEmailVerificationCodeResponseError.RATE_LIMITED
@@ -462,10 +466,21 @@ export class AuthController {
 
     // Delay for security
     await delay(DELAY_FOR_SECURITY);
-    if (!(await this.authEmailVerificationCodeService.verify(request.email, request.emailVerificationCode)))
+    // The code is used up here: another request with it, even at the same time, fails. If the password change below
+    // fails, the user requests a new code.
+    if (
+      (await this.authEmailVerificationCodeService.consume(
+        EmailVerificationCodeType.ResetPassword,
+        request.email,
+        request.emailVerificationCode,
+        user.id
+      )) !== "used"
+    ) {
+      await this.auditService.log(user.id, "auth.reset_password_failed.wrong_code");
       return {
         error: ResetPasswordResponseError.INVALID_EMAIL_VERIFICATION_CODE
       };
+    }
 
     const registrationStatus = await this.registrationReviews.status(user);
     if (registrationStatus === RegistrationReviewStatus.Pending)
@@ -480,7 +495,8 @@ export class AuthController {
       const userMigrationInfo = await this.userMigrationService.findUserMigrationInfoByUserId(user.id);
       await this.userMigrationService.changeOldPassword(userMigrationInfo, request.newPassword);
     }
-    await this.authEmailVerificationCodeService.revoke(request.email, request.emailVerificationCode);
+    // Second-factor checks started with the old password can no longer finish.
+    await this.twoFactorService.endPendingChallenges(user.id);
 
     // Revoke ALL previous sessions
     await this.authSessionService.revokeAllSessionsExcept(user.id, null);

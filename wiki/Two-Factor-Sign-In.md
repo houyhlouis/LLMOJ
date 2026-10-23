@@ -28,6 +28,8 @@ After the password, the login page asks for the second step. A passkey is offere
 
 Resetting a forgotten password by email changes the password but still asks for the second step before signing in.
 
+Changing or resetting a password, or a user manager turning two-factor sign-in off, ends any sign-in still waiting for its second step: someone who had the old password can't finish one, even with the second factor.
+
 ## Confirming sensitive changes
 
 Some changes need the password to have been entered in this browser session within the last 10 minutes. Otherwise a **Confirm it's you** dialog asks for it (and, with two-factor sign-in on, for the second step), then makes the change. This applies to every account, with or without two-factor sign-in:

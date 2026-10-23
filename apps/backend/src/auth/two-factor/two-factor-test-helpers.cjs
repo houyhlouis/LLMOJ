@@ -72,13 +72,15 @@ function softwareAuthenticator(kind, defaults = relyingParty) {
     length.writeUInt16BE(credentialId.length);
     return Buffer.concat([head, Buffer.alloc(16), length, credentialId, cbor(cose)]);
   };
-  const clientData = (type, challenge, origin = defaults.origin) =>
-    Buffer.from(JSON.stringify({ type, challenge, origin, crossOrigin: false }));
+  const clientData = (type, challenge, origin = defaults.origin, extra = {}) =>
+    Buffer.from(JSON.stringify({ type, challenge, origin, crossOrigin: false, ...extra }));
   return {
     credentialId,
-    create({ challenge, rpId = defaults.rpId, origin, flags = 0x41 }) {
+    // The COSE public key, as registration stores it
+    publicKey: cbor(cose),
+    create({ challenge, rpId = defaults.rpId, origin, flags = 0x41, clientDataExtra }) {
       return {
-        clientDataJSON: clientData("webauthn.create", challenge, origin),
+        clientDataJSON: clientData("webauthn.create", challenge, origin, clientDataExtra),
         attestationObject: cbor(
           new Map([
             ["fmt", "none"],
@@ -88,10 +90,10 @@ function softwareAuthenticator(kind, defaults = relyingParty) {
         )
       };
     },
-    get({ challenge, rpId = defaults.rpId, origin, flags = 0x05, advance = 1 }) {
+    get({ challenge, rpId = defaults.rpId, origin, flags = 0x05, advance = 1, clientDataExtra }) {
       counter += advance;
       const data = authenticatorData(rpId, flags, false);
-      const clientDataJSON = clientData("webauthn.get", challenge, origin);
+      const clientDataJSON = clientData("webauthn.get", challenge, origin, clientDataExtra);
       const signed = Buffer.concat([data, sha256(clientDataJSON)]);
       const signature =
         kind === "EdDSA"

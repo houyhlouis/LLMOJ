@@ -308,6 +308,16 @@ class UpgradeTests(unittest.TestCase):
                 self.up.compatibility(self.source)
         (self.source/'packages/shared/src/index.ts').write_text('changed shared code')
         with self.assertRaisesRegex(u.UpgradeError,'frozen runtime contract'): self.up.compatibility(self.source)
+    def test_frontend_build_inputs_may_change_but_other_bootstrap_packages_may_not(self):
+        self.up.preflight()
+        for relative in ('packages/service-worker/retire-service-worker.js','packages/service-worker/src/installer.ts'):
+            (self.source/relative).parent.mkdir(parents=True,exist_ok=True)
+            (self.source/relative).write_text('// retires the old worker')
+        self.up.compatibility(self.source)
+        self.assertEqual((self.up.runtime_changes,self.up.native_rebuild),([],[]))
+        (self.source/'packages/bootstrap-core/src').mkdir(parents=True)
+        (self.source/'packages/bootstrap-core/src/index.ts').write_text('changed bootstrap code')
+        with self.assertRaisesRegex(u.UpgradeError,'frozen runtime contract'): self.up.compatibility(self.source)
     def test_rollback_manifest_may_name_the_dependencies_but_no_other_persistent_entry(self):
         for name in ('node_modules','public'):
             u.validate_manifest({'guardBefore':False,'entries':[{'name':name,'hadOld':True,'oldMoved':True,'newMoved':True}]})

@@ -127,7 +127,7 @@ LLMOJ 不会检查邮件能否真正发出。开启邮箱验证之前，请先�
 | 设置 | 示例 | 含义 |
 | --- | --- | --- |
 | `preference.security.registrationMode` | `open` | **可选。** `open`、`approval` 或 `closed`（省略时为 `open`）。在 **网站管理** 中保存的模式优先。见[注册审核](Registration-Approval.zh-CN.md) |
-| `preference.security.requireEmailVerification` | `true` | 注册时要求填写邮件中的验证码。请先确认邮件能正常发送。关闭它不影响找回密码和修改邮箱，它们仍会使用邮件 |
+| `preference.security.requireEmailVerification` | `true` | 注册、修改邮箱和重置密码时通过邮件发送验证码。请先确认邮件能正常发送。设为 `false` 时不发送验证码：注册和修改邮箱不需要验证码，也无法通过邮件找回密码（可由用户管理员设置新密码） |
 | `preference.security.allowUserChangeUsername` | `true` | 用户可以修改自己的用户名（还需要编辑自己资料的权限） |
 | `preference.security.allowEveryoneCreateProblem` | `true` | 已登录用户可以创建题目，除非权限规则另有规定 |
 | `preference.security.allowNonPrivilegedUserEditPublicProblem` | `true` | 题目公开后，题目所有者或有写权限的用户仍可编辑 |
@@ -138,6 +138,8 @@ LLMOJ 不会检查邮件能否真正发出。开启邮箱验证之前，请先�
 | `preference.security.allowEveryoneCreateDiscussion` | `true` | 已登录用户可以发起讨论，除非权限规则另有规定 |
 
 以 “allow” 开头的设置只是默认值：**权限管理** 页面中明确的权限规则仍然优先。不要在这里设置 `captchaEnabled` 或 `turnstileSiteKey`：后端会根据 `security.captcha` 自动填写。
+
+**邮箱验证码。** 每个验证码只用于一种用途（注册、修改邮箱或重置密码），只对它发往的邮箱有效（不区分大小写）；修改邮箱和重置密码的验证码还只对申请它的账号有效。验证码只能使用一次：两个请求同时使用同一个验证码，也只有一个会成功。如果之后的修改失败（很少见），请重新获取验证码。验证码 15 分钟后过期，同一邮箱同一用途的新验证码会使旧的失效；同一邮箱每分钟最多发送一个验证码。一个验证码输错 5 次后失效；同一邮箱的每种用途每小时最多接受 20 次错误输入，不论针对哪个验证码。页面不会说明是哪种情况，只会提示重新获取验证码。重置密码和修改邮箱时输错验证码会记入该用户的审计日志，但不会记录验证码本身。升级到此版本之前发送的验证码将失效。
 
 ### `preference.pagination`
 

@@ -60,6 +60,7 @@ fs.rmSync(path.join(output, 'frontend/index.html'), { force: true });
 // Render a single same-origin bootstrap. Do not install the upstream bootstrap
 // CDN service worker: it was designed for a separate origin and corrupts cached
 // same-origin API/static responses by mapping non-JavaScript paths to '/'.
+// /sw.js removes it from browsers that still have it (see that file).
 const substitutions = {
   __public_path__: '/frontend',
   __default_title__: siteName,
@@ -76,7 +77,7 @@ for (const [placeholder, value] of Object.entries(substitutions)) {
 }
 if (Object.keys(substitutions).some(placeholder => html.includes(placeholder))) throw new Error('Unresolved bootstrap placeholder.');
 fs.writeFileSync(path.join(output, 'index.html'), html);
-fs.writeFileSync(path.join(output, 'sw.js'), `self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(Promise.all([self.registration.unregister(),caches.delete('bootstrap')])));\n`);
+fs.copyFileSync(path.join(root, 'packages/service-worker/retire-service-worker.js'), path.join(output, 'sw.js'));
 
 const manifest = files(output).filter(filename => !filename.endsWith('/offline-manifest.json')).map(filename => ({
   path: path.relative(output, filename),

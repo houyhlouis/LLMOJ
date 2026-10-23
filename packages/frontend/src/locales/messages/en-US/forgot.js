@@ -18,13 +18,14 @@ return {
       "Your registration application was rejected. No site account has been created. Contact an administrator if you have questions.",
     ALREADY_LOGGEDIN: "You have already logged in.",
     NO_SUCH_USER: "No such user.",
-    INVALID_EMAIL_VERIFICATION_CODE: "Invalid email verification code.",
+    INVALID_EMAIL_VERIFICATION_CODE:
+      "Wrong, expired or already used verification code. A code works once and stops working after 5 wrong tries: send a new one if needed.",
     FAILED_TO_SEND: "Failed to send mail: {errorMessage}",
     RATE_LIMITED: "Your operations are too frequent. Please try again later."
   },
   empty_email: "Please enter your email address",
   invalid_email: "Invalid email address",
-  invalid_email_verification_code: "Invalid email verification code.",
+  invalid_email_verification_code: "Wrong, expired or already used code",
   empty_password: "Please enter your password",
   invalid_password: "Password must be in the length of 6 to 32",
   passwords_do_not_match: "Passwords don't match",

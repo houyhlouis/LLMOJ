@@ -159,7 +159,8 @@ return {
       email_verification_code: "Email verification code",
       send_email_verification_code: "Send",
       verification_code_sent: "Email verification code sent.",
-      invalid_email_verification_code: "Invalid email verification code",
+      invalid_email_verification_code:
+        "Wrong, expired or already used code. A code stops working after 5 wrong tries: send a new one.",
       success: "Email changed successfully.",
       submit: "Submit"
     },

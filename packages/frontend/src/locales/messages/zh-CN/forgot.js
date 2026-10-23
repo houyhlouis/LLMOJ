@@ -16,13 +16,14 @@ return {
     REGISTRATION_REJECTED: "你的注册申请未获通过，尚未创建站点账户。如有疑问，请联系管理员。",
     ALREADY_LOGGEDIN: "你已经登陆过。",
     NO_SUCH_USER: "无此用户。",
-    INVALID_EMAIL_VERIFICATION_CODE: "邮箱验证码无效。",
+    INVALID_EMAIL_VERIFICATION_CODE:
+      "验证码错误、已过期或已使用。每个验证码只能使用一次，输错 5 次后失效，如有需要请重新发送。",
     FAILED_TO_SEND: "发送邮件失败：{errorMessage}",
     RATE_LIMITED: "您的操作过于频繁，请稍后再试。"
   },
   empty_email: "邮箱不能为空",
   invalid_email: "邮箱无效",
-  invalid_email_verification_code: "邮箱验证码无效",
+  invalid_email_verification_code: "验证码错误、已过期或已使用",
   empty_password: "密码不能为空",
   invalid_password: "密码长度需要在 6 到 32 之间",
   passwords_do_not_match: "密码不一致",

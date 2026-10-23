@@ -156,7 +156,7 @@ return {
       email_verification_code: "邮箱验证码",
       send_email_verification_code: "发送验证码",
       verification_code_sent: "邮箱验证码已发送。",
-      invalid_email_verification_code: "无效的邮箱验证码。",
+      invalid_email_verification_code: "验证码错误、已过期或已使用。输错 5 次后验证码失效，请重新发送。",
       success: "修改邮箱地址成功。",
       submit: "提交"
     },
