@@ -155,7 +155,7 @@ export class AiWorkflowService implements AiWorkflowRunner {
     const directory = await fs.mkdtemp(path.join(base, "ai-attachment-"));
     try {
       const zip = path.join(directory, "attachment.zip");
-      if ((await this.files.downloadFileToPath(attachment.uuid, zip, attachment.size)) !== attachment.size)
+      if ((await this.files.downloadUploadToPath(attachment.uuid, zip, attachment.size)) !== attachment.size)
         throw new AiError("ATTACHMENT_SIZE_MISMATCH");
       const extracted = await extractSafeZip(zip, path.join(directory, "files"), { archiveBytes: 67108864 });
       const authorize = async () => {
@@ -229,7 +229,7 @@ export class AiWorkflowService implements AiWorkflowRunner {
         sampleCount: extracted.pairs.length
       });
       // Keep the original upload for failed/crash retries until the entire import has committed.
-      this.files.deleteUnfinishedUploadedFile(attachment.uuid);
+      this.files.discardUploads([attachment.uuid]).catch(() => undefined);
     } catch (error) {
       if (error instanceof ArchiveError) throw new AiError(error.code);
       throw error;

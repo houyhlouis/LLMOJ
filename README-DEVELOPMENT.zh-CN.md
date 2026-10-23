@@ -63,7 +63,7 @@ pnpm test
 - **MariaDB：** 下面的[数据库测试](#数据库测试)需要设置各自的变量；
 - **redis-server**，用于评测队列和 Redis 测试；
 - **root**，用于部署测试中创建账户、挂载文件系统或运行服务的用例。运行器在可以时使用免密码的 `sudo`（与 CI 相同），并用 `-B` 运行 Python，以免在源码树中出现属于 root 的缓存文件；
-- **MinIO**（`LLMOJ_MINIO_BINARY`，或某个安装的 `runtime/minio`），用于备份检查器的内容检查；
+- **MinIO**（`LLMOJ_MINIO_BINARY`，或某个安装的 `runtime/minio`），用于上传封存测试和备份检查器的内容检查；
 - **`TMPDIR` 中 2 GiB 空间**，用于 AI 测试的 ZIP 归档。临时目录较小时，运行器改用 `/var/tmp`；
 - **Chrome 或 Chromium**（`LLMOJ_TEST_CHROME`，或 `PATH` 中的 `google-chrome` 或 `chromium`），用于检查站点会移除旧 bootstrap service worker 的测试。测试以无界面方式、不带沙箱运行浏览器，只打开本地测试页面。
 

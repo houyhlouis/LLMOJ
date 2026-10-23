@@ -70,6 +70,8 @@ The backend signs upload and download links for MinIO. `default` is used for the
 | `services.minio.secretKey` | `REPLACE_WITH_MINIO_SECRET_KEY` | MinIO password, random in installations. Secret; must match MinIO's own configuration. |
 | `services.minio.bucket` | `libreoj-files` | Bucket for all files. Renaming it doesn't move existing files. |
 
+**How uploads become files.** An upload link lets a browser write one object, `staging/<upload ID>`, for 10 minutes. Like any S3 upload link, it can be used again until then, so the backend never keeps that object as the file. When the upload is completed, the backend copies it to an object with a new ID that no link can write, checks the copy's size and records its SHA-256, registers the file, and deletes the staging object. Each upload becomes at most one file. If the uploaded object changes while it's copied, the upload is refused. Maintenance (`POST /api/runMaintainceTasks`, below) deletes what abandoned uploads left in staging once their links have expired, and copies that were never registered because a request failed halfway, an hour after they were made. Files from before this version keep their objects.
+
 ### `services.redis` and `services.mail`
 
 | Setting | Example | Meaning |

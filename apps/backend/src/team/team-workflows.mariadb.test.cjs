@@ -61,15 +61,21 @@ test('team creation, membership, private resources, assignments and files (real 
     const [owner, applicant, member, moderator, outsider, invited, newcomer, banned] = users;
     const privilege = Object.create(UserPrivilegeService.prototype);
     Object.assign(privilege, { connection: db, userPrivilegeRepository: db.getRepository(UserPrivilegeEntity) });
-    const objectData = new Map(), objectSizes = new Map(), signedSizes = new Map();
+    const objectData = new Map(), objectSizes = new Map(), signedSizes = new Map(), storageHooks = {};
+    // Forms write staging/<upload UUID>; a completed file is a sealed copy with a UUID of its own
+    const staged = id => 'staging/' + id;
     const storage = {
       statObject: async (_bucket, id) => { if (!objectData.has(id) && !objectSizes.has(id)) throw new Error('The specified key does not exist.'); return { size: objectSizes.get(id) ?? objectData.get(id).length, etag: 'test-etag' }; },
       getObject: async (_bucket, id) => Readable.from(objectData.get(id)),
       fPutObject: async (_bucket, id, local) => objectData.set(id, await fsp.readFile(local)),
       putObject: async (_bucket, id, value) => { if (Buffer.isBuffer(value)) objectData.set(id, value); else { const chunks = []; for await (const chunk of value) chunks.push(chunk); objectData.set(id, Buffer.concat(chunks)); } },
-      removeObject: async (_bucket, id) => objectData.delete(id),
+      removeObject: async (_bucket, id) => { objectData.delete(id); objectSizes.delete(id); },
       removeObjects: async (_bucket, ids) => ids.forEach(id => { objectData.delete(id); objectSizes.delete(id); }),
-      composeObject: async (destination, sources) => objectSizes.set(destination.Object, sources.reduce((sum, source) => sum + (objectSizes.get(source.Object) ?? objectData.get(source.Object).length), 0)),
+      composeObject: async (destination, sources) => {
+        await storageHooks.compose?.();
+        if (sources.some(source => !objectData.has(source.Object) && !objectSizes.has(source.Object))) throw new Error('The specified key does not exist.');
+        objectSizes.set(destination.Object, sources.reduce((sum, source) => sum + (objectSizes.get(source.Object) ?? objectData.get(source.Object).length), 0));
+      },
       presignedGetObject: async (_bucket, id, seconds) => { assert.equal(seconds, 60); return 'https://storage.example.invalid/' + id; }
     };
     const files = Object.create(FileService.prototype);
@@ -351,10 +357,15 @@ test('team creation, membership, private resources, assignments and files (real 
     });
     await run('member uploads and downloads, private links, quota checks and recoverable file archives', async () => {
       const prepared = await teams.prepareFileUpload(member, { teamId, size: 4 });
-      objectData.set(prepared.signedUploadRequest.uuid, Buffer.from('data'));
+      objectData.set(staged(prepared.signedUploadRequest.uuid), Buffer.from('data'));
       fileId = (await teams.uploadFile(member, { teamId, name: 'notes.txt', uploadInfo: { uuid: prepared.signedUploadRequest.uuid, size: 4 } })).fileId;
       assert.equal((await teamRepo.findOneBy({ id: teamId })).quotaUsed, '4');
-      assert((await teams.downloadFile(member, { teamId, id: fileId })).url.includes(prepared.signedUploadRequest.uuid));
+      const sealedUuid = (await db.getRepository(TeamFileEntity).findOneBy({ id: fileId })).uuid;
+      assert.notEqual(sealedUuid, prepared.signedUploadRequest.uuid);
+      assert.equal((await db.getRepository(FileEntity).findOneBy({ uuid: sealedUuid })).uploadUuid, prepared.signedUploadRequest.uuid);
+      assert.equal(objectData.has(staged(prepared.signedUploadRequest.uuid)), false, 'staging is cleaned up');
+      const link = (await teams.downloadFile(member, { teamId, id: fileId })).url;
+      assert(link.includes(sealedUuid) && !link.includes(prepared.signedUploadRequest.uuid));
       await assert.rejects(teams.downloadFile(banned, { teamId, id: fileId }), /membership required/);
       const large = await teams.prepareFileUpload(member, { teamId, size: 64 * 1024 * 1024 + 1 });
       assert.equal(large.uploadSession.partCount, 3);
@@ -394,12 +405,12 @@ test('team creation, membership, private resources, assignments and files (real 
       assert(await db.getRepository(TeamFileUploadEntity).findOneBy({ uuid: objectUuid }));
       await assert.rejects(teams.prepareFileUploadPart(owner, { teamId, uuid: objectUuid, part: 1 }), /FILE_UPLOAD_EXPIRED/);
       await assert.rejects(teams.uploadFile(owner, { teamId: fileTeamId, name: 'wrong-size', uploadInfo: { uuid: objectUuid, size: size + 1 } }), /FILE_SIZE_MISMATCH/);
-      objectSizes.set(first.signedUploadRequest.uuid, TEAM_FILE_PART_SIZE);
-      objectSizes.set(last.signedUploadRequest.uuid, 8);
+      objectSizes.set(staged(first.signedUploadRequest.uuid), TEAM_FILE_PART_SIZE);
+      objectSizes.set(staged(last.signedUploadRequest.uuid), 8);
       await assert.rejects(teams.uploadFile(owner, { teamId: fileTeamId, name: 'wrong-bytes', uploadInfo: { uuid: objectUuid, size } }), /FILE_SIZE_MISMATCH/);
       assert.equal(Number((await teamRepo.findOneBy({ id: fileTeamId })).quotaUsed), 0);
       await teams.cancelFileUpload(owner, { teamId: fileTeamId, uuid: objectUuid });
-      assert.equal(objectSizes.has(first.signedUploadRequest.uuid), false);
+      assert.equal(objectSizes.has(staged(first.signedUploadRequest.uuid)), false);
       const own = await teams.prepareFileUpload(member, { teamId: fileTeamId, size });
       await teams.manageMembers(owner, { teamId: fileTeamId, userIds: [member.id], action: 'remove' });
       await assert.rejects(teams.prepareFileUploadPart(member, { teamId: fileTeamId, uuid: own.uploadSession.uuid, part: 1 }), /membership required/);
@@ -410,12 +421,12 @@ test('team creation, membership, private resources, assignments and files (real 
     await run('expired reservations release capacity and cannot complete or expose registered objects', async () => {
       const prepared = await teams.prepareFileUpload(owner, { teamId: fileTeamId, size: TEAM_FILE_QUOTA });
       const reservation = await db.getRepository(TeamFileUploadEntity).findOneBy({ uuid: prepared.uploadSession.uuid });
-      objectSizes.set(reservation.parts[0], TEAM_FILE_PART_SIZE);
+      objectSizes.set(staged(reservation.parts[0]), TEAM_FILE_PART_SIZE);
       await db.getRepository(TeamFileUploadEntity).update(reservation.uuid, { expiresAt: new Date(Date.now() - 1000) });
       await assert.rejects(teams.uploadFile(owner, { teamId: fileTeamId, name: 'expired', uploadInfo: { uuid: reservation.uuid, size: reservation.size } }), /FILE_UPLOAD_EXPIRED/);
       const next = await teams.prepareFileUpload(member, { teamId: fileTeamId, size: 1 });
       assert.equal(await db.getRepository(TeamFileUploadEntity).findOneBy({ uuid: reservation.uuid }), null);
-      assert.equal(objectSizes.has(reservation.parts[0]), false);
+      assert.equal(objectSizes.has(staged(reservation.parts[0])), false);
       await teams.cancelFileUpload(member, { teamId: fileTeamId, uuid: next.uploadSession.uuid });
       const protectedFile = await db.getRepository(FileEntity).findOneBy({ uuid: (await db.getRepository(TeamFileEntity).findOneBy({ id: fileId })).uuid });
       await assert.rejects(teams.uploadFile(owner, { teamId: fileTeamId, name: 'forged', uploadInfo: { uuid: protectedFile.uuid, size: protectedFile.size } }), /FILE_UPLOAD_EXPIRED/);
@@ -425,25 +436,78 @@ test('team creation, membership, private resources, assignments and files (real 
       const size = 6 * 1024 ** 3 + 1;
       const prepared = await teams.prepareFileUpload(member, { teamId: fileTeamId, size });
       const reservation = await db.getRepository(TeamFileUploadEntity).findOneBy({ uuid: prepared.uploadSession.uuid });
-      reservation.parts.forEach((part, index) => objectSizes.set(part, Math.min(TEAM_FILE_PART_SIZE, size - index * TEAM_FILE_PART_SIZE)));
+      reservation.parts.forEach((part, index) => objectSizes.set(staged(part), Math.min(TEAM_FILE_PART_SIZE, size - index * TEAM_FILE_PART_SIZE)));
       const completed = await teams.uploadFile(member, { teamId: fileTeamId, name: 'large-data.bin', uploadInfo: { uuid: reservation.uuid, size } });
       assert.equal((await db.getRepository(TeamFileEntity).findOneBy({ id: completed.fileId })).size, size);
-      assert.equal((await db.getRepository(FileEntity).findOneBy({ uuid: reservation.uuid })).size, size);
+      const sealed = await db.getRepository(FileEntity).findOneBy({ uploadUuid: reservation.uuid });
+      assert.equal(sealed.size, size);
+      assert.equal(objectSizes.get(sealed.uuid), size);
       assert.equal(Number((await teamRepo.findOneBy({ id: fileTeamId })).quotaUsed), size);
-      assert.equal(reservation.parts.some(part => objectSizes.has(part)), false);
+      assert.equal(reservation.parts.some(part => objectSizes.has(staged(part))), false);
       assert.equal(await db.getRepository(TeamFileUploadEntity).findOneBy({ uuid: reservation.uuid }), null);
       await assert.rejects(teams.uploadFile(member, { teamId: fileTeamId, name: 'duplicate', uploadInfo: { uuid: reservation.uuid, size } }), /FILE_UPLOAD_EXPIRED/);
       assert.equal(Number((await teamRepo.findOneBy({ id: fileTeamId })).quotaUsed), size);
-      assert((await teams.downloadFile(member, { teamId: fileTeamId, id: completed.fileId })).url.includes(reservation.uuid));
+      assert((await teams.downloadFile(member, { teamId: fileTeamId, id: completed.fileId })).url.includes(sealed.uuid));
       await teams.archiveFile(owner, { teamId: fileTeamId, id: completed.fileId, archived: true });
       assert.equal(Number((await teamRepo.findOneBy({ id: fileTeamId })).quotaUsed), size);
+    });
+    await run('an upload is sealed without the team lock; changes meanwhile are checked before it becomes a file', async () => {
+      const sealedCopies = () => [...objectSizes.keys(), ...objectData.keys()].filter(name => !name.startsWith('staging/') && !name.startsWith('temporary/'));
+      const before = new Set(sealedCopies());
+      const quota = async () => Number((await teamRepo.findOneBy({ id: fileTeamId })).quotaUsed);
+      const used = await quota();
+      const stage = async () => {
+        const prepared = await teams.prepareFileUpload(member, { teamId: fileTeamId, size: 9 });
+        objectData.set(staged(prepared.signedUploadRequest.uuid), Buffer.from('nine byte'));
+        return prepared.signedUploadRequest.uuid;
+      };
+      // The object store takes 3 seconds; meanwhile another member changes the team, which takes its lock
+      let upload = await stage();
+      let release;
+      storageHooks.compose = () => new Promise(resolve => { release = resolve; });
+      const completing = teams.uploadFile(member, { teamId: fileTeamId, name: 'slow.bin', uploadInfo: { uuid: upload, size: 9 } });
+      while (!release) await new Promise(resolve => setTimeout(resolve, 20));
+      const started = Date.now();
+      const other = await teams.prepareFileUpload(owner, { teamId: fileTeamId, size: 1 });
+      const waited = Date.now() - started;
+      assert(waited < 2000, `the team was locked for ${waited} ms while the upload was sealed`);
+      await teams.cancelFileUpload(owner, { teamId: fileTeamId, uuid: other.uploadSession.uuid });
+      setTimeout(release, 3000);
+      const slow = await completing;
+      assert(slow.fileId);
+      assert.equal(await quota(), used + 9);
+      // A member removed while the file is sealed gets no file; the copy is deleted
+      upload = await stage();
+      storageHooks.compose = async () => teams.manageMembers(owner, { teamId: fileTeamId, userIds: [member.id], action: 'remove' });
+      await assert.rejects(teams.uploadFile(member, { teamId: fileTeamId, name: 'revoked.bin', uploadInfo: { uuid: upload, size: 9 } }), /membership required/);
+      storageHooks.compose = undefined;
+      await teams.join(member, { teamId: fileTeamId });
+      assert.equal(await db.getRepository(FileEntity).countBy({ uploadUuid: upload }), 0);
+      // Its reservation stays until cancelled or expired
+      await teams.cancelFileUpload(member, { teamId: fileTeamId, uuid: upload });
+      assert.equal(await db.getRepository(TeamFileEntity).countBy({ teamId: fileTeamId, name: 'revoked.bin' }), 0);
+      // An upload cancelled while it's sealed doesn't become a file either
+      upload = await stage();
+      storageHooks.compose = async () => teams.cancelFileUpload(member, { teamId: fileTeamId, uuid: upload });
+      await assert.rejects(teams.uploadFile(member, { teamId: fileTeamId, name: 'cancelled.bin', uploadInfo: { uuid: upload, size: 9 } }), /FILE_UPLOAD_EXPIRED|FILE_NOT_UPLOADED/);
+      storageHooks.compose = undefined;
+      assert.equal(await db.getRepository(FileEntity).countBy({ uploadUuid: upload }), 0);
+      // Two simultaneous completions of one upload make one file
+      upload = await stage();
+      const twice = await Promise.allSettled([1, 2].map(() => teams.uploadFile(member, { teamId: fileTeamId, name: 'twice.bin', uploadInfo: { uuid: upload, size: 9 } })));
+      assert.equal(twice.filter(result => result.status === 'fulfilled').length, 1);
+      assert.equal(await db.getRepository(FileEntity).countBy({ uploadUuid: upload }), 1);
+      assert.equal(await quota(), used + 18);
+      // Only the two files' copies remain: the refused ones were deleted
+      const kept = (await db.getRepository(TeamFileEntity).findBy({ teamId: fileTeamId })).filter(file => ['slow.bin', 'twice.bin'].includes(file.name));
+      assert.deepEqual(sealedCopies().filter(name => !before.has(name)).sort(), kept.map(file => file.uuid).sort());
     });
     await run('concurrent completions consume their reservations exactly once and finish at the total quota', async () => {
       const used = Number((await teamRepo.findOneBy({ id: fileTeamId })).quotaUsed);
       const sizes = [2 * 1024 ** 3, TEAM_FILE_QUOTA - used - 2 * 1024 ** 3];
       const prepared = await Promise.all(sizes.map(size => teams.prepareFileUpload(member, { teamId: fileTeamId, size })));
       const pending = await Promise.all(prepared.map(result => db.getRepository(TeamFileUploadEntity).findOneBy({ uuid: result.uploadSession.uuid })));
-      pending.forEach(upload => upload.parts.forEach((part, index) => objectSizes.set(part, Math.min(TEAM_FILE_PART_SIZE, upload.size - index * TEAM_FILE_PART_SIZE))));
+      pending.forEach(upload => upload.parts.forEach((part, index) => objectSizes.set(staged(part), Math.min(TEAM_FILE_PART_SIZE, upload.size - index * TEAM_FILE_PART_SIZE))));
       const completed = await Promise.all(pending.map((upload, index) => teams.uploadFile(member, { teamId: fileTeamId, name: 'parallel-' + index + '.bin', uploadInfo: { uuid: upload.uuid, size: upload.size } })));
       assert.equal(completed.length, 2);
       assert.equal(Number((await teamRepo.findOneBy({ id: fileTeamId })).quotaUsed), TEAM_FILE_QUOTA);

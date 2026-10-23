@@ -70,6 +70,8 @@
 | `services.minio.secretKey` | `REPLACE_WITH_MINIO_SECRET_KEY` | MinIO 密码，安装时随机生成。属于密钥，必须与 MinIO 自身的配置一致 |
 | `services.minio.bucket` | `libreoj-files` | 保存所有文件的存储桶。改名不会移动已有文件 |
 
+**上传如何成为文件。** 上传链接允许浏览器在 10 分钟内写入一个对象 `staging/<上传 ID>`。和所有 S3 上传链接一样，它在此期间可以重复使用，所以后端从不把这个对象当作文件保留。上传完成时，后端把它复制到一个没有任何链接能写入的新 ID 对象，核对副本的大小并记录其 SHA-256，登记文件，然后删除 staging 对象。每次上传最多成为一个文件。如果复制时上传的对象发生了变化，这次上传会被拒绝。维护任务（`POST /api/runMaintainceTasks`，见下文）会在链接过期后删除被放弃的上传留在 staging 中的对象；因请求中途失败而未登记的副本会在产生一小时后删除。此版本之前的文件保留原来的对象。
+
 ### `services.redis` 与 `services.mail`
 
 | 设置 | 示例 | 含义 |

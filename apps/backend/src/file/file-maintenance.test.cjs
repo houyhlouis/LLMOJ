@@ -21,7 +21,8 @@ require.extensions[".ts"] = (module, filename) =>
   );
 const { FileService } = require("./file.service.ts");
 
-const old = new Date(Date.now() - 3600 * 1000);
+// Older than the hour an unregistered sealed copy is kept
+const old = new Date(Date.now() - 2 * 3600 * 1000);
 
 function fixture({ objects, files, uploads = [] }) {
   const calls = { queries: [], removed: [], inFlight: 0, maxInFlight: 0 };

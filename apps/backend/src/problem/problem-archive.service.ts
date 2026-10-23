@@ -89,15 +89,16 @@ export class ProblemArchiveService {
         const leaseKey = `problem-zip:${request.uploadInfo.uuid}`;
         const actualLease = await this.redisService.cacheGet(leaseKey);
         if (!actualLease || actualLease !== JSON.stringify(lease)) throw new ArchiveError("FILE_NOT_UPLOADED");
-        let archiveClaimed = false;
+        let archive: FileEntity = null;
         let workspace: string;
         try {
+          // Registered only to be read once, and deleted after the import: its size is checked as it's downloaded
           const claimed = await this.connection.transaction(manager =>
-            this.fileService.processUploadRequest(request.uploadInfo, () => null, manager)
+            this.fileService.processUploadRequest(request.uploadInfo, () => null, manager, false)
           );
           if (!(claimed instanceof FileEntity))
             throw new ArchiveError(typeof claimed === "string" ? claimed : "INVALID_ZIP");
-          archiveClaimed = true;
+          archive = claimed;
           const base = process.env.HYHOJ_ARCHIVE_WORK_DIRECTORY || "/opt/LLMOJ/data/backend-archives";
           await fs.promises.mkdir(base, { recursive: true, mode: 0o700 });
           workspace = await fs.promises.mkdtemp(path.join(base, "zip-"));
@@ -138,9 +139,9 @@ export class ProblemArchiveService {
           };
         } finally {
           if (workspace) await fs.promises.rm(workspace, { recursive: true, force: true });
-          if (archiveClaimed) {
+          if (archive) {
             const remove = await this.connection.transaction(manager =>
-              this.fileService.deleteFile(request.uploadInfo.uuid, manager)
+              this.fileService.deleteFile(archive.uuid, manager)
             );
             await remove();
             await this.redisService.cacheDelete(leaseKey);

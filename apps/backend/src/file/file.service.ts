@@ -21,6 +21,13 @@ import { ConfigService } from "../config/config.service";
 
 // 10 minutes upload expire time
 const FILE_UPLOAD_EXPIRE_TIME = 10 * 60;
+// Uploads are written to staging/<upload UUID>, which a signed form can rewrite until it expires. A file is sealed
+// from there: copied to an object of its own that no form can write, and checked there (review N03).
+const STAGING_PREFIX = "staging/";
+// Forms signed before sealing wrote the object at the upload's own UUID; such an upload may be completed this long
+const LEGACY_UPLOAD_WINDOW = 2 * FILE_UPLOAD_EXPIRE_TIME;
+// A sealed object is registered right after it is made; maintenance leaves an unregistered one alone this long
+const UNREGISTERED_OBJECT_GRACE = 60 * 60;
 // Stored objects checked by one query of maintenance
 const MAINTENANCE_BATCH_SIZE = 500;
 // Default download links last 20 hours; private team files explicitly request 60 seconds.
@@ -32,9 +39,29 @@ export const JUDGE_FILE_DOWNLOAD_EXPIRE_TIME = 6 * 60 * 60;
 export const TEMPORARY_OBJECT_PREFIX = "temporary/";
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const isMissingObject = (error: { code?: string; message?: string }) =>
   error?.code === "NoSuchKey" || error?.code === "NotFound" || error?.message === "The specified key does not exist.";
+// The object changed after it was measured (a conditional copy's If-Match failed)
+const isChangedObject = (error: { code?: string }) => error?.code === "PreconditionFailed";
+const isDuplicateEntry = (error: unknown) =>
+  (error as { code?: string })?.code === "ER_DUP_ENTRY" ||
+  (error as { driverError?: { code?: string } })?.driverError?.code === "ER_DUP_ENTRY";
+
+/** Where an upload's form writes. */
+export const stagingObject = (uploadUuid: string) => STAGING_PREFIX + uploadUuid;
+
+/**
+ * An upload copied to an object of its own and checked there, not registered yet (see `FileService.sealUpload`).
+ * `uuid` is the new object; nothing but the backend writes it.
+ */
+export interface SealedUpload {
+  uploadUuid: string;
+  uuid: string;
+  size: number;
+  sha256: string;
+}
 
 // Passes a stream through, updating `hash` with its content
 const hashing = (hash: Hash) =>
@@ -336,7 +363,8 @@ export class FileService implements OnModuleInit {
    * Process the client's request about uploading a file.
    *
    * * If the user has not uploaded the file, return a signed upload info object.
-   * * If the user has uploaded the file, check the file existance, file size and limits.
+   * * If the user has uploaded the file, check its size and limits, seal it (see `sealUpload`) and register the
+   *   sealed copy. The returned file's UUID is that copy's, not the upload's.
    *
    * @note
    * The `checkLimit` function may return different result for each call with the same upload info.
@@ -346,6 +374,9 @@ export class FileService implements OnModuleInit {
    *
    * Rejected uploads are left for maintenance cleanup. A caller-supplied UUID must
    * never cause another registered or concurrently accepted object to be deleted.
+   *
+   * An upload is registered at most once, also by simultaneous requests: the file records it (`uploadUuid`, unique).
+   * If the caller's transaction doesn't commit, nothing is registered, and the file must be uploaded again.
    *
    * @return A `SignedFileUploadRequestDto` to return to the client if the file is not uploaded.
    * @return `string` error message if client says the file is uploaded but we do not accept it according to some errors.
@@ -359,37 +390,141 @@ export class FileService implements OnModuleInit {
   ): Promise<FileEntity | SignedFileUploadRequestDto | LimitCheckErrorType | "FILE_UUID_EXISTS" | "FILE_NOT_UPLOADED"> {
     if (!uploadInfo.uuid) return await this.prepareUploadRequest(uploadInfo.size, checkLimit);
 
-    if ((await transactionalEntityManager.countBy(FileEntity, { uuid: uploadInfo.uuid })) !== 0)
-      return "FILE_UUID_EXISTS";
+    if (await this.isUploadRegistered(uploadInfo.uuid, transactionalEntityManager)) return "FILE_UUID_EXISTS";
 
-    let actualSize: number;
-    try {
-      actualSize = (await this.minioClient.statObject(this.bucket, uploadInfo.uuid)).size;
-    } catch (e) {
-      if (isMissingObject(e)) return "FILE_NOT_UPLOADED";
-      throw e;
-    }
-
-    if (!Number.isSafeInteger(actualSize) || actualSize < 0 || actualSize !== uploadInfo.size)
+    const upload = await this.findUpload(uploadInfo.uuid);
+    if (!upload) return "FILE_NOT_UPLOADED";
+    if (!Number.isSafeInteger(upload.size) || upload.size < 0 || upload.size !== uploadInfo.size)
       throw new BadRequestException("FILE_SIZE_MISMATCH");
-    const limitCheckError = await checkLimit(actualSize);
+    const limitCheckError = await checkLimit(upload.size);
     if (limitCheckError) return limitCheckError;
 
-    // Judges check the file against what's stored now; its upload form stays valid for a while, so the file could
-    // still be replaced in storage, but not without that being noticed. A file judges don't use may leave its hash to
-    // the background (FileContentHashService), so that a large one isn't read while the caller holds its locks.
-    const content = recordContentHash ? await this.hashStoredObject(uploadInfo.uuid) : null;
-    if (content && content.size !== actualSize) throw new BadRequestException("FILE_SIZE_MISMATCH");
-
-    const file = new FileEntity();
-    file.uuid = uploadInfo.uuid;
-    file.size = actualSize;
-    file.uploadTime = new Date();
-    file.sha256 = content?.sha256 ?? null;
-
-    await transactionalEntityManager.save(FileEntity, file);
-
+    // A file judges don't use may leave its hash to the background (FileContentHashService), so that a large one
+    // isn't read while the caller holds its locks. Its sealed copy can't change meanwhile.
+    const sealed = await this.sealObjects(uploadInfo.uuid, upload.size, [upload], recordContentHash);
+    const file = await this.registerSealedUpload(sealed, transactionalEntityManager);
+    if (file === "FILE_UUID_EXISTS") await this.discardSealedUpload(sealed);
+    // What the form wrote isn't needed any more: deleted now, rather than taking space twice until maintenance runs.
+    // Should the caller's transaction fail after all, the file is uploaded again.
+    else await this.discardUploads([uploadInfo.uuid]).catch(e => logger.error(`Failed to delete upload: ${e}`));
     return file;
+  }
+
+  /** Whether the upload was registered as a file: sealed (Part 25), or under its own UUID before that. */
+  async isUploadRegistered(uploadUuid: string, manager: EntityManager): Promise<boolean> {
+    if (typeof uploadUuid !== "string" || !UUID_PATTERN.test(uploadUuid)) return false;
+    return (await manager.countBy(FileEntity, [{ uploadUuid }, { uuid: uploadUuid }])) !== 0;
+  }
+
+  /**
+   * The object an upload's form wrote: its staging object, or for a form signed before sealing, the object at the
+   * upload's own UUID while such a form may still be completing (or, with `recordedUpload`, for an upload the caller
+   * has a record of, at any age). Only the backend issues upload UUIDs.
+   */
+  private async findUpload(
+    uploadUuid: string,
+    recordedUpload = false
+  ): Promise<{ name: string; size: number; etag: string }> {
+    if (typeof uploadUuid !== "string" || !UUID_PATTERN.test(uploadUuid)) return null;
+    for (const [name, legacy] of [
+      [stagingObject(uploadUuid), false],
+      [uploadUuid, true]
+    ] as const) {
+      let stored: Awaited<ReturnType<MinioClient["statObject"]>>;
+      try {
+        // eslint-disable-next-line no-await-in-loop -- The legacy place is only looked at if the staging one is empty
+        stored = await this.minioClient.statObject(this.bucket, name);
+      } catch (e) {
+        if (isMissingObject(e)) continue;
+        throw e;
+      }
+      if (legacy && !recordedUpload && !(+stored.lastModified > Date.now() - LEGACY_UPLOAD_WINDOW * 1000)) return null;
+      return { name, size: stored.size, etag: stored.etag };
+    }
+    return null;
+  }
+
+  /**
+   * Seals an upload (review N03): copies what its form wrote (or, for a team upload in parts, the parts in order) to a
+   * new object no form can write, and checks the copy's size, and its content hash unless `recordContentHash` is
+   * false. Whatever the form writes afterwards stays in staging. The copy isn't registered: see
+   * `registerSealedUpload`, and `discardSealedUpload` if it won't be. A team upload's record names its parts, which
+   * are found where their forms wrote them however long ago that was.
+   */
+  async sealUpload(
+    uploadUuid: string,
+    size: number,
+    parts: { uuid: string; size: number }[] = [],
+    recordContentHash = true,
+    recordedUpload = false
+  ): Promise<SealedUpload | "FILE_NOT_UPLOADED"> {
+    const sources = parts.length ? parts : [{ uuid: uploadUuid, size }];
+    const found = await Promise.all(sources.map(source => this.findUpload(source.uuid, recordedUpload)));
+    if (found.some(source => !source)) return "FILE_NOT_UPLOADED";
+    if (found.some((source, i) => source.size !== sources[i].size)) throw new BadRequestException("FILE_SIZE_MISMATCH");
+    return await this.sealObjects(uploadUuid, size, found, recordContentHash);
+  }
+
+  private async sealObjects(
+    uploadUuid: string,
+    size: number,
+    sources: { name: string; etag: string }[],
+    recordContentHash: boolean
+  ): Promise<SealedUpload> {
+    const uuid = UUID();
+    try {
+      // A single source is copied only if it's still what was measured (If-Match). minio-js composes several
+      // sources with the versions it measures itself. Either way, what's checked below is the copy.
+      await this.minioClient.composeObject(
+        new CopyDestinationOptions({ Bucket: this.bucket, Object: uuid }),
+        sources.map(
+          source => new CopySourceOptions({ Bucket: this.bucket, Object: source.name, MatchETag: source.etag })
+        )
+      );
+      if ((await this.minioClient.statObject(this.bucket, uuid)).size !== size)
+        throw new BadRequestException("FILE_SIZE_MISMATCH");
+      const content = recordContentHash ? await this.hashStoredObject(uuid) : null;
+      if (content && content.size !== size) throw new BadRequestException("FILE_SIZE_MISMATCH");
+      return { uploadUuid, uuid, size, sha256: content?.sha256 ?? null };
+    } catch (e) {
+      await this.discardSealedUpload({ uuid });
+      if (isChangedObject(e)) throw new BadRequestException("FILE_CHANGED_DURING_UPLOAD");
+      if (isMissingObject(e)) throw new BadRequestException("FILE_NOT_UPLOADED");
+      throw e;
+    }
+  }
+
+  /**
+   * Registers a sealed upload as a file, in the caller's transaction. "FILE_UUID_EXISTS" if the upload was already
+   * registered (by a simultaneous request too); then nothing refers to the sealed copy, and the caller discards it.
+   */
+  async registerSealedUpload(
+    sealed: SealedUpload,
+    transactionalEntityManager: EntityManager
+  ): Promise<FileEntity | "FILE_UUID_EXISTS"> {
+    const file = new FileEntity();
+    file.uuid = sealed.uuid;
+    file.uploadUuid = sealed.uploadUuid;
+    file.size = sealed.size;
+    file.uploadTime = new Date();
+    file.sha256 = sealed.sha256;
+    try {
+      await transactionalEntityManager.insert(FileEntity, file);
+    } catch (e) {
+      if (isDuplicateEntry(e)) return "FILE_UUID_EXISTS";
+      throw e;
+    }
+    return file;
+  }
+
+  /** Deletes a sealed copy that wasn't registered. One that was (its transaction committed after all) stays. */
+  async discardSealedUpload(sealed: Pick<SealedUpload, "uuid">): Promise<void> {
+    try {
+      if (await this.fileRepository.countBy({ uuid: sealed.uuid })) return;
+      await this.minioClient.removeObject(this.bucket, sealed.uuid);
+    } catch (e) {
+      if (!isMissingObject(e)) logger.error(`Failed to delete unregistered sealed upload ${sealed.uuid}: ${e}`);
+    }
   }
 
   async prepareUploadRequest<LimitCheckErrorType extends string>(
@@ -403,19 +538,21 @@ export class FileService implements OnModuleInit {
 
   /**
    * Sign a upload request for given size. The alternative MinIO endpoint for user will be used in the POST URL.
+   * A user's form writes the upload's staging object; the returned `uuid` is the upload's (see `sealUpload`).
    */
   private async signUploadRequest(
     minSize?: number,
     maxSize?: number,
-    objectUuid = UUID(),
+    uploadUuid = UUID(),
     expiresAt = new Date(Date.now() + FILE_UPLOAD_EXPIRE_TIME * 1000),
-    signFor = MinioSignFor.UserUpload
+    signFor = MinioSignFor.UserUpload,
+    objectName = stagingObject(uploadUuid)
   ): Promise<SignedFileUploadRequestDto> {
     const signer = this.minioSigner[signFor];
-    const uuid = objectUuid;
+    const uuid = uploadUuid;
     const policy = signer.client.newPostPolicy();
     policy.setBucket(this.bucket);
-    policy.setKey(uuid);
+    policy.setKey(objectName);
     policy.setExpires(expiresAt);
     if (minSize != null || maxSize != null) {
       policy.setContentLengthRange(minSize || 0, maxSize || 0);
@@ -439,8 +576,29 @@ export class FileService implements OnModuleInit {
       size,
       name,
       new Date(Date.now() + JUDGE_FILE_DOWNLOAD_EXPIRE_TIME * 1000),
-      MinioSignFor.Judge
+      MinioSignFor.Judge,
+      name
     );
+  }
+
+  /**
+   * Stores content of the backend's own (a buffer, or the path of a local file) as an upload, to register like a
+   * user's (e.g. with `addProblemFile`).
+   *
+   * @return The upload to complete.
+   */
+  async storeUpload(data: Buffer | string): Promise<{ uuid: string; size: number }> {
+    const uuid = UUID();
+    const size = typeof data === "string" ? (await fs.promises.stat(data)).size : data.length;
+    await this.uploadFile(stagingObject(uuid), data);
+    return { uuid, size };
+  }
+
+  /** Downloads what an upload's form wrote, without registering it (e.g. an archive the backend imports at once). */
+  async downloadUploadToPath(uploadUuid: string, destination: string, maximumBytes: number): Promise<number> {
+    const upload = await this.findUpload(uploadUuid);
+    if (!upload) throw new Error("FILE_NOT_UPLOADED");
+    return await this.downloadFileToPath(upload.name, destination, maximumBytes);
   }
 
   /** Stores a temporary object; see `TEMPORARY_OBJECT_PREFIX`. */
@@ -489,28 +647,19 @@ export class FileService implements OnModuleInit {
     );
   }
 
-  async composeTeamUpload(uuid: string, parts: { uuid: string; size: number }[]): Promise<void> {
-    const sources = await Promise.all(
-      parts.map(async part => {
-        let stored: Awaited<ReturnType<MinioClient["statObject"]>>;
-        try {
-          stored = await this.minioClient.statObject(this.bucket, part.uuid);
-        } catch (error) {
-          if (isMissingObject(error)) throw new BadRequestException("FILE_NOT_UPLOADED");
-          throw error;
-        }
-        if (stored.size !== part.size) throw new BadRequestException("FILE_SIZE_MISMATCH");
-        return new CopySourceOptions({ Bucket: this.bucket, Object: part.uuid, MatchETag: stored.etag });
-      })
-    );
-    await this.minioClient.composeObject(new CopyDestinationOptions({ Bucket: this.bucket, Object: uuid }), sources);
-  }
-
-  async discardTeamUploadObjects(uuids: string[]): Promise<void> {
+  /**
+   * Deletes what uploads' forms wrote (their staging objects, and the objects of forms signed before sealing), once
+   * the uploads are completed, cancelled or expired. Never a registered file.
+   */
+  async discardUploads(uploadUuids: string[]): Promise<void> {
+    const uuids = uploadUuids.filter(uuid => typeof uuid === "string" && UUID_PATTERN.test(uuid));
+    if (!uuids.length) return;
     const registered = await this.fileRepository.findBy({ uuid: In(uuids) });
     const retained = new Set(registered.map(file => file.uuid));
-    const unused = uuids.filter(uuid => !retained.has(uuid));
-    if (unused.length) await this.minioClient.removeObjects(this.bucket, unused);
+    await this.minioClient.removeObjects(this.bucket, [
+      ...uuids.map(stagingObject),
+      ...uuids.filter(uuid => !retained.has(uuid))
+    ]);
   }
 
   /**
@@ -537,7 +686,7 @@ export class FileService implements OnModuleInit {
   }
 
   /**
-   * Delete a user-uploaded file before calling finishUpload()
+   * Delete an object the backend stored itself (`uploadFile`) and didn't register after all
    */
   deleteUnfinishedUploadedFile(uuid: string): void {
     this.minioClient.removeObject(this.bucket, uuid).catch(e => {
@@ -591,6 +740,8 @@ export class FileService implements OnModuleInit {
 
   /**
    * Deletes stored objects that no file refers to, except recent uploads and the parts of active team uploads.
+   * Staging objects are never registered: they go once their forms have expired. A sealed copy is registered right
+   * after it's made; one that isn't (its transaction failed) goes after an hour.
    * Objects are checked in batches, one batch at a time with one query, so a large bucket never means many
    * concurrent queries.
    *
@@ -600,7 +751,9 @@ export class FileService implements OnModuleInit {
     const activeUploads = await this.fileRepository.manager.findBy(TeamFileUploadEntity, {
       expiresAt: MoreThan(new Date())
     });
-    const pendingTeamObjects = new Set(activeUploads.flatMap(upload => [upload.uuid, ...upload.parts]));
+    const pendingTeamObjects = new Set(
+      activeUploads.flatMap(upload => [upload.uuid, ...upload.parts]).flatMap(uuid => [uuid, stagingObject(uuid)])
+    );
     let checked = 0;
     let deleted = 0;
     let batch: string[] = [];
@@ -622,12 +775,13 @@ export class FileService implements OnModuleInit {
     }>) {
       if (!object.name) continue;
       checked++;
-      // Keep active team chunks and recent signed uploads while their policies can still be used. Expired or
-      // cancelled chunks are collected.
+      // Keep active team chunks and recent signed uploads while their policies can still be used, and sealed copies
+      // while they may still be registered. Expired or cancelled chunks are collected.
+      const keepFor = object.name.startsWith(STAGING_PREFIX) ? FILE_UPLOAD_EXPIRE_TIME : UNREGISTERED_OBJECT_GRACE;
       if (
         pendingTeamObjects.has(object.name) ||
         object.name.startsWith(TEMPORARY_OBJECT_PREFIX) ||
-        +object.lastModified > Date.now() - FILE_UPLOAD_EXPIRE_TIME * 1000
+        +object.lastModified > Date.now() - keepFor * 1000
       )
         continue;
       batch.push(object.name);

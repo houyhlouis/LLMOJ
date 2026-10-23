@@ -280,7 +280,8 @@ export class SubmissionService {
       const submissionDetail = new SubmissionDetailEntity();
       submissionDetail.submissionId = submission.id;
       submissionDetail.content = content;
-      submissionDetail.fileUuid = uploadInfo?.uuid;
+      // The sealed copy of the answer, not the upload
+      submissionDetail.fileUuid = file?.uuid;
       submissionDetail.result = null;
       await transactionalEntityManager.save(submissionDetail);
 

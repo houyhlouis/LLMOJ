@@ -33,7 +33,7 @@ function fixture() {
       updateProblemJudgeInfo:async(_problem,next)=>{events.push('activate');Object.assign(judgeInfo,next);return null;}
     },
     locks:{lock:async(_key,callback)=>callback()},
-    files:{uploadFile:async(id,bytes)=>uploads.set(id,bytes),deleteUnfinishedUploadedFile:async id=>uploads.delete(id)},
+    files:{storeUpload:async bytes=>{const id=require('node:crypto').randomUUID();uploads.set(id,bytes);return {uuid:id,size:bytes.length};},discardUploads:async ids=>ids.forEach(id=>uploads.delete(id))},
     queue:{enqueue:async()=>{},notifyJobsAvailable(){}}
   });
   service.problemAccess = service.problemFiles = service.problemTags = service.problemLocks = service.problems;

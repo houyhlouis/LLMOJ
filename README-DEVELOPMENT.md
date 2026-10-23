@@ -63,7 +63,7 @@ Suites that need something this machine lacks skip those cases, and the summary 
 - **MariaDB:** the [database tests](#database-tests) below need their variables;
 - **redis-server**, for the judge queue and Redis suites;
 - **root**, for the deployment suites' cases that create accounts, mount file systems or run services. The runner uses passwordless `sudo` when it can, as CI does, and runs Python with `-B` so that no root-owned cache files appear in the tree;
-- **MinIO** (`LLMOJ_MINIO_BINARY`, or an installation's `runtime/minio`), for the backup verifier's content check;
+- **MinIO** (`LLMOJ_MINIO_BINARY`, or an installation's `runtime/minio`), for the upload sealing test and the backup verifier's content check;
 - **2 GiB in `TMPDIR`**, for the AI suites' ZIP archives. The runner uses `/var/tmp` when the temporary directory is smaller;
 - **Chrome or Chromium** (`LLMOJ_TEST_CHROME`, or `google-chrome` or `chromium` on `PATH`), for the test that the site removes the old bootstrap service worker. It runs the browser headless and without its sandbox, on local test pages only.
 

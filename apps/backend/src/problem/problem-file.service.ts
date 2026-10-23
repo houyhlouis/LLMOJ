@@ -354,7 +354,8 @@ export class ProblemFileService {
         problemFile.problemId = problem.id;
         problemFile.type = type;
         problemFile.filename = filename;
-        problemFile.uuid = uploadInfo.uuid;
+        // The sealed copy, not the upload
+        problemFile.uuid = result.uuid;
 
         await transactionalEntityManager.save(ProblemFileEntity, problemFile);
 

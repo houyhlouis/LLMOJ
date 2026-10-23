@@ -294,7 +294,8 @@ test(
         const files = {
           uploadFile: async (uuid, input) => {const chunks=[]; for await (const chunk of input) chunks.push(chunk); uploaded.set(uuid, Buffer.concat(chunks));},
           getFileSizes: async (uuids, manager) => Promise.all(uuids.map(async uuid => (await manager.findOneBy(FileEntity, {uuid})).size)),
-          deleteUnfinishedUploadedFile: uuid => {uploaded.delete(uuid); removed.push(uuid);}
+          deleteUnfinishedUploadedFile: uuid => {uploaded.delete(uuid); removed.push(uuid);},
+          discardUploads: async () => {}
         };
         problems.fileService = files;
         problems.lockManageProblemFile = async (_id, _type, callback) => callback(await db.getRepository(ProblemEntity).findOneBy({id: problem.id}));

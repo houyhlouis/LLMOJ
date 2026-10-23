@@ -292,7 +292,8 @@ test(
         const files = {
           uploadFile: async (uuid, input) => {const chunks=[]; for await (const chunk of input) chunks.push(chunk); uploaded.set(uuid, Buffer.concat(chunks));},
           getFileSizes: async (uuids, manager) => Promise.all(uuids.map(async uuid => (await manager.findOneBy(FileEntity, {uuid})).size)),
-          deleteUnfinishedUploadedFile: uuid => {uploaded.delete(uuid); removed.push(uuid);}
+          deleteUnfinishedUploadedFile: uuid => {uploaded.delete(uuid); removed.push(uuid);},
+          discardUploads: async () => {}
         };
         problems.fileService = files;
         problems.lockManageProblemFile = async (_id, _type, callback) => callback(await db.getRepository(ProblemEntity).findOneBy({id: problem.id}));
@@ -517,7 +518,7 @@ test(
             const attachment = {ownerId: f.user.id, uuid: crypto.randomUUID(), filename: 'fixture.zip',
               size: fs.statSync(archive).size, expires: Date.now() + 60000};
             f.job.input.attachmentToken = signAiAttachment(f.service.key, attachment);
-            f.files.downloadFileToPath = async (_uuid, destination) => {fs.copyFileSync(archive, destination); return attachment.size;};
+            f.files.downloadUploadToPath = async (_uuid, destination) => {fs.copyFileSync(archive, destination); return attachment.size;};
             let transactions = 0, injected = false;
             const before = async () => {
               transactions++;
@@ -595,7 +596,7 @@ test(
         f.job.input.attachmentToken = signAiAttachment(f.service.key, attachment);
         let changed = false;
         const mutateType = async () => {await db.getRepository(ProblemEntity).update({id: f.problem.id}, {type: 'Interaction'}); changed = true;};
-        f.files.downloadFileToPath = async (_uuid, destination) => {fs.copyFileSync(zip, destination); if (phase === 'download') await mutateType(); return attachment.size;};
+        f.files.downloadUploadToPath = async (_uuid, destination) => {fs.copyFileSync(zip, destination); if (phase === 'download') await mutateType(); return attachment.size;};
         let transactions = 0;
         if (phase === 'between-registrations') interceptTransactions(f.problems, 'connection', async () => {
           if (++transactions === 2) await mutateType();
@@ -702,7 +703,7 @@ test(
         f.service.key = Buffer.alloc(32, 1); f.job.createdAt = new Date();
         const attachment = {ownerId: f.user.id, uuid: crypto.randomUUID(), filename: 'fixture.zip', size: fs.statSync(zip).size, expires: Date.now() + 60000};
         f.job.input.attachmentToken = signAiAttachment(f.service.key, attachment);
-        f.files.downloadFileToPath = async (_uuid, destination) => {fs.copyFileSync(zip, destination); return attachment.size;};
+        f.files.downloadUploadToPath = async (_uuid, destination) => {fs.copyFileSync(zip, destination); return attachment.size;};
         const add = f.problems.addProblemFilesFromDisk.bind(f.problems);
         let wrote = false;
         f.problems.addProblemFilesFromDisk = (problem, type, files, options) => add(problem, type, files, {

@@ -63,6 +63,8 @@ import { FileEntity } from "../file/file.entity";
 import { AuditService, AuditLogObjectType } from "../audit/audit.service";
 
 const FILE_UPLOAD_LIFETIME = 24 * 3600 * 1000;
+// A completing upload keeps its reservation and parts at least this long while it's sealed
+const FILE_SEALING_TIME = 30 * 60 * 1000;
 
 function integer(value: unknown): number {
   if (!Number.isSafeInteger(value) || Number(value) < 1) throw new BadRequestException("Invalid ID");
@@ -1180,7 +1182,7 @@ export class TeamService {
           : { signedUploadRequest: await this.files.signTeamUploadPart(upload.uuid, upload.size, upload.expiresAt) })
       };
     });
-    if (expiredObjects.length) await this.files.discardTeamUploadObjects(expiredObjects).catch(() => undefined);
+    if (expiredObjects.length) await this.files.discardUploads(expiredObjects).catch(() => undefined);
     return result;
   }
 
@@ -1219,66 +1221,86 @@ export class TeamService {
       if (pending) await manager.delete(TeamFileUploadEntity, { uuid: pending.uuid });
       return pending;
     });
-    if (upload) await this.files.discardTeamUploadObjects([upload.uuid, ...upload.parts]).catch(() => undefined);
+    if (upload) await this.files.discardUploads([upload.uuid, ...upload.parts]).catch(() => undefined);
     return {};
   }
 
+  /**
+   * Completes an upload in three steps, so that the team is locked only briefly (review 4.2): a short transaction
+   * checks the upload and keeps its reservation; the upload is sealed (its parts copied to the file's own object)
+   * without any lock; another short transaction checks membership, the team and the upload again, and registers the
+   * file. A member removed meanwhile, or an upload cancelled meanwhile, gets no file, and the sealed copy is deleted.
+   */
   async uploadFile(user: UserEntity, data: TeamRequestDto) {
     if (!data.uploadInfo) throw new BadRequestException("Upload information required");
     if (!data.uploadInfo.uuid)
       return await this.prepareFileUpload(user, { teamId: data.teamId, size: data.uploadInfo.size });
-    let uploadedParts: string[] = [];
-    const completed = await this.db.transaction(async manager => {
+    const name = text(data.name, 240, true);
+    // eslint-disable-next-line no-control-regex -- File names must exclude control bytes and path separators.
+    if (/[\u0000-\u001f/\\]/.test(name)) throw new BadRequestException("Invalid filename");
+    const upload = await this.db.transaction(async manager => {
       const { team } = await this.access(user, data.teamId, undefined, manager, true);
       await this.requireMember(user, team.id, manager);
       if (team.archived) throw new ConflictException();
-      const name = text(data.name, 240, true);
-      // eslint-disable-next-line no-control-regex -- File names must exclude control bytes and path separators.
-      if (/[\u0000-\u001f/\\]/.test(name)) throw new BadRequestException("Invalid filename");
-      const upload = await this.pendingFileUpload(manager, user, team.id, data.uploadInfo.uuid);
-      if (upload.size !== data.uploadInfo.size) throw new BadRequestException("FILE_SIZE_MISMATCH");
-      if (await manager.countBy(FileEntity, { uuid: upload.uuid })) throw new BadRequestException("FILE_UUID_EXISTS");
-      if (upload.parts.length)
-        await this.files.composeTeamUpload(
-          upload.uuid,
-          upload.parts.map((part, index) => ({
-            uuid: part,
-            size: Math.min(TEAM_FILE_PART_SIZE, upload.size - index * TEAM_FILE_PART_SIZE)
-          }))
-        );
-      const result = await this.files.processUploadRequest(
-        data.uploadInfo,
-        size =>
-          !Number.isSafeInteger(size) || size < 0 || size !== upload.size
-            ? "FILE_SIZE_MISMATCH"
-            : size + Number(team.quotaUsed) > Math.min(Number(team.quotaLimit), TEAM_FILE_QUOTA)
-              ? "TEAM_QUOTA_EXCEEDED"
-              : null,
-        manager,
-        // Team files aren't judged, and can be large: hashed in the background, not while the team is locked
-        false
-      );
-      if (typeof result === "string") throw new BadRequestException(result);
-      if (!(result instanceof FileEntity)) return { signedUploadRequest: result };
-      const file = await manager.save(
-        TeamFileEntity,
-        manager.create(TeamFileEntity, {
-          teamId: team.id,
-          name,
-          uuid: result.uuid,
-          size: result.size,
-          uploaderId: user.id,
-          archived: false,
-          createdAt: new Date()
-        })
-      );
-      team.quotaUsed = Number(team.quotaUsed) + result.size;
-      await manager.save(team);
-      await manager.delete(TeamFileUploadEntity, { uuid: upload.uuid });
-      uploadedParts = upload.parts;
-      return { fileId: file.id };
+      const pending = await this.pendingFileUpload(manager, user, team.id, data.uploadInfo.uuid);
+      if (pending.size !== data.uploadInfo.size) throw new BadRequestException("FILE_SIZE_MISMATCH");
+      if (await this.files.isUploadRegistered(pending.uuid, manager)) throw new BadRequestException("FILE_UUID_EXISTS");
+      if (+pending.expiresAt < Date.now() + FILE_SEALING_TIME) {
+        pending.expiresAt = new Date(Date.now() + FILE_SEALING_TIME);
+        await manager.save(pending);
+      }
+      return pending;
     });
-    if (uploadedParts.length) await this.files.discardTeamUploadObjects(uploadedParts).catch(() => undefined);
+    // Team files aren't judged, and can be large: hashed in the background. The sealed copy can't change meanwhile.
+    const sealed = await this.files.sealUpload(
+      upload.uuid,
+      upload.size,
+      upload.parts.map((part, index) => ({
+        uuid: part,
+        size: Math.min(TEAM_FILE_PART_SIZE, upload.size - index * TEAM_FILE_PART_SIZE)
+      })),
+      false,
+      true
+    );
+    if (sealed === "FILE_NOT_UPLOADED") throw new BadRequestException(sealed);
+    let completed: { fileId: number };
+    try {
+      completed = await this.db.transaction(async manager => {
+        const { team } = await this.access(user, data.teamId, undefined, manager, true);
+        await this.requireMember(user, team.id, manager);
+        if (team.archived) throw new ConflictException();
+        const pending = await manager.findOneBy(TeamFileUploadEntity, {
+          uuid: upload.uuid,
+          teamId: team.id,
+          userId: user.id
+        });
+        if (!pending) throw new BadRequestException("FILE_UPLOAD_EXPIRED");
+        if (sealed.size + Number(team.quotaUsed) > Math.min(Number(team.quotaLimit), TEAM_FILE_QUOTA))
+          throw new BadRequestException("TEAM_QUOTA_EXCEEDED");
+        const result = await this.files.registerSealedUpload(sealed, manager);
+        if (!(result instanceof FileEntity)) throw new BadRequestException(result);
+        const file = await manager.save(
+          TeamFileEntity,
+          manager.create(TeamFileEntity, {
+            teamId: team.id,
+            name,
+            uuid: result.uuid,
+            size: result.size,
+            uploaderId: user.id,
+            archived: false,
+            createdAt: new Date()
+          })
+        );
+        team.quotaUsed = Number(team.quotaUsed) + result.size;
+        await manager.save(team);
+        await manager.delete(TeamFileUploadEntity, { uuid: pending.uuid });
+        return { fileId: file.id };
+      });
+    } catch (e) {
+      await this.files.discardSealedUpload(sealed);
+      throw e;
+    }
+    await this.files.discardUploads([upload.uuid, ...upload.parts]).catch(() => undefined);
     return completed;
   }
 

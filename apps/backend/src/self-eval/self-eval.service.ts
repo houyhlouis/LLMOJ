@@ -240,22 +240,21 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
         throw new ForbiddenException();
       for (let index = 0; index < programs.length; index++) {
         if (fresh.testData[names[index]]) continue;
-        const fileId = uuid();
         // eslint-disable-next-line no-await-in-loop -- Publish both immutable source files before activating the profile.
-        await this.files.uploadFile(fileId, Buffer.from(programs[index]));
+        const upload = await this.files.storeUpload(Buffer.from(programs[index]));
         // addProblemFile acquires the problem read lock itself; do not call it under a write lock.
         // eslint-disable-next-line no-await-in-loop -- Each source must be registered before the recipe references it.
         const error = await this.problemFiles.addProblemFile(
           fresh.problem,
           ProblemFileType.TestData,
-          { uuid: fileId, size: Buffer.byteLength(programs[index]) },
+          upload,
           names[index],
           false,
           user
         );
         if (error) {
           // eslint-disable-next-line no-await-in-loop -- Remove the failed upload before rejecting the binding.
-          await this.files.deleteUnfinishedUploadedFile(fileId);
+          await this.files.discardUploads([upload.uuid]);
           throw new BadRequestException("Could not save the self-evaluation source file");
         }
       }

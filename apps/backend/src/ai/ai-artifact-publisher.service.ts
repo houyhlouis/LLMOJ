@@ -231,17 +231,14 @@ export class AiArtifactPublisher {
   }
 
   async putFile(problem: ProblemEntity, filename: string, data: string | Buffer, size: number) {
-    const uuid = randomUUID();
-    await this.files.uploadFile(uuid, data);
-    const result = await this.problemFiles.addProblemFile(
-      problem,
-      ProblemFileType.TestData,
-      { uuid, size },
-      filename,
-      true
-    );
+    const upload = await this.files.storeUpload(data);
+    if (upload.size !== size) {
+      await this.files.discardUploads([upload.uuid]);
+      throw new AiError("UPLOAD_GENERATED_FILE_FAILED", "the file changed while it was stored");
+    }
+    const result = await this.problemFiles.addProblemFile(problem, ProblemFileType.TestData, upload, filename, true);
     if (result) {
-      await this.files.deleteUnfinishedUploadedFile(uuid);
+      await this.files.discardUploads([upload.uuid]);
       throw new AiError(
         "UPLOAD_GENERATED_FILE_FAILED",
         typeof result === "string" ? result : "unexpected upload response"

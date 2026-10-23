@@ -71,6 +71,8 @@ Members can upload and download team files; file managers can archive and restor
 
 Large files upload automatically in 32 MiB parts, which the storage server joins, so other upload limits stay unchanged. Space is reserved before an upload starts, permissions are checked again for each part and at the end, and the stored size is verified, so neither simultaneous uploads nor a false file size can exceed the space. A failed or canceled upload releases its reservation; an interrupted upload expires after 24 hours and its parts are cleaned up.
 
+Finishing an upload doesn't hold up the rest of the team while a large file is joined. The upload is checked and its space kept; the parts are joined into the file's own object, which no upload link can change, without locking the team; then membership, the team and the upload are checked again before the file is added. A member removed, or an upload canceled, in the meantime gets no file, and the joined copy is deleted.
+
 Downloads check membership each time. A download link already issued keeps working for up to 60 seconds after a member leaves, but they can't get a new one.
 
 Installations from before teams existed need the database changes in [Feature upgrades](Community-Upgrade.md).

@@ -174,6 +174,34 @@ test('file content hashes and judge runtimes are added exactly once, and only wh
   assert.equal(RUNTIME_IDENTITY_SQL.length, 5);
 });
 
+test('sealed uploads add the file uploadUuid column and its unique index exactly once', async () => {
+  const { validateSealedUploadSchema, SEALED_UPLOAD_SQL, FILE_UPLOAD_UUID_SQL, FILE_UPLOAD_UUID_INDEX_SQL,
+    FILE_UPLOAD_UUID_INDEX } = await import('../sealed-upload-schema.mjs');
+  assert.deepEqual(validateQueries([...SEALED_UPLOAD_SQL]), [...SEALED_UPLOAD_SQL]);
+  assert.throws(() => validateQueries([FILE_UPLOAD_UUID_SQL.replace('NULL', 'NOT NULL')]));
+  assert.throws(() => validateQueries([FILE_UPLOAD_UUID_INDEX_SQL.replace('UNIQUE INDEX', 'INDEX')]));
+  const column = { columnType: 'char(36)', isNullable: 'YES', defaultValue: 'NULL', extra: '', comment: '' };
+  const index = { name: FILE_UPLOAD_UUID_INDEX, nonUnique: 0, position: 1, columnName: 'uploadUuid' };
+  const fixture = (columns, indexes) => ({
+    query: async sql => (sql.includes('information_schema.COLUMNS') ? columns : indexes)
+  });
+  await validateSealedUploadSchema(fixture([], []), [...SEALED_UPLOAD_SQL]);
+  await validateSealedUploadSchema(fixture([column], [index]), []);
+  await validateSealedUploadSchema(fixture([{ ...column, defaultValue: null }], [index]), []);
+  // Partially applied: the index alone remains
+  await validateSealedUploadSchema(fixture([column], []), [FILE_UPLOAD_UUID_INDEX_SQL]);
+  await assert.rejects(() => validateSealedUploadSchema(fixture([], []), [FILE_UPLOAD_UUID_SQL]), /uploadUuid index addition/);
+  await assert.rejects(() => validateSealedUploadSchema(fixture([column], [index]), [FILE_UPLOAD_UUID_SQL]), /uploadUuid column addition/);
+  await assert.rejects(() => validateSealedUploadSchema(fixture([], []), [...SEALED_UPLOAD_SQL, FILE_UPLOAD_UUID_SQL]), /column addition/);
+  for (const changed of [{ isNullable: 'NO' }, { defaultValue: "''" }, { columnType: 'varchar(36)' }, { extra: 'x' }, { comment: 'x' }])
+    await assert.rejects(() => validateSealedUploadSchema(fixture([{ ...column, ...changed }], [index]), []),
+      /Unsupported existing file uploadUuid column/);
+  for (const indexes of [[{ ...index, nonUnique: 1 }], [index, { ...index, position: 2, columnName: 'uuid' }],
+    [{ ...index, name: 'IDX_other' }], [index, { ...index, name: 'IDX_other' }]])
+    await assert.rejects(() => validateSealedUploadSchema(fixture([column], indexes), []), /Unsupported existing file uploadUuid index/);
+  assert.equal(SEALED_UPLOAD_SQL.length, 2);
+});
+
 test('the AI execution table is added exactly once', async () => {
   const { validateAiExecutionSchema, AI_EXECUTION_SQL, AI_EXECUTION_CREATE_SQL } = await import('../ai-execution-schema.mjs');
   assert.deepEqual(validateQueries([...AI_EXECUTION_SQL]), [...AI_EXECUTION_SQL]);

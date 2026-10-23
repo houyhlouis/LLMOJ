@@ -8,7 +8,9 @@
  * - MariaDB: the *_TEST_DB_CONFIG variables naming disposable databases (see README-DEVELOPMENT.md);
  * - redis-server, for the judge queue and Redis suites;
  * - root (or passwordless sudo), for the deploy suites' cases that create accounts, mount or run services;
- * - Chrome or Chromium, for the service worker test: LLMOJ_TEST_CHROME, or google-chrome or chromium on PATH.
+ * - Chrome or Chromium, for the service worker test: LLMOJ_TEST_CHROME, or google-chrome or chromium on PATH;
+ * - MinIO (LLMOJ_MINIO_BINARY, or an installation's runtime/minio), for the upload sealing test and the backup
+ *   verifier's content check.
  * Building the backend first (`pnpm build`) is needed by the schema and API contract suites.
  */
 import fs from 'node:fs';
@@ -34,6 +36,7 @@ const BACKEND_SUITES = [
   'apps/backend/src/study-list/*.test.cjs', 'apps/backend/src/auth/two-factor/*.test.cjs', 'apps/backend/src/health/*.test.cjs',
   'apps/backend/src/common/*.test.cjs', 'apps/backend/src/metrics/*.test.cjs', 'apps/backend/src/redis/*.test.cjs',
   'apps/backend/src/file/file-maintenance.test.cjs', 'apps/backend/src/file/file-content-hash.test.cjs',
+  'apps/backend/src/file/file-sealing.minio.test.cjs',
   'apps/backend/src/archive/*.test.cjs'
 ];
 
@@ -119,6 +122,9 @@ if (spawnSync('redis-server', ['--version'], { stdio: 'ignore' }).status !== 0) 
 const chrome = process.env.LLMOJ_TEST_CHROME || ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser']
   .some(name => spawnSync('which', [name], { stdio: 'ignore' }).status === 0);
 if (groups.includes('deploy') && !chrome) missing.push('Chrome or Chromium (the service worker test skips)');
+const minio = process.env.LLMOJ_MINIO_BINARY || ['/opt/LLMOJ/runtime/minio'].find(file => fs.existsSync(file));
+if ((groups.includes('backend') || groups.includes('deploy')) && !minio)
+  missing.push('MinIO (the upload sealing test and the backup content check skip)');
 
 const results = [];
 for (const group of groups)
