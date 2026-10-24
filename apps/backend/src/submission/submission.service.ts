@@ -35,6 +35,7 @@ import { UserEntity } from "../user/user.entity";
 import { ProblemEntity } from "../problem/problem.entity";
 import { JudgeQueueService } from "../judge/judge-queue.service";
 import { ProblemDataVersionService } from "../problem/problem-data-version.service";
+import { TestDataRetentionService } from "../problem/test-data-retention.service";
 import { JudgeGateway } from "../judge/judge.gateway";
 import { JudgeRuntimeService } from "../judge/judge-runtime.service";
 import { ProblemTypeFactoryService } from "../problem-type/problem-type-factory.service";
@@ -77,7 +78,9 @@ export class SubmissionService {
     private readonly userPrivilegeService: UserPrivilegeService,
     @Inject(forwardRef(() => ProblemDataVersionService))
     private readonly problemDataVersionService: ProblemDataVersionService,
-    private readonly statisticsOutboxService: StatisticsOutboxService
+    private readonly statisticsOutboxService: StatisticsOutboxService,
+    @Inject(forwardRef(() => TestDataRetentionService))
+    private readonly testDataRetentionService: TestDataRetentionService
   ) {
     this.auditService.registerObjectTypeQueryHandler(AuditLogObjectType.Submission, async submissionId => {
       const submission = await this.findSubmissionById(submissionId);
@@ -494,7 +497,8 @@ export class SubmissionService {
     } catch (e) {
       logger.warn(`Couldn't compare the data version of submission ${submission.id}: ${e}`);
     }
-    return { version: dataVersion.version, current };
+    const testData = (await this.testDataRetentionService.describeAvailability([dataVersion.id])).get(dataVersion.id);
+    return { version: dataVersion.version, current, testData };
   }
 
   /** What the submission's result was judged with, or `null` if it isn't recorded. */
@@ -511,8 +515,10 @@ export class SubmissionService {
       where: { submissionId: submission.id },
       order: { id: "DESC" }
     });
-    const [versions, runtimes] = await Promise.all([
-      this.problemDataVersionService.findVersionNumbers(history.map(result => result.problemDataVersionId)),
+    const versionIds = history.map(result => result.problemDataVersionId);
+    const [versions, testData, runtimes] = await Promise.all([
+      this.problemDataVersionService.findVersionNumbers(versionIds),
+      this.testDataRetentionService.describeAvailability(versionIds),
       this.judgeRuntimeService?.describe(history.map(result => result.judgeRuntimeId)) ?? new Map()
     ]);
     return history.map(result => ({
@@ -521,6 +527,7 @@ export class SubmissionService {
       timeUsed: result.timeUsed,
       memoryUsed: result.memoryUsed,
       dataVersion: versions.get(result.problemDataVersionId) ?? null,
+      testData: testData.get(result.problemDataVersionId),
       judgeRuntime: runtimes.get(result.judgeRuntimeId) ?? null,
       replacedAt: result.replacedAt
     }));

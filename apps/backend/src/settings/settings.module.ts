@@ -7,6 +7,7 @@ import { RegistrationSettingsService } from "./registration-settings.service";
 import { AiPolicyService } from "./ai-policy.service";
 import { JudgePolicyService } from "./judge-policy.service";
 import { AiEndpointPolicyService } from "./ai-endpoint-policy.service";
+import { TestDataRetentionPolicyService } from "./test-data-retention-policy.service";
 
 import { ConfigModule } from "../config/config.module";
 
@@ -17,8 +18,16 @@ import { ConfigModule } from "../config/config.module";
     RegistrationSettingsService,
     AiPolicyService,
     JudgePolicyService,
-    AiEndpointPolicyService
+    AiEndpointPolicyService,
+    TestDataRetentionPolicyService
   ],
-  exports: [SettingsService, RegistrationSettingsService, AiPolicyService, JudgePolicyService, AiEndpointPolicyService]
+  exports: [
+    SettingsService,
+    RegistrationSettingsService,
+    AiPolicyService,
+    JudgePolicyService,
+    AiEndpointPolicyService,
+    TestDataRetentionPolicyService
+  ]
 })
 export class SettingsModule {}

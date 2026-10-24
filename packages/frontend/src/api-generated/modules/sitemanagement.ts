@@ -26,3 +26,10 @@ export const updateAiEndpointPolicy = createPostApi<ApiTypes.AiEndpointPolicyDto
   "site-management/updateAiEndpointPolicy",
   {}
 );
+export const getTestDataRetention = createGetApi<void, ApiTypes.TestDataRetentionReportDto>(
+  "site-management/getTestDataRetention"
+);
+export const updateTestDataRetention = createPostApi<
+  ApiTypes.TestDataRetentionPolicyDto,
+  ApiTypes.TestDataRetentionPolicyDto
+>("site-management/updateTestDataRetention", {});

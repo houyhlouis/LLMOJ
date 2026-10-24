@@ -63,7 +63,13 @@ const cases = {
     }
   },
   ...Object.fromEntries(
-    ["updateRegistrationMode", "updateAiPolicy", "updateJudgePolicy", "updateAiEndpointPolicy"].map(route => [
+    [
+      "updateRegistrationMode",
+      "updateAiPolicy",
+      "updateJudgePolicy",
+      "updateAiEndpointPolicy",
+      "updateTestDataRetention"
+    ].map(route => [
       `site setting ${route}`,
       async (user, recent) => {
         let changes = 0;
@@ -79,7 +85,9 @@ const cases = {
           { update: change },
           { update: change },
           { update: change },
-          sessions(recent)
+          sessions(recent),
+          { update: change },
+          {}
         );
         try {
           await site[route](user, route === "updateRegistrationMode" ? { registrationMode: "closed" } : {}, req);
@@ -159,6 +167,7 @@ test("users who may not make a change are refused without being asked for a pass
     "site setting updateAiPolicy",
     "site setting updateJudgePolicy",
     "site setting updateAiEndpointPolicy",
+    "site setting updateTestDataRetention",
     "judge machine addJudgeClient",
     "judge machine resetJudgeClientKey",
     "judge machine getJudgeClientKey"

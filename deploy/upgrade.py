@@ -28,6 +28,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -134,6 +135,10 @@ def say(english, chinese):
 
 class UpgradeError(RuntimeError):
     """Only deliberately non-sensitive messages may reach the terminal."""
+
+
+class Cancelled(UpgradeError):
+    """Ctrl+C or SIGTERM before the website was stopped"""
 
 
 def fail(message):
@@ -395,6 +400,302 @@ def maintenance_lock(directory=Path('/run/libreoj-installer')):
         os.close(fd)
 
 
+def maintenance_running(path=Path('/run/libreoj-installer/lock')):
+    """Whether an install, upgrade, judge resize or backup holds the maintenance lock (tried, never kept)."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    except OSError:
+        return True
+    finally:
+        os.close(fd)
+
+
+# The steps of an upgrade, in order, as the person running it sees them: (key, English, Chinese). The website keeps
+# running until 'stop' and runs again from 'start-site'. A step an upgrade doesn't need is shown as not needed.
+STEPS = (
+    ('check', 'Checking the installation and the new version', '检查安装和新版本'),
+    ('copy', 'Copying the installation to a staging area', '把安装复制到暂存区'),
+    ('dependencies', 'Installing the changed dependencies', '安装有变化的依赖'),
+    ('native', "Rebuilding the sandbox and the judge's native programs", '重新构建沙箱和评测机的本地程序'),
+    ('judge', 'Checking the judge (types and regression tests)', '检查评测机（类型和回归测试）'),
+    ('backend', 'Building the backend', '构建后端'),
+    ('frontend', 'Building the website', '构建网站前端'),
+    ('trial', 'Checking the configuration and trying the database changes on a copy', '检查配置，并在数据库副本上试做数据库变更'),
+    ('stop', 'Stopping the website, the backend and the judge', '停止网站、后端和评测机'),
+    ('sandbox', 'Testing the new judge and sandbox on this server', '在本机测试新的评测机和沙箱'),
+    ('backup', 'Backing up the database', '备份数据库'),
+    ('retrial', 'Trying the database changes on a copy of this backup', '在这份备份的副本上再试数据库变更'),
+    ('database', 'Changing the database', '变更数据库'),
+    ('switch', 'Switching to the new version', '切换到新版本'),
+    ('start-backend', 'Starting the backend and waiting until it is ready', '启动后端并等待就绪'),
+    ('start-judge', 'Starting the judge and waiting until it connects', '启动评测机并等待连接'),
+    ('start-site', 'Starting the website', '启动网站'),
+)
+STEP_KEYS = tuple(key for key, _, _ in STEPS)
+# Steps of a rollback, which aren't numbered
+OTHER_STEPS = {
+    'rollback-stop': ('Stopping the website, the backend and the judge', '停止网站、后端和评测机'),
+    'restore': ('Putting the previous version back', '恢复上一个版本的文件')
+}
+PROGRESS_RECORD = 'progress.json'
+PROGRESS_LOG = 'progress.log'
+
+
+def step_title(key):
+    for name, english, chinese in STEPS:
+        if name == key:
+            return say(english, chinese)
+    return say(*OTHER_STEPS[key])
+
+
+def duration(seconds):
+    seconds = max(0, int(seconds))
+    hours, rest = divmod(seconds, 3600)
+    minutes, seconds = divmod(rest, 60)
+    if hours:
+        return say(f'{hours} h {minutes} min', f'{hours} 小时 {minutes} 分')
+    if minutes:
+        return say(f'{minutes} min {seconds} s', f'{minutes} 分 {seconds} 秒')
+    return say(f'{seconds} s', f'{seconds} 秒')
+
+
+def utc_now():
+    return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+class Progress:
+    """What the upgrade is doing: printed for the person running it, and recorded in its backup directory
+    (progress.json and progress.log), where `--status` and doctor read it from another terminal.
+
+    Reporting never fails an upgrade or its rollback: a terminal that went away (a dropped SSH connection) only ends
+    the printing, and a record that can't be written is skipped."""
+
+    def __init__(self, stream=None, live=None, heartbeat=60, clock=time.monotonic):
+        self.stream = stream
+        try:
+            self.live = stream is not None and (stream.isatty() if live is None else live)
+        except (AttributeError, OSError, ValueError):
+            self.live = False
+        self.heartbeat = heartbeat
+        self.clock = clock
+        self.lock = threading.RLock()
+        self.directory = None
+        self.pending = []
+        self.started = clock()
+        self.record = {'version': 1, 'pid': os.getpid(), 'state': 'running', 'startedAt': utc_now(), 'steps': []}
+        self.rollback = False
+        self.running = None
+        self.offline_since = None
+        self.offline_seconds = None
+        self.notes = []
+
+    def _print(self, text, end='\n'):
+        with self.lock:
+            if self.stream is None:
+                return
+            try:
+                try:
+                    self.stream.write(text+end)
+                except UnicodeEncodeError:
+                    encoding = getattr(self.stream, 'encoding', None) or 'ascii'
+                    self.stream.write((text+end).encode(encoding, 'replace').decode(encoding))
+                self.stream.flush()
+            except (OSError, ValueError):
+                # The terminal went away. What couldn't be written stays buffered, and Python would fail flushing it
+                # at exit, so later prints go nowhere instead.
+                if self.stream is sys.stdout:
+                    try:
+                        sys.stdout = open(os.devnull, 'w')
+                    except OSError:
+                        pass
+                self.stream = None
+
+    def _log(self, text):
+        line = utc_now()+' '+text+'\n'
+        with self.lock:
+            if self.directory is None:
+                self.pending.append(line)
+                return
+            try:
+                fd = os.open(self.directory/PROGRESS_LOG, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+                with os.fdopen(fd, 'a') as stream:
+                    stream.write(line)
+            except OSError:
+                pass
+
+    def _save(self):
+        with self.lock:
+            if self.directory is None:
+                return
+            self.record['updatedAt'] = utc_now()
+            try:
+                write_json(self.directory/PROGRESS_RECORD, self.record)
+            except OSError:
+                pass
+
+    def say(self, english, chinese):
+        """A line for the person running the upgrade, also kept in the log."""
+        text = say(english, chinese)
+        with self.lock:
+            if self.live and self.running:
+                self._print('\r\x1b[K'+text+'\n'+self.running+' …', end='')
+            else:
+                self._print(text)
+        self._log(text)
+
+    def begin(self, target, prefix, command):
+        self.record['target'] = target
+        self.record['prefix'] = str(prefix)
+        version = str(target.get('commit') or target.get('treeSha256') or '')[:12]
+        stop = STEP_KEYS.index('stop')+1
+        self.say(f'Upgrading {prefix} to {version}. The website keeps running until step {stop} of {len(STEPS)}.',
+                 f'正在把 {prefix} 升级到 {version}。第 {stop}/{len(STEPS)} 步之前，网站照常运行。')
+        self.say(f'To follow it from another terminal: sudo bash {command} --prefix {prefix} --status',
+                 f'可在另一个终端查看进度：sudo bash {command} --prefix {prefix} --status')
+
+    def attach(self, directory, resume=False):
+        """Records progress in an upgrade's backup directory from now on, with the lines printed so far."""
+        with self.lock:
+            self.directory = Path(directory)
+            if resume:
+                try:
+                    record = json.loads((self.directory/PROGRESS_RECORD).read_text())
+                    if isinstance(record, dict) and isinstance(record.get('steps'), list):
+                        self.record = record
+                except (OSError, ValueError):
+                    pass
+            for line in self.pending:
+                try:
+                    fd = os.open(self.directory/PROGRESS_LOG, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+                    with os.fdopen(fd, 'a') as stream:
+                        stream.write(line)
+                except OSError:
+                    pass
+            self.pending = []
+        self._save()
+
+    def label(self, key):
+        if self.rollback:
+            return '  ↺ '+step_title(key)
+        number = STEP_KEYS.index(key)+1 if key in STEP_KEYS else None
+        return (f'[{number:>2}/{len(STEPS)}] ' if number else '') + step_title(key)
+
+    def _tick(self, stop, label, started):
+        last = self.clock()
+        while not stop.wait(1):
+            elapsed = self.clock()-started
+            if self.live:
+                self._print('\r\x1b[K'+label+' … '+duration(elapsed), end='')
+            elif self.clock()-last >= self.heartbeat:
+                last = self.clock()
+                self._print(label+say(f': still running ({duration(elapsed)})', f'：仍在进行（{duration(elapsed)}）'))
+
+    @contextlib.contextmanager
+    def step(self, key):
+        label = self.label(key)
+        started = self.clock()
+        entry = {'key': key, 'state': 'running', 'startedAt': utc_now()}
+        if self.rollback:
+            entry['rollback'] = True
+        with self.lock:
+            self.record['steps'].append(entry)
+            # For doctor, which doesn't know the steps
+            self.record['current'] = {'key': key, 'title': step_title(key), 'rollback': self.rollback,
+                                      **({'number': STEP_KEYS.index(key)+1, 'of': len(STEPS)}
+                                         if key in STEP_KEYS and not self.rollback else {})}
+            self.running = label
+        self._save()
+        self._log(label+' …')
+        self._print(label+' …', end='' if self.live else '\n')
+        stop = threading.Event()
+        ticker = threading.Thread(target=self._tick, args=(stop, label, started), daemon=True)
+        ticker.start()
+        try:
+            yield
+        except BaseException:
+            stop.set()
+            ticker.join()
+            seconds = round(self.clock()-started)
+            entry.update(state='failed', seconds=seconds)
+            self._finish_line(label, say(f': failed after {duration(seconds)}', f'：{duration(seconds)} 后失败'))
+            raise
+        else:
+            stop.set()
+            ticker.join()
+            seconds = round(self.clock()-started)
+            entry.update(state='done', seconds=seconds)
+            self._finish_line(label, say(f': done ({duration(seconds)})', f'：完成（{duration(seconds)}）'))
+        finally:
+            with self.lock:
+                self.running = None
+            self._save()
+            self._say_notes()
+
+    def _finish_line(self, label, outcome):
+        self._print(('\r\x1b[K' if self.live else '')+label+outcome)
+        self._log(label+outcome)
+
+    def skip(self, key):
+        """A numbered step this upgrade doesn't need. Not shown in a rollback."""
+        if self.rollback:
+            return
+        with self.lock:
+            self.record['steps'].append({'key': key, 'state': 'skipped'})
+        self._save()
+        text = self.label(key)+say(': not needed', '：不需要')
+        self._print(text)
+        self._log(text)
+
+    def offline(self):
+        """The website stopped: said once the current step ends."""
+        if self.offline_since is None:
+            self.offline_since = self.clock()
+            self.record['offlineAt'] = utc_now()
+            self._save()
+            self.notes.append(('The website is offline from now on.', '网站从现在起暂停访问。'))
+            if self.running is None:
+                self._say_notes()
+
+    def _say_notes(self):
+        notes, self.notes = self.notes, []
+        for note in notes:
+            self.say(*note)
+
+    def online(self):
+        if self.offline_since is not None and self.offline_seconds is None:
+            self.offline_seconds = round(self.clock()-self.offline_since)
+            self.record.update(onlineAt=utc_now(), offlineSeconds=self.offline_seconds)
+            self._save()
+            self.notes.append((f'The website is back online (it was offline for {duration(self.offline_seconds)}).',
+                               f'网站已恢复访问（暂停了 {duration(self.offline_seconds)}）。'))
+            if self.running is None:
+                self._say_notes()
+
+    def begin_rollback(self, reason=None):
+        self.rollback = True
+        if reason:
+            self.record['message'] = reason
+        self.record['state'] = 'rolling-back'
+        self._save()
+        self.say('Putting the previous version back:', '正在恢复上一个版本：')
+
+    def finish(self, state, message=None):
+        """complete, failed, cancelled, rolled-back or rollback-failed"""
+        with self.lock:
+            self.record['state'] = state
+            self.record['seconds'] = round(self.clock()-self.started)
+            self.record.pop('current', None)
+            if message is not None:
+                self.record['message'] = message
+        self._save()
+
+
 class Host:
     def run(self, args, *, check=True, input=None, output=None, error_output=None, cwd=None, env=None, timeout=300, umask=-1):
         try:
@@ -471,9 +772,12 @@ def extract_archive(data, destination):
 
 
 class Upgrade:
-    def __init__(self, root, host=None, units=Path('/etc/systemd/system')):
+    def __init__(self, root, host=None, units=Path('/etc/systemd/system'), progress=None):
         self.root = safe_dir(Path(root))
         self.host = host or Host()
+        self.progress = progress or Progress()
+        # Whether this process holds the maintenance lock
+        self.locked = False
         self.units = Path(units)
         self.guard = self.units/'libreoj-backend.service.d'/GUARD_NAME
         self.backup = None
@@ -593,8 +897,35 @@ class Upgrade:
         if tables or extras != '000' or nontransactional != '0':
             fail('Custom database views, triggers, routines or events require manual upgrade')
         self.database_bytes = int(self.sql("SELECT COALESCE(SUM(DATA_LENGTH+INDEX_LENGTH),0) FROM information_schema.TABLES WHERE TABLE_SCHEMA='libreoj'"))
+        if not recovery:
+            unfinished = self.unfinished_upgrade()
+            # While another process holds the maintenance lock, that may be this upgrade, still running
+            if unfinished and (self.locked or not maintenance_running()):
+                backup, status = unfinished
+                fail(say(f'The upgrade in {backup} stopped halfway ({status}), so the installation may be partly '
+                         f'switched. Roll it back first: sudo bash {self.root}/deploy/upgrade.sh --prefix {self.root} '
+                         f'--rollback {backup} --drained (see "Rolling back" in the upgrade guide)',
+                         f'{backup} 的升级中途停止（{status}），安装可能只切换了一部分。请先回滚：sudo bash '
+                         f'{self.root}/deploy/upgrade.sh --prefix {self.root} --rollback {backup} --drained'
+                         f'（见升级说明中的“回滚”）'))
         return {'role': self.role, 'prefix': str(self.root), 'node': self.node_version, 'pnpm': self.pnpm_version,
                 'services': self.states, 'databaseBytes': self.database_bytes, 'scope': 'code and locked dependency changes on the pinned Node/pnpm + frozen community/contest/permission schema + reviewed Hack/SelfEval runtime + verified data migration'}
+
+    def unfinished_upgrade(self):
+        """(backup directory, status) of the latest upgrade after the last completed one that stopped while the
+        website was offline, or whose rollback failed: None if there is none. Doctor reports the same."""
+        base = self.root/'backups/upgrade'
+        unfinished = None
+        for manifest in sorted(base.glob('*/manifest.json')) if base.is_dir() else ():
+            try:
+                status = json.loads(manifest.read_text()).get('status')
+            except (OSError, UnicodeError, ValueError, AttributeError):
+                continue
+            if status == 'complete':
+                unfinished = None
+            elif status in ('maintenance', 'rollback-failed'):
+                unfinished = (manifest.parent, status)
+        return unfinished
 
     def deployed_by_upgrade(self):
         """Whether the installed source is exactly what one of this installation's completed upgrades deployed."""
@@ -731,57 +1062,60 @@ class Upgrade:
         write_json(self.backup/'manifest.json', self.manifest)
 
     def prepare(self, source, provenance):
-        self.compatibility(source)
-        self.check_space(source)
-        base = self.root/'backups'
-        if not base.exists():
-            base.mkdir(mode=0o700)
-        safe_dir(base)
-        base = base/'upgrade'
-        if not base.exists():
-            base.mkdir(mode=0o700)
-        safe_dir(base, private=True)
-        self.backup = base/(datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+secrets.token_hex(4))
-        self.backup.mkdir(mode=0o700)
-        self.stage = self.backup/'staging'
-        self.stage.mkdir(mode=0o755)
-        # Independent copies: builds must never write through into running dependencies.
-        for name in ('apps', 'packages', 'node_modules', 'public'):
-            self.host.run(['cp', '-a', '--reflink=auto', self.root/name, self.stage/name], timeout=1800)
-        for relative, path in source_files(source):
-            target = self.stage/relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, target)
-        if any(digest(self.stage/relative) != expected for relative, expected in self.compatibility(source).items()):
-            fail('Source changed while preparing staging')
-        if (self.root/'deploy/systemd').exists():
-            shutil.copytree(self.root/'deploy/systemd', self.stage/'deploy/systemd', dirs_exist_ok=True)
-        # Delete removed backend/frontend source modules; stale compiled entities are
-        # erased by the backend's own prebuild before target compilation.
-        for name in ('apps/backend/src', 'apps/judge/src', 'packages/frontend/src'):
-            shutil.rmtree(self.stage/name)
-            shutil.copytree(source/name, self.stage/name)
-        if tree_digest(source) != provenance['treeSha256']:
-            fail('Source changed during staging')
-        self.host.run(['cp', '-a', '--reflink=auto', self.root/'config', self.backup/'config'], timeout=300)
-        if self.key_before:
-            shutil.copy2(self.root/'data/ai/master.key', self.backup/'ai-master.key')
-            (self.backup/'ai-master.key').chmod(0o600)
-        self.manifest = {'version': 1, 'prefix': str(self.root), 'provenance': provenance, 'status': 'building', 'states': self.states,
-                         'config': self.config_before, 'aiMasterKeySha256': self.key_before, 'unitHashes': self.unit_fingerprint,
-                         'guardBefore': self.guard_before, 'entries': [], 'port': self.port, 'dependencyChanges': self.dependency_changes}
-        self.save()
+        with self.progress.step('copy'):
+            self.compatibility(source)
+            self.check_space(source)
+            base = self.root/'backups'
+            if not base.exists():
+                base.mkdir(mode=0o700)
+            safe_dir(base)
+            base = base/'upgrade'
+            if not base.exists():
+                base.mkdir(mode=0o700)
+            safe_dir(base, private=True)
+            self.backup = base/(datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+secrets.token_hex(4))
+            self.backup.mkdir(mode=0o700)
+            self.progress.attach(self.backup)
+            self.stage = self.backup/'staging'
+            self.stage.mkdir(mode=0o755)
+            # Independent copies: builds must never write through into running dependencies.
+            for name in ('apps', 'packages', 'node_modules', 'public'):
+                self.host.run(['cp', '-a', '--reflink=auto', self.root/name, self.stage/name], timeout=1800)
+            for relative, path in source_files(source):
+                target = self.stage/relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, target)
+            if any(digest(self.stage/relative) != expected for relative, expected in self.compatibility(source).items()):
+                fail('Source changed while preparing staging')
+            if (self.root/'deploy/systemd').exists():
+                shutil.copytree(self.root/'deploy/systemd', self.stage/'deploy/systemd', dirs_exist_ok=True)
+            # Delete removed backend/frontend source modules; stale compiled entities are
+            # erased by the backend's own prebuild before target compilation.
+            for name in ('apps/backend/src', 'apps/judge/src', 'packages/frontend/src'):
+                shutil.rmtree(self.stage/name)
+                shutil.copytree(source/name, self.stage/name)
+            if tree_digest(source) != provenance['treeSha256']:
+                fail('Source changed during staging')
+            self.host.run(['cp', '-a', '--reflink=auto', self.root/'config', self.backup/'config'], timeout=300)
+            if self.key_before:
+                shutil.copy2(self.root/'data/ai/master.key', self.backup/'ai-master.key')
+                (self.backup/'ai-master.key').chmod(0o600)
+            self.manifest = {'version': 1, 'prefix': str(self.root), 'provenance': provenance, 'status': 'building', 'states': self.states,
+                             'config': self.config_before, 'aiMasterKeySha256': self.key_before, 'unitHashes': self.unit_fingerprint,
+                             'guardBefore': self.guard_before, 'entries': [], 'port': self.port, 'dependencyChanges': self.dependency_changes}
+            self.save()
         self.build()
-        self.make_publish_readable()
-        self.check_backend_configuration()
-        self.assert_preserved()
-        # External databases can reference this instance; these incoming keys are
-        # absent from a restored clone, so audit the live schema read-only first.
-        self.schema('libreoj')
-        self.dump(self.backup/'preflight.sql')
-        self.schema_on_clone(self.backup/'preflight.sql')
-        self.manifest['status'] = 'ready'
-        self.save()
+        with self.progress.step('trial'):
+            self.make_publish_readable()
+            self.check_backend_configuration()
+            self.assert_preserved()
+            # External databases can reference this instance; these incoming keys are
+            # absent from a restored clone, so audit the live schema read-only first.
+            self.schema('libreoj')
+            self.dump(self.backup/'preflight.sql')
+            self.schema_on_clone(self.backup/'preflight.sql')
+            self.manifest['status'] = 'ready'
+            self.save()
 
     def build(self):
         env = dict(os.environ, PATH=str(self.root/'runtime/node/bin')+':'+os.environ.get('PATH', ''), NODE_OPTIONS='--max-old-space-size=1200',
@@ -790,32 +1124,49 @@ class Upgrade:
                    npm_config_nodedir=str(self.root/'runtime/node'))
         fd = os.open(self.backup/'build.log', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, 'wb') as log:
+            def run(commands):
+                for command in commands:
+                    self.host.run(command, cwd=self.stage, env=env, output=log, error_output=log, timeout=1800, umask=0o022)
+
             if self.dependency_changes:
-                self.install_dependencies(env, log)
-            commands = [[self.node, self.pnpm, '--filter', '@libreoj/judge-protocol', 'run', 'build']]
+                with self.progress.step('dependencies'):
+                    self.install_dependencies(env, log)
+            else:
+                self.progress.skip('dependencies')
+            native = []
             if self.role == 'all':
                 if self.sandbox_changed:
                     # The sandbox's compiled TypeScript (lib) is not part of the source tree.
-                    commands.append([self.node, self.pnpm, '--filter', 'simple-sandbox', 'run', 'build'])
+                    native.append([self.node, self.pnpm, '--filter', 'simple-sandbox', 'run', 'build'])
                 for package in self.native_rebuild:
                     # The copied build directory belongs to the live tree; configure from scratch.
                     shutil.rmtree(self.stage/package/'build', ignore_errors=True)
-                    commands.append([self.node, self.pnpm, '--filter', NATIVE_PACKAGES[package]['name'], 'run', 'build:native'])
+                    native.append([self.node, self.pnpm, '--filter', NATIVE_PACKAGES[package]['name'], 'run', 'build:native'])
                 if 'apps/judge' in self.native_rebuild:
-                    commands.append([self.node, self.pnpm, '--filter', '@libreoj/judge', 'run', 'test:native'])
-            commands.append([self.node, self.pnpm, '--filter', '@libreoj/judge', 'run', 'check-types'])
-            for regression in JUDGE_REGRESSIONS:
-                if (self.stage/regression).is_file():
-                    commands.append([self.node, '--test', self.stage/regression])
-            commands.extend([
-                [self.node, self.pnpm, '--filter', '@libreoj/backend', 'run', 'build'],
-                [self.node, self.pnpm, '--filter', '@libreoj/frontend', 'run', 'build'],
-                [self.node, self.stage/'deploy/build-frontend-offline.mjs']
-            ])
-            for command in commands:
-                self.host.run(command, cwd=self.stage, env=env, output=log, error_output=log, timeout=1800, umask=0o022)
-        if self.dependency_changes:
-            self.relocate_dependencies()
+                    native.append([self.node, self.pnpm, '--filter', '@libreoj/judge', 'run', 'test:native'])
+            # The judge protocol is built first, before anything that may use it
+            protocol = [self.node, self.pnpm, '--filter', '@libreoj/judge-protocol', 'run', 'build']
+            if native:
+                with self.progress.step('native'):
+                    run([protocol, *native])
+            else:
+                self.progress.skip('native')
+            with self.progress.step('judge'):
+                run([*([] if native else [protocol]),
+                     [self.node, self.pnpm, '--filter', '@libreoj/judge', 'run', 'check-types'],
+                     *([self.node, '--test', self.stage/regression] for regression in JUDGE_REGRESSIONS
+                       if (self.stage/regression).is_file())])
+            with self.progress.step('backend'):
+                run([[self.node, self.pnpm, '--filter', '@libreoj/backend', 'run', 'build']])
+            with self.progress.step('frontend'):
+                run([[self.node, self.pnpm, '--filter', '@libreoj/frontend', 'run', 'build'],
+                     [self.node, self.stage/'deploy/build-frontend-offline.mjs']])
+                if self.dependency_changes:
+                    self.relocate_dependencies()
+                self.check_build()
+
+    def check_build(self):
+        """Whether the build produced everything the new version runs."""
         if not (self.stage/'apps/backend/dist/main.js').is_file() or not (self.stage/'public/index.html').is_file() or not (self.stage/'public/offline-manifest.json').is_file():
             fail('Build did not produce required artifacts')
         for package in self.native_rebuild:
@@ -951,12 +1302,15 @@ class Upgrade:
     def stop_apps(self, require_drained=False):
         self.paused = True
         self.host.service('stop', 'libreoj-nginx.service')
+        if self.states['libreoj-nginx.service']:
+            self.progress.offline()
         if require_drained:
             try:
                 self.assert_drained()
             except BaseException:
                 if self.states['libreoj-nginx.service']:
                     self.host.service('start', 'libreoj-nginx.service')
+                    self.progress.online()
                 self.paused = False
                 raise
         if self.role == 'all':
@@ -992,6 +1346,9 @@ class Upgrade:
             if self.judge_account() != 'exists':
                 fail(f'Could not create the account {JUDGE_ACCOUNT}')
 
+    def self_test_needed(self):
+        return self.role == 'all' and bool(self.runtime_changes or self.dependency_changes) and (self.stage/'apps/judge/self-test.mjs').is_file()
+
     def verify_sandbox(self):
         """Check the staged sandbox and judge on this host, while the judge is stopped."""
         if self.sandbox_changed:
@@ -1002,7 +1359,7 @@ class Upgrade:
                            '--property=WorkingDirectory='+str(self.stage/'apps/judge'),
                            self.node, self.stage/'deploy/sandbox/verify-installed.mjs', '--root', self.root,
                            '--sandbox', self.stage/'packages/simple-sandbox'], timeout=180)
-        if self.role == 'all' and (self.runtime_changes or self.dependency_changes) and (self.stage/'apps/judge/self-test.mjs').is_file():
+        if self.self_test_needed():
             # Every language compiled and run through the staged judge and sandbox, and the syscall filter probed.
             # The judge runs as its own account, which can't enter the private backups: the unit sees the staged
             # tree at another path.
@@ -1108,16 +1465,26 @@ class Upgrade:
 
     def restore_states(self, verify=False):
         if self.states['libreoj-backend.service']:
-            self.host.service('start', 'libreoj-backend.service')
-            if verify:
-                self.health()
+            with self.progress.step('start-backend'):
+                self.host.service('start', 'libreoj-backend.service')
+                if verify:
+                    self.health()
+        else:
+            self.progress.skip('start-backend')
         if self.role == 'all' and self.states['libreoj-judge.service']:
-            self.host.service('start', 'libreoj-judge.service')
-            if verify:
-                self.wait_for_judge()
+            with self.progress.step('start-judge'):
+                self.host.service('start', 'libreoj-judge.service')
+                if verify:
+                    self.wait_for_judge()
+        else:
+            self.progress.skip('start-judge')
         # Start nginx last, so a failed migration/build health check cannot admit users.
         if self.states['libreoj-nginx.service']:
-            self.host.service('start', 'libreoj-nginx.service')
+            with self.progress.step('start-site'):
+                self.host.service('start', 'libreoj-nginx.service')
+            self.progress.online()
+        else:
+            self.progress.skip('start-site')
         for unit, expected in self.states.items():
             if self.host.active(unit) != expected:
                 if not expected:
@@ -1126,39 +1493,49 @@ class Upgrade:
                     fail('Service state restoration failed: '+unit)
 
     def activate(self):
-        self.assert_preserved()
-        if shutil.disk_usage(self.root).free < self.database_bytes*3 + 512*1024**2:
-            fail('Insufficient free space for final database snapshot; services remain running')
-        self.assert_drained()
-        self.stop_apps(require_drained=True)
-        self.assert_drained()
-        self.manifest['status'] = 'maintenance'
-        self.save()
+        with self.progress.step('stop'):
+            self.assert_preserved()
+            if shutil.disk_usage(self.root).free < self.database_bytes*3 + 512*1024**2:
+                fail('Insufficient free space for final database snapshot; services remain running')
+            self.assert_drained()
+            self.stop_apps(require_drained=True)
+            self.assert_drained()
+            self.manifest['status'] = 'maintenance'
+            self.save()
         # Before any database change: a sandbox that fails its check leaves nothing to undo but service states.
-        self.ensure_judge_account()
-        self.verify_sandbox()
-        self.dump(self.backup/'database.sql')
-        self.schema_on_clone(self.backup/'database.sql')
-        # Audit and apply before swapping stage paths; only additive compatible DDL.
-        live_audit = self.schema('libreoj')
-        if live_audit['queries'] != self.manifest['schemaQueries'] or live_audit.get('migration', {}) != self.manifest['registrationMigration'] or live_audit.get('solutions', {}) != self.manifest.get('solutionMigration', {}) or live_audit.get('teamStorage', {}) != self.manifest.get('teamStorageMigration', {}):
-            fail('Database schema changed since the restored-copy audit')
-        # MariaDB DDL can commit before a later statement fails. Install and
-        # record the guard before the first mutation so rollback cannot let an
-        # older backend synchronize away a partially applied schema.
-        self.manifest['communitySchemaApplied'] = any(
-            re.search(r'`(?:team(?:_[a-z]+)*|file|discussion|submission|hack(?:_[a-z]+)*|self_eval(?:_[a-z]+)*|contest|user_privilege|user_permission_rule|user_two_factor|user_passkey|judge_job(?:_attempt)?|judge_client|problem_data_version|deferred_file_deletion|submission_result_history|statistics_outbox|ai_reservation)`', query)
-            for query in self.manifest['schemaQueries']
-        )
-        self.save()
-        self.guard_install()
-        self.manifest['registrationMigrationApplied'] = True
-        self.save()
-        applied = self.schema('libreoj', 'apply')
-        self.manifest['teamStorageMigrationResult'] = applied.get('teamStorage', {})
-        self.save()
-        self.switch()
-        self.assert_preserved()
+        if self.sandbox_changed or self.self_test_needed():
+            with self.progress.step('sandbox'):
+                self.ensure_judge_account()
+                self.verify_sandbox()
+        else:
+            self.ensure_judge_account()
+            self.progress.skip('sandbox')
+        with self.progress.step('backup'):
+            self.dump(self.backup/'database.sql')
+        with self.progress.step('retrial'):
+            self.schema_on_clone(self.backup/'database.sql')
+            # Audit and apply before swapping stage paths; only additive compatible DDL.
+            live_audit = self.schema('libreoj')
+            if live_audit['queries'] != self.manifest['schemaQueries'] or live_audit.get('migration', {}) != self.manifest['registrationMigration'] or live_audit.get('solutions', {}) != self.manifest.get('solutionMigration', {}) or live_audit.get('teamStorage', {}) != self.manifest.get('teamStorageMigration', {}):
+                fail('Database schema changed since the restored-copy audit')
+        with self.progress.step('database'):
+            # MariaDB DDL can commit before a later statement fails. Install and
+            # record the guard before the first mutation so rollback cannot let an
+            # older backend synchronize away a partially applied schema.
+            self.manifest['communitySchemaApplied'] = any(
+                re.search(r'`(?:team(?:_[a-z]+)*|file|discussion|submission|hack(?:_[a-z]+)*|self_eval(?:_[a-z]+)*|contest|user_privilege|user_permission_rule|user_two_factor|user_passkey|judge_job(?:_attempt)?|judge_client|problem_data_version(?:_keep)?|deferred_file_deletion|submission_result_history|statistics_outbox|ai_reservation)`', query)
+                for query in self.manifest['schemaQueries']
+            )
+            self.save()
+            self.guard_install()
+            self.manifest['registrationMigrationApplied'] = True
+            self.save()
+            applied = self.schema('libreoj', 'apply')
+            self.manifest['teamStorageMigrationResult'] = applied.get('teamStorage', {})
+            self.save()
+        with self.progress.step('switch'):
+            self.switch()
+            self.assert_preserved()
         self.restore_states(verify=True)
         self.manifest['status'] = 'complete'
         self.save()
@@ -1273,6 +1650,7 @@ class Upgrade:
             fail('Rollback refused: this upgrade moved legacy account records; use a separately reviewed recovery procedure')
 
     def rollback(self, manual=False):
+        self.progress.begin_rollback()
         # Refuse a downgrade that could turn pending/rejected accounts into active
         # users under the older authentication code. This check runs before stop.
         if manual:
@@ -1280,7 +1658,16 @@ class Upgrade:
             self.assert_drained()
         # Tables added by this release are intentionally retained. No stale backup
         # is imported, and no account, submission or AI state is discarded.
-        self.stop_apps()
+        with self.progress.step('rollback-stop'):
+            self.stop_apps()
+        with self.progress.step('restore'):
+            self.restore_previous()
+        self.restore_states(verify=True)
+        self.manifest['status'] = 'rolled-back'
+        self.save()
+        self.paused = False
+
+    def restore_previous(self):
         # Recheck only after nginx and backend (including in-flight requests) are
         # stopped. This also closes the automatic rollback race after reopening.
         self.assert_safe_downgrade()
@@ -1305,10 +1692,6 @@ class Upgrade:
             self.unit_fingerprint.pop(str(self.guard), None)
             self.host.run(['systemctl', 'daemon-reload'])
         self.assert_preserved()
-        self.restore_states(verify=True)
-        self.manifest['status'] = 'rolled-back'
-        self.save()
-        self.paused = False
 
 
 def validate_manifest(manifest):
@@ -1327,6 +1710,176 @@ def validate_manifest(manifest):
         seen.add(name)
 
 
+def parse_time(value):
+    try:
+        return datetime.datetime.strptime(value, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def show_time(value):
+    moment = parse_time(value)
+    return moment.strftime('%Y-%m-%d %H:%M UTC') if moment else '?'
+
+
+def process_alive(pid):
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def status_report(prefix, running, now=None):
+    """The latest upgrade's progress, from the record in its backup directory: lines for --status. Read-only."""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    base = Path(prefix)/'backups/upgrade'
+    records = sorted(base.glob('*/'+PROGRESS_RECORD)) if base.is_dir() else []
+    lock_line = say('An install, upgrade, judge resize or backup holds the maintenance lock now.',
+                    '安装、升级、评测扩缩容或备份正持有维护锁。')
+    if not records:
+        lines = [say('No upgrade has recorded its progress here yet; upgraders record it from this version on.',
+                     '这里还没有记录过升级进度；从这个版本起，升级程序会记录进度。')]
+        return lines + ([lock_line] if running else [])
+    directory = records[-1].parent
+    try:
+        record = json.loads(records[-1].read_text())
+        steps = [entry for entry in record['steps'] if isinstance(entry, dict)]
+    except (OSError, ValueError, KeyError, TypeError):
+        return [say(f'The progress record in {directory} is unreadable.', f'{directory} 中的进度记录无法读取。')]
+    try:
+        status = json.loads((directory/'manifest.json').read_text()).get('status')
+    except (OSError, ValueError, AttributeError):
+        status = None
+    state = record.get('state')
+    alive = running and process_alive(record.get('pid'))
+    target = record.get('target') or {}
+    version = str(target.get('commit') or target.get('treeSha256') or '?')[:12]
+    started = parse_time(record.get('startedAt'))
+    lines = [say(f'Upgrade {directory.name} to {version}, started {show_time(record.get("startedAt"))}',
+                 f'升级 {directory.name}，目标 {version}，开始于 {show_time(record.get("startedAt"))}')]
+    numbered = [entry for entry in steps if not entry.get('rollback') and entry.get('key') in STEP_KEYS]
+    failed = next((entry for entry in reversed(numbered) if entry.get('state') == 'failed'), None)
+    last = numbered[-1] if numbered else None
+    where = failed or last
+    at = (say(f' at step {STEP_KEYS.index(where["key"])+1} ({step_title(where["key"])})',
+              f'，第 {STEP_KEYS.index(where["key"])+1} 步（{step_title(where["key"])}）') if where else '')
+    message = record.get('message')
+    reason = (': '+message if message else '')
+    went_offline = bool(record.get('offlineAt'))
+    rollback_command = (f'sudo bash {prefix}/deploy/upgrade.sh --prefix {prefix} --rollback {directory} --drained')
+    if state in ('running', 'rolling-back') and alive:
+        current = next((entry for entry in reversed(steps) if entry.get('state') == 'running'), None)
+        if state == 'rolling-back':
+            lines.append(say(f'State: putting the previous version back after a failure{at}{reason}',
+                             f'状态：失败{at}后正在恢复上一个版本{reason}'))
+        elif current:
+            since = parse_time(current.get('startedAt'))
+            elapsed = duration((now-since).total_seconds()) if since else '?'
+            lines.append(say(f'State: running, step {STEP_KEYS.index(current["key"])+1} of {len(STEPS)}: '
+                             f'{step_title(current["key"])} ({elapsed} so far)',
+                             f'状态：进行中，第 {STEP_KEYS.index(current["key"])+1}/{len(STEPS)} 步：'
+                             f'{step_title(current["key"])}（已 {elapsed}）'))
+        else:
+            lines.append(say('State: running', '状态：进行中'))
+        if not went_offline:
+            lines.append(say(f'The website is online; it goes offline at step {STEP_KEYS.index("stop")+1}.',
+                             f'网站正常访问；第 {STEP_KEYS.index("stop")+1} 步起暂停访问。'))
+        elif not record.get('onlineAt'):
+            since = parse_time(record.get('offlineAt'))
+            lines.append(say(f'The website is offline since {show_time(record.get("offlineAt"))}'
+                             + (f' ({duration((now-since).total_seconds())}).' if since else '.'),
+                             f'网站自 {show_time(record.get("offlineAt"))} 起暂停访问'
+                             + (f'（{duration((now-since).total_seconds())}）。' if since else '。')))
+    elif state in ('running', 'rolling-back') or (state is None and status not in ('complete', 'rolled-back')):
+        # The upgrader stopped without recording an outcome: killed, or the server restarted
+        if status == 'complete':
+            lines.append(say('State: complete', '状态：已完成'))
+        elif status in ('maintenance', 'rollback-failed'):
+            lines.append(say(f'State: stopped{at} while the website was offline, without finishing (the upgrader '
+                             f'was stopped, or the server restarted). Roll it back: {rollback_command}',
+                             f'状态：在网站暂停访问期间{at}中途停止（升级程序被终止，或服务器重启）。请回滚：{rollback_command}'))
+        elif status == 'rolled-back':
+            lines.append(say('State: rolled back; the previous version runs.', '状态：已回滚，运行上一个版本。'))
+        else:
+            lines.append(say(f'State: stopped{at} during preparation, without finishing (the upgrader was stopped, or '
+                             'the server restarted). Nothing was changed; the website kept running. You can run the '
+                             'upgrade again.',
+                             f'状态：准备阶段{at}中途停止（升级程序被终止，或服务器重启）。没有任何改动，网站一直正常运行；'
+                             '可以重新运行升级。'))
+    elif state == 'complete':
+        offline = record.get('offlineSeconds')
+        lines.append(say(f'State: complete in {duration(record.get("seconds", 0))}'
+                         + (f'; the website was offline for {duration(offline)}.' if offline is not None else '.'),
+                         f'状态：已完成，用时 {duration(record.get("seconds", 0))}'
+                         + (f'；网站暂停访问 {duration(offline)}。' if offline is not None else '。')))
+    elif state == 'rolled-back':
+        lines.append(say(f'State: failed{at}{reason}. The previous version was put back and runs again.',
+                         f'状态：失败{at}{reason}。已恢复并运行上一个版本。'))
+    elif state == 'rollback-failed':
+        lines.append(say(f'State: failed{at}{reason}, and putting the previous version back failed too: the website '
+                         f'stays stopped. See "If the upgrade fails" in the upgrade guide; the backup is {directory}.',
+                         f'状态：失败{at}{reason}，恢复上一个版本也失败了：网站保持停止。见升级说明中的“升级失败时”；'
+                         f'备份在 {directory}。'))
+    elif state == 'cancelled':
+        lines.append(say(f'State: cancelled{at}. Nothing was changed; the website kept running.',
+                         f'状态：已取消{at}。没有任何改动，网站一直正常运行。'))
+    else:
+        lines.append(say(f'State: failed{at}{reason}.', f'状态：失败{at}{reason}。')
+                     + (say(' Nothing was changed; the website kept running.', '没有任何改动，网站一直正常运行。')
+                        if not went_offline else ''))
+    if running and not alive:
+        lines.append(lock_line)
+    lines.append('')
+    latest = {}
+    for entry in numbered:
+        latest[entry['key']] = entry
+    for number, key in enumerate(STEP_KEYS, 1):
+        entry = latest.get(key)
+        if entry is None:
+            mark, time_text = '', ''
+        elif entry.get('state') == 'running' and not alive:
+            mark, time_text = say('stopped', '中止'), ''
+        elif entry.get('state') == 'running':
+            since = parse_time(entry.get('startedAt'))
+            mark, time_text = say('running', '进行中'), duration((now-since).total_seconds()) if since else ''
+        else:
+            mark = {'done': say('done', '完成'), 'skipped': say('not needed', '不需要'),
+                    'failed': say('failed', '失败')}.get(entry.get('state'), str(entry.get('state')))
+            time_text = duration(entry['seconds']) if 'seconds' in entry and entry.get('state') != 'skipped' else ''
+        lines.append(f'  {number:>2}  {mark:<10} {time_text:>12}  {step_title(key)}')
+    for entry in steps:
+        if entry.get('rollback') and entry.get('key') in (*STEP_KEYS, *OTHER_STEPS):
+            mark = {'done': say('done', '完成'), 'failed': say('failed', '失败'),
+                    'running': say('running', '进行中') if alive else say('stopped', '中止')}.get(entry.get('state'), '')
+            time_text = duration(entry['seconds']) if 'seconds' in entry else ''
+            lines.append(f'   ↺  {mark:<10} {time_text:>12}  {step_title(entry["key"])}')
+    lines.append('')
+    lines.append(say(f'What happened, step by step: {directory/PROGRESS_LOG}', f'逐步记录：{directory/PROGRESS_LOG}'))
+    if (directory/'build.log').exists():
+        lines.append(say(f'Output of the build and its tests: {directory/"build.log"}', f'构建和测试的输出：{directory/"build.log"}'))
+    return lines
+
+
+def status_command(prefix):
+    """The command that shows an upgrade's progress, for the line printed when it starts: the downloaded upgrade script
+    it was started with, else the installed upgrader once it has --status, else this upgrader's own script."""
+    script = os.environ.get('LLMOJ_UPGRADE_SCRIPT', '')
+    if script.startswith('/') and not any(c.isspace() for c in script) and Path(script).is_file():
+        return script
+    try:
+        if "'--status'" in (Path(prefix)/'deploy/upgrade.py').read_text():
+            return str(Path(prefix)/'deploy/upgrade.sh')
+    except OSError:
+        pass
+    own = Path(__file__).resolve().parent/'upgrade.sh' if __file__ and not __file__.startswith('<') else None
+    return str(own) if own and own.is_file() else str(Path(prefix)/'deploy/upgrade.sh')
+
+
 def parser():
     result = argparse.ArgumentParser(allow_abbrev=False, description=say(
         'Upgrade an official all/web installation, keeping its configuration, judge capacity and data. '
@@ -1343,6 +1896,8 @@ def parser():
     result.add_argument('--apply', action='store_true')
     result.add_argument('--drained', action='store_true')
     result.add_argument('--rollback', type=Path)
+    result.add_argument('--status', action='store_true', help=say("Show the latest upgrade's progress or outcome, read-only",
+                                                                   '只读显示最近一次升级的进度或结果'))
     return result
 
 
@@ -1356,9 +1911,13 @@ def main(argv=None):
     if os.geteuid() != 0:
         fail(say('Run with sudo: root is required to read the private installation metadata',
                  '请使用 sudo 运行：需要 root 权限读取私有安装信息'))
+    if args.status:
+        print('\n'.join(status_report(args.prefix, maintenance_running())))
+        return
     if args.plan and (args.apply or args.rollback):
         fail('--plan cannot be combined with --apply or --rollback')
-    upgrade = Upgrade(args.prefix)
+    progress = Progress(sys.stdout)
+    upgrade = Upgrade(args.prefix, progress=progress)
     if args.rollback:
         if not args.drained:
             fail('--rollback requires --drained after pausing submissions, remote judges and AI jobs')
@@ -1380,9 +1939,16 @@ def main(argv=None):
         # Manual rollback preserves current config, key, unit customizations and
         # current service activity; only our own guard and recorded code are reverted.
         with maintenance_lock():
-            upgrade.rollback(manual=True)
-        print(say('Code rollback complete; the database, including tables added since, is kept.',
-                  '代码回滚完成；数据库及新增兼容审核表保留。'))
+            upgrade.locked = True
+            progress.attach(backup, resume=True)
+            try:
+                upgrade.rollback(manual=True)
+            except BaseException as error:
+                progress.finish('rollback-failed', str(error) if isinstance(error, UpgradeError) else None)
+                raise
+            progress.finish('rolled-back')
+        progress.say('Code rollback complete; the database, including tables added since, is kept.',
+                     '代码回滚完成；数据库及新增兼容审核表保留。')
         return
     info = upgrade.preflight()
     source = args.source.resolve() if args.source else None
@@ -1430,35 +1996,64 @@ def main(argv=None):
         if input(say('Type UPGRADE to confirm that everything has finished and start: ',
                      '确认已排空并开始升级？输入 UPGRADE：')).strip() != 'UPGRADE':
             fail('Upgrade cancelled before modification')
+    # From here the upgrade goes on when the terminal goes away (a dropped SSH connection); --status follows it.
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
     with maintenance_lock():
+        upgrade.locked = True
         temporary = None
+
+        def cancelled(signum, frame):
+            raise Cancelled(say('Cancelled during preparation', '在准备阶段被取消'))
+
+        def interrupted(signum, frame):
+            raise UpgradeError('Upgrade interrupted; restoring original code and service state')
+
+        old_handlers = {s: signal.signal(s, cancelled) for s in (signal.SIGINT, signal.SIGTERM)}
         try:
-            # Refresh after lock acquisition; another maintenance may have completed.
-            upgrade.preflight()
-            if not source:
-                temporary = Path(tempfile.mkdtemp(prefix='libreoj-upgrade-', dir='/var/tmp'))
-                data = fetch(f'https://codeload.github.com/{REPOSITORY}/tar.gz/{provenance["commit"]}')
-                provenance['archiveSha256'] = hashlib.sha256(data).hexdigest()
-                source = extract_archive(data, temporary/'source')
-                provenance['treeSha256'] = tree_digest(source)
-            elif tree_digest(source) != provenance['treeSha256']:
-                fail('Local source changed after verification')
-            upgrade.assert_drained()
+            progress.begin({key: provenance[key] for key in ('commit', 'treeSha256') if key in provenance},
+                           args.prefix, status_command(args.prefix))
             try:
+                with progress.step('check'):
+                    # Refresh after lock acquisition; another maintenance may have completed.
+                    upgrade.preflight()
+                    if not source:
+                        temporary = Path(tempfile.mkdtemp(prefix='libreoj-upgrade-', dir='/var/tmp'))
+                        data = fetch(f'https://codeload.github.com/{REPOSITORY}/tar.gz/{provenance["commit"]}')
+                        provenance['archiveSha256'] = hashlib.sha256(data).hexdigest()
+                        source = extract_archive(data, temporary/'source')
+                        provenance['treeSha256'] = tree_digest(source)
+                    elif tree_digest(source) != provenance['treeSha256']:
+                        fail('Local source changed after verification')
+                    upgrade.assert_drained()
+                    upgrade.compatibility(source)
+                    upgrade.check_space(source)
                 upgrade.prepare(source, provenance)
-            except UpgradeError as error:
+            except BaseException as error:
+                message = str(error) if isinstance(error, UpgradeError) else say(
+                    'an unexpected error (private details are not shown)', '意外错误（不显示私有细节）')
+                progress.finish('cancelled' if isinstance(error, Cancelled) else 'failed', message)
+                progress.say('Nothing was changed; the website runs as before.', '没有任何改动，网站照常运行。')
                 if upgrade.backup:
-                    fail(str(error)+'; private preparation evidence: '+str(upgrade.backup))
+                    progress.say(f'What happened: {upgrade.backup/PROGRESS_LOG}'
+                                 + (f'; the output of the build and its tests: {upgrade.backup/"build.log"}'
+                                    if (upgrade.backup/'build.log').exists() else ''),
+                                 f'经过：{upgrade.backup/PROGRESS_LOG}'
+                                 + (f'；构建和测试的输出：{upgrade.backup/"build.log"}' if (upgrade.backup/'build.log').exists() else ''))
+                    if isinstance(error, UpgradeError):
+                        fail(str(error)+'; private preparation evidence: '+str(upgrade.backup))
                 raise
-            def interrupted(signum, frame):
-                raise UpgradeError('Upgrade interrupted; restoring original code and service state')
-            old_handlers = {s: signal.signal(s, interrupted) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+            for s in old_handlers:
+                signal.signal(s, interrupted)
             try:
                 upgrade.activate()
-            except BaseException:
+            except BaseException as error:
+                message = str(error) if isinstance(error, UpgradeError) else say(
+                    'an unexpected error (private details are not shown)', '意外错误（不显示私有细节）')
                 if upgrade.paused:
                     for s in old_handlers:
                         signal.signal(s, signal.SIG_IGN)
+                    progress.record['message'] = message
+                    progress.say(f'The upgrade failed: {message}', f'升级失败：{message}')
                     try:
                         upgrade.rollback()
                     except BaseException:
@@ -1467,15 +2062,29 @@ def main(argv=None):
                         # Do not claim recovery or admit requests on a broken release.
                         for unit in ('libreoj-nginx.service', 'libreoj-judge.service', 'libreoj-backend.service'):
                             upgrade.host.run(['systemctl', 'stop', unit], check=False)
+                        progress.finish('rollback-failed', message)
                         fail('Automatic rollback failed; application services remain stopped. Private recovery backup: '+str(upgrade.backup))
+                    progress.finish('rolled-back', message)
+                    progress.say('The previous version runs again. Database changes already made stay; the previous '
+                                 'version ignores them.',
+                                 '上一个版本已恢复运行。已做的数据库变更保留，上一个版本会忽略它们。')
+                else:
+                    progress.finish('failed', message)
+                    progress.say('Nothing was changed; the website runs as before.', '没有任何改动，网站照常运行。')
                 raise
-            finally:
-                for s, handler in old_handlers.items():
-                    signal.signal(s, handler)
-            print(say('Upgrade complete; configuration and data kept. Private backup: ',
-                      '升级完成；配置和数据保留。私有备份：')+str(upgrade.backup))
-            print(say('Automatic schema synchronization stays disabled by ', '数据库结构自动同步保持关闭：')+str(upgrade.guard))
+            progress.finish('complete')
+            offline = progress.offline_seconds
+            progress.say(f'Upgrade complete in {duration(progress.record["seconds"])}'
+                         + (f'; the website was offline for {duration(offline)}.' if offline is not None else '.'),
+                         f'升级完成，用时 {duration(progress.record["seconds"])}'
+                         + (f'；网站暂停访问 {duration(offline)}。' if offline is not None else '。'))
+            progress.say('Configuration and data kept. Private backup: '+str(upgrade.backup),
+                         '配置和数据保留。私有备份：'+str(upgrade.backup))
+            progress.say('Automatic schema synchronization stays disabled by '+str(upgrade.guard),
+                         '数据库结构自动同步保持关闭：'+str(upgrade.guard))
         finally:
+            for s, handler in old_handlers.items():
+                signal.signal(s, handler)
             if temporary:
                 shutil.rmtree(temporary)
 

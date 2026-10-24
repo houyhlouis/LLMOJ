@@ -207,3 +207,53 @@ export async function listAiEndpointUsage(): Promise<AiEndpointUsage[]> {
   if (!Array.isArray(result.response?.endpoints)) throw new InvalidSiteSettingsResponse();
   return result.response.endpoints;
 }
+
+export interface TestDataRetentionPolicy {
+  contestDays: number;
+  resultDays: number;
+}
+
+/** The same ranges the server enforces. */
+export const TEST_DATA_RETENTION_RANGES: Readonly<Record<keyof TestDataRetentionPolicy, readonly [number, number]>> = {
+  contestDays: [0, 3650],
+  resultDays: [0, 3650]
+};
+
+export type TestDataRetentionReport = ApiTypes.TestDataRetentionReportDto;
+
+export class TestDataRetentionRequestError extends Error {
+  constructor(readonly result: ApiResponse<unknown>) {
+    super();
+  }
+}
+
+export function isTestDataRetentionPolicy(value: unknown): value is TestDataRetentionPolicy {
+  if (!value || typeof value !== "object") return false;
+  const policy = value as Record<string, unknown>;
+  return Object.entries(TEST_DATA_RETENTION_RANGES).every(
+    ([key, [min, max]]) =>
+      Number.isSafeInteger(policy[key]) && (policy[key] as number) >= min && (policy[key] as number) <= max
+  );
+}
+
+const getRetention = createGetApi<void, TestDataRetentionReport>("site-management/getTestDataRetention");
+const saveRetention = createPostApi<TestDataRetentionPolicy, TestDataRetentionPolicy>(
+  "site-management/updateTestDataRetention",
+  {}
+);
+
+export async function getTestDataRetention(): Promise<TestDataRetentionReport> {
+  const result = await getRetention();
+  if (result.requestError) throw new TestDataRetentionRequestError(result);
+  const report = result.response;
+  if (!report || !isTestDataRetentionPolicy(report.policy) || !Array.isArray(report.files))
+    throw new InvalidSiteSettingsResponse();
+  return report;
+}
+
+export async function updateTestDataRetention(policy: TestDataRetentionPolicy): Promise<TestDataRetentionPolicy> {
+  const result = await saveRetention(policy);
+  if (result.requestError) throw new TestDataRetentionRequestError(result);
+  if (!isTestDataRetentionPolicy(result.response)) throw new InvalidSiteSettingsResponse();
+  return result.response;
+}

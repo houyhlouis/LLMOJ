@@ -46,6 +46,10 @@ export const removeProblemFiles = createPostApi<
   ApiTypes.RemoveProblemFilesRequestDto,
   ApiTypes.RemoveProblemFilesResponseDto
 >("problem/removeProblemFiles", {});
+export const setTestDataKept = createPostApi<ApiTypes.SetTestDataKeptRequestDto, ApiTypes.SetTestDataKeptResponseDto>(
+  "problem/setTestDataKept",
+  {}
+);
 export const downloadProblemFiles = createPostApi<
   ApiTypes.DownloadProblemFilesRequestDto,
   ApiTypes.DownloadProblemFilesResponseDto

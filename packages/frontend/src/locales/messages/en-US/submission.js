@@ -65,7 +65,45 @@ return {
     judge_program: "Judge program",
     sandbox_image: "Sandbox image",
     host: "System",
-    cpu: "CPU"
+    cpu: "CPU",
+    test_data: {
+      deleted: "Test data deleted: this result can't be judged again with the same data",
+      deleted_short: "data deleted",
+      deleted_notes:
+        "A file of this version's test data is deleted. Its results stay as they were, but can't be reproduced.",
+      retained: "Test data kept while needed",
+      retained_short: "data kept",
+      retained_until: "Test data kept until {date}",
+      retained_until_short: "data kept until {date}",
+      deletion_due: "Test data deleted within 10 minutes",
+      deletion_due_short: "data deleted soon",
+      kept_by: "kept by {username}",
+      deleted_user: "a deleted user",
+      kept_because: "Some of this test data was removed from the problem. It's kept because:",
+      reasons: {
+        Grace: "it was removed less than 15 minutes ago",
+        WaitingSubmission: "a waiting submission needs it",
+        WaitingHack: "a waiting hack needs it",
+        WaitingSelfEval: "a waiting self-evaluation needs it",
+        Contest: "contest submissions were judged with it (kept for some days after the contest ends)",
+        Result: "results were judged with it (kept for some days after its removal)",
+        EarlierResult: "a rejudge replaced a result judged with it (kept for some days after)",
+        Kept: "a problem manager keeps it"
+      },
+      keep: "Keep",
+      keep_notes:
+        "Keep the test data of version #{version} until you release it, so results judged with it can be judged again with the same data.",
+      release: "Release",
+      release_notes: "Stop keeping this test data: the site's retention policy decides again.",
+      kept: "This test data is kept until released.",
+      released: "This test data is no longer kept; the retention policy decides.",
+      errors: {
+        NO_SUCH_PROBLEM: "The problem no longer exists.",
+        PERMISSION_DENIED: "You don't have permission to keep this problem's test data.",
+        NO_SUCH_DATA_VERSION: "This data version no longer exists.",
+        TEST_DATA_DELETED: "Some of this test data is already deleted, so there's nothing left to keep."
+      }
+    }
   },
   testcase: {
     title: "Testcase",

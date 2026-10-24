@@ -16,6 +16,7 @@ import {
 import AiPolicySection from "./AiPolicySection";
 import JudgePolicySection from "./JudgePolicySection";
 import AiEndpointsSection from "./AiEndpointsSection";
+import TestDataRetentionSection from "./TestDataRetentionSection";
 import style from "./SiteManagementPage.module.less";
 
 export const SiteManagementPage = observer(() => {
@@ -207,6 +208,7 @@ export const SiteManagementPage = observer(() => {
           <JudgePolicySection />
           <AiPolicySection />
           <AiEndpointsSection />
+          <TestDataRetentionSection />
         </div>
       )}
     </>

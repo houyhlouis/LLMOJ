@@ -86,6 +86,100 @@ test("earlier results open on demand, the most recent first", () => {
   assert.deepEqual(plain(cells[1].slice(2)), ["-", "-", "-", ".not_recorded", ".not_recorded"]);
 });
 
+// The subcomponents the harness leaves unrendered
+const renderNode = node => node.type(node.props);
+
+test("test data availability: nothing while the problem uses it, kept until a date, or deleted", () => {
+  const current = render({ problemId: 7, dataVersion: { version: 3, current: true, testData: { state: "InUse" } } });
+  const [state] = current.all(node => node.type?.name === "TestDataState");
+  assert.equal(renderNode(state), null, "nothing to say");
+  assert.equal(current.all(node => node.type?.name === "KeepTestData").length, 0, "no button for the current data");
+
+  const retained = render({
+    problemId: 7,
+    dataVersion: {
+      version: 2,
+      current: false,
+      testData: { state: "Retained", retainedUntil: "2026-11-20", reasons: ["Contest", "Result"] }
+    }
+  });
+  const popup = renderNode(retained.all(node => node.type?.name === "TestDataState")[0]);
+  assert.deepEqual(plain(texts(popup.props.trigger)), [".retained_until"]);
+  const reasons = retained.all(node => node.type === "li", popup.props.content).map(item => item.props.children[0]);
+  assert.deepEqual(reasons, [".reasons.Contest", ".reasons.Result"]);
+  const keep = renderNode(retained.all(node => node.type?.name === "KeepTestData")[0]);
+  assert.deepEqual(plain(texts(keep)), [".keep"]);
+
+  const deleted = render({
+    problemId: 7,
+    dataVersion: { version: 1, current: false, testData: { state: "Deleted" } }
+  });
+  const gone = renderNode(deleted.all(node => node.type?.name === "TestDataState")[0]);
+  assert.deepEqual(plain(texts(gone.props.trigger)), [".deleted"]);
+  assert.equal(renderNode(deleted.all(node => node.type?.name === "KeepTestData")[0]), null, "nothing left to keep");
+});
+
+test("keeping a version's test data asks the server and shows who keeps it; release undoes it", async () => {
+  const kept = { state: "Retained", reasons: ["Kept"], keptBy: "alice", keptAt: "2026-10-24" };
+  const h = componentHarness(file, {
+    props: {
+      problemId: 7,
+      dataVersion: { version: 2, current: false, testData: { state: "Retained", retainedUntil: "2026-11-20" } }
+    },
+    deps,
+    api: (name, body) => ({ response: { testData: body.keep ? kept : { state: "Retained" } } })
+  });
+  await renderNode(h.all(node => node.type?.name === "KeepTestData")[0]).props.onClick();
+  await h.settle();
+  assert.deepEqual(plain(h.calls), [{ name: "setTestDataKept", body: { problemId: 7, version: 2, keep: true } }]);
+  assert.deepEqual(h.toasts, [".test_data.kept"]);
+  const state = h.all(node => node.type?.name === "TestDataState")[0];
+  assert.deepEqual(plain(state.props.testData), kept);
+  const release = renderNode(h.all(node => node.type?.name === "KeepTestData")[0]);
+  assert.deepEqual(plain(texts(release)), [".release"]);
+  await release.props.onClick();
+  await h.settle();
+  assert.deepEqual(plain(h.calls[1].body), { problemId: 7, version: 2, keep: false });
+
+  // A refusal changes nothing
+  const refused = componentHarness(file, {
+    props: { problemId: 7, dataVersion: { version: 2, current: false, testData: { state: "Retained" } } },
+    deps,
+    api: () => ({ response: { error: "TEST_DATA_DELETED" } })
+  });
+  await renderNode(refused.all(node => node.type?.name === "KeepTestData")[0]).props.onClick();
+  await refused.settle();
+  assert.deepEqual(refused.toasts, [".test_data.errors.TEST_DATA_DELETED"]);
+  assert.deepEqual(plain(refused.all(node => node.type?.name === "TestDataState")[0].props.testData), {
+    state: "Retained"
+  });
+});
+
+test("earlier results show whether their data version's test data is still there", () => {
+  const h = render({
+    problemId: 7,
+    dataVersion: { version: 4, current: true, testData: { state: "InUse" } },
+    earlierResults: [
+      { status: "Accepted", score: 100, dataVersion: 4, testData: { state: "InUse" }, replacedAt: "2026-10-18" },
+      { status: "WrongAnswer", score: 0, dataVersion: 2, testData: { state: "Deleted" }, replacedAt: "2026-10-17" },
+      { status: "WrongAnswer", score: 0, dataVersion: null, replacedAt: "2026-10-16" }
+    ]
+  });
+  h.find("Accordion.Title").props.onClick();
+  h.render();
+  const rows = h.all(node => node.type?.name === "Table.Row", h.find("Accordion.Content")).slice(1);
+  const dataCells = rows.map(row => row.props.children[5]);
+  const states = dataCells.map(cell => h.all(node => node.type?.name === "TestDataState", cell)[0]);
+  assert.deepEqual(
+    states.map(state => state && [state.props.testData.state, state.props.compact]),
+    [["InUse", true], ["Deleted", true], undefined]
+  );
+  assert.deepEqual(plain(texts(renderNode(states[1]).props.trigger)), [".deleted_short"]);
+  // The submission's own version has its button in the line above
+  assert.equal(h.all(node => node.type?.name === "KeepTestData", dataCells[0]).length, 0);
+  assert.equal(h.all(node => node.type?.name === "KeepTestData", dataCells[1]).length, 1);
+});
+
 test("what judged the result is shown in a line, with its details on click", () => {
   const h = render({ judgeRuntime: runtime });
   const [line] = h.all(node => node.type?.name === "JudgeRuntime");

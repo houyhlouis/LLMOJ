@@ -52,6 +52,29 @@ The upgrader then:
 5. switches to the new files and applies the database changes;
 6. waits until the new backend is [ready](Operations-Configuration.md#liveness-and-readiness) (it reaches the database, Redis and object storage) and checks the local judge, then starts the services that were running before, Nginx last.
 
+## Following an upgrade
+
+After you type `UPGRADE`, the upgrader shows each of its 17 steps as it starts and finishes, with how long it took; a step this upgrade doesn't need shows as **not needed**. In a terminal, the running step counts its time. Without one (`--apply --drained` in a script, or output into a file), a long step says every minute that it's still running. The website keeps running until step 9, and the upgrader says when it goes offline and when it's back. For example:
+
+```text
+[ 6/17] Building the backend: done (1 min 52 s)
+[ 7/17] Building the website … 1 min 10 s
+```
+
+To follow an upgrade from another terminal, or to see how the last one ended:
+
+```bash
+sudo bash /tmp/llmoj-upgrade.sh --prefix /opt/LLMOJ --status
+```
+
+Once this version is installed, `sudo bash /opt/LLMOJ/deploy/upgrade.sh --prefix /opt/LLMOJ --status` does the same. It only reads: the step running and for how long, whether the website is online, each step's state and time, and where the logs are. For an upgrade that stopped without finishing, it says whether anything was changed and what to do. [Doctor](Operations-Configuration.md#doctor) names the running step too.
+
+Each upgrade records its progress in its backup directory: `progress.log` lists the steps with their UTC times, and `build.log` has the output of the build and its tests.
+
+If your connection drops, the upgrade goes on: once you've typed `UPGRADE`, losing the terminal doesn't stop it. Connect again and use `--status`. **Ctrl+C** still stops it: before the website goes offline nothing is changed, and afterwards the previous version is put back.
+
+The upgrader won't start while an earlier upgrade that stopped halfway, with the website offline, hasn't been rolled back. It shows the `--rollback` command to run first.
+
 The judge runs as the account `libreoj-judge`, and only its [sandbox launcher](Judge-Configuration.md#the-judges-account-and-its-sandbox-launcher) runs as root. On an `all` installation, the upgrader creates that account before the judge's self-test if it doesn't exist yet. The plan shows it as `judgeAccount`. An account of that name that can log in is refused. A rollback keeps the account; an older judge runs as root and doesn't use it.
 
 Backups and build logs stay in `<prefix>/backups/upgrade/<UTC time>-<random>/`, and the upgrader prints the path. They contain secrets, so keep them private, and delete old ones yourself when you no longer need them; the upgrader never deletes data or backups. After an upgrade completes, it deletes only the build's copy of the dependencies (`staging/node_modules`, about 1 GiB), which nothing uses afterwards, not even a rollback. When the upgrade changed the dependencies, that copy became the installed one instead, and the previous dependencies stay in `previous/node_modules` for a rollback. Upgrade backups from before this version still hold that copy; [doctor](Operations-Configuration.md#doctor) tells you how many. For an upgrade that completed, you can delete it: `sudo rm -rf /opt/LLMOJ/backups/upgrade/<UTC time>-<random>/staging/node_modules`.
@@ -93,7 +116,7 @@ Check the `sourceSha256` it reports, then run it again with both `--source` and 
 
 ## If the upgrade fails
 
-- If building or testing on the database copy fails, the site keeps running the old version.
+- If building or testing on the database copy fails, the site keeps running the old version. The upgrader names the step that failed; the build's output is in `build.log` in the backup directory.
 - If switching over fails, the upgrader tries to restore the old files and services. If that also fails, the site stays stopped and the upgrader tells you where its backup is. Never assume the site is fine after an error message.
 
 Fix the cause and run the upgrader again with the same options. Database changes that were already made aren't repeated. Don't delete configuration, keys or the database to retry.

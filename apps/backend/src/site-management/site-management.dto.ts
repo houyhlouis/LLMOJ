@@ -18,6 +18,8 @@ import {
 
 import { REGISTRATION_MODES, RegistrationMode } from "../settings/registration-settings.service";
 import { AI_POLICY_LIMITS } from "../settings/ai-policy.service";
+import { TEST_DATA_RETENTION_LIMITS } from "../settings/test-data-retention-policy.service";
+import { TestDataRetentionReasonKind } from "../problem/test-data-retention.service";
 import { JUDGE_POLICY_LIMITS } from "../settings/judge-policy.service";
 import { AI_ENDPOINT_TYPES, AiEndpointType, MAX_APPROVED_AI_ENDPOINTS } from "../settings/ai-endpoint-policy.service";
 
@@ -123,4 +125,117 @@ export class AiEndpointPolicyDto {
   @ValidateNested({ each: true })
   @Type(() => AiApprovedEndpointDto)
   endpoints: AiApprovedEndpointDto[];
+}
+
+export class TestDataRetentionPolicyDto {
+  @ApiProperty({ description: "Days after a contest ends that the test data its submissions were judged with stays." })
+  @IsInt()
+  @Min(0)
+  @Max(TEST_DATA_RETENTION_LIMITS.contestDays[1])
+  contestDays: number;
+
+  @ApiProperty({
+    description:
+      "Days that removed test data stays for the results judged with it, from its removal (or from the rejudge that " +
+      "replaced a result judged with it)."
+  })
+  @IsInt()
+  @Min(0)
+  @Max(TEST_DATA_RETENTION_LIMITS.resultDays[1])
+  resultDays: number;
+}
+
+export class TestDataRetentionTotalsDto {
+  @ApiProperty()
+  files: number;
+
+  @ApiProperty()
+  bytes: number;
+}
+
+export class TestDataRetentionReasonTotalsDto extends TestDataRetentionTotalsDto {
+  @ApiProperty({ enum: TestDataRetentionReasonKind })
+  kind: TestDataRetentionReasonKind;
+}
+
+export class TestDataRetentionReasonDto {
+  @ApiProperty({ enum: TestDataRetentionReasonKind })
+  kind: TestDataRetentionReasonKind;
+
+  @ApiProperty({ required: false, description: "When it ends; absent for as long as its cause lasts" })
+  until?: Date;
+
+  @ApiProperty({ required: false, description: "The number of the data version it comes from" })
+  version?: number;
+
+  @ApiProperty({ required: false })
+  contestId?: number;
+
+  @ApiProperty({ required: false })
+  contestTitle?: string;
+
+  @ApiProperty({ required: false, description: "Who kept the data version" })
+  keptBy?: string;
+}
+
+export class RemovedTestDataFileDto {
+  @ApiProperty({ required: false, description: "From a data version that uses it; null if none does" })
+  problemId: number;
+
+  @ApiProperty({ required: false })
+  problemDisplayId: number;
+
+  @ApiProperty({ required: false })
+  filename: string;
+
+  @ApiProperty({ required: false, description: "null once the file is gone" })
+  size: number;
+
+  @ApiProperty()
+  removedAt: Date;
+
+  @ApiProperty({ type: Number, isArray: true, description: "The numbers of the data versions that use it" })
+  versions: number[];
+
+  @ApiProperty({
+    enum: ["Delete", "Keep", "Release"],
+    description: "What the next cleanup does: deletes it, keeps it, or releases it (a problem uses it again)"
+  })
+  action: "Delete" | "Keep" | "Release";
+
+  @ApiProperty({ required: false, description: "While kept: when its last reason ends; absent while one has no end" })
+  keptUntil?: Date;
+
+  @ApiProperty({ type: TestDataRetentionReasonDto, isArray: true })
+  reasons: TestDataRetentionReasonDto[];
+}
+
+export class TestDataRetentionReportDto {
+  @ApiProperty({ type: TestDataRetentionPolicyDto })
+  policy: TestDataRetentionPolicyDto;
+
+  @ApiProperty({ type: TestDataRetentionTotalsDto, description: "Test data removed from problems that still exists" })
+  removed: TestDataRetentionTotalsDto;
+
+  @ApiProperty({ type: TestDataRetentionTotalsDto, description: "Removed files the next cleanup keeps" })
+  kept: TestDataRetentionTotalsDto;
+
+  @ApiProperty({ type: TestDataRetentionTotalsDto, description: "Removed files the next cleanup deletes" })
+  deletedAtNextCleanup: TestDataRetentionTotalsDto;
+
+  @ApiProperty({ type: TestDataRetentionReasonTotalsDto, isArray: true, description: "A file counts for each reason" })
+  byReason: TestDataRetentionReasonTotalsDto[];
+
+  @ApiProperty({
+    type: RemovedTestDataFileDto,
+    isArray: true,
+    description: "Those the next cleanup deletes first, then the largest it keeps"
+  })
+  files: RemovedTestDataFileDto[];
+
+  @ApiProperty({ description: "How many removed files there are, including any not looked at" })
+  total: number;
+
+  @ApiProperty({ description: "How often the cleanup runs" })
+  cleanupMinutes: number;
 }

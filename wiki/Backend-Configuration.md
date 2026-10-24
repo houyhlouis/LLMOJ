@@ -254,6 +254,7 @@ The section must be present. `vendor.ip2region` is **optional**: leave it out to
 ## What isn't in this file
 
 - The registration mode saved in **Site management**, which overrides `preference.security.registrationMode` at once, without a restart.
+- How long removed test data stays, set in **Site management** under **Removed test data**; see [Submissions](Submissions.md#how-long-removed-test-data-stays).
 - Permissions and access rules for users, groups, problems and discussions, including `ManageRegistrationReviews` and the AI permissions (`ManageAiConfiguration`, `UseAi`, `GenerateTestdata`, `ImportProblem`). They're stored in the database, apply without a restart, and are set on the **Permissions** page; see [Registration approval](Registration-Approval.md) and [AI](AI.md).
 - Each user's AI provider keys; see [AI](AI.md).
 - Judging capacity; see [Judge configuration](Judge-Configuration.md).

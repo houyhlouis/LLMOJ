@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Download a fixed official source revision; never run the installer for upgrades.
 set -euo pipefail
+# The upgrader names this script in the command that shows its progress from another terminal.
+case "$0" in
+  *.sh) LLMOJ_UPGRADE_SCRIPT="$(readlink -f -- "$0" || true)"; export LLMOJ_UPGRADE_SCRIPT ;;
+esac
 exec python3 - "$@" <<'PY'
 import argparse
 import hashlib
@@ -9,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
@@ -36,6 +41,7 @@ options.add_argument('--plan', action='store_true')
 options.add_argument('--apply', action='store_true')
 options.add_argument('--drained', action='store_true')
 options.add_argument('--rollback')
+options.add_argument('--status', action='store_true')
 parsed = options.parse_args(args)
 if len(parsed.ref) > 1:
     raise SystemExit(say('Specify --ref only once', '--ref 只能指定一次'))
@@ -59,14 +65,16 @@ try:
         raise SystemExit(say('Invalid source commit', '无效的源码提交'))
     # A plan is genuinely read-only: execute the same fixed-commit preflight from
     # memory, with no temporary archive or source files. The plan reports build
-    # and schema checks that cannot be completed without staging.
-    if parsed.plan:
+    # and schema checks that cannot be completed without staging. --status only
+    # reads the installation's upgrade records.
+    if parsed.plan or parsed.status:
         code = fetch('https://raw.githubusercontent.com/'+REPO+'/'+sha+'/deploy/upgrade.py', 1024*1024)
         sys.argv = ['upgrade.py', *args, '--ref', sha]
         exec(compile(code, '<fixed-commit-upgrade>', 'exec'), {'__name__':'__main__','__file__':'<fixed-commit-upgrade>'})
         raise SystemExit(0)
     if os.geteuid() != 0:
         raise SystemExit(say('Run this script with sudo', '请使用 sudo 运行此脚本'))
+    print(say('Downloading version '+sha[:12]+' from GitHub…', '正在从 GitHub 下载版本 '+sha[:12]+'…'), flush=True)
     archive = fetch('https://codeload.github.com/'+REPO+'/tar.gz/'+sha, 256*1024*1024)
     temporary = Path(tempfile.mkdtemp(prefix='llmoj-upgrade-', dir='/var/tmp'))
     try:
@@ -114,6 +122,9 @@ try:
                 raise SystemExit(say('Without a terminal, use --apply --drained', '非交互运行请使用 --apply --drained'))
         try:
             command = ['python3',str(helper),*args,'--source',str(source),'--source-sha256',tree,'--verified-commit',sha]
+            # The upgrader goes on when the terminal goes away (a dropped SSH connection), and so does this script,
+            # which deletes the downloaded source afterwards.
+            signal.signal(signal.SIGHUP, signal.SIG_IGN)
             result = subprocess.run(command,stdin=terminal)
         finally:
             if terminal:

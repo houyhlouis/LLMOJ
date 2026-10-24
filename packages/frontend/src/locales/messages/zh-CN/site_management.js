@@ -26,6 +26,68 @@ return {
   request_failed: "请求未完成，请重试。",
   invalid_response: "服务器返回了无法识别的设置，请重新加载后重试。",
   save_unconfirmed: "未能确认保存结果：{error} 请重新加载设置核对，当前选择暂未清除。",
+  test_data: {
+    title: "已移除的测试数据",
+    introduction:
+      "题目的测试数据被替换或移除后，只要还有需要，它的文件就会保留，以便用同样的数据重新评测用它评测过的结果。等待中的提交、Hack 和自测，以及题目管理者在提交页面上选择保留的数据版本，总会保留这些文件。在这里设置比赛和评测结果再保留多久。缺少文件的数据版本显示为已删除：它的评测结果仍可查看，但无法复现。",
+    fields: {
+      contestDays: "比赛结束后保留的天数",
+      resultDays: "为评测结果保留的天数"
+    },
+    notes: {
+      contestDays:
+        "比赛提交所用的测试数据在比赛进行期间以及结束后的这些天内保留，以便申诉和更正。0 表示只在比赛进行期间保留。",
+      resultDays: "评测结果所用的测试数据在移除后、以及重测替换这类结果后保留这些天。0 表示没有任务等待时即删除。"
+    },
+    invalid: "请输入允许范围内的整数。",
+    saved: "已保存。下次清理时生效。",
+    refresh: "重新查看",
+    dry_run: "下次清理会做什么",
+    nothing_removed: "没有等待删除的已移除测试数据。",
+    summary:
+      "仍然存在的已移除测试数据：{files} 个文件，{size}。下次清理（每 {minutes} 分钟一次）会删除 {deleteFiles} 个文件（{deleteSize}），保留 {keepFiles} 个（{keepSize}）。",
+    kept_because: "保留原因",
+    files: "文件数",
+    size: "大小",
+    file: "文件",
+    removed_at: "移除时间",
+    next_cleanup: "下次清理",
+    why: "原因",
+    no_problem: "无数据版本",
+    unnamed: "（无名称）",
+    version: "版本 #{version}",
+    until: "（至 {date}）",
+    deleted_user: "已删除的用户",
+    used_again: "有题目重新使用了它",
+    nothing_needs_it: "已不再需要",
+    showing: "显示 {total} 个已移除文件中的 {shown} 个：先列出将删除的，再列出最大的保留文件。",
+    actions: {
+      Delete: "删除",
+      Keep: "在需要期间保留",
+      KeepUntil: "保留至 {date}",
+      Release: "保留：重新被使用"
+    },
+    reason_kinds: {
+      Grace: "移除不到 15 分钟",
+      WaitingSubmission: "等待中的提交",
+      WaitingHack: "等待中的 Hack",
+      WaitingSelfEval: "等待中的自测",
+      Contest: "比赛的保留天数",
+      Result: "评测结果的保留天数",
+      EarlierResult: "此前评测结果的保留天数",
+      Kept: "题目管理者选择保留"
+    },
+    reasons: {
+      Grace: "移除不到 15 分钟",
+      WaitingSubmission: "等待中的提交需要{version}",
+      WaitingHack: "等待中的 Hack 需要它",
+      WaitingSelfEval: "等待中的自测需要它",
+      Contest: "比赛 {contest} 用{version}评测",
+      Result: "有评测结果用{version}评测",
+      EarlierResult: "此前的评测结果用{version}评测",
+      Kept: "{username} 保留了{version}"
+    }
+  },
   judging: {
     title: "评测",
     introduction:

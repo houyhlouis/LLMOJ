@@ -451,6 +451,20 @@ class DoctorTests(unittest.TestCase):
         self.assertFalse(self.found(report, d.FAIL, 'stopped halfway'))
         self.assertReported(report, d.INFO, r'upgrade, judge resize or backup is running now')
 
+    def test_running_upgrade_names_its_step(self):
+        directory = self.install.root/'backups/upgrade/20261024T101500Z-11111111'
+        directory.mkdir()
+        (directory/'manifest.json').write_text(json.dumps({'status': 'building'}))
+        (directory/'progress.json').write_text(json.dumps({'version': 1, 'state': 'running', 'steps': [], 'current': {
+            'key': 'frontend', 'title': 'Building the website', 'rollback': False, 'number': 7, 'of': 17}}))
+        self.host.maintenance = True
+        report, _ = self.run_doctor()
+        self.assertReported(report, d.INFO, r'An upgrade is running \(step 7 of 17: Building the website\).*--status')
+        # A finished upgrade's record doesn't name a step: the lock belongs to something else
+        (directory/'progress.json').write_text(json.dumps({'version': 1, 'state': 'complete', 'steps': []}))
+        report, _ = self.run_doctor()
+        self.assertReported(report, d.INFO, r'upgrade, judge resize or backup is running now')
+
     def test_https_certificate(self):
         install = Installation(Path(self.tmp.name)/'tls', origin='https://oj.example.com')
         (install.root/'config/nginx.conf').write_text('server {\n  ssl_certificate /etc/ssl/oj.pem;\n  # ssl_certificate /old.pem;\n}\n')

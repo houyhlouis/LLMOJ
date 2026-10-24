@@ -50,8 +50,27 @@ The score must be a whole token, ended by a space or the end of the message. A m
 A submission is judged with the problem's judging data as it was when it was submitted: the judge settings, the test data files and the samples it runs form a **data version**, numbered per problem (#1, #2, …). Editing the problem afterwards doesn't change how a waiting submission is judged; submissions made after the edit use the new version. **Rejudge** always uses the problem's current data.
 
 - Users who can rejudge a submission see its data version below the result, marked **current** or **changed since**. Submissions made before data versions were introduced show none; a rejudge gives them one.
-- Replaced or removed test data files are kept while a waiting submission still needs them, and deleted afterwards (at the earliest 15 minutes after the change). Removed attachments are deleted at once.
+- Replaced or removed test data files stay while something still needs them (see [How long removed test data stays](#how-long-removed-test-data-stays)). Removed attachments are deleted at once.
 - A rejudge keeps the result it replaces. Users who can rejudge the submission see the five most recent under **Earlier results**: when each was replaced, its status, score, time, memory, data version and what judged it. Deleting the submission deletes them too.
+
+### How long removed test data stays
+
+A data version names its test data files, but a result can only be judged again with the same data while those files exist. When test data is replaced or removed, its files aren't deleted at once. A cleanup every ten minutes deletes those that nothing keeps any more:
+
+- **Always kept:** files that a waiting submission's data version uses, or that a waiting hack or self-evaluation was given, and the data versions a problem manager chose to keep. Every removed file also stays at least 15 minutes.
+- **Kept by the site's policy** (**Site management**, **Removed test data**): files that submissions to a contest were judged with stay while the contest runs and 30 days after it ends; files that results were judged with stay 7 days after their removal, and 7 days after a rejudge replaces such a result. Administrators can change both numbers; 0 keeps nothing beyond the always-kept cases.
+
+Users who can rejudge a submission see whether its data version's test data is all still there, next to the version and in **Earlier results**:
+
+- nothing extra while the problem still uses it all;
+- **Test data kept until** a date, or **while needed**, when some of it was removed. Point at it to see why it's kept;
+- **Test data deleted** when a file is gone: the result stays as it was, but it can't be judged again with the same data. A version number alone never means the data is still there.
+
+**Keep** next to an older version keeps its test data until someone clicks **Release**, whatever the policy, for example while an appeal is open. It needs permission to edit the problem, and is refused once some of the data is deleted. Keeping and releasing are recorded in the audit log.
+
+**Site management** shows how much removed test data still exists, and a dry run of the next cleanup: each removed file, with its problem and data versions, whether the cleanup deletes or keeps it, until when, and why. The cleanup makes the same decisions, and decides once more just before deleting, so a version kept in between keeps its files.
+
+Rejudging still uses the problem's current data; keeping an older version's test data doesn't change that.
 
 ### Content hashes
 

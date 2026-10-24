@@ -202,6 +202,20 @@ test('sealed uploads add the file uploadUuid column and its unique index exactly
   assert.equal(SEALED_UPLOAD_SQL.length, 2);
 });
 
+test('test data retention adds the kept data version table and its foreign key exactly once', async () => {
+  const { validateDataRetentionSchema, DATA_RETENTION_SQL, PROBLEM_DATA_VERSION_KEEP_CREATE_SQL,
+    PROBLEM_DATA_VERSION_KEEP_FOREIGN_KEY_SQL } = await import('../data-retention-schema.mjs');
+  assert.deepEqual(validateQueries([...DATA_RETENTION_SQL]), [...DATA_RETENTION_SQL]);
+  const fixture = exists => ({ query: async () => [{ count: exists ? 1 : 0 }] });
+  await validateDataRetentionSchema(fixture(false), [...DATA_RETENTION_SQL]);
+  await validateDataRetentionSchema(fixture(true), []);
+  await assert.rejects(() => validateDataRetentionSchema(fixture(false), []), /retention table addition/);
+  await assert.rejects(() => validateDataRetentionSchema(fixture(false), [PROBLEM_DATA_VERSION_KEEP_CREATE_SQL]), /retention table addition/);
+  await assert.rejects(() => validateDataRetentionSchema(fixture(true), [PROBLEM_DATA_VERSION_KEEP_FOREIGN_KEY_SQL]), /retention table addition/);
+  await assert.rejects(() => validateDataRetentionSchema(fixture(false), [...DATA_RETENTION_SQL, ...DATA_RETENTION_SQL]), /retention table addition/);
+  assert.equal(DATA_RETENTION_SQL.length, 2);
+});
+
 test('the AI execution table is added exactly once', async () => {
   const { validateAiExecutionSchema, AI_EXECUTION_SQL, AI_EXECUTION_CREATE_SQL } = await import('../ai-execution-schema.mjs');
   assert.deepEqual(validateQueries([...AI_EXECUTION_SQL]), [...AI_EXECUTION_SQL]);

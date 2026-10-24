@@ -224,7 +224,13 @@ class Doctor:
         r.add(INFO, 'version', say(f'{role}; version {str(version or "unknown")[:12]}', f'{role}；版本 {str(version or "未知")[:12]}')
               + (say(f', upgraded {when}', f'，升级于 {when}') if when else ''))
         running = self.host.maintenance_running()
-        if running:
+        step = self.upgrade_step() if running else None
+        if step:
+            r.add(INFO, 'maintenance', say(f'An upgrade is running ({step}); services may be stopped on purpose. '
+                                           f'Follow it with: sudo bash {self.root}/deploy/upgrade.sh --prefix {self.root} --status',
+                                           f'升级正在进行（{step}），服务可能是有意停止的。查看进度：'
+                                           f'sudo bash {self.root}/deploy/upgrade.sh --prefix {self.root} --status'))
+        elif running:
             r.add(INFO, 'maintenance', say('An installation, upgrade, judge resize or backup is running now; '
                                            'services may be stopped on purpose',
                                            '安装、升级、评测扩缩容或备份正在进行，服务可能是有意停止的'))
@@ -239,6 +245,23 @@ class Doctor:
                 r.add(FAIL, 'upgrade', say(f'The upgrade in {Path(path).parent} stopped halfway ({status}); '
                                            'see "Rolling back" in the upgrade guide',
                                            f'{Path(path).parent} 的升级中途停止（{status}）；见升级说明中的“回滚”'))
+
+    def upgrade_step(self):
+        """The step of the upgrade that records its progress as running, if any (upgrade.py's progress.json)."""
+        records = sorted(glob.glob(str(self.root/'backups/upgrade/*/progress.json')))
+        if not records:
+            return None
+        try:
+            record = json.loads(self.host.read(records[-1]))
+            current = record.get('current') if record.get('state') in ('running', 'rolling-back') else None
+            if not isinstance(current, dict) or not isinstance(current.get('title'), str):
+                return None
+            if current.get('rollback'):
+                return say(f'putting the previous version back: {current["title"]}', f'正在恢复上一个版本：{current["title"]}')
+            return say(f'step {current["number"]} of {current["of"]}: {current["title"]}',
+                       f'第 {current["number"]}/{current["of"]} 步：{current["title"]}')
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            return None
 
     def services(self):
         r = self.report

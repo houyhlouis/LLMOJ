@@ -15,6 +15,8 @@ import { ProblemAccessService, ProblemPermissionType, ProblemPermissionLevel } f
 import { ProblemFileService } from "./problem-file.service";
 import { ProblemTagService } from "./problem-tag.service";
 import { ProblemLockService } from "./problem-lock.service";
+import { ProblemDataVersionService } from "./problem-data-version.service";
+import { TestDataRetentionService } from "./test-data-retention.service";
 
 import {
   CreateProblemRequestDto,
@@ -74,6 +76,9 @@ import {
   DeleteProblemResponseError,
   ChangeProblemTypeRequestDto,
   ChangeProblemTypeResponseDto,
+  SetTestDataKeptRequestDto,
+  SetTestDataKeptResponseDto,
+  SetTestDataKeptResponseError,
   ChangeProblemTypeResponseError
 } from "./dto";
 
@@ -111,7 +116,9 @@ export class ProblemController {
     private readonly fileService: FileService,
     private readonly submissionService: SubmissionService,
     private readonly auditService: AuditService,
-    private readonly discussionService: DiscussionService
+    private readonly discussionService: DiscussionService,
+    private readonly problemDataVersions: ProblemDataVersionService,
+    private readonly testDataRetention: TestDataRetentionService
   ) {}
 
   @Post("queryProblemSet")
@@ -819,6 +826,37 @@ export class ProblemController {
     });
 
     return {};
+  }
+
+  @Post("setTestDataKept")
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      "Keep a data version's test data until released, so results judged with it can be judged again with the same " +
+      "data, or let the retention policy decide again."
+  })
+  async setTestDataKept(
+    @CurrentUser() currentUser: UserEntity,
+    @Body() request: SetTestDataKeptRequestDto
+  ): Promise<SetTestDataKeptResponseDto> {
+    const problem = await this.problemService.findProblemById(request.problemId);
+    if (!problem) return { error: SetTestDataKeptResponseError.NO_SUCH_PROBLEM };
+    if (!(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.Modify)))
+      return { error: SetTestDataKeptResponseError.PERMISSION_DENIED };
+    const version = await this.problemDataVersions.findByNumber(problem.id, request.version);
+    if (!version) return { error: SetTestDataKeptResponseError.NO_SUCH_DATA_VERSION };
+
+    if (request.keep) {
+      if (!(await this.testDataRetention.keep(version, currentUser)))
+        return { error: SetTestDataKeptResponseError.TEST_DATA_DELETED };
+    } else await this.testDataRetention.release(version);
+    await this.auditService.log(
+      request.keep ? "problem.keep_test_data" : "problem.release_test_data",
+      AuditLogObjectType.Problem,
+      problem.id,
+      { version: version.version }
+    );
+    return { testData: (await this.testDataRetention.describeAvailability([version.id])).get(version.id) };
   }
 
   @Post("downloadProblemFiles")

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Temporary fixtures only. No real service, configuration or database is changed."""
 import contextlib
+import errno
 import grp
 import hashlib
 import importlib.util
@@ -8,11 +9,15 @@ import io
 import json
 import os
 from pathlib import Path
+import pty
+import re
 import shutil
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -42,6 +47,8 @@ class FakeHost:
         self.fail_start = None
         self.fail_install = False
         self.config_refused = False
+        # A command whose text contains this fails, as a failed build step would
+        self.fail_command = None
     def prop(self, unit, name):
         if (unit,name) in self.override:
             return self.override[(unit,name)]
@@ -71,6 +78,8 @@ class FakeHost:
         self.states[unit]=action=='start'
     def run(self,args,**kwargs):
         args=list(map(str,args)); self.calls.append(tuple(args)); output=b''
+        if self.fail_command and self.fail_command in ' '.join(args):
+            raise u.UpgradeError(f'{Path(args[0]).name} operation failed (exit 1; private output withheld)')
         if args[0]=='mariadb':
             query=kwargs.get('input',b'')
             if isinstance(query,Path):
@@ -108,6 +117,16 @@ class FakeHost:
             package=stage/'node_modules/.pnpm/tool@2.0.0/node_modules/tool/index.js'; package.parent.mkdir(parents=True,exist_ok=True)
             package.write_text('// built in '+str(stage)+'\n')
         elif args[-1]=='--version': output=b'11.13.1' if 'pnpm' in args[-2] else b'v24.21.0'
+        elif args[-2:]==['run','build'] and '@libreoj/backend' in args:
+            dist=Path(kwargs['cwd'])/'apps/backend/dist'
+            (dist/'database').mkdir(parents=True,exist_ok=True)
+            (dist/'main.js').write_text('new backend')
+            (dist/'database/database.providers.js').write_text('LIBREOJ_SCHEMA_SYNC')
+        elif args[-2:]==['run','build'] and '@libreoj/frontend' in args:
+            (Path(kwargs['cwd'])/'public/index.html').write_text('new frontend')
+        elif args[-1].endswith('deploy/build-frontend-offline.mjs'):
+            public=Path(kwargs['cwd'])/'public'
+            (public/'offline-manifest.json').write_text(json.dumps({'files':[{'path':'/index.html','sha256':u.digest(public/'index.html')}]}))
         return subprocess.CompletedProcess(args,0,output,b'')
 
 
@@ -127,6 +146,12 @@ class FixtureUpgrade(u.Upgrade):
         queries=[] if self.schemas.get(database) else ['add registration_review']
         if action=='apply': self.schemas[database]=True; self.host.review_table=True
         return {'compatible':True,'queries':queries}
+
+
+class BuildingUpgrade(u.Upgrade):
+    """Builds with the upgrader's own build steps; the fake host makes what each command would."""
+    health = FixtureUpgrade.health
+    schema = FixtureUpgrade.schema
 
 
 @unittest.skipUnless(os.geteuid()==0, 'Run with sudo; ownership checks use root-owned temporary fixtures')
@@ -184,6 +209,162 @@ class UpgradeTests(unittest.TestCase):
     def prepare(self):
         self.up.preflight()
         self.up.prepare(self.source,{'treeSha256':u.tree_digest(self.source),'kind':'fixture'})
+    def run_main(self,*args,stream=None):
+        """The upgrader's command line on the fixture: what it printed, and the error it ended with."""
+        output=stream or io.StringIO()
+        lock=u.maintenance_lock
+        hangup=u.signal.getsignal(u.signal.SIGHUP)
+        self.addCleanup(u.signal.signal,u.signal.SIGHUP,hangup)
+        upgrade=lambda root,progress=None: BuildingUpgrade(root,self.host,self.units,progress=progress)
+        with patch.object(u,'Upgrade',upgrade),patch.object(u,'maintenance_lock',lambda: lock(self.base/'lock')),\
+             patch.object(u,'maintenance_running',return_value=False),contextlib.redirect_stdout(output):
+            try:
+                u.main(['--prefix',str(self.root),'--source',str(self.source),'--source-sha256',u.tree_digest(self.source),*args])
+            except u.UpgradeError as error:
+                return output.getvalue(),error
+        return output.getvalue(),None
+    def backup_directory(self):
+        return next((self.root/'backups/upgrade').iterdir())
+    def test_an_upgrade_shows_each_step_while_it_runs_and_records_it(self):
+        text,error=self.run_main('--apply','--drained')
+        self.assertIsNone(error,text)
+        lines=text.splitlines()
+        self.assertRegex(lines[0],r'^Upgrading .* to [0-9a-f]{12}\. The website keeps running until step 9 of 17\.$')
+        self.assertRegex(lines[1],r'from another terminal: sudo bash \S+upgrade\.sh --prefix \S+ --status$')
+        # Every step in order: started, then done or not needed
+        ends=[line for line in lines if re.match(r'\[\s*\d+/17\] .*: (done \(\d+ s\)|not needed)$',line)]
+        self.assertEqual([int(re.match(r'\[\s*(\d+)/',line)[1]) for line in ends],list(range(1,18)))
+        self.assertEqual([line.split('] ')[1] for line in ends if line.endswith('not needed')],
+                         ['Installing the changed dependencies: not needed',
+                          "Rebuilding the sandbox and the judge's native programs: not needed",
+                          'Testing the new judge and sandbox on this server: not needed'])
+        self.assertIn('[ 6/17] Building the backend …',lines)
+        stop=lines.index(next(line for line in lines if line.startswith('[ 9/17] Stopping the website, the backend and the judge: done')))
+        self.assertEqual(lines[stop+1],'The website is offline from now on.')
+        self.assertRegex(lines[stop+2],r'^\[10/17\]')
+        site=lines.index(next(line for line in lines if line.startswith('[17/17] Starting the website: done')))
+        self.assertRegex(lines[site+1],r'^The website is back online \(it was offline for \d+ s\)\.$')
+        self.assertRegex(text,r'Upgrade complete in \d+ s; the website was offline for \d+ s\.\nConfiguration and data kept\. Private backup: ')
+        backup=self.backup_directory()
+        record=json.loads((backup/'progress.json').read_text())
+        self.assertEqual(record['state'],'complete')
+        self.assertEqual([step['key'] for step in record['steps']],list(u.STEP_KEYS))
+        self.assertEqual(record['target']['treeSha256'],u.tree_digest(self.source))
+        self.assertTrue(record['offlineAt'] and record['onlineAt'])
+        self.assertEqual(stat.S_IMODE((backup/'progress.json').stat().st_mode),0o600)
+        log=(backup/'progress.log').read_text()
+        # Lines from before the backup directory existed are kept too
+        self.assertRegex(log,r'^\d{4}-\d\d-\d\dT[\d:]+Z Upgrading ')
+        self.assertIn('[ 1/17] Checking the installation and the new version: done',log)
+        self.assertIn('Upgrade complete in',log)
+        report='\n'.join(u.status_report(self.root,running=False))
+        self.assertRegex(report,r'State: complete in \d+ s; the website was offline for \d+ s\.')
+        self.assertRegex(report,r'\n   6  done\s+\d+ s  Building the backend\n')
+        self.assertRegex(report,r'\n   3  not needed\s+Installing the changed dependencies\n')
+    def test_a_failed_build_step_says_which_step_and_that_nothing_changed(self):
+        self.host.fail_command='@libreoj/backend'
+        text,error=self.run_main('--apply','--drained')
+        self.assertRegex(str(error),r'node operation failed .*private preparation evidence: ')
+        self.assertRegex(text,r'\n\[ 6/17\] Building the backend: failed after \d+ s\n')
+        self.assertNotIn('[ 7/17]',text)
+        self.assertIn('Nothing was changed; the website runs as before.',text)
+        self.assertRegex(text,r'What happened: \S+/progress\.log; the output of the build and its tests: \S+/build\.log')
+        self.assertTrue(all(self.host.states.values()))
+        self.assertEqual((self.root/'apps/backend/dist/main.js').read_text(),'old backend')
+        record=json.loads((self.backup_directory()/'progress.json').read_text())
+        self.assertEqual((record['state'],record['message']),('failed','node operation failed (exit 1; private output withheld)'))
+        report='\n'.join(u.status_report(self.root,running=False))
+        self.assertIn('State: failed at step 6 (Building the backend): node operation failed (exit 1; private output withheld). '
+                      'Nothing was changed; the website kept running.',report)
+        self.assertRegex(report,r'\n   6  failed\s+\d+ s  Building the backend\n   7  \s+  Building the website\n')
+        self.assertIn('Output of the build and its tests: ',report)
+    def test_a_failure_after_switching_shows_the_rollback(self):
+        self.host.fail_start='libreoj-backend.service'
+        text,error=self.run_main('--apply','--drained')
+        self.assertEqual(str(error),'synthetic start failure')
+        for line in ('[15/17] Starting the backend and waiting until it is ready: failed after',
+                     'The upgrade failed: synthetic start failure','Putting the previous version back:',
+                     '  ↺ Stopping the website, the backend and the judge: done','  ↺ Putting the previous version back: done',
+                     '  ↺ Starting the backend and waiting until it is ready: done','  ↺ Starting the judge and waiting until it connects: done',
+                     '  ↺ Starting the website: done','The website is back online (it was offline for',
+                     'The previous version runs again.'):
+            self.assertIn('\n'+line,text)
+        self.assertEqual((self.root/'apps/backend/dist/main.js').read_text(),'old backend')
+        self.assertTrue(all(self.host.states.values()))
+        record=json.loads((self.backup_directory()/'progress.json').read_text())
+        self.assertEqual(record['state'],'rolled-back')
+        report='\n'.join(u.status_report(self.root,running=False))
+        self.assertIn('State: failed at step 15 (Starting the backend and waiting until it is ready): synthetic start failure. '
+                      'The previous version was put back and runs again.',report)
+        self.assertRegex(report,r'\n   ↺  done\s+\d+ s  Putting the previous version back\n')
+    def test_the_upgrade_goes_on_when_its_terminal_goes_away(self):
+        class HungUp(io.StringIO):
+            writes=0
+            def write(self,text):
+                HungUp.writes+=1
+                if HungUp.writes>4: raise OSError(errno.EIO,'Input/output error')
+                return super().write(text)
+        text,error=self.run_main('--apply','--drained',stream=HungUp())
+        self.assertIsNone(error)
+        self.assertNotIn('[ 2/17]',text)
+        # After the confirmation, a hangup (a dropped SSH connection) doesn't stop it
+        self.assertEqual(u.signal.getsignal(u.signal.SIGHUP),u.signal.SIG_IGN)
+        record=json.loads((self.backup_directory()/'progress.json').read_text())
+        self.assertEqual(record['state'],'complete')
+        self.assertEqual((self.root/'apps/backend/dist/main.js').read_text(),'new backend')
+        self.assertIn('Upgrade complete in',(self.backup_directory()/'progress.log').read_text())
+    def test_status_tells_a_running_upgrade_from_one_that_stopped(self):
+        directory=self.root/'backups/upgrade/20261024T100000Z-00000001'; directory.mkdir(parents=True)
+        (directory/'manifest.json').write_text(json.dumps({'status':'building'}))
+        dead=subprocess.Popen(['true']); dead.wait()
+        record={'version':1,'pid':dead.pid,'state':'running','startedAt':'2026-10-24T10:00:00Z','target':{'commit':'ab'*20},
+                'steps':[{'key':'check','state':'done','seconds':2},{'key':'copy','state':'running','startedAt':'2026-10-24T10:00:02Z'}]}
+        (directory/'progress.json').write_text(json.dumps(record))
+        now=u.datetime.datetime(2026,10,24,10,1,32,tzinfo=u.datetime.timezone.utc)
+        report='\n'.join(u.status_report(self.root,running=False,now=now))
+        self.assertIn('Upgrade 20261024T100000Z-00000001 to abababababab, started 2026-10-24 10:00 UTC',report)
+        self.assertIn('State: stopped at step 2 (Copying the installation to a staging area) during preparation, without finishing',report)
+        self.assertIn('Nothing was changed; the website kept running. You can run the upgrade again.',report)
+        self.assertRegex(report,r'\n   2  stopped\s+Copying the installation to a staging area\n')
+        # Running: this process holds the record, and the maintenance lock is held
+        record['pid']=os.getpid(); (directory/'progress.json').write_text(json.dumps(record))
+        report='\n'.join(u.status_report(self.root,running=True,now=now))
+        self.assertIn('State: running, step 2 of 17: Copying the installation to a staging area (1 min 30 s so far)',report)
+        self.assertIn('The website is online; it goes offline at step 9.',report)
+        self.assertRegex(report,r'\n   2  running\s+1 min 30 s  Copying the installation to a staging area\n')
+        # Stopped while the website was offline: roll it back
+        record.update(pid=dead.pid,offlineAt='2026-10-24T10:05:00Z')
+        record['steps']=[*({'key':key,'state':'done','seconds':1} for key in u.STEP_KEYS[:12]),{'key':'database','state':'running','startedAt':'2026-10-24T10:06:00Z'}]
+        (directory/'progress.json').write_text(json.dumps(record))
+        (directory/'manifest.json').write_text(json.dumps({'status':'maintenance'}))
+        report='\n'.join(u.status_report(self.root,running=False,now=now))
+        self.assertIn(f'State: stopped at step 13 (Changing the database) while the website was offline, without finishing '
+                      f'(the upgrader was stopped, or the server restarted). Roll it back: sudo bash {self.root}/deploy/upgrade.sh '
+                      f'--prefix {self.root} --rollback {directory} --drained',report)
+        # Another maintenance holds the lock, but not this upgrade
+        self.assertIn('An install, upgrade, judge resize or backup holds the maintenance lock now.','\n'.join(u.status_report(self.root,running=True,now=now)))
+    def test_status_without_records(self):
+        self.assertEqual(u.status_report(self.root,running=False),
+                         ['No upgrade has recorded its progress here yet; upgraders record it from this version on.'])
+    def test_upgrade_refuses_to_start_on_top_of_one_that_stopped_halfway(self):
+        base=self.root/'backups/upgrade'; base.mkdir(parents=True)
+        def record(name,status):
+            (base/name).mkdir(exist_ok=True); (base/name/'manifest.json').write_text(json.dumps({'status':status}))
+        # A failure followed by a completed upgrade is history
+        record('20261020T000000Z-0000000a','rollback-failed'); record('20261021T000000Z-0000000b','complete')
+        record('20261021T120000Z-0000000c','building')
+        with patch.object(u,'maintenance_running',return_value=False): self.up.preflight()
+        record('20261022T000000Z-0000000d','maintenance')
+        with patch.object(u,'maintenance_running',return_value=False):
+            with self.assertRaisesRegex(u.UpgradeError,r'stopped halfway \(maintenance\).* --rollback \S+0000000d --drained'):
+                self.up.preflight()
+        # While another process holds the maintenance lock, that may be the same upgrade, still running
+        with patch.object(u,'maintenance_running',return_value=True): self.up.preflight()
+        self.up.locked=True
+        with patch.object(u,'maintenance_running',return_value=True):
+            with self.assertRaisesRegex(u.UpgradeError,'stopped halfway'): self.up.preflight()
+        record('20261022T000000Z-0000000d','rolled-back')
+        self.up.preflight()
     def test_official_0640_config_and_generated_bootstrap_accepted(self):
         self.up.preflight(); self.up.compatibility(self.source)
     def test_preflight_is_read_only(self):
@@ -658,11 +839,12 @@ class UpgradeTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(self.up.backup.stat().st_mode),0o700)
         self.assertEqual(stat.S_IMODE((self.up.backup/'ai-master.key').stat().st_mode),0o600)
     def test_bootstrap_ref_equals_and_duplicate_unknown_rejection(self):
-        import sys
         wrapper=(MODULE.parents[1]/'upgrade.sh').read_text().split("<<'PY'\n",1)[1].rsplit('\nPY',1)[0]
         prefix=wrapper.split('try:\n    sha =',1)[0]
         with patch.object(sys,'argv',['bootstrap','--ref=abc123','--plan']):
             scope={}; exec(prefix,scope); self.assertEqual(scope['ref'],'abc123')
+        with patch.object(sys,'argv',['bootstrap','--prefix','/opt/LLMOJ','--status']):
+            scope={}; exec(prefix,scope); self.assertTrue(scope['parsed'].status)
         for args in (['--ref','abc','--ref=def'],['--typo'],['--source=/tmp/no']):
             with patch.object(sys,'argv',['bootstrap',*args]),contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit): exec(prefix,{})
@@ -698,6 +880,66 @@ class UpgradeTests(unittest.TestCase):
             output=self.base/'extracted'
             with self.assertRaises(u.UpgradeError): u.extract_archive(data.getvalue(),output)
             self.assertFalse(output.exists())
+
+
+class ProgressTests(unittest.TestCase):
+    """What the person running an upgrade sees while a step runs."""
+    def test_a_terminal_shows_the_running_step_with_its_time(self):
+        stream=io.StringIO(); progress=u.Progress(stream,live=True)
+        with progress.step('backend'): time.sleep(1.3)
+        text=stream.getvalue()
+        self.assertTrue(text.startswith('[ 6/17] Building the backend …\r\x1b[K[ 6/17] Building the backend … 1 s'),text)
+        self.assertTrue(text.endswith('\r\x1b[K[ 6/17] Building the backend: done (1 s)\n'),text)
+    def test_lines_said_during_a_live_step_keep_the_step_on_screen(self):
+        stream=io.StringIO(); progress=u.Progress(stream,live=True)
+        with progress.step('stop'):
+            progress.offline()
+            progress.say('A line','A line')
+        self.assertEqual(stream.getvalue(),'[ 9/17] Stopping the website, the backend and the judge …'
+                         '\r\x1b[KA line\n[ 9/17] Stopping the website, the backend and the judge …'
+                         '\r\x1b[K[ 9/17] Stopping the website, the backend and the judge: done (0 s)\n'
+                         'The website is offline from now on.\n')
+    def test_without_a_terminal_a_long_step_says_it_still_runs(self):
+        stream=io.StringIO(); progress=u.Progress(stream,live=False,heartbeat=1)
+        with progress.step('frontend'): time.sleep(2.3)
+        self.assertIn('\n[ 7/17] Building the website: still running (1 s)\n',stream.getvalue())
+        self.assertNotIn('\r',stream.getvalue())
+    def test_chinese(self):
+        stream=io.StringIO()
+        with patch.dict(os.environ,{'LLMOJ_LANG':'zh-CN'}):
+            progress=u.Progress(stream,live=False)
+            with progress.step('backend'): pass
+            progress.skip('native')
+        self.assertEqual(stream.getvalue(),'[ 6/17] 构建后端 …\n[ 6/17] 构建后端：完成（0 秒）\n[ 4/17] 重新构建沙箱和评测机的本地程序：不需要\n')
+    def test_a_terminal_that_cant_show_a_character_still_shows_the_rest(self):
+        raw=io.BytesIO(); stream=io.TextIOWrapper(raw,encoding='ascii')
+        progress=u.Progress(stream,live=False)
+        with progress.step('copy'): pass
+        self.assertEqual(raw.getvalue(),b'[ 2/17] Copying the installation to a staging area ?\n[ 2/17] Copying the installation to a staging area: done (0 s)\n')
+    def test_durations(self):
+        self.assertEqual([u.duration(x) for x in (0,59,61,3600,3725)],['0 s','59 s','1 min 1 s','1 h 0 min','1 h 2 min'])
+    @unittest.skipUnless(os.geteuid()==0,'Run with sudo; the record is written as the upgrader writes it')
+    def test_a_real_hangup_ends_only_the_printing(self):
+        # As after the confirmation: the terminal closes (the SSH connection drops) while a step runs
+        directory=Path(tempfile.mkdtemp(prefix='progress-hangup-')); self.addCleanup(shutil.rmtree,directory)
+        child=('import importlib.util, signal, sys, time\n'
+               'spec = importlib.util.spec_from_file_location("upgrade", sys.argv[1]); u = importlib.util.module_from_spec(spec)\n'
+               'spec.loader.exec_module(u)\n'
+               'signal.signal(signal.SIGHUP, signal.SIG_IGN)\n'
+               'progress = u.Progress(sys.stdout); progress.attach(sys.argv[2])\n'
+               'with progress.step("backend"): time.sleep(2)\n'
+               'progress.finish("complete"); progress.say("Finished", "Finished")\n')
+        pid,fd=pty.fork()
+        if pid==0:
+            os.execv(sys.executable,[sys.executable,'-B','-c',child,str(MODULE),str(directory)])
+        seen=b''
+        while b'Building the backend' not in seen: seen+=os.read(fd,1024)
+        os.close(fd)
+        _,status=os.waitpid(pid,0)
+        self.assertEqual(os.waitstatus_to_exitcode(status),0)
+        self.assertEqual(json.loads((directory/'progress.json').read_text())['state'],'complete')
+        log=(directory/'progress.log').read_text()
+        self.assertRegex(log,r'Building the backend: done \(2 s\)\n.*Finished\n$')
 
 
 class HealthTests(unittest.TestCase):

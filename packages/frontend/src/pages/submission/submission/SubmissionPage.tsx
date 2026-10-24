@@ -1047,6 +1047,7 @@ let SubmissionPage: React.FC<SubmissionPageProps> = props => {
         <SubmissionReferenceButton submissionId={meta.id} status={progressMeta.status} />
       </div>
       <SubmissionJudgingRecord
+        problemId={meta.problem.id}
         dataVersion={props.dataVersion}
         judgeRuntime={props.judgeRuntime}
         earlierResults={props.earlierResults}

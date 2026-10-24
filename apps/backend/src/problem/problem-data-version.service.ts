@@ -1,29 +1,18 @@
 import { createHash } from "crypto";
 
-import { Injectable, Inject, forwardRef, OnModuleInit, OnModuleDestroy } from "@nestjs/common";
-import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
+import { Injectable, Inject, forwardRef } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
 
-import { DataSource, In, LessThan, Repository } from "typeorm";
+import { In, Repository } from "typeorm";
 
 import { ProblemDataVersionEntity, ProblemDataVersionFile } from "./problem-data-version.entity";
-import { DeferredFileDeletionEntity } from "./deferred-file-deletion.entity";
-import { ProblemFileEntity, ProblemFileType } from "./problem-file.entity";
+import { ProblemFileType } from "./problem-file.entity";
 import { ProblemEntity } from "./problem.entity";
 import { ProblemService } from "./problem.service";
 import { ProblemFileService } from "./problem-file.service";
 
-import { logger } from "../logger";
 import { ConfigService } from "../config/config.service";
 import { FileService } from "../file/file.service";
-import { RedisService } from "../redis/redis.service";
-import { SubmissionEntity } from "../submission/submission.entity";
-
-// A removed test data file is kept at least this long, so that a submission whose data version was taken just before
-// the removal, but not committed yet, finds its files
-const DEFERRED_DELETION_GRACE = 15 * 60 * 1000;
-const SWEEP_INTERVAL = 10 * 60 * 1000;
-const SWEEP_BATCH = 1000;
-const REDIS_KEY_SWEEP_TURN = "problem-data-version:sweep-turn";
 
 export type ProblemDataVersionContent = Pick<
   ProblemDataVersionEntity,
@@ -54,12 +43,8 @@ const isDuplicateEntry = (error: unknown) =>
   (error as { driverError?: { code?: string } })?.driverError?.code === "ER_DUP_ENTRY";
 
 @Injectable()
-export class ProblemDataVersionService implements OnModuleInit, OnModuleDestroy {
-  private sweepTimer: ReturnType<typeof setInterval>;
-
+export class ProblemDataVersionService {
   constructor(
-    @InjectDataSource()
-    private readonly connection: DataSource,
     @InjectRepository(ProblemDataVersionEntity)
     private readonly problemDataVersionRepository: Repository<ProblemDataVersionEntity>,
     @Inject(forwardRef(() => ProblemService))
@@ -67,20 +52,8 @@ export class ProblemDataVersionService implements OnModuleInit, OnModuleDestroy 
     @Inject(forwardRef(() => ProblemFileService))
     private readonly problemFiles: ProblemFileService,
     private readonly fileService: FileService,
-    private readonly redisService: RedisService,
     private readonly configService: ConfigService
   ) {}
-
-  onModuleInit(): void {
-    this.sweepTimer = setInterval(() => {
-      this.sweepTurn().catch(e => logger.error(`Failed to delete removed test data files: ${e}`));
-    }, SWEEP_INTERVAL);
-    this.sweepTimer.unref();
-  }
-
-  onModuleDestroy(): void {
-    clearInterval(this.sweepTimer);
-  }
 
   /** What the problem is judged with now. */
   async currentContent(problem: ProblemEntity): Promise<ProblemDataVersionContent> {
@@ -136,6 +109,10 @@ export class ProblemDataVersionService implements OnModuleInit, OnModuleDestroy 
     return id ? await this.problemDataVersionRepository.findOneBy({ id }) : null;
   }
 
+  async findByNumber(problemId: number, version: number): Promise<ProblemDataVersionEntity> {
+    return await this.problemDataVersionRepository.findOneBy({ problemId, version });
+  }
+
   async findVersionNumbers(ids: number[]): Promise<Map<number, number>> {
     const unique = [...new Set(ids.filter(id => id))];
     if (unique.length === 0) return new Map();
@@ -149,65 +126,5 @@ export class ProblemDataVersionService implements OnModuleInit, OnModuleDestroy 
   /** Whether the version still has the problem's current content (also after edits nobody submitted since). */
   async isCurrent(problem: ProblemEntity, version: ProblemDataVersionEntity): Promise<boolean> {
     return dataVersionDigest(await this.currentContent(problem)) === version.digest;
-  }
-
-  // One backend process deletes at a time; if Redis is unavailable, all do (deleting is idempotent).
-  private async sweepTurn(): Promise<void> {
-    let turn = true;
-    try {
-      turn = await this.redisService.takeTurn(REDIS_KEY_SWEEP_TURN, SWEEP_INTERVAL - 1000);
-    } catch {
-      /* delete anyway */
-    }
-    if (turn) await this.sweepDeferredFiles();
-  }
-
-  /** The test data files of the data versions that waiting submissions are pinned to. */
-  private async pinnedFiles(): Promise<Set<string>> {
-    const rows: { id: number }[] = await this.connection
-      .getRepository(SubmissionEntity)
-      .createQueryBuilder("submission")
-      .select("DISTINCT submission.problemDataVersionId", "id")
-      .where("submission.taskId IS NOT NULL AND submission.problemDataVersionId IS NOT NULL")
-      .getRawMany();
-    if (rows.length === 0) return new Set();
-    const versions = await this.problemDataVersionRepository.find({
-      where: { id: In(rows.map(row => Number(row.id))) },
-      select: ["id", "testData"]
-    });
-    return new Set(versions.flatMap(version => version.testData.map(file => file.uuid)));
-  }
-
-  /**
-   * Deletes removed test data files that no waiting submission needs any more.
-   *
-   * @return How many files were deleted.
-   */
-  async sweepDeferredFiles(now = Date.now()): Promise<number> {
-    const due = await this.connection.getRepository(DeferredFileDeletionEntity).find({
-      where: { requestedAt: LessThan(new Date(now - DEFERRED_DELETION_GRACE)) },
-      order: { requestedAt: "ASC" },
-      take: SWEEP_BATCH
-    });
-    if (due.length === 0) return 0;
-
-    const pinned = await this.pinnedFiles();
-    const candidates = due.map(file => file.uuid).filter(uuid => !pinned.has(uuid));
-    if (candidates.length === 0) return 0;
-    // Never delete a file a problem uses again
-    const reused = new Set(
-      (await this.connection.getRepository(ProblemFileEntity).findBy({ uuid: In(candidates) })).map(file => file.uuid)
-    );
-
-    let removeObjects: () => void = null;
-    await this.connection.transaction("READ COMMITTED", async manager => {
-      await manager.delete(DeferredFileDeletionEntity, { uuid: In(candidates) });
-      removeObjects = await this.fileService.deleteFile(
-        candidates.filter(uuid => !reused.has(uuid)),
-        manager
-      );
-    });
-    removeObjects();
-    return candidates.length - reused.size;
   }
 }

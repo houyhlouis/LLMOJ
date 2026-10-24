@@ -8,6 +8,8 @@ import {
   AiPolicyDto,
   JudgePolicyDto,
   SiteManagementSettingsDto,
+  TestDataRetentionPolicyDto,
+  TestDataRetentionReportDto,
   UpdateRegistrationModeRequestDto
 } from "./site-management.dto";
 
@@ -15,6 +17,8 @@ import { RegistrationSettingsService } from "../settings/registration-settings.s
 import { AiPolicyService } from "../settings/ai-policy.service";
 import { JudgePolicyService } from "../settings/judge-policy.service";
 import { AiEndpointPolicyService } from "../settings/ai-endpoint-policy.service";
+import { TestDataRetentionPolicyService } from "../settings/test-data-retention-policy.service";
+import { SWEEP_INTERVAL, TestDataRetentionService } from "../problem/test-data-retention.service";
 import { CurrentUser } from "../common/user.decorator";
 import { UserEntity } from "../user/user.entity";
 import { AuthSessionService } from "../auth/auth-session.service";
@@ -29,7 +33,9 @@ export class SiteManagementController {
     private readonly aiPolicy: AiPolicyService,
     private readonly judgePolicy: JudgePolicyService,
     private readonly aiEndpoints: AiEndpointPolicyService,
-    private readonly sessions: AuthSessionService
+    private readonly sessions: AuthSessionService,
+    private readonly testDataRetentionPolicy: TestDataRetentionPolicyService,
+    private readonly testDataRetention: TestDataRetentionService
   ) {}
 
   /** Site settings change for everyone at once, so administrators confirm their password first. */
@@ -105,5 +111,33 @@ export class SiteManagementController {
   ): Promise<AiEndpointPolicyDto> {
     await this.confirmAdministrator(user, request);
     return await this.aiEndpoints.update(user, body, request.ip);
+  }
+
+  @Get("getTestDataRetention")
+  @ApiOperation({
+    summary:
+      "Get how long removed test data stays, and what the next cleanup would delete or keep and why (site " +
+      "administrators only)."
+  })
+  async getTestDataRetention(@CurrentUser() user: UserEntity): Promise<TestDataRetentionReportDto> {
+    const policy = await this.testDataRetentionPolicy.getForAdministrator(user);
+    return {
+      policy,
+      ...(await this.testDataRetention.describeReport(500)),
+      cleanupMinutes: SWEEP_INTERVAL / 60000
+    };
+  }
+
+  @Post("updateTestDataRetention")
+  @ApiOperation({
+    summary: "Change how long removed test data stays, from the next cleanup (site administrators only)."
+  })
+  async updateTestDataRetention(
+    @CurrentUser() user: UserEntity,
+    @Body() body: TestDataRetentionPolicyDto,
+    @Req() request: Request
+  ): Promise<TestDataRetentionPolicyDto> {
+    await this.confirmAdministrator(user, request);
+    return await this.testDataRetentionPolicy.update(user, body, request.ip);
   }
 }

@@ -66,3 +66,7 @@ export * from "./change-problem-type-request.dto";
 export * from "./change-problem-type-response.dto";
 
 export * from "./import-test-data-zip.dto";
+
+export * from "./test-data-availability.dto";
+export * from "./set-test-data-kept-request.dto";
+export * from "./set-test-data-kept-response.dto";

@@ -62,7 +62,7 @@ test("Redis connections are opened in constructors or closed where they're opene
 test("periodic turns take no new connection", async () => {
   const { RedisService } = require("./redis.service.ts");
   const { StatisticsOutboxService } = require("../submission/statistics-outbox.service.ts");
-  const { ProblemDataVersionService } = require("../problem/problem-data-version.service.ts");
+  const { TestDataRetentionService } = require("../problem/test-data-retention.service.ts");
 
   // The shared connection: SET ... PX ... NX succeeds once per period.
   const holders = new Map();
@@ -90,7 +90,7 @@ test("periodic turns take no new connection", async () => {
     replay: async () => replays++
   });
   let sweeps = 0;
-  const versions = Object.assign(Object.create(ProblemDataVersionService.prototype), {
+  const retention = Object.assign(Object.create(TestDataRetentionService.prototype), {
     redisService: redis,
     sweepDeferredFiles: async () => sweeps++
   });
@@ -98,7 +98,7 @@ test("periodic turns take no new connection", async () => {
     // eslint-disable-next-line no-await-in-loop
     await outbox.replayTurn();
     // eslint-disable-next-line no-await-in-loop
-    await versions.sweepTurn();
+    await retention.sweepTurn();
   }
   // One turn each until the period passes; never a new connection.
   assert.equal(replays, 1);
@@ -109,9 +109,9 @@ test("periodic turns take no new connection", async () => {
     client: { set: async () => Promise.reject(new Error("connection refused")) }
   });
   Object.assign(outbox, { redisService: down });
-  Object.assign(versions, { redisService: down });
+  Object.assign(retention, { redisService: down });
   await outbox.replayTurn();
-  await versions.sweepTurn();
+  await retention.sweepTurn();
   assert.equal(replays, 2);
   assert.equal(sweeps, 2);
 });

@@ -691,6 +691,41 @@ declare namespace ApiTypes {
        * Whether the problem's test data and judge settings are still that version
        */
       current: boolean;
+      /**
+       * Whether its test data is all still there
+       */
+      testData: {
+        /**
+         * InUse: the problem uses all of it; Retained: some was removed from the problem but is kept; Deleted: some is gone, so results judged with it can't be judged again with the same data
+         */
+        state: "InUse" | "Retained" | "Deleted";
+        /**
+         * Retained: when the first of its removed files may be deleted; absent while kept as long as needed
+         */
+        retainedUntil?: string; // date-time
+        /**
+         * Retained: the next cleanup, within ten minutes, deletes some of it
+         */
+        deletionDue?: boolean;
+        /**
+         * Retained: why
+         */
+        reasons?: (
+          | "Grace"
+          | "WaitingSubmission"
+          | "WaitingHack"
+          | "WaitingSelfEval"
+          | "Contest"
+          | "Result"
+          | "EarlierResult"
+          | "Kept"
+        )[];
+        /**
+         * Who chose to keep it until released; absent if nobody did
+         */
+        keptBy?: string;
+        keptAt?: string; // date-time
+      };
     };
     /**
      * With rejudge permission: what its result was judged with; absent if not recorded
@@ -1663,6 +1698,32 @@ declare namespace ApiTypes {
     error?:
       "PERMISSION_DENIED" | "NO_SUCH_USER" | "NO_SUCH_GROUP" | "USER_NOT_IN_GROUP" | "GROUP_ADMIN_CAN_NOT_BE_REMOVED";
   }
+  export interface RemovedTestDataFileDto {
+    /**
+     * From a data version that uses it; null if none does
+     */
+    problemId?: number;
+    problemDisplayId?: number;
+    filename?: string;
+    /**
+     * null once the file is gone
+     */
+    size?: number;
+    removedAt: string; // date-time
+    /**
+     * The numbers of the data versions that use it
+     */
+    versions: number[];
+    /**
+     * What the next cleanup does: deletes it, keeps it, or releases it (a problem uses it again)
+     */
+    action: "Delete" | "Keep" | "Release";
+    /**
+     * While kept: when its last reason ends; absent while one has no end
+     */
+    keptUntil?: string; // date-time
+    reasons: ApiTypes.TestDataRetentionReasonDto[];
+  }
   export interface RenameGroupRequestDto {
     groupId: number;
     name: string;
@@ -1880,6 +1941,21 @@ declare namespace ApiTypes {
   export interface SetSubmissionPublicResponseDto {
     error?: "NO_SUCH_SUBMISSION" | "PERMISSION_DENIED";
   }
+  export interface SetTestDataKeptRequestDto {
+    problemId: number;
+    /**
+     * The problem's data version number
+     */
+    version: number;
+    /**
+     * true keeps its test data until released; false lets the retention policy decide
+     */
+    keep: boolean;
+  }
+  export interface SetTestDataKeptResponseDto {
+    error?: "NO_SUCH_PROBLEM" | "PERMISSION_DENIED" | "NO_SUCH_DATA_VERSION" | "TEST_DATA_DELETED";
+    testData?: ApiTypes.TestDataAvailabilityDto;
+  }
   export interface SetUserPrivilegesRequestDto {
     userId: number;
     privileges: (
@@ -2013,6 +2089,41 @@ declare namespace ApiTypes {
      * Whether the problem's test data and judge settings are still that version
      */
     current: boolean;
+    /**
+     * Whether its test data is all still there
+     */
+    testData: {
+      /**
+       * InUse: the problem uses all of it; Retained: some was removed from the problem but is kept; Deleted: some is gone, so results judged with it can't be judged again with the same data
+       */
+      state: "InUse" | "Retained" | "Deleted";
+      /**
+       * Retained: when the first of its removed files may be deleted; absent while kept as long as needed
+       */
+      retainedUntil?: string; // date-time
+      /**
+       * Retained: the next cleanup, within ten minutes, deletes some of it
+       */
+      deletionDue?: boolean;
+      /**
+       * Retained: why
+       */
+      reasons?: (
+        | "Grace"
+        | "WaitingSubmission"
+        | "WaitingHack"
+        | "WaitingSelfEval"
+        | "Contest"
+        | "Result"
+        | "EarlierResult"
+        | "Kept"
+      )[];
+      /**
+       * Who chose to keep it until released; absent if nobody did
+       */
+      keptBy?: string;
+      keptAt?: string; // date-time
+    };
   }
   export interface SubmissionEarlierResultDto {
     status:
@@ -2039,6 +2150,41 @@ declare namespace ApiTypes {
      * The data version it was judged with; null if not recorded
      */
     dataVersion?: number;
+    /**
+     * Whether that data version's test data is all still there; absent if not recorded
+     */
+    testData?: {
+      /**
+       * InUse: the problem uses all of it; Retained: some was removed from the problem but is kept; Deleted: some is gone, so results judged with it can't be judged again with the same data
+       */
+      state: "InUse" | "Retained" | "Deleted";
+      /**
+       * Retained: when the first of its removed files may be deleted; absent while kept as long as needed
+       */
+      retainedUntil?: string; // date-time
+      /**
+       * Retained: the next cleanup, within ten minutes, deletes some of it
+       */
+      deletionDue?: boolean;
+      /**
+       * Retained: why
+       */
+      reasons?: (
+        | "Grace"
+        | "WaitingSubmission"
+        | "WaitingHack"
+        | "WaitingSelfEval"
+        | "Contest"
+        | "Result"
+        | "EarlierResult"
+        | "Kept"
+      )[];
+      /**
+       * Who chose to keep it until released; absent if nobody did
+       */
+      keptBy?: string;
+      keptAt?: string; // date-time
+    };
     /**
      * What it was judged with; null if not recorded
      */
@@ -2178,6 +2324,130 @@ declare namespace ApiTypes {
     token?: string; // uuid
     maxUses?: number;
     expiresAt?: string;
+  }
+  export interface TestDataAvailabilityDto {
+    /**
+     * InUse: the problem uses all of it; Retained: some was removed from the problem but is kept; Deleted: some is gone, so results judged with it can't be judged again with the same data
+     */
+    state: "InUse" | "Retained" | "Deleted";
+    /**
+     * Retained: when the first of its removed files may be deleted; absent while kept as long as needed
+     */
+    retainedUntil?: string; // date-time
+    /**
+     * Retained: the next cleanup, within ten minutes, deletes some of it
+     */
+    deletionDue?: boolean;
+    /**
+     * Retained: why
+     */
+    reasons?: (
+      | "Grace"
+      | "WaitingSubmission"
+      | "WaitingHack"
+      | "WaitingSelfEval"
+      | "Contest"
+      | "Result"
+      | "EarlierResult"
+      | "Kept"
+    )[];
+    /**
+     * Who chose to keep it until released; absent if nobody did
+     */
+    keptBy?: string;
+    keptAt?: string; // date-time
+  }
+  export interface TestDataRetentionPolicyDto {
+    /**
+     * Days after a contest ends that the test data its submissions were judged with stays.
+     */
+    contestDays: number;
+    /**
+     * Days that removed test data stays for the results judged with it, from its removal (or from the rejudge that replaced a result judged with it).
+     */
+    resultDays: number;
+  }
+  export interface TestDataRetentionReasonDto {
+    kind:
+      | "Grace"
+      | "WaitingSubmission"
+      | "WaitingHack"
+      | "WaitingSelfEval"
+      | "Contest"
+      | "Result"
+      | "EarlierResult"
+      | "Kept";
+    /**
+     * When it ends; absent for as long as its cause lasts
+     */
+    until?: string; // date-time
+    /**
+     * The number of the data version it comes from
+     */
+    version?: number;
+    contestId?: number;
+    contestTitle?: string;
+    /**
+     * Who kept the data version
+     */
+    keptBy?: string;
+  }
+  export interface TestDataRetentionReasonTotalsDto {
+    files: number;
+    bytes: number;
+    kind:
+      | "Grace"
+      | "WaitingSubmission"
+      | "WaitingHack"
+      | "WaitingSelfEval"
+      | "Contest"
+      | "Result"
+      | "EarlierResult"
+      | "Kept";
+  }
+  export interface TestDataRetentionReportDto {
+    policy: ApiTypes.TestDataRetentionPolicyDto;
+    /**
+     * Test data removed from problems that still exists
+     */
+    removed: {
+      files: number;
+      bytes: number;
+    };
+    /**
+     * Removed files the next cleanup keeps
+     */
+    kept: {
+      files: number;
+      bytes: number;
+    };
+    /**
+     * Removed files the next cleanup deletes
+     */
+    deletedAtNextCleanup: {
+      files: number;
+      bytes: number;
+    };
+    /**
+     * A file counts for each reason
+     */
+    byReason: ApiTypes.TestDataRetentionReasonTotalsDto[];
+    /**
+     * Those the next cleanup deletes first, then the largest it keeps
+     */
+    files: ApiTypes.RemovedTestDataFileDto[];
+    /**
+     * How many removed files there are, including any not looked at
+     */
+    total: number;
+    /**
+     * How often the cleanup runs
+     */
+    cleanupMinutes: number;
+  }
+  export interface TestDataRetentionTotalsDto {
+    files: number;
+    bytes: number;
   }
   export interface ToggleReactionRequestDto {
     type: "Discussion" | "DiscussionReply";

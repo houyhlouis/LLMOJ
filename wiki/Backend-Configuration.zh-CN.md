@@ -254,6 +254,7 @@ LLMOJ 不会检查邮件能否真正发出。开启邮箱验证之前，请先�
 ## 不在这个文件中的设置
 
 - 在 **网站管理** 中保存的注册模式，它会立即覆盖 `preference.security.registrationMode`，无需重启。
+- 已移除的测试数据保留多久，在 **网站管理** 的 **已移除的测试数据** 中设置；见[提交记录](Submissions.zh-CN.md#已移除的测试数据保留多久)。
 - 用户、用户组、题目和讨论的权限及访问规则，包括 `ManageRegistrationReviews` 和 AI 权限（`ManageAiConfiguration`、`UseAi`、`GenerateTestdata`、`ImportProblem`）。它们保存在数据库中，无需重启即可生效，在 **权限管理** 页面设置；见[注册审核](Registration-Approval.zh-CN.md)和 [AI](AI.zh-CN.md)。
 - 每位用户的 AI 服务商密钥，见 [AI](AI.zh-CN.md)。
 - 评测能力，见[评测配置](Judge-Configuration.zh-CN.md)。

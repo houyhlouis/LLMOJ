@@ -10,6 +10,7 @@ import { ProblemTagService } from "./problem-tag.service";
 import { ProblemLockService } from "./problem-lock.service";
 import { ProblemDataVersionService } from "./problem-data-version.service";
 import { ProblemDataVersionEntity } from "./problem-data-version.entity";
+import { TestDataRetentionService } from "./test-data-retention.service";
 
 import { ProblemController } from "./problem.controller";
 
@@ -35,6 +36,7 @@ import { SubmissionModule } from "../submission/submission.module";
 import { ProblemTypeModule } from "../problem-type/problem-type.module";
 import { AuditModule } from "../audit/audit.module";
 import { DiscussionModule } from "../discussion/discussion.module";
+import { SettingsModule } from "../settings/settings.module";
 
 @Module({
   imports: [
@@ -54,7 +56,8 @@ import { DiscussionModule } from "../discussion/discussion.module";
     forwardRef(() => SubmissionModule),
     forwardRef(() => ProblemTypeModule),
     forwardRef(() => AuditModule),
-    forwardRef(() => DiscussionModule)
+    forwardRef(() => DiscussionModule),
+    SettingsModule
   ],
   providers: [
     ProblemAccessService,
@@ -63,7 +66,8 @@ import { DiscussionModule } from "../discussion/discussion.module";
     ProblemFileService,
     ProblemService,
     ProblemArchiveService,
-    ProblemDataVersionService
+    ProblemDataVersionService,
+    TestDataRetentionService
   ],
   controllers: [ProblemController],
   exports: [
@@ -73,7 +77,8 @@ import { DiscussionModule } from "../discussion/discussion.module";
     ProblemFileService,
     ProblemService,
     ProblemArchiveService,
-    ProblemDataVersionService
+    ProblemDataVersionService,
+    TestDataRetentionService
   ]
 })
 export class ProblemModule {}

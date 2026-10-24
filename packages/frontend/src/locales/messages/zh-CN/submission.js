@@ -64,7 +64,43 @@ return {
     judge_program: "评测程序",
     sandbox_image: "沙箱镜像",
     host: "系统",
-    cpu: "CPU"
+    cpu: "CPU",
+    test_data: {
+      deleted: "测试数据已删除：无法用同样的数据重新评测此结果",
+      deleted_short: "数据已删除",
+      deleted_notes: "此版本的部分测试数据文件已删除。评测结果保持不变，但无法复现。",
+      retained: "测试数据在需要期间保留",
+      retained_short: "数据保留中",
+      retained_until: "测试数据保留至 {date}",
+      retained_until_short: "数据保留至 {date}",
+      deletion_due: "测试数据将在 10 分钟内删除",
+      deletion_due_short: "数据即将删除",
+      kept_by: "由 {username} 保留",
+      deleted_user: "已删除的用户",
+      kept_because: "这些测试数据有一部分已从题目中移除。仍然保留，因为：",
+      reasons: {
+        Grace: "移除不到 15 分钟",
+        WaitingSubmission: "有等待评测的提交需要它",
+        WaitingHack: "有等待中的 Hack 需要它",
+        WaitingSelfEval: "有等待中的自测需要它",
+        Contest: "有比赛提交用它评测（比赛结束后再保留若干天）",
+        Result: "有评测结果用它评测（移除后再保留若干天）",
+        EarlierResult: "重测替换了用它评测的结果（之后再保留若干天）",
+        Kept: "题目管理者选择保留"
+      },
+      keep: "保留",
+      keep_notes: "保留版本 #{version} 的测试数据，直到你取消保留，以便用同样的数据重新评测用它评测过的结果。",
+      release: "取消保留",
+      release_notes: "不再特意保留这些测试数据，由网站的保留策略重新决定。",
+      kept: "这些测试数据将一直保留，直到取消保留。",
+      released: "已取消保留，由保留策略决定。",
+      errors: {
+        NO_SUCH_PROBLEM: "题目已不存在。",
+        PERMISSION_DENIED: "你没有权限保留此题目的测试数据。",
+        NO_SUCH_DATA_VERSION: "此数据版本已不存在。",
+        TEST_DATA_DELETED: "这些测试数据已有部分被删除，无法再保留。"
+      }
+    }
   },
   testcase: {
     title: "测试点",

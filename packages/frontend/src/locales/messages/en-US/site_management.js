@@ -30,6 +30,69 @@ return {
   invalid_response: "The server returned unrecognized settings. Reload and try again.",
   save_unconfirmed:
     "Could not confirm the save result: {error} Reload settings to check; your current selection has been kept.",
+  test_data: {
+    title: "Removed test data",
+    introduction:
+      "When a problem's test data is replaced or removed, its files stay while something needs them, so results judged with them can be judged again with the same data. Waiting submissions, hacks and self-evaluations, and data versions a problem manager keeps on a submission's page, always keep them. Here you choose how long contests and results keep them. A data version missing a file shows as deleted: its results stay readable, but can't be reproduced.",
+    fields: {
+      contestDays: "Days to keep after a contest ends",
+      resultDays: "Days to keep for judged results"
+    },
+    notes: {
+      contestDays:
+        "Test data that submissions to a contest were judged with stays while the contest runs and this many days after it ends, for appeals and corrections. 0 keeps it only while the contest runs.",
+      resultDays:
+        "Test data that results were judged with stays this many days after it's removed, and after a rejudge replaces such a result. 0 deletes it once nothing waits for it."
+    },
+    invalid: "Enter whole numbers within the allowed ranges.",
+    saved: "Saved. The next cleanup uses it.",
+    refresh: "Look again",
+    dry_run: "What the next cleanup does",
+    nothing_removed: "No removed test data is waiting to be deleted.",
+    summary:
+      "Removed test data that still exists: {files} files, {size}. The next cleanup (every {minutes} minutes) deletes {deleteFiles} files ({deleteSize}) and keeps {keepFiles} ({keepSize}).",
+    kept_because: "Kept because",
+    files: "Files",
+    size: "Size",
+    file: "File",
+    removed_at: "Removed",
+    next_cleanup: "Next cleanup",
+    why: "Why",
+    no_problem: "no data version",
+    unnamed: "(unnamed)",
+    version: "version #{version}",
+    until: " (until {date})",
+    deleted_user: "a deleted user",
+    used_again: "A problem uses it again",
+    nothing_needs_it: "Nothing needs it any more",
+    showing: "Showing {shown} of {total} removed files: those deleted first, then the largest kept.",
+    actions: {
+      Delete: "Deletes it",
+      Keep: "Keeps it while needed",
+      KeepUntil: "Keeps it until {date}",
+      Release: "Keeps it: in use again"
+    },
+    reason_kinds: {
+      Grace: "Removed less than 15 minutes ago",
+      WaitingSubmission: "A waiting submission",
+      WaitingHack: "A waiting hack",
+      WaitingSelfEval: "A waiting self-evaluation",
+      Contest: "A contest's days",
+      Result: "Judged results' days",
+      EarlierResult: "Earlier results' days",
+      Kept: "Kept by a problem manager"
+    },
+    reasons: {
+      Grace: "Removed less than 15 minutes ago",
+      WaitingSubmission: "A waiting submission needs {version}",
+      WaitingHack: "A waiting hack needs it",
+      WaitingSelfEval: "A waiting self-evaluation needs it",
+      Contest: "Contest {contest} judged with {version}",
+      Result: "Results judged with {version}",
+      EarlierResult: "An earlier result judged with {version}",
+      Kept: "{username} keeps {version}"
+    }
+  },
   judging: {
     title: "Judging",
     introduction:

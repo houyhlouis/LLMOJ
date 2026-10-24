@@ -110,6 +110,7 @@ function componentHarness(file, options = {}) {
   };
   api.user = api.auth;
   api.judgeClient = api.auth;
+  api.problem = api.auth;
   for (const name of ["createGetApi", "createPostApi"]) {
     api[name] = endpoint => async body => {
       calls.push({ name: endpoint, body });
@@ -144,7 +145,14 @@ function componentHarness(file, options = {}) {
       useLoginOrRegisterNavigation: () => () => {},
       useFieldCheck: value => [() => {}, async () => true, () => false, () => "", () => value],
       useAsyncCallbackPending: callback => [false, callback],
-      useDialog: () => ({ element: null, open() {}, close() {} })
+      useDialog: () => ({ element: null, open() {}, close() {} }),
+      Link: { name: "Link" }
+    },
+    "@/utils/formatFileSize": { __esModule: true, default: size => `${size} B` },
+    "@/utils/formatDateTime": { __esModule: true, default: date => [`short ${date}`, `long ${date}`] },
+    "@/pages/problem/utils": {
+      getProblemUrl: (id, { subRoute, use } = {}) =>
+        `/p/${use === "displayId" ? "" : "id/"}${id}${subRoute ? `/${subRoute}` : ""}`
     },
     "@/utils/toast": { error: value => toasts.push(value), success: value => toasts.push(value) },
     "@/utils/validators": {
