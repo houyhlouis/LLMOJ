@@ -51,7 +51,18 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      # The build takes about 19 GiB at its peak: about 9.5 GiB of layers where Docker keeps them, then the 7 GiB tar
+      # and its 2.5 GiB archive. Those go to the second disk where there is one (amd64 runners mount it at /mnt), and
+      # preinstalled toolchains this job doesn't use make room on the first.
+      - name: Make room
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          if mountpoint -q /mnt; then output=/mnt/rootfs; else output="$RUNNER_TEMP/rootfs"; fi
+          sudo mkdir -p "$output" && sudo chown "$(id -un)" "$output"
+          echo "OUTPUT_DIRECTORY=$output" >> "$GITHUB_ENV"
+          df -h / "$output"
       - uses: docker/setup-buildx-action@v3
-      - run: ./infra/sandbox-rootfs/build.sh
+      # With bash, as the installer runs it: the script isn't executable in Git
+      - run: bash infra/sandbox-rootfs/build.sh
         env:
           ROOTFS_ARCHITECTURE: ${{ matrix.architecture }}

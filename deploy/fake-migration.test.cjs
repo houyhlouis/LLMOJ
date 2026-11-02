@@ -13,8 +13,9 @@ test("Fake SQL migration preserves enum positions, is repeatable and rejects unk
   assert.match(cfg.database, /(?:^|_)fake(?:_|$)/i, "Use an explicitly named Fake isolation database");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "llmoj-fake-sql-test-")), options = path.join(directory, "client.cnf");
   const quote = value => '"' + String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n") + '"';
+  // Without TLS: clients from MariaDB 11.4 on require it by default, and a disposable test server (CI's 10.11) has none
   fs.writeFileSync(options, "[client]\nhost=" + quote(cfg.host) + "\nport=" + cfg.port + "\nuser=" + quote(cfg.username) +
-    "\npassword=" + quote(cfg.password) + "\ndatabase=" + quote(cfg.database) + "\nprotocol=tcp\n", { mode: 0o600 });
+    "\npassword=" + quote(cfg.password) + "\ndatabase=" + quote(cfg.database) + "\nprotocol=tcp\nskip-ssl\n", { mode: 0o600 });
   const sql = (query, success = true) => {
     const result = spawnSync(process.env.LLMOJ_MARIADB_BINARY || "mariadb", ["--defaults-extra-file=" + options, "--batch", "--skip-column-names", "--connect-timeout=5"], { input: query, encoding: "utf8", timeout: 10000 });
     if (result.error) throw result.error;
