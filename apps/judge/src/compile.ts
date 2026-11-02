@@ -182,6 +182,9 @@ export async function compile(compileTask: CompileTask): Promise<CompileResult> 
     : null;
   const compileTaskHash = await hashCompileTask(compileTask, testlibHeader);
 
+  const unavailable = languageConfig.unavailable?.(compileTask.compileAndRunOptions);
+  if (unavailable) return { compileTaskHash, success: false, message: unavailable };
+
   const cachedResult = compileResultCache.get(compileTaskHash);
   if (cachedResult) {
     winston.verbose(`Use cached compile reslt for ${compileTaskHash}`);

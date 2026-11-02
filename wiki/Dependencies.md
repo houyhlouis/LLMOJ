@@ -17,7 +17,7 @@ LLMOJ pins its toolchain and locks every package it uses in `pnpm-lock.yaml`. Th
 | Judge | node-addon-api 8 and cmake-js 8 | The native add-ons are built against the installed Node.js, without downloads. |
 | Frontend | React 18.3, MobX 6, Vite 8, Monaco Editor 0.57, MathJax 3, Fomantic UI 2.8, Chart.js 4 | The build is self-contained: see [The frontend build](#the-frontend-build). |
 | Browsers | Chrome and Edge 111, Firefox 114, Safari 16.4 (macOS and iOS), and later | See [Supported browsers](#supported-browsers). |
-| Server | Ubuntu 26.04 on amd64 | See [Installation](Installation.md). |
+| Server | Ubuntu 26.04 on amd64 or arm64 | See [Installation](Installation.md) and [ARM64 servers](ARM64.md). |
 
 ## Not upgraded yet
 

@@ -11,12 +11,15 @@ It tests every database change on a copy of your database before touching the re
 - Installations made by the installer, with the `all` or `web` role, using the default service layout and the local MariaDB, Redis and MinIO.
 - Changes to the site's code, the judge and the sandbox. On an `all` installation, a changed sandbox or judge is rebuilt and tested before switching over (see [the judge self-test](Judge-Configuration.md#sandbox-syscall-filter-and-self-test)).
 - Changes to dependencies and the lockfile: see [Dependency changes](#dependency-changes).
+- Changes to the sandbox image recipes that leave the recipe of the installed image (the server's architecture) as it is, such as the other architecture's (see [ARM64 servers](ARM64.md#upgrades)). The plan lists them under `rootfsRecipe`.
 - The database changes made by LLMOJ's own features, each checked against its exact expected form. See [Feature upgrades](Community-Upgrade.md) for the list.
 
 It refuses:
 - installations managed with Git, custom layouts, custom database connections, `EnvironmentFile` overrides of the backend or judge, or custom AI directories;
 - database differences it doesn't recognize, and changes to the Node.js and pnpm versions (24.21.0 and 11.13.1; see [Dependencies](Dependencies.md));
-- removing or changing values the judge protocol or the database already uses (new values may be added at the end).
+- removing or changing values the judge protocol or the database already uses (new values may be added at the end);
+- a change to the recipe of the installed sandbox image, which an upgrade keeps;
+- changes to the judge's protocol and task files on an installation whose source isn't known to be what was installed: the installer records the source tree it installed, and each completed upgrade the one it deployed. An installation made before this record (before arm64 support) that was never upgraded has neither: upgrade it once to the version it already runs (`--ref` with that commit), then to the new one.
 
 These need a separate, planned migration. Don't get round a refusal by deleting data or reinstalling.
 
@@ -50,7 +53,7 @@ The upgrader then:
 3. backs up the configuration, the AI master key and the database, loads the backup into a temporary database, and tests every schema and data change there;
 4. stops Nginx, the judge and the backend, makes a fresh database backup and checks it again;
 5. switches to the new files and applies the database changes;
-6. waits until the new backend is [ready](Operations-Configuration.md#liveness-and-readiness) (it reaches the database, Redis and object storage) and checks the local judge, then starts the services that were running before, Nginx last.
+6. waits up to three minutes until the new backend is [ready](Operations-Configuration.md#liveness-and-readiness) (it reaches the database, Redis and object storage) and checks the local judge, then starts the services that were running before, Nginx last.
 
 ## Following an upgrade
 

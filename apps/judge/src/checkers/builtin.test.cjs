@@ -59,7 +59,8 @@ childProcess.ChildProcess.prototype.kill = function kill(signal) {
   return originalKill.call(this, signal);
 };
 
-const LIMITS = { time: 2000, message: 4096 };
+// Generous, so that only the case with a limit of its own times out, also on a slow or busy machine
+const LIMITS = { time: 10000, message: 4096 };
 async function run(script, limits = LIMITS) {
   const output = fs.openSync(write("output", "1 2 3\n"), "r");
   const answer = fs.openSync(write("answer", "4 5 6\n"), "r");

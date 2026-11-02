@@ -17,7 +17,7 @@ LLMOJ 固定其工具链，并在 `pnpm-lock.yaml` 中锁定所用的全部软�
 | 评测机 | node-addon-api 8 与 cmake-js 8 | 原生模块针对已安装的 Node.js 构建，无需下载。 |
 | 前端 | React 18.3、MobX 6、Vite 8、Monaco Editor 0.57、MathJax 3、Fomantic UI 2.8、Chart.js 4 | 构建结果自成一体：见[前端构建](#前端构建)。 |
 | 浏览器 | Chrome 与 Edge 111、Firefox 114、Safari 16.4（macOS 与 iOS）及更高版本 | 见[受支持的浏览器](#受支持的浏览器)。 |
-| 服务器 | amd64 上的 Ubuntu 26.04 | 见[安装](Installation.zh-CN.md)。 |
+| 服务器 | amd64 或 arm64 上的 Ubuntu 26.04 | 见[安装](Installation.zh-CN.md)和 [ARM64 服务器](ARM64.zh-CN.md)。 |
 
 ## 尚未升级的部分
 

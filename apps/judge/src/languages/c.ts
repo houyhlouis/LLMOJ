@@ -1,4 +1,5 @@
 import { LanguageConfig } from ".";
+import { cArchitectureFlags, cArchitectureUnavailable } from "../architecture";
 
 interface CompileAndRunOptionsC {
   compiler: string;
@@ -13,6 +14,7 @@ export const languageConfig: LanguageConfig<CompileAndRunOptionsC> = {
     sourceFilename: "main.c",
     binarySizeLimit: 5 * 1024 * 1024 // 5 MiB, enough unless someone initlizes globals badly
   }),
+  unavailable: compileAndRunOptions => cArchitectureUnavailable(compileAndRunOptions.m),
   compile: ({ sourcePathInside, binaryDirectoryInside, compileAndRunOptions }) => ({
     executable: compileAndRunOptions.compiler === "gcc" ? "gcc" : "clang",
     parameters: [
@@ -25,8 +27,7 @@ export const languageConfig: LanguageConfig<CompileAndRunOptionsC> = {
       "-Wall",
       "-Wextra",
       "-Wno-unused-result",
-      `-m${compileAndRunOptions.m}`,
-      "-march=native",
+      ...cArchitectureFlags(compileAndRunOptions.m),
       sourcePathInside
     ],
     time: 10000,

@@ -29,6 +29,7 @@ import { RedisModule } from "../redis/redis.module";
 import { MailModule } from "../mail/mail.module";
 import { AuditModule } from "../audit/audit.module";
 import { MigrationModule } from "../migration/migration.module";
+import { JudgeModule } from "../judge/judge.module";
 
 @Module({
   imports: [
@@ -44,7 +45,8 @@ import { MigrationModule } from "../migration/migration.module";
     forwardRef(() => RedisModule),
     forwardRef(() => MailModule),
     forwardRef(() => AuditModule),
-    forwardRef(() => MigrationModule)
+    forwardRef(() => MigrationModule),
+    forwardRef(() => JudgeModule)
   ],
   providers: [
     RegistrationReviewService,

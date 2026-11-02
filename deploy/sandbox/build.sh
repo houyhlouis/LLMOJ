@@ -6,26 +6,45 @@ REPOSITORY_ROOT="$(cd "$SCRIPT_DIRECTORY/../.." && pwd)"
 RUNTIME_DIRECTORY="${RUNTIME_DIRECTORY:-$REPOSITORY_ROOT/runtime}"
 OUTPUT_DIRECTORY="${OUTPUT_DIRECTORY:-$RUNTIME_DIRECTORY/sandbox-archives}"
 
+case "$(uname -m)" in
+    x86_64) HOST_ARCHITECTURE=amd64 ;;
+    aarch64) HOST_ARCHITECTURE=arm64 ;;
+    *) HOST_ARCHITECTURE="$(uname -m)" ;;
+esac
+# This machine's architecture, unless ROOTFS_ARCHITECTURE names one (to plan or build the other's rootfs). amd64 and
+# arm64 each have a recipe of their own (infra/sandbox-rootfs/build.sh), and so their own rootfs ID.
+case "${ROOTFS_ARCHITECTURE:-$HOST_ARCHITECTURE}" in
+    amd64|x86_64) ROOTFS_ARCHITECTURE=amd64; RECIPE_DIRECTORY=infra/sandbox-rootfs ;;
+    arm64|aarch64) ROOTFS_ARCHITECTURE=arm64; RECIPE_DIRECTORY=infra/sandbox-rootfs/arm64 ;;
+    *) echo "There is no sandbox rootfs for ${ROOTFS_ARCHITECTURE:-$HOST_ARCHITECTURE}; LLMOJ judges on amd64 and arm64" >&2; exit 1 ;;
+esac
+
+# The files the rootfs ID covers, in order; the same list as infra/sandbox-rootfs/build.sh
+recipe_files() {
+    printf '%s\n' \
+        apps/judge/src/languages/compile-java.sh \
+        apps/judge/src/languages/compile-python.sh \
+        "$RECIPE_DIRECTORY/Dockerfile" \
+        infra/sandbox-rootfs/csc \
+        infra/sandbox-rootfs/fsharpc \
+        infra/sandbox-rootfs/mono \
+        "$RECIPE_DIRECTORY/smoke-test.sh"
+}
+
 recipe_id() {
     local file
     {
-        for file in \
-            apps/judge/src/languages/compile-java.sh \
-            apps/judge/src/languages/compile-python.sh \
-            infra/sandbox-rootfs/Dockerfile \
-            infra/sandbox-rootfs/csc \
-            infra/sandbox-rootfs/fsharpc \
-            infra/sandbox-rootfs/mono \
-            infra/sandbox-rootfs/smoke-test.sh; do
+        while read -r file; do
             printf '%s  %s\n' "$(git -C "$REPOSITORY_ROOT" hash-object "$file")" "$file"
-        done
+        done < <(recipe_files)
     } | sha256sum | cut -d' ' -f1
 }
 
 case "${1:-plan}" in
     plan)
         printf 'ROOTFS_ID=%s\n' "$(recipe_id)"
-        printf 'RECIPE=%s\n' "$REPOSITORY_ROOT/infra/sandbox-rootfs/Dockerfile"
+        printf 'ARCHITECTURE=%s\n' "$ROOTFS_ARCHITECTURE"
+        printf 'RECIPE=%s\n' "$REPOSITORY_ROOT/$RECIPE_DIRECTORY/Dockerfile"
         printf 'OUTPUT_DIRECTORY=%s\n' "$OUTPUT_DIRECTORY"
         printf 'ROOTFS=%s\n' "$RUNTIME_DIRECTORY/sandbox-rootfs"
         ;;
@@ -36,19 +55,12 @@ case "${1:-plan}" in
         mkdir -p "$RUNTIME_DIRECTORY"
         context="$(mktemp -d "$RUNTIME_DIRECTORY/.upstream-rootfs-context-XXXXXXXX")"
         trap 'rm -rf "$context"' EXIT
-        for file in \
-            apps/judge/src/languages/compile-java.sh \
-            apps/judge/src/languages/compile-python.sh \
-            infra/sandbox-rootfs/Dockerfile \
-            infra/sandbox-rootfs/build.sh \
-            infra/sandbox-rootfs/csc \
-            infra/sandbox-rootfs/fsharpc \
-            infra/sandbox-rootfs/mono \
-            infra/sandbox-rootfs/smoke-test.sh; do
+        while read -r file; do
             mkdir -p "$context/$(dirname "$file")"
             cp --preserve=mode "$REPOSITORY_ROOT/$file" "$context/$file"
-        done
-        OUTPUT_DIRECTORY="$OUTPUT_DIRECTORY" bash "$context/infra/sandbox-rootfs/build.sh"
+        done < <(recipe_files; echo infra/sandbox-rootfs/build.sh)
+        OUTPUT_DIRECTORY="$OUTPUT_DIRECTORY" ROOTFS_ARCHITECTURE="$ROOTFS_ARCHITECTURE" \
+            bash "$context/infra/sandbox-rootfs/build.sh"
         ;;
     stage)
         if [[ "$EUID" -ne 0 ]]; then
@@ -81,9 +93,15 @@ case "${1:-plan}" in
             0) staging_script="$SCRIPT_DIRECTORY/stage-host.sh" ;;
             *) echo "LIBREOJ_X32_SUPPORTED must be 0 or 1" >&2; exit 1 ;;
         esac
+        if [[ "$ROOTFS_ARCHITECTURE" != "$HOST_ARCHITECTURE" ]]; then
+            echo "This machine can't run the $ROOTFS_ARCHITECTURE rootfs's checks; stage it on an $ROOTFS_ARCHITECTURE machine." >&2
+            exit 1
+        fi
+        # x32 is an x86-64 ABI: the arm64 rootfs is checked with its own smoke test, through the host profile
+        [[ "$ROOTFS_ARCHITECTURE" == amd64 ]] || { x32_supported=0; staging_script="$SCRIPT_DIRECTORY/stage-host.sh"; }
         mkdir -p "$RUNTIME_DIRECTORY"
         ARCHIVE="$archive" CHECKSUM="$archive.sha256" DESTINATION_PARENT="$RUNTIME_DIRECTORY" \
-            LIBREOJ_X32_SUPPORTED="$x32_supported" bash "$staging_script"
+            LIBREOJ_X32_SUPPORTED="$x32_supported" ROOTFS_ARCHITECTURE="$ROOTFS_ARCHITECTURE" bash "$staging_script"
         ln -s "rootfs-$rootfs_id" "$RUNTIME_DIRECTORY/sandbox-rootfs"
         printf '%s\n' "$rootfs_id" > "$RUNTIME_DIRECTORY/rootfs-id"
         chmod 0644 "$RUNTIME_DIRECTORY/rootfs-id"

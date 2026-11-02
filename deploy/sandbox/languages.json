@@ -15,6 +15,9 @@
     "architectures": [
       "64",
       "32"
+    ],
+    "arm64Architectures": [
+      "64"
     ]
   },
   "c": {
@@ -33,6 +36,9 @@
     "architectures": [
       "64",
       "32"
+    ],
+    "arm64Architectures": [
+      "64"
     ]
   },
   "java": {

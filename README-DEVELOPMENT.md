@@ -7,7 +7,7 @@ LLMOJ is based on [LibreOJ](https://github.com/libreoj/libreoj) and released und
 ## Toolchain
 
 - Node.js 24.21 (`.node-version`; installations use exactly 24.21.0) and pnpm 11.13.1 (`packageManager` in `package.json`). The other pinned versions, what isn't upgraded yet, and how to check the dependencies for advisories are in [Dependencies](wiki/Dependencies.md).
-- For the judge's native code: Linux on amd64, CMake, a C++ compiler and libfmt.
+- For the judge's native code: Linux on amd64 or arm64, CMake, a C++ compiler and libfmt. C and C++ submissions build for the judge machine's architecture (`apps/judge/src/architecture.ts`); arm64 has no 32-bit toolchain.
 - To actually run programs in the sandbox: namespaces and cgroup v2.
 
 ## Building

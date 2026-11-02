@@ -11,6 +11,7 @@ import { JudgeClientCapabilities, JudgeClientSystemInfo } from "@libreoj/judge-p
 import { JudgeClientEntity } from "./judge-client.entity";
 import { JudgeClientInfoDto } from "./dto/judge-client-info.dto";
 import { JudgeJobEntity, JudgeJobState } from "./judge-job.entity";
+import { C_ARCHITECTURES, judgeClientArchitectures } from "./judge-architecture";
 
 import { RedisService } from "../redis/redis.service";
 
@@ -24,6 +25,9 @@ const REDIS_KEY_JUDGE_CLIENT_SESSION_ID = "judge-client-session-id:%d";
 const REDIS_KEY_JUDGE_CLIENT_SYSTEM_INFO = "judge-client-system-info:%s";
 const REDIS_KEY_JUDGE_CLIENT_CAPABILITIES = "judge-client-capabilities:%d";
 
+// The judge clients' architectures are read again after this long
+const FLEET_ARCHITECTURES_CACHE = 10 * 1000;
+
 // Tells every backend process that a judge client changed: its key was reset or it was deleted (`revoked`: its
 // connections are closed), or it was drained or resumed.
 export const REDIS_CHANNEL_JUDGE_CLIENT_CHANGED = "judge-client-changed";
@@ -36,6 +40,8 @@ export interface JudgeClientChange {
 @Injectable()
 export class JudgeClientService {
   private readonly redis: Redis;
+
+  private fleetArchitectures: { value: Promise<string[]>; until: number } = null;
 
   constructor(
     @InjectRepository(JudgeClientEntity)
@@ -145,6 +151,29 @@ export class JudgeClientService {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * The architectures the site's judge clients build C and C++ programs for (see judge-architecture.ts), by what each
+   * announced when it last connected, online or not. All of them while none has announced anything, as before any
+   * judge client ran on arm64.
+   */
+  async getFleetArchitectures(): Promise<string[]> {
+    if (!this.fleetArchitectures || this.fleetArchitectures.until < Date.now()) {
+      const value = (async () => {
+        const announced = (
+          await Promise.all((await this.listJudgeClients()).map(client => this.getJudgeClientCapabilities(client)))
+        ).filter(capabilities => capabilities && typeof capabilities === "object");
+        if (announced.length === 0) return [...C_ARCHITECTURES];
+        const built = new Set(announced.flatMap(judgeClientArchitectures));
+        return C_ARCHITECTURES.filter(architecture => built.has(architecture));
+      })();
+      this.fleetArchitectures = { value, until: Date.now() + FLEET_ARCHITECTURES_CACHE };
+      value.catch(() => {
+        if (this.fleetArchitectures?.value === value) this.fleetArchitectures = null;
+      });
+    }
+    return await this.fleetArchitectures.value;
   }
 
   async getJudgeClientSystemInfo(judgeClient: JudgeClientEntity): Promise<JudgeClientSystemInfo> {

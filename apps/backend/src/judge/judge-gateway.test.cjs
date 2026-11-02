@@ -23,6 +23,7 @@ const timers = [];
 vm.runInNewContext(
   ts.transpileModule(
     `export class Gateway {
+      async skippedArchitectures(state: any) ${methodBody("skippedArchitectures")}
       async claimOptions(state: any) ${methodBody("claimOptions")}
       async onConsumeTask(client: any, threadId: number) ${methodBody("onConsumeTask")}
       onTaskAcknowledged(client: any, state: any, assignment: any) ${methodBody("onTaskAcknowledged")}
@@ -44,8 +45,10 @@ vm.runInNewContext(
     LEGACY_TASK_TYPES: ["Submission"],
     JudgeTaskPriorityType: { LiveContest: 0 },
     JudgeTaskType: require("@libreoj/judge-protocol").JudgeTaskType,
-    // AI runs are covered by judge-gateway-scope.test.cjs
+    // AI runs and architectures are covered by judge-gateway-scope.test.cjs
     aiExecutionLimit: () => 0,
+    C_ARCHITECTURES: ["64", "32"],
+    judgeClientArchitectures: () => ["64", "32"],
     CONSUME_TASK_RETRY_DELAY: 0,
     ACKNOWLEDGED_TASK_GRACE_TIME: 10000
   },

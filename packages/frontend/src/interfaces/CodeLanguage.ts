@@ -223,6 +223,20 @@ export const normalizeContestLanguages = (languages: string[]): string[] => [
   )
 ];
 
+/**
+ * The values of an option that can be judged on this site: all of them, except that C and C++ architectures (`m`) are
+ * those its judge machines build (arm64 ones build no 32-bit programs).
+ */
+export function availableOptionValues(codeLanguage: CodeLanguage, option: CodeLanguageOption): string[] {
+  if ((codeLanguage === CodeLanguage.Cpp || codeLanguage === CodeLanguage.C) && option.name === "m") {
+    const available = option.values.filter(
+      value => !appState.judgeArchitectures || appState.judgeArchitectures.includes(value)
+    );
+    if (available.length) return available;
+  }
+  return option.values;
+}
+
 export const getDefaultCompileAndRunOptions = (codeLanguage: CodeLanguage): Record<string, unknown> =>
   Object.fromEntries(compileAndRunOptions[codeLanguage].map(({ name, defaultValue }) => [name, defaultValue]));
 
@@ -239,7 +253,7 @@ export const filterValidCompileAndRunOptions = (
         if (!option) return false;
         switch (option.type) {
           case CodeLanguageOptionType.Select:
-            return option.values.includes(value as string);
+            return availableOptionValues(codeLanguage, option).includes(value as string);
         }
       })
     )

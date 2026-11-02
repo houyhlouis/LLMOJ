@@ -5,7 +5,7 @@
 本教程在独立的服务器上安装评测机，不安装网站、数据库、Redis 或 MinIO。评测机使用自己的密钥主动连接站点，因此站点不需要访问评测机上的任何端口。
 
 需要：
-- Ubuntu 24.04 或 26.04（amd64），systemd 254 或更高版本，cgroup v2。Ubuntu 26.04 尚未完整测试。限制命名空间、挂载或 cgroup 的容器无法使用。
+- amd64 或 arm64 上的 Ubuntu 24.04 或 26.04（见 [ARM64 服务器](ARM64.zh-CN.md)），systemd 254 或更高版本，cgroup v2。Ubuntu 26.04 尚未完整测试。限制命名空间、挂载或 cgroup 的容器无法使用。
 - 一个评测槽至少需要 2 个 CPU 和 256 MiB 内存，以及 30 GiB 空闲磁盘空间。在评测机上构建需要更多内存，建议 8 GiB。
 - 一台已在站点上注册的评测机及其密钥（见[分布式评测](Distributed-Judging.zh-CN.md)）。
 
@@ -28,20 +28,22 @@ fi
 
 ## 2. 安装 Node.js 和 pnpm 并构建评测机
 
-以下版本和校验值与安装器相同。如果校验失败，请停止。
+以下版本和校验值与安装器相同，分别对应 amd64（`x86_64`）和 arm64（`aarch64`）。如果校验失败，请停止。
 
 ```bash
+case "$(uname -m)" in
+  x86_64) OJ_NODE=node-v24.21.0-linux-x64 OJ_NODE_SHA256=fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6 ;;
+  aarch64) OJ_NODE=node-v24.21.0-linux-arm64 OJ_NODE_SHA256=6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2 ;;
+esac
 OJ_NODE_STAGE=$(mktemp -d)
 curl --proto '=https' --tlsv1.2 -fL --retry 3 \
-  https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz \
+  "https://nodejs.org/dist/v24.21.0/$OJ_NODE.tar.xz" \
   -o "$OJ_NODE_STAGE/node.tar.xz"
-printf '%s  %s\n' \
-  fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6 \
-  "$OJ_NODE_STAGE/node.tar.xz" | sha256sum --check
+printf '%s  %s\n' "$OJ_NODE_SHA256" "$OJ_NODE_STAGE/node.tar.xz" | sha256sum --check
 # 仅在上面的校验成功后执行：
 sudo install -d -m 0755 /opt/LLMOJ/runtime
 sudo tar -xJf "$OJ_NODE_STAGE/node.tar.xz" -C /opt/LLMOJ/runtime
-sudo ln -sfn node-v24.21.0-linux-x64 /opt/LLMOJ/runtime/node
+sudo ln -sfn "$OJ_NODE" /opt/LLMOJ/runtime/node
 rm -r -- "$OJ_NODE_STAGE"
 
 sudo env PATH=/opt/LLMOJ/runtime/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
@@ -78,14 +80,14 @@ sudo env BUILDX_BUILDER=default bash deploy/sandbox/build.sh build
 bash deploy/sandbox/build.sh plan
 ```
 
-用构建输出的 `ROOTFS_ID` 和压缩包路径安装镜像。与安装器一样，x32 程序只编译不运行，其他检查照常进行。
+镜像按本服务器的架构构建，arm64 上使用其自己的配方。用构建输出的 `ROOTFS_ID` 和压缩包路径安装镜像。与安装器一样，amd64 上 x32 程序只编译不运行，其他检查照常进行。
 
 ```bash
 sudo env LIBREOJ_X32_SUPPORTED=0 unshare --net --mount --propagation private -- \
   bash deploy/sandbox/build.sh stage /opt/LLMOJ/runtime/sandbox-archives/rootfs-ACTUAL_ROOTFS_ID.tar.gz
 ```
 
-如果不想在评测机上安装 Docker，也可以在一台可信的机器上用相同配方构建，把 `rootfs-<ID>.tar.gz` 及其 `.sha256` 文件复制到评测机，再按上面的方法安装。不要混用不同版本。Docker 只用于构建镜像：提交的程序在 LLMOJ 自己的沙箱中运行。
+如果不想在评测机上安装 Docker，也可以在一台相同架构的可信机器上用相同配方构建，把 `rootfs-<ID>.tar.gz` 及其 `.sha256` 文件复制到评测机，再按上面的方法安装（amd64 机器也可以构建 arm64 镜像：见 [ARM64 服务器](ARM64.zh-CN.md#在其他机器上构建-arm64-镜像)）。不要混用不同版本。Docker 只用于构建镜像：提交的程序在 LLMOJ 自己的沙箱中运行。
 
 ## 4. 保存密钥并生成配置
 
@@ -116,7 +118,7 @@ sudo env HYHOJ_ROOT=/opt/LLMOJ NODE_BINARY=/opt/LLMOJ/runtime/node/bin/node \
 只安装评测服务及其工作目录挂载（不要安装网站的服务），检查沙箱，然后开始评测：
 
 ```bash
-sudo chmod -R a+rX apps packages node_modules runtime/node-v24.21.0-linux-x64 runtime/tooling runtime/pnpm-store
+sudo chmod -R a+rX apps packages node_modules "$(readlink -f runtime/node)" runtime/tooling runtime/pnpm-store
 shopt -s nullglob
 OJ_JUDGE_MOUNTS=(deploy/systemd/*.mount)
 sudo systemd-analyze verify deploy/systemd/libreoj-judge.service \

@@ -662,6 +662,7 @@ declare namespace ApiTypes {
     userPreference?: ApiTypes.UserPreferenceDto;
     serverPreference: ApiTypes.PreferenceConfig;
     serverVersion: ApiTypes.ServerVersionDto;
+    judgeArchitectures: string[];
     sessionMarker?: string;
   }
   export interface GetSubmissionDetailRequestDto {
@@ -1041,6 +1042,10 @@ declare namespace ApiTypes {
       arch: string;
       cpu: string;
     };
+    /**
+     * The C and C++ architectures (option "m") it builds programs for; absent for judge clients older than protocol version 5, which run on x86-64 and build both
+     */
+    architectures?: string[];
   }
   export interface JudgeClientInfoDto {
     id: number;
@@ -1094,6 +1099,10 @@ declare namespace ApiTypes {
         arch: string;
         cpu: string;
       };
+      /**
+       * The C and C++ architectures (option "m") it builds programs for; absent for judge clients older than protocol version 5, which run on x86-64 and build both
+       */
+      architectures?: string[];
     };
   }
   export interface JudgeJobInfoDto {

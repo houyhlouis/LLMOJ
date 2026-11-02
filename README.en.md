@@ -45,7 +45,7 @@ Review everything AI generates. Validating reference solutions and generating te
 
 | Item | Requirement |
 | --- | --- |
-| System | Ubuntu 24.04 amd64 (tested), on a virtual machine or physical server |
+| System | Ubuntu 24.04 / 26.04 on amd64 (tested) or arm64 (see [ARM64 servers](wiki/ARM64.md)), on a virtual machine or physical server |
 | CPU and memory | At least 2 logical CPUs; 256 MiB of RAM per judge execution slot; 8 GiB recommended for building |
 | Disk | At least 30 GiB free for a full installation (40 GiB recommended), 10 GiB for the website only |
 | Other | systemd 254 or later, cgroup v2, and access to package repositories, GitHub and the build dependencies' download sources |

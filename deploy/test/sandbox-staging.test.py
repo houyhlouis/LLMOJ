@@ -47,12 +47,15 @@ if os.environ.get('TEST_DOCKER_FAILURE'):
     sys.exit(17)
 args = sys.argv[1:]
 assert args[:2] == ['buildx', 'build']
+with open(os.environ['TEST_DOCKER_ARGUMENTS'], 'w') as stream:
+    stream.write('\\n'.join(args))
 output = args[args.index('--output') + 1]
 assert output.startswith('type=tar,dest=')
 shutil.copyfile(os.environ['TEST_DOCKER_EXPORT'], output.split('dest=', 1)[1])
 """, 0o755)
+        self.arguments = self.directory / "docker-arguments"
         self.environment = dict(os.environ, OUTPUT_DIRECTORY=str(self.output),
-                                TEST_DOCKER_EXPORT=str(self.export),
+                                TEST_DOCKER_EXPORT=str(self.export), TEST_DOCKER_ARGUMENTS=str(self.arguments),
                                 PATH=str(self.commands) + os.pathsep + os.environ["PATH"])
 
     def tearDown(self):
@@ -62,10 +65,21 @@ shutil.copyfile(os.environ['TEST_DOCKER_EXPORT'], output.split('dest=', 1)[1])
         return subprocess.run(["bash", str(ROOT / "infra/sandbox-rootfs/build.sh")],
                               env=self.environment, capture_output=True, text=True, timeout=30)
 
+    def docker_argument(self, name):
+        arguments = self.arguments.read_text().split("\n")
+        return arguments[arguments.index(name) + 1]
+
+    def plan(self, architecture):
+        return subprocess.run(["bash", str(ROOT / "deploy/sandbox/build.sh"), "plan"],
+                              env=dict(os.environ, ROOTFS_ARCHITECTURE=architecture),
+                              capture_output=True, text=True, check=True).stdout
+
     def test_gzip_archive_checksum_progress_and_recipe_id(self):
+        self.environment["ROOTFS_ARCHITECTURE"] = "amd64"
         result = self.run_build()
         self.assertEqual(result.returncode, 0, result.stderr)
         plan = subprocess.run(["bash", str(ROOT / "deploy/sandbox/build.sh"), "plan"],
+                              env=dict(os.environ, ROOTFS_ARCHITECTURE="amd64"),
                               capture_output=True, text=True, check=True)
         expected_id = re.search(r"^ROOTFS_ID=([0-9a-f]{64})$", plan.stdout, re.M)[1]
         self.assertIn("ROOTFS_ID=" + expected_id, result.stdout)
@@ -77,9 +91,49 @@ shutil.copyfile(os.environ['TEST_DOCKER_EXPORT'], output.split('dest=', 1)[1])
         self.assertIn("Compressing rootfs archive", result.stderr)
         self.assertIn("bytes", result.stderr)
         self.assertIn("Rootfs compression complete", result.stderr)
-        self.assertTrue(all(line.startswith(("ROOTFS_ID=", "ARCHIVE="))
+        self.assertTrue(all(line.startswith(("ROOTFS_ID=", "ARCHITECTURE=", "ARCHIVE="))
                             for line in result.stdout.splitlines()), result.stdout)
+        self.assertIn("ARCHITECTURE=amd64", result.stdout)
         self.assertEqual(list(self.output.glob(".rootfs-build-*")), [])
+        self.assertEqual(self.docker_argument("--platform"), "linux/amd64")
+        self.assertEqual(Path(self.docker_argument("--file")), ROOT / "infra/sandbox-rootfs/Dockerfile")
+
+    def test_the_amd64_rootfs_id_still_covers_exactly_the_original_recipe(self):
+        # Installed amd64 judges keep their rootfs across upgrades only while this ID stays the same
+        files = ["apps/judge/src/languages/compile-java.sh", "apps/judge/src/languages/compile-python.sh",
+                 "infra/sandbox-rootfs/Dockerfile", "infra/sandbox-rootfs/csc", "infra/sandbox-rootfs/fsharpc",
+                 "infra/sandbox-rootfs/mono", "infra/sandbox-rootfs/smoke-test.sh"]
+        lines = "".join(f"{subprocess.run(['git', 'hash-object', str(ROOT / file)], capture_output=True, text=True, check=True).stdout.strip()}  {file}\n"
+                        for file in files)
+        expected = hashlib.sha256(lines.encode()).hexdigest()
+        self.assertIn(f"ROOTFS_ID={expected}\n", self.plan("amd64"))
+        self.assertIn(f"ROOTFS_ID={expected}\n", self.plan("x86_64"))
+
+    def test_arm64_rootfs_has_its_own_recipe_platform_and_id(self):
+        self.environment["ROOTFS_ARCHITECTURE"] = "arm64"
+        result = self.run_build()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        plan = self.plan("arm64")
+        self.assertIn("ARCHITECTURE=arm64\n", plan)
+        self.assertIn(f"RECIPE={ROOT}/infra/sandbox-rootfs/arm64/Dockerfile\n", plan)
+        arm_id = re.search(r"^ROOTFS_ID=([0-9a-f]{64})$", plan, re.M)[1]
+        self.assertEqual(plan, self.plan("aarch64"))
+        self.assertNotIn(f"ROOTFS_ID={arm_id}", self.plan("amd64"))
+        self.assertIn(f"ROOTFS_ID={arm_id}\nARCHITECTURE=arm64\n", result.stdout)
+        self.assertTrue((self.output / f"rootfs-{arm_id}.tar.gz").is_file())
+        self.assertEqual(self.docker_argument("--platform"), "linux/arm64")
+        self.assertEqual(Path(self.docker_argument("--file")), ROOT / "infra/sandbox-rootfs/arm64/Dockerfile")
+
+    def test_other_architectures_have_no_rootfs(self):
+        self.environment["ROOTFS_ARCHITECTURE"] = "riscv64"
+        result = self.run_build()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no rootfs recipe for riscv64", result.stderr)
+        self.assertFalse(self.arguments.exists(), "Docker isn't run")
+        plan = subprocess.run(["bash", str(ROOT / "deploy/sandbox/build.sh"), "plan"],
+                              env=dict(os.environ, ROOTFS_ARCHITECTURE="riscv64"), capture_output=True, text=True)
+        self.assertNotEqual(plan.returncode, 0)
+        self.assertIn("no sandbox rootfs for riscv64", plan.stderr)
 
     def test_compression_failure_does_not_publish_partial_archive(self):
         write(self.commands / "gzip", "#!/bin/sh\nexit 23\n", 0o755)
@@ -162,8 +216,9 @@ if ( : > "$validation/uid-999-must-not-create-files" ) 2>/dev/null; then
 fi
 printf 'validated real uid=%s, readable helpers, no write access\\n' "$EUID"
 """
-        for relative in ("deploy/sandbox/smoke-test-host.sh", "infra/sandbox-rootfs/smoke-test.sh"):
-            write(self.repository / relative, smoke)
+        for relative in ("deploy/sandbox/smoke-test-host.sh", "infra/sandbox-rootfs/smoke-test.sh",
+                         "infra/sandbox-rootfs/arm64/smoke-test.sh"):
+            write(self.repository / relative, smoke.replace("validated", f"validated ({relative})"))
         for relative in ("apps/judge/src/languages/compile-java.sh", "apps/judge/src/languages/compile-python.sh"):
             write(self.repository / relative, "#!/bin/bash\n[[ \"$EUID\" == 999 ]]\n")
 
@@ -179,7 +234,7 @@ printf 'validated real uid=%s, readable helpers, no write access\\n' "$EUID"
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, destination)
 
-    def stage(self, relative, legacy=False):
+    def stage(self, relative, legacy=False, architecture=None):
         contents = (ROOT / relative).read_text()
         if legacy:
             contents = contents.replace('mkdir -m 0755 "$VALIDATION_DIRECTORY_OUTSIDE"',
@@ -188,6 +243,8 @@ printf 'validated real uid=%s, readable helpers, no write access\\n' "$EUID"
         write(script, contents)
         environment = dict(os.environ, ARCHIVE=str(self.archive), CHECKSUM=str(self.checksum),
                            DESTINATION_PARENT=str(self.destination), LIBREOJ_X32_SUPPORTED="0")
+        if architecture:
+            environment["ROOTFS_ARCHITECTURE"] = architecture
         return subprocess.run(["unshare", "--mount", "--propagation", "private",
                                "bash", "-c", 'umask 0077; exec bash "$1"', "stage-test", str(script)],
                               env=environment, capture_output=True, text=True, timeout=30)
@@ -197,7 +254,8 @@ printf 'validated real uid=%s, readable helpers, no write access\\n' "$EUID"
             with self.subTest(profile=relative):
                 result = self.stage(relative)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertIn("validated real uid=999", result.stdout)
+                self.assertIn("validated", result.stdout)
+                self.assertIn("real uid=999", result.stdout)
                 staged = self.destination / f"rootfs-{self.rootfs_id}"
                 self.assertTrue(staged.is_dir())
                 self.assertEqual(staged.stat().st_uid, 0)
@@ -206,11 +264,38 @@ printf 'validated real uid=%s, readable helpers, no write access\\n' "$EUID"
                 self.assertEqual(list(self.destination.glob(".rootfs-staging-*")), [])
                 shutil.rmtree(staged)
 
+    def test_each_architecture_is_checked_with_its_own_smoke_test(self):
+        for architecture, smoke in (("amd64", "deploy/sandbox/smoke-test-host.sh"),
+                                    ("arm64", "infra/sandbox-rootfs/arm64/smoke-test.sh")):
+            with self.subTest(architecture=architecture):
+                result = self.stage(STAGING_SCRIPTS[0], architecture=architecture)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(f"validated ({smoke}) real uid=999", result.stdout)
+                shutil.rmtree(self.destination / f"rootfs-{self.rootfs_id}")
+        result = self.stage(STAGING_SCRIPTS[0], architecture="riscv64")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ROOTFS_ARCHITECTURE must be amd64 or arm64", result.stderr)
+
+    def test_the_rootfs_of_another_architecture_is_not_staged(self):
+        other = "arm64" if os.uname().machine == "x86_64" else "amd64"
+        plan = subprocess.run(["bash", str(ROOT / "deploy/sandbox/build.sh"), "plan"],
+                              env=dict(os.environ, ROOTFS_ARCHITECTURE=other), capture_output=True, text=True, check=True)
+        other_id = re.search(r"^ROOTFS_ID=([0-9a-f]{64})$", plan.stdout, re.M)[1]
+        archive = self.directory / f"rootfs-{other_id}.tar.gz"
+        shutil.copyfile(self.archive, archive)
+        runtime = self.directory / "runtime"
+        result = subprocess.run(["bash", str(ROOT / "deploy/sandbox/build.sh"), "stage", str(archive)],
+                                env=dict(os.environ, ROOTFS_ARCHITECTURE=other, RUNTIME_DIRECTORY=str(runtime)),
+                                capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(f"can't run the {other} rootfs's checks", result.stderr)
+        self.assertFalse(runtime.exists())
+
     def test_original_umask_dependent_mkdir_reproduces_permission_denied(self):
         result = self.stage(STAGING_SCRIPTS[0], legacy=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Permission denied", result.stderr)
-        self.assertNotIn("validated real uid=999", result.stdout)
+        self.assertNotIn("real uid=999", result.stdout)
         self.assertEqual(list(self.destination.iterdir()), [], "failed staging must clean temporary mounts/files")
 
     def test_bad_checksum_is_rejected_before_staging(self):

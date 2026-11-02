@@ -43,7 +43,7 @@ usage() {
       [--site-name LLMOJ] [--role all|web] [--judge-slots N]
       [--docker-source https://download.docker.com] [--docker-mirrors HTTPS镜像源]
       [--yes | --interactive] [--check | --plan]
-Ubuntu 24.04 / 26.04 amd64、systemd >=254、cgroup v2；每台服务器一个实例。
+Ubuntu 24.04 / 26.04（amd64 或 arm64）、systemd >=254、cgroup v2；每台服务器一个实例。
 终端安装会询问选项和评测实例数；默认与最大值均为 CPU 数减 1、内存 MiB/256 向下取整、511 的最小值。
 本机评测至少需要 2 个有效逻辑 CPU 和 256 MiB 有效内存；不额外预留内存。
 --judge-slots N 显式选择；0 为自动。--yes 使用提供的参数和默认值。
@@ -60,7 +60,7 @@ Usage: sudo bash deploy/install.sh [--prefix /opt/LLMOJ] [--port 80]
        [--site-name LLMOJ] [--role all|web] [--judge-slots N]
        [--docker-source https://download.docker.com] [--docker-mirrors https://mirror.example.com]
        [--yes | --interactive] [--check | --plan]
-Ubuntu 24.04 / 26.04 amd64, systemd >=254, cgroup v2; one instance per server.
+Ubuntu 24.04 / 26.04 on amd64 or arm64, systemd >=254, cgroup v2; one instance per server.
 --check: read-only environment/resource/port checks; does not install anything.
 --plan:  read-only list of installation steps; does not install anything.
 Private credentials stay under config/. The admin password is printed after success.
@@ -149,6 +149,13 @@ if [[ "$MODE" == install && ( "$INTERACTIVE" == yes || ( "$INTERACTIVE" == auto 
     fi
 fi
 DOCKER_SOURCE="${DOCKER_SOURCE%/}"
+# amd64 (x86-64) or arm64 (AArch64); the preflight refuses any other. Selects the Node.js and Go downloads and the
+# sandbox rootfs recipe (deploy/sandbox/build.sh).
+case "$(uname -m)" in
+    x86_64) ARCHITECTURE=amd64; NODE_PLATFORM=linux-x64 ;;
+    aarch64) ARCHITECTURE=arm64; NODE_PLATFORM=linux-arm64 ;;
+    *) ARCHITECTURE="$(uname -m)"; NODE_PLATFORM= ;;
+esac
 "$PYTHON" "$SOURCE_ROOT/deploy/docker-support.py" --source "$DOCKER_SOURCE" --mirrors "$DOCKER_MIRRORS"
 [[ "$PROJECT_ROOT" =~ ^/[A-Za-z0-9_./-]+$ ]] || die "Use an absolute prefix without spaces or special characters"
 PROJECT_ROOT="$(realpath -m "$PROJECT_ROOT")"
@@ -175,6 +182,7 @@ SUPPORT_ARGS=(--root "$PROJECT_ROOT" --origin "$PUBLIC_ORIGIN" --port "$PUBLIC_P
 if [[ "$MODE" == plan ]]; then
     say 'Directory: %s\nSite origin: %s\nListen address: %s:%s\nRole: %s\nSite name: %s\n' "$PROJECT_ROOT" "$PUBLIC_ORIGIN" "$LISTEN_ADDRESS" "$PUBLIC_PORT" "$INSTALL_ROLE" "$SITE_NAME"
     say 'Docker package source: %s/linux/ubuntu\nDocker Hub mirrors: %s\n' "$DOCKER_SOURCE" "${DOCKER_MIRRORS:-$(translate 'official/default')}"
+    say 'Architecture: %s\n' "$ARCHITECTURE"
     if [[ "$INSTALL_ROLE" == all ]]; then
         "$PYTHON" "$SOURCE_ROOT/deploy/judge_capacity.py"
         say 'Requested judge slots: %s (0 = automatic; existing judge.yaml is retained).\n' "$JUDGE_SLOTS"
@@ -182,9 +190,9 @@ if [[ "$MODE" == plan ]]; then
     if [[ "$LLMOJ_INSTALL_LANG" == zh-CN ]]; then
         cat <<'PLAN_ZH'
 1. 检查 Ubuntu、systemd/cgroup v2、资源、端口和已有实例。
-2. 安装系统依赖，下载校验过的 Node / Go，构建固定 MinIO 源码。
+2. 安装系统依赖，下载本机架构（amd64/arm64）校验过的 Node / Go，构建固定 MinIO 源码。
 3. 安装锁定依赖，编译后端与前端；all 模式还构建原生沙盒。
-4. all 模式：按所选 Docker 源构建、验证原版 LibreOJ rootfs。
+4. all 模式：按所选 Docker 源构建、验证本机架构的原版 LibreOJ rootfs（arm64 无 32 位工具链）。
 5. 生成私有配置、权限、systemd 单元和 AppArmor 配置。
 6. 持久化 Redis 所需的 vm.overcommit_memory=1；初始化 MariaDB、Redis 和私有 MinIO 存储桶。
 7. 启动后端，创建全权限 admin 和随机密码。
@@ -194,9 +202,9 @@ PLAN_ZH
     else
     cat <<'PLAN'
 1. Check Ubuntu, systemd/cgroup v2, available RAM/disk, ports and existing instance.
-2. Install apt dependencies; download verified Node and Go; build pinned MinIO source.
+2. Install apt dependencies; download verified Node and Go for this architecture (amd64/arm64); build pinned MinIO source.
 3. Install locked pnpm dependencies; compile backend/frontend; native sandbox for role all.
-4. For role all: build and validate original LibreOJ rootfs (NOI Linux is not used).
+4. For role all: build and validate original LibreOJ rootfs for this architecture (arm64: no 32-bit toolchain).
 5. Generate private configuration and systemd units; prepare ownership and AppArmor.
 6. Persist Redis host setting vm.overcommit_memory=1; initialize MariaDB, Redis and private MinIO bucket.
 7. Start backend; create random-password admin with all permissions.
@@ -311,17 +319,21 @@ if [[ ! -f "$SOURCE_ROOT/apps/judge/vendor/testlib/testlib.h" ]]; then
     git -c safe.directory="$SOURCE_ROOT" -C "$SOURCE_ROOT" submodule update --init --recursive
 fi
 if [[ "$SOURCE_ROOT" != "$PROJECT_ROOT" ]]; then
-    rsync -a --exclude='.git' --exclude='node_modules' --exclude='__pycache__' \
+    # Root's, and writable by root only: a checkout made by another account keeps that account and its umask
+    rsync -a --chown=root:root --chmod=go-w --exclude='.git' --exclude='node_modules' --exclude='__pycache__' \
         --exclude='/runtime/' --exclude='/data/' --exclude='/logs/' --exclude='/backups/' \
         --exclude='/release/' --exclude='/public/' --exclude='dist/' --exclude='build/' --exclude='lib/' \
         --include='/config/*.example' --exclude='/config/*' "$SOURCE_ROOT/" "$PROJECT_ROOT/"
 fi
 install -d -m 0755 -o root -g root "$PROJECT_ROOT" "$PROJECT_ROOT/runtime" "$PROJECT_ROOT/runtime/downloads"
 install -d -m 0751 -o root -g root "$PROJECT_ROOT/config"
-for directory in apps packages infra deploy; do
+# Also when installing in the checkout itself. The upgrader refuses source directories others can write.
+for directory in apps packages infra deploy wiki .github; do
+    [[ -d "$PROJECT_ROOT/$directory" ]] || continue
     chown -R root:root "$PROJECT_ROOT/$directory"
-    chmod -R a+rX "$PROJECT_ROOT/$directory"
+    chmod -R a+rX,go-w "$PROJECT_ROOT/$directory"
 done
+find "$PROJECT_ROOT" -maxdepth 1 -type f -exec chown root:root {} + -exec chmod a+r,go-w {} +
 DOWNLOADS="$PROJECT_ROOT/runtime/downloads"
 download() {
     local url=$1 sha=$2 archive=$3
@@ -331,12 +343,17 @@ download() {
     mv "$archive.partial" "$archive"
 }
 NODE_VERSION=24.21.0
-NODE_ARCHIVE="$DOWNLOADS/node-v$NODE_VERSION-linux-x64.tar.xz"
-download "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz" \
-    fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6 "$NODE_ARCHIVE"
+# SHA-256 from https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt
+case "$ARCHITECTURE" in
+    amd64) NODE_SHA256=fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6 ;;
+    arm64) NODE_SHA256=6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2 ;;
+esac
+NODE_ARCHIVE="$DOWNLOADS/node-v$NODE_VERSION-$NODE_PLATFORM.tar.xz"
+download "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-$NODE_PLATFORM.tar.xz" \
+    "$NODE_SHA256" "$NODE_ARCHIVE"
 tar -xJf "$NODE_ARCHIVE" -C "$PROJECT_ROOT/runtime"
 [[ ! -d "$PROJECT_ROOT/runtime/node" || -L "$PROJECT_ROOT/runtime/node" ]] || die "runtime/node must be an installer symlink"
-ln -sfn "node-v$NODE_VERSION-linux-x64" "$PROJECT_ROOT/runtime/node"
+ln -sfn "node-v$NODE_VERSION-$NODE_PLATFORM" "$PROJECT_ROOT/runtime/node"
 NODE="$PROJECT_ROOT/runtime/node/bin/node"
 export PATH="$PROJECT_ROOT/runtime/node/bin:$PROJECT_ROOT/runtime/tooling/node_modules/.bin:$PATH"
 npm install --prefix "$PROJECT_ROOT/runtime/tooling" --no-audit --no-fund --ignore-scripts pnpm@11.13.1
@@ -347,9 +364,14 @@ export pnpm_config_verify_deps_before_run=false
 
 step 'Build pinned MinIO from source and retain its AGPL license/source'
 GO_VERSION=1.26.8
-GO_ARCHIVE="$DOWNLOADS/go$GO_VERSION.linux-amd64.tar.gz"
-download "https://go.dev/dl/go$GO_VERSION.linux-amd64.tar.gz" \
-    d0f743b33e8d8945e6b1f432edd15785c70507121d6e2a723b21285eddf8b57b "$GO_ARCHIVE"
+# SHA-256 from https://go.dev/dl/
+case "$ARCHITECTURE" in
+    amd64) GO_SHA256=d0f743b33e8d8945e6b1f432edd15785c70507121d6e2a723b21285eddf8b57b ;;
+    arm64) GO_SHA256=211ffced9dcb9633a55eac6364816ec0ddd951389a740e88fa8b3337971bdda0 ;;
+esac
+GO_ARCHIVE="$DOWNLOADS/go$GO_VERSION.linux-$ARCHITECTURE.tar.gz"
+download "https://go.dev/dl/go$GO_VERSION.linux-$ARCHITECTURE.tar.gz" \
+    "$GO_SHA256" "$GO_ARCHIVE"
 install -d -m 0755 "$PROJECT_ROOT/runtime/go-$GO_VERSION"
 tar -xzf "$GO_ARCHIVE" --strip-components=1 -C "$PROJECT_ROOT/runtime/go-$GO_VERSION"
 MINIO_COMMIT=7aac2a2c5b7c882e68c1ce017d8256be2feea27f
@@ -360,10 +382,13 @@ install -d -m 0755 "$PROJECT_ROOT/runtime/third-party"
 tar -xzf "$MINIO_ARCHIVE" -C "$PROJECT_ROOT/runtime/third-party"
 MINIO_SOURCE="$PROJECT_ROOT/runtime/third-party/minio-$MINIO_COMMIT"
 if [[ ! -x "$PROJECT_ROOT/runtime/minio" || ! -f "$PROJECT_ROOT/runtime/minio.commit" || "$(cat "$PROJECT_ROOT/runtime/minio.commit")" != "$MINIO_COMMIT" ]]; then
+    # Go's work files go to disk too: /tmp may be a small tmpfs (half the RAM by default on Ubuntu 26.04)
+    install -d -m 0700 "$PROJECT_ROOT/runtime/go-tmp"
     (cd "$MINIO_SOURCE"
-     GOTOOLCHAIN=local GOMAXPROCS=2 CGO_ENABLED=0 \
+     GOTOOLCHAIN=local GOMAXPROCS=2 CGO_ENABLED=0 GOTMPDIR="$PROJECT_ROOT/runtime/go-tmp" \
      GOCACHE="$PROJECT_ROOT/runtime/go-cache" GOMODCACHE="$PROJECT_ROOT/runtime/go-modules" \
         "$PROJECT_ROOT/runtime/go-$GO_VERSION/bin/go" build -mod=readonly -buildvcs=false -trimpath -o "$PROJECT_ROOT/runtime/minio.partial" .)
+    rm -rf -- "${PROJECT_ROOT:?}/runtime/go-tmp"
     mv "$PROJECT_ROOT/runtime/minio.partial" "$PROJECT_ROOT/runtime/minio"
     printf '%s\n' "$MINIO_COMMIT" > "$PROJECT_ROOT/runtime/minio.commit"
 fi
@@ -409,7 +434,7 @@ Types: deb
 URIs: $DOCKER_SOURCE/linux/ubuntu
 Suites: $VERSION_CODENAME
 Components: stable
-Architectures: amd64
+Architectures: $(dpkg --print-architecture)
 Signed-By: /etc/apt/keyrings/libreoj-docker.asc
 DOCKER
         chmod 0644 /etc/apt/sources.list.d/libreoj-docker.sources
@@ -458,7 +483,7 @@ if [[ "$INSTALL_ROLE" == all ]]; then
 fi
 support apparmor
 chmod -R a+rX "$PROJECT_ROOT/node_modules" "$PROJECT_ROOT/runtime/pnpm-store" \
-    "$PROJECT_ROOT/runtime/node-v$NODE_VERSION-linux-x64" "$PROJECT_ROOT/runtime/tooling" "$PROJECT_ROOT/public"
+    "$PROJECT_ROOT/runtime/node-v$NODE_VERSION-$NODE_PLATFORM" "$PROJECT_ROOT/runtime/tooling" "$PROJECT_ROOT/public"
 chown -R root:root "$PROJECT_ROOT/public"
 # Keep rootfs ownership (including uid 999) intact; never recursively chown runtime/.
 support verify-network

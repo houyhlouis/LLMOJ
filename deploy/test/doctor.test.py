@@ -96,6 +96,7 @@ class FakeHost(d.Host):
         self.commands = []
         self.urls = []
         self.synchronized = 'yes'
+        self.architecture = 'x86_64'
 
     def run(self, args, env=None, timeout=20):
         args = list(map(str, args))
@@ -144,6 +145,9 @@ class FakeHost(d.Host):
 
     def read(self, path):
         return self.texts[str(path)] if str(path) in self.texts else Path(path).read_text()
+
+    def machine(self):
+        return self.architecture
 
     def now(self):
         return self.clock
@@ -407,6 +411,27 @@ class DoctorTests(unittest.TestCase):
         self.assertReported(report, d.FAIL, r'512\.0 MiB free \(0%\)')
         self.assertReported(report, d.WARN, r'memory available')
         self.assertReported(report, d.WARN, r"clock isn't synchronized")
+
+    def test_architecture_of_the_server_and_its_sandbox_image(self):
+        report, _ = self.run_doctor()
+        self.assertReported(report, d.OK, r'^amd64 \(x86-64\)$')
+        bash = self.install.root/f'runtime/rootfs-{ROOTFS}/usr/bin/bash'
+        bash.parent.mkdir(parents=True)
+        elf = lambda machine: b'\x7fELF\x02\x01\x01' + bytes(11) + machine.to_bytes(2, 'little')
+        bash.write_bytes(elf(62))
+        report, _ = self.run_doctor()
+        self.assertFalse([item for item in report.items if item['check'] == 'rootfs-architecture'])
+        # An arm64 server with an image built for amd64 (e.g. copied from another server)
+        self.host.architecture = 'aarch64'
+        report, _ = self.run_doctor()
+        self.assertReported(report, d.OK, r'^arm64 \(AArch64\): C and C\+\+ programs are built 64-bit only$')
+        self.assertReported(report, d.FAIL, r'sandbox image is built for amd64, not for this arm64 machine')
+        bash.write_bytes(elf(183))
+        report, _ = self.run_doctor()
+        self.assertFalse([item for item in report.items if item['check'] == 'rootfs-architecture'])
+        self.host.architecture = 'riscv64'
+        report, _ = self.run_doctor()
+        self.assertReported(report, d.FAIL, r'riscv64: LLMOJ runs on amd64')
 
     def test_permissions(self):
         root = str(self.install.root)

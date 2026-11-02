@@ -21,6 +21,7 @@ function applySessionInfo(sessionInfo: ApiTypes.GetSessionInfoResponseDto) {
   appState.userPreference = sessionInfo.userPreference || {};
   appState.serverPreference = sessionInfo.serverPreference;
   appState.serverVersion = sessionInfo.serverVersion;
+  appState.judgeArchitectures = sessionInfo.judgeArchitectures ?? null;
 }
 
 function saveSessionSwrInfo(sessionInfo: ApiTypes.GetSessionInfoResponseDto) {

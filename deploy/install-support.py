@@ -17,6 +17,11 @@ import subprocess
 import sys
 
 
+# The machine architectures (platform.machine()) the installer supports, by their Debian names: each has a Node.js
+# and Go download, a sandbox rootfs recipe and a syscall filter.
+ARCHITECTURES = {"x86_64": "amd64", "aarch64": "arm64"}
+
+
 class InstallerError(ValueError):
     """A message deliberately safe to show without private configuration contents."""
 
@@ -72,6 +77,14 @@ def check_state(args):
     return complete_file.exists()
 
 
+def upgrade_module():
+    # The upgrader's tree digest, so that it can tell an installation's source is the one installed
+    spec = importlib.util.spec_from_file_location("libreoj_upgrade", Path(__file__).with_name("upgrade.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def judge_capacity_module():
     # Also works when tests load this file by spec without deploy/ on sys.path.
     spec = importlib.util.spec_from_file_location("libreoj_judge_capacity", Path(__file__).with_name("judge_capacity.py"))
@@ -96,9 +109,9 @@ def check_initial_judge_capacity(args):
 def preflight(args):
     os_info = platform.freedesktop_os_release()
     if os_info.get("ID") != "ubuntu" or os_info.get("VERSION_ID") not in ("24.04", "26.04"):
-        fail("Supported servers: Ubuntu 24.04 / 26.04, amd64")
-    if platform.machine() != "x86_64":
-        fail("The original sandbox currently supports Linux amd64 only")
+        fail("Supported servers: Ubuntu 24.04 / 26.04 on amd64 or arm64")
+    if platform.machine() not in ARCHITECTURES:
+        fail(f"The sandbox supports Linux amd64 (x86_64) and arm64 (aarch64) only, not {platform.machine()}")
     if not Path("/run/systemd/system").is_dir() or Path("/proc/1/comm").read_text().strip() != "systemd":
         fail("A server booted with systemd is required")
     version = subprocess.check_output(["systemctl", "--version"], text=True).split()[1]
@@ -138,7 +151,7 @@ def preflight(args):
                     probe.bind((args.listen_address if port == args.port else "127.0.0.1", port))
                 except OSError:
                     fail(f"TCP port {port} is occupied; resolve the conflict before installing")
-    print(f"Preflight passed: Ubuntu {os_info['VERSION_ID']}, systemd {version}, RAM {mem / 1024**3:.1f} GiB, free disk {free / 1024**3:.1f} GiB")
+    print(f"Preflight passed: Ubuntu {os_info['VERSION_ID']} {ARCHITECTURES[platform.machine()]}, systemd {version}, RAM {mem / 1024**3:.1f} GiB, free disk {free / 1024**3:.1f} GiB")
     print("The real namespace/cgroup sandbox check runs before installation is declared complete.")
 
 
@@ -321,6 +334,9 @@ def main():
         private_json(args.root / "config/install-complete.json", {
             **state_for(args), "completedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "rootfsId": (args.root / "runtime/rootfs-id").read_text().strip() if args.role == "all" else None,
+            "architecture": ARCHITECTURES.get(platform.machine(), platform.machine()),
+            # What was installed: upgrades accept runtime changes on top of it (see upgrade.py deployed_by_upgrade)
+            "treeSha256": upgrade_module().tree_digest(args.root),
             "sourceRepository": os.environ.get("OJ_SOURCE_REPOSITORY"),
             "sourceCommit": os.environ.get("OJ_SOURCE_COMMIT"),
         })

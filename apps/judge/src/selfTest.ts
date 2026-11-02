@@ -12,6 +12,7 @@ import { runTaskQueued } from "./taskQueue";
 import { ensureDirectoryEmpty, safelyJoinPath } from "./utils";
 import { runBuiltinChecker } from "./checkers/builtin";
 import { Checker } from "./checkers";
+import { C_ARCHITECTURES } from "./architecture";
 
 /**
  * Compiles and runs a program in every language and option the judge supports on this host, through the same code
@@ -41,8 +42,8 @@ const CPP_SUM = `#include <iostream>
 int main() { long long a, b; std::cin >> a >> b; std::cout << a + b << std::endl; }
 `;
 
-// Tries calls the syscall filter refuses, and threads and processes, which must keep working. Compiled for 64 and
-// 32 bits, so that both system call tables are checked.
+// Tries calls the syscall filter refuses, and threads and processes, which must keep working. Compiled for every
+// architecture the judge builds C for: on x86-64 also for 32 bits, so that both system call tables are checked.
 const PROBE = `#define _GNU_SOURCE
 #include <errno.h>
 #include <pthread.h>
@@ -104,7 +105,7 @@ const PROBE_EXPECTED = {
 
 const cases: SelfTestCase[] = [
   ...["g++", "clang++"].flatMap(compiler =>
-    ["64", "32"].map(m => ({
+    C_ARCHITECTURES.map(m => ({
       name: `C++ (${compiler}, ${m}-bit)`,
       language: "cpp",
       options: { compiler, std: "c++17", O: "2", m },
@@ -112,7 +113,7 @@ const cases: SelfTestCase[] = [
     }))
   ),
   ...["gcc", "clang"].flatMap(compiler =>
-    ["64", "32"].map(m => ({
+    C_ARCHITECTURES.map(m => ({
       name: `C (${compiler}, ${m}-bit)`,
       language: "c",
       options: { compiler, std: "c11", O: "2", m },
@@ -208,7 +209,7 @@ printfn "%d" (int64 p.[0] + int64 p.[1])
   }
 ].map(testCase => ({ ...testCase, expected: SUM }));
 
-const probes: SelfTestCase[] = ["64", "32"].map(m => ({
+const probes: SelfTestCase[] = C_ARCHITECTURES.map(m => ({
   name: `Syscall filter (${m}-bit)`,
   language: "c",
   options: { compiler: "gcc", std: "gnu11", O: "1", m },

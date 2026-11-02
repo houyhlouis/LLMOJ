@@ -7,7 +7,7 @@ LLMOJ 基于 [LibreOJ](https://github.com/libreoj/libreoj)，采用 MIT 许可�
 ## 工具链
 
 - Node.js 24.21（`.node-version`；安装时严格使用 24.21.0），以及 pnpm 11.13.1（`package.json` 的 `packageManager`）。其他固定的版本、尚未升级的部分以及如何检查依赖的安全通告，见[依赖与工具链](wiki/Dependencies.zh-CN.md)。
-- 评测机的原生代码需要：amd64 上的 Linux、CMake、C++ 编译器和 libfmt。
+- 评测机的原生代码需要：amd64 或 arm64 上的 Linux、CMake、C++ 编译器和 libfmt。C 与 C++ 提交按评测机的架构编译（`apps/judge/src/architecture.ts`）；arm64 没有 32 位工具链。
 - 在沙箱中实际运行程序还需要：命名空间和 cgroup v2。
 
 ## 构建

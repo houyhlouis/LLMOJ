@@ -68,7 +68,8 @@ test("capacity is announced by the judge machine; an older one is marked as lega
   const capacity = rows(h).map(row => row.props.children[5].props.children[0]);
   assert.equal(capacity[0].type.name, "Popup");
   const details = h.all(node => node.type === "tr", capacity[0].props.content);
-  assert.equal(details.length, 6);
+  // With the C and C++ architectures it builds
+  assert.equal(details.length, 7);
   assert.deepEqual(plain(details[0].props.children[1].props.children), [
     ".queue.types.Submission, .queue.types.Hack, .queue.types.SelfEvalPrepare, .queue.types.SelfEval"
   ]);
@@ -163,12 +164,61 @@ test("a judge machine's runtime is shown with its capacity", () => {
   const h = withRuntimes([[runtime(), true]]);
   const capacity = rows(h)[0].props.children[5].props.children[0];
   const details = h.all(node => node.type === "tr", capacity.props.content);
-  assert.equal(details.length, 9);
+  assert.equal(details.length, 11);
   const value = row => [row.props.children[1].props.children].flat()[0];
   const program = value(details[6]);
   assert.equal(program.props.title, "a".repeat(64));
   assert.deepEqual([program.props.children].flat(), ["a".repeat(12)]);
   assert.equal(value(details[8]), "v24.21.0");
+  assert.equal(value(details[9]), "x86-64");
+  // Judge machines before protocol version 5 announce no architectures: they ran on x86-64 only
+  assert.equal(value(details[10]), ".cpp.options.m.values.64, .cpp.options.m.values.32");
+});
+
+const details = (h, index) =>
+  h
+    .all(node => node.type === "tr", rows(h)[index].props.children[5].props.children[0].props.content)
+    .map(row => [row.props.children[1].props.children].flat()[0]);
+
+test("an arm64 judge machine shows that it builds only 64-bit C and C++ programs", () => {
+  const h = componentHarness(page, {
+    props: {
+      hasManagePermission: true,
+      judgeClients: [
+        client(1, {
+          capabilities: { ...capabilities, protocolVersion: 5, runtime: runtime({ arch: "arm64" }), architectures: ["64"] }
+        }),
+        client(2, { capabilities: { ...capabilities, protocolVersion: 4, runtime: runtime({ arch: "arm64" }) } })
+      ]
+    },
+    deps: {
+      "@/components/EmojiRenderer": { EmojiRenderer: { name: "EmojiRenderer" } },
+      "@/utils/formatDateTime": { __esModule: true, default: () => ["", ""] }
+    }
+  });
+  for (const index of [0, 1]) assert.deepEqual(details(h, index).slice(9), ["AArch64", ".cpp.options.m.values.64"]);
+});
+
+const notices = h => h.all(node => node.type?.name === "Message" && node.props.info);
+
+test("online judge machines of different architectures are pointed out, and only their own images compared", () => {
+  const arm = { arch: "arm64", sandboxImage: "e".repeat(64) };
+  assert.equal(notices(withRuntimes([[runtime(), true], [runtime({ kernel: "Linux 6.8" }), true]])).length, 0);
+  assert.equal(notices(withRuntimes([[runtime(), true], [runtime(arm), false]])).length, 0, "only online ones");
+  const mixed = withRuntimes([[runtime(), true], [runtime(arm), true]]);
+  const [notice] = notices(mixed);
+  assert.equal(notice.props.header, ".architecture_mismatch");
+  assert.equal(notice.props.content, ".architecture_mismatch_notes");
+  assert.equal(warnings(mixed).length, 0, "each architecture has its own sandbox image");
+  for (const changed of [{ judgeProgram: "c".repeat(64) }, { sandboxImage: "d".repeat(64) }]) {
+    const [warning] = warnings(withRuntimes([[runtime(), true], [runtime(changed), true], [runtime(arm), true]]));
+    assert.equal(warning?.props.header, ".runtime_mismatch", JSON.stringify(changed));
+  }
+  assert.equal(
+    warnings(withRuntimes([[runtime(), true], [runtime({ ...arm, judgeProgram: "c".repeat(64) }), true]]))[0]?.props.header,
+    ".runtime_mismatch",
+    "the judge program is the same on every architecture"
+  );
 });
 
 test("online judge machines with different judge programs or sandbox images are pointed out", () => {

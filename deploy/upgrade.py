@@ -17,6 +17,7 @@ import io
 import json
 import os
 from pathlib import Path
+import platform
 import pwd
 import re
 import secrets
@@ -72,6 +73,9 @@ GUARD_NAME = '90-libreoj-schema-sync.conf'
 SERVICES = ('mariadb', 'redis', 'minio', 'backend', 'nginx')
 # How long a judge started again may take to connect to the backend before the upgrade (or rollback) counts as failed
 JUDGE_CONNECT_SECONDS = 120
+# How long a backend just started may take to answer that it's ready. Longer than the installer's minute and a half:
+# a slower server that installed fine must not fail its upgrade, or worse its rollback, here.
+BACKEND_READY_SECONDS = 180
 GIB = 1024 ** 3
 # This digest is reviewed together with the code changes, never learned from the
 # target archive. Updating the contract requires updating this frozen pin too.
@@ -89,6 +93,11 @@ COMMUNITY_RUNTIME_PATHS = frozenset({
 # installed node_modules and rootfs are reused. Changes are verified by the staged build, the judge regression
 # tests, a native rebuild and a real sandbox run instead of a hash list.
 RUNTIME_SOURCE_PREFIXES = ('apps/judge/', 'packages/judge-protocol/', 'packages/simple-sandbox/')
+# The sandbox rootfs recipes (amd64's, and arm64's in arm64/). An upgrade reuses the installed rootfs, so they may
+# change only while the recipe of the installed one stays the same: its rootfs ID (rootfs_recipe_id) is unchanged.
+ROOTFS_RECIPES = 'infra/sandbox-rootfs/'
+# The machine architectures (platform.machine()) installations run on, by the names the rootfs recipes use
+ARCHITECTURES = {'x86_64': 'amd64', 'aarch64': 'arm64'}
 # Native inputs of each package rebuilt with cmake-js, and the add-ons (and programs) the rebuild must produce.
 NATIVE_PACKAGES = {
     'packages/simple-sandbox': {
@@ -108,7 +117,7 @@ JUDGE_REGRESSIONS = ('apps/judge/src/task/hack/hack.test.cjs', 'apps/judge/src/t
                      'apps/judge/src/selfTestConfig.test.cjs', 'apps/judge/src/fileContent.test.cjs',
                      'apps/judge/src/task/ai-execution/ai-execution.test.cjs', 'apps/judge/src/launcher/policy.test.cjs',
                      'apps/judge/src/checkers/builtin.test.cjs', 'apps/judge/src/checkers/score.test.cjs',
-                     'apps/judge/src/task/submission/submissionFile.test.cjs')
+                     'apps/judge/src/task/submission/submissionFile.test.cjs', 'apps/judge/src/architecture.test.cjs')
 # A judge with the sandbox launcher runs as this account; only the launcher runs as root.
 LAUNCHER = 'apps/judge/src/launcher/main.ts'
 JUDGE_ACCOUNT = 'libreoj-judge'
@@ -187,8 +196,9 @@ def community_runtime_transition(source, before, after, deployed_by_upgrade=Fals
 
     Paths already at the reviewed target are not part of the transition; later runtime changes to them
     follow the general runtime policy, but may not revert them to an older baseline. A path an earlier
-    upgrade already moved past the target is likewise left to the general policy, but only when
-    `deployed_by_upgrade` proves that the installed source is exactly what a completed upgrade deployed.
+    upgrade (or a newer installation) already moved past the target is likewise left to the general policy, but only
+    when `deployed_by_upgrade` proves that the installed source is exactly what the installer or a completed upgrade
+    deployed.
     """
     contract_path = Path(source)/'deploy/community-runtime-contract.json'
     if not contract_path.is_file() or contract_path.is_symlink() or contract_path.stat().st_size > 32768:
@@ -231,6 +241,22 @@ def community_runtime_transition(source, before, after, deployed_by_upgrade=Fals
     if paths != COMMUNITY_RUNTIME_PATHS:
         fail('Incomplete community runtime contract')
     return approved
+
+
+def rootfs_recipe_id(source, architecture):
+    """The rootfs ID `deploy/sandbox/build.sh plan` gives `source`'s recipe for `architecture` (its recipe_files): the
+    SHA-256 of each recipe file's Git blob ID and path."""
+    recipe = 'infra/sandbox-rootfs' + ('/arm64' if architecture == 'arm64' else '')
+    lines = []
+    for name in ('apps/judge/src/languages/compile-java.sh', 'apps/judge/src/languages/compile-python.sh',
+                 f'{recipe}/Dockerfile', 'infra/sandbox-rootfs/csc', 'infra/sandbox-rootfs/fsharpc',
+                 'infra/sandbox-rootfs/mono', f'{recipe}/smoke-test.sh'):
+        path = Path(source)/name
+        if not path.is_file() or path.is_symlink():
+            return None
+        data = path.read_bytes()
+        lines.append(f'{hashlib.sha1(b"blob %d" % len(data) + bytes(1) + data).hexdigest()}  {name}\n')
+    return hashlib.sha256(''.join(lines).encode()).hexdigest()
 
 
 def runtime_source(relative):
@@ -789,6 +815,7 @@ class Upgrade:
         self.native_rebuild = []
         self.sandbox_changed = False
         self.launcher = False
+        self.rootfs_recipe_changes = []
 
     def sql(self, query, database=None):
         args = ['mariadb', '--protocol=socket', f'--socket={self.root}/data/mariadb/mysql.sock', '--user=root', '--batch', '--skip-column-names']
@@ -928,8 +955,17 @@ class Upgrade:
         return unfinished
 
     def deployed_by_upgrade(self):
-        """Whether the installed source is exactly what one of this installation's completed upgrades deployed."""
+        """Whether the installed source is exactly what the installer or one of this installation's completed upgrades
+        deployed: the tree digest each recorded (installers record it since arm64 support)."""
         installed = None
+        try:
+            installation = json.loads((self.root/'config/install-complete.json').read_text())
+        except (OSError, UnicodeError, ValueError):
+            installation = None
+        if isinstance(installation, dict) and isinstance(installation.get('treeSha256'), str):
+            installed = tree_digest(self.root)
+            if installation['treeSha256'] == installed:
+                return True
         for manifest in sorted((self.root/'backups/upgrade').glob('*/manifest.json')):
             try:
                 record = json.loads(manifest.read_text())
@@ -965,6 +1001,10 @@ class Upgrade:
         tooling = {name for name in changed if TOOLING_CONFIGURATION.search(name)}
         changed -= tooling
         changed -= {name for name in changed if name.startswith(FRONTEND_BUILD_INPUTS)}
+        self.rootfs_recipe_changes = sorted(name for name in changed if name.startswith(ROOTFS_RECIPES))
+        if self.rootfs_recipe_changes:
+            self.check_rootfs_recipe(source)
+            changed -= set(self.rootfs_recipe_changes)
         approved_runtime = (community_runtime_transition(source, old_map, source_map, self.deployed_by_upgrade())
                             if changed else set())
         runtime_changes = changed - approved_runtime
@@ -994,6 +1034,19 @@ class Upgrade:
         if 'LIBREOJ_SCHEMA_SYNC' not in (source/'apps/backend/src/database/database.providers.ts').read_text():
             fail('Target backend cannot disable automatic schema synchronization')
         return source_map
+
+    def check_rootfs_recipe(self, source):
+        """Recipe files may change (e.g. the other architecture's) while the installed rootfs stays what the target's
+        recipe for this machine builds. A web installation has no rootfs."""
+        if self.role != 'all':
+            return
+        architecture = ARCHITECTURES.get(platform.machine())
+        installed = self.root/'runtime/rootfs-id'
+        installed_id = installed.read_text().strip() if installed.is_file() and not installed.is_symlink() else None
+        if not architecture or not installed_id or rootfs_recipe_id(source, architecture) != installed_id:
+            fail(say('The target changes the sandbox rootfs recipe of this machine; upgrades reuse the installed rootfs, '
+                     'so a new one requires a separate procedure',
+                     '目标版本修改了本机的沙箱 rootfs 配方；升级沿用已安装的 rootfs，更换 rootfs 需要单独的流程'))
 
     def check_dependencies(self, source):
         """A dependency change may update packages, but not the pinned toolchain that installs and runs them."""
@@ -1420,7 +1473,8 @@ class Upgrade:
         backend from before the readiness check (a rollback to it) answers 404 there; its API description is checked
         instead."""
         legacy = False
-        for _ in range(60):
+        deadline = time.monotonic() + BACKEND_READY_SECONDS
+        while True:
             try:
                 if legacy:
                     with urllib.request.urlopen(f'http://127.0.0.1:{self.port}/docs-json', timeout=2) as response:
@@ -1436,6 +1490,8 @@ class Upgrade:
                 error.close()
             except Exception:
                 pass
+            if time.monotonic() >= deadline:
+                break
             time.sleep(1)
         fail('New backend health check failed')
 
@@ -1969,6 +2025,10 @@ def main(argv=None):
                                     'install': say('from the npm registry into the staged copy; the installed dependencies are kept for a rollback',
                                                    '从 npm 仓库安装到暂存副本；已安装的依赖保留以便回滚')}
         info['nativeRebuild'] = upgrade.native_rebuild
+        if upgrade.rootfs_recipe_changes:
+            info['rootfsRecipe'] = {'changedFiles': upgrade.rootfs_recipe_changes,
+                                    'installedRootfs': say("unchanged: the recipe of this machine's architecture is the same",
+                                                           '不变：本机架构的配方未改变')}
         if upgrade.judge_account():
             info['judgeAccount'] = {'exists': JUDGE_ACCOUNT, 'create': f'{JUDGE_ACCOUNT} (created by the upgrade)'}[upgrade.judge_account()]
         if upgrade.runtime_changes and upgrade.role == 'web':

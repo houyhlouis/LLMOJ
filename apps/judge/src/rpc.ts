@@ -16,6 +16,7 @@ import { executionScheduler } from "./taskQueue";
 
 import getSystemInfo from "./systemInfo";
 import getRuntimeInfo from "./runtimeIdentity";
+import { C_ARCHITECTURES } from "./architecture";
 import { CanceledError } from "./error";
 
 // Storing a result may first wait for the problem's and submission's locks (up to about 30 seconds).
@@ -96,7 +97,8 @@ export class RPC {
             executionSlots: executionScheduler.slots,
             memoryBudget: executionScheduler.memoryBudget,
             aiExecutionSlots: executionScheduler.aiSlots,
-            runtime: await getRuntimeInfo()
+            runtime: await getRuntimeInfo(),
+            architectures: [...C_ARCHITECTURES]
           };
           this.socket.emit("capabilities", announced);
 

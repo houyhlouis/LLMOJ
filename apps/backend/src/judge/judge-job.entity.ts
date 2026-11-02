@@ -81,6 +81,9 @@ export enum JudgeJobAttemptOutcome {
   Abandoned = "Abandoned",
   // Preparing the task to send failed; retried later
   NotPrepared = "NotPrepared",
+  // The judge client can't build the task's programs (e.g. 32-bit C++ on arm64), while another one can; queued again
+  // for that one
+  Incompatible = "Incompatible",
   Failed = "Failed"
 }
 

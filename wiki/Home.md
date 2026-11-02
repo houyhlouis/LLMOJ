@@ -16,6 +16,7 @@ LLMOJ 是基于 LibreOJ 的在线评测系统，提供 AI 辅助出题功能。�
 | [运维配置](Operations-Configuration.zh-CN.md) | 安装后的 Nginx、MariaDB、Redis、MinIO 与 systemd；健康检查、备份与计数修正 |
 | [运维手册](Runbook.zh-CN.md) | doctor 发出警告、指标越界或用户报告问题时该怎么办 |
 | [容量](Capacity.zh-CN.md) | 小型网站在实测负载下的表现，以及本版本前后的对比 |
+| [ARM64 服务器](ARM64.zh-CN.md) | 在 arm64（AArch64）上安装，C 与 C++ 的不同之处，以及两种架构的评测机 |
 
 ## 使用
 
@@ -62,4 +63,4 @@ LLMOJ 是基于 LibreOJ 的在线评测系统，提供 AI 辅助出题功能。�
 
 完整安装（`--role all`）包含网站、存储和本机评测，也可以再接入远程评测机。仅网页安装（`--role web`）不构建本机评测环境：提交由远程评测机评测，已更新的评测机（协议版本 4）也负责 AI 验证标程和生成测试数据（见[分布式评测](Distributed-Judging.zh-CN.md)）。
 
-LLMOJ 在 Ubuntu 24.04 amd64 上经过测试。本项目代码采用 MIT 许可，上游组件保留各自的许可。
+LLMOJ 在 Ubuntu 24.04 amd64 上经过测试，并在模拟的虚拟机中测试了 Ubuntu 26.04 arm64。本项目代码采用 MIT 许可，上游组件保留各自的许可。

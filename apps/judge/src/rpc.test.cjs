@@ -58,6 +58,7 @@ function loadRpc(taskHandler) {
     "@libreoj/judge-protocol": { JUDGE_PROTOCOL_VERSION: 3 },
     "./systemInfo": { __esModule: true, default: async () => ({}) },
     "./runtimeIdentity": { __esModule: true, default: async () => runtime },
+    "./architecture": { C_ARCHITECTURES: ["64"] },
     "./error": { CanceledError }
   };
   const loaded = { exports: {} };
@@ -120,7 +121,7 @@ test("with a server that does not acknowledge progress, the final progress is fl
   }
 });
 
-test("after connecting, the judge client announces what it can judge, its capacity and its runtime", async () => {
+test("after connecting, the judge client announces what it can judge, its capacity, runtime and architectures", async () => {
   const { socket, isAcknowledged } = await runOneTask({ progressAck: true });
   // Finish the task, so nothing waits for the server afterwards
   await until(() => socket.sent.some(([event]) => event === "progress"));
@@ -137,7 +138,8 @@ test("after connecting, the judge client announces what it can judge, its capaci
         executionSlots: 7,
         memoryBudget: 2374,
         aiExecutionSlots: 6,
-        runtime
+        runtime,
+        architectures: ["64"]
       }
     ]
   ]);

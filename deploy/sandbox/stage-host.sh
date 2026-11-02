@@ -9,6 +9,12 @@ if [[ "$LIBREOJ_X32_SUPPORTED" != 0 && "$LIBREOJ_X32_SUPPORTED" != 1 ]]; then
     exit 1
 fi
 export LIBREOJ_X32_SUPPORTED
+# The arm64 rootfs is checked with its own recipe's smoke test, which has nothing x32 to skip
+case "${ROOTFS_ARCHITECTURE:-amd64}" in
+    amd64) SMOKE_TEST=deploy/sandbox/smoke-test-host.sh ;;
+    arm64) SMOKE_TEST=infra/sandbox-rootfs/arm64/smoke-test.sh ;;
+    *) echo "ROOTFS_ARCHITECTURE must be amd64 or arm64" >&2; exit 1 ;;
+esac
 
 if [[ "${EUID}" -ne 0 ]]; then
     echo "stage.sh must run as root" >&2
@@ -132,7 +138,7 @@ VALIDATION_DIRECTORY_OUTSIDE="$TEMPORARY_DIRECTORY$VALIDATION_DIRECTORY"
 # Validation runs as UID 999 even when the installer uses a private umask.
 mkdir -m 0755 "$VALIDATION_DIRECTORY_OUTSIDE"
 declare -A VALIDATION_FILES=(
-    [libreoj-rootfs-smoke-test]="$REPOSITORY_ROOT/deploy/sandbox/smoke-test-host.sh"
+    [libreoj-rootfs-smoke-test]="$REPOSITORY_ROOT/$SMOKE_TEST"
     [compile-java.sh]="$REPOSITORY_ROOT/apps/judge/src/languages/compile-java.sh"
     [compile-python.sh]="$REPOSITORY_ROOT/apps/judge/src/languages/compile-python.sh"
 )

@@ -18,6 +18,7 @@ import {
 import { JudgeTaskCompletion, JudgeTaskService } from "./judge-task-service.interface";
 import { JudgeTaskProgress } from "./judge-task-progress.interface";
 import { JudgeJobAttemptEntity, JudgeJobAttemptOutcome, JudgeJobEntity, JudgeJobState } from "./judge-job.entity";
+import { taskArchitectures } from "./judge-architecture";
 
 import { logger } from "../logger";
 import { RedisService } from "../redis/redis.service";
@@ -66,6 +67,9 @@ export interface JudgeClaimOptions {
   liveContestOnly?: boolean;
   // Every AGED_TURN-th task goes to the job waiting longest, once it has waited this long (0: never)
   agingSeconds?: number;
+  // C and C++ architectures the judge client doesn't build programs for, while another one does: tasks that need them
+  // are left to those (see judge-architecture.ts)
+  skipArchitectures?: string[];
 }
 
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
@@ -160,6 +164,10 @@ const AGED_TURN = 5;
 // Whether a contest is running is read this often
 const LIVE_CONTEST_CACHE = 10 * 1000;
 
+// Queued tasks known to need an architecture other than "64" (see taskArchitectures), so that judge clients without
+// it don't lease them again. Only the most recent ones are kept.
+const MAX_REMEMBERED_ARCHITECTURES = 10000;
+
 // A task whose preparation fails (e.g. the database is briefly unavailable) is retried with a growing delay, up to
 // MAX_PREPARATION_FAILURES times (about 15 minutes).
 const MAX_PREPARATION_FAILURES = 10;
@@ -220,6 +228,10 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
   private claimsSinceAged = 0;
 
   private liveContest: { running: Promise<boolean>; until: number } = null;
+
+  // The architectures other than "64" of the tasks queued again for judge clients that build them (until one of those
+  // is sent the task), by task ID, oldest first
+  private readonly taskArchitectures = new Map<string, string[]>();
 
   @Optional() @Inject(FileService) private readonly fileService: FileService;
 
@@ -394,13 +406,23 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
     options: JudgeClaimOptions = {}
   ): Promise<LeasedJudgeTask> {
     if (taskTypes.length === 0) return null;
+    const skip = options.skipArchitectures ?? [];
     /* eslint-disable no-await-in-loop */
     for (let round = 0; round < MAX_CLAIM_ROUNDS; round++) {
+      // Jobs known to need an architecture the judge client doesn't build are never candidates, so that it isn't
+      // kept from the jobs behind them
+      const excluded = skip.length ? this.tasksNeeding(skip) : [];
+      const exclusion = excluded.length ? " AND taskId NOT IN (?)" : "";
       let candidates: JudgeJobRow[] = await this.connection.query(
         `SELECT taskId, type, priority, fence, createdAt FROM judge_job
-         WHERE state = ? AND availableAt <= NOW(3) AND type IN (?)${options.liveContestOnly ? " AND priority < ?" : ""}
+         WHERE state = ? AND availableAt <= NOW(3) AND type IN (?)${options.liveContestOnly ? " AND priority < ?" : ""}${exclusion}
          ORDER BY priority, createdAt LIMIT ${CLAIM_CANDIDATES}`,
-        [JudgeJobState.Queued, taskTypes, ...(options.liveContestOnly ? [LIVE_CONTEST_PRIORITY_LIMIT] : [])]
+        [
+          JudgeJobState.Queued,
+          taskTypes,
+          ...(options.liveContestOnly ? [LIVE_CONTEST_PRIORITY_LIMIT] : []),
+          ...(excluded.length ? [excluded] : [])
+        ]
       );
       // An aged turn, unless a running contest's submission waits
       let agedIds = new Set<string>();
@@ -413,9 +435,9 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
       ) {
         const aged: JudgeJobRow[] = await this.connection.query(
           `SELECT taskId, type, priority, fence, createdAt FROM judge_job
-           WHERE state = ? AND availableAt <= NOW(3) AND type IN (?) AND createdAt <= NOW(3) - INTERVAL ? SECOND
+           WHERE state = ? AND availableAt <= NOW(3) AND type IN (?) AND createdAt <= NOW(3) - INTERVAL ? SECOND${exclusion}
            ORDER BY createdAt LIMIT ${CLAIM_CANDIDATES}`,
-          [JudgeJobState.Queued, taskTypes, options.agingSeconds]
+          [JudgeJobState.Queued, taskTypes, options.agingSeconds, ...(excluded.length ? [excluded] : [])]
         );
         agedIds = new Set(aged.map(job => job.taskId));
         // Nothing waited that long: look again after the next AGED_TURN tasks
@@ -426,14 +448,18 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
       for (const job of candidates) {
         const fence = Number(job.fence) + 1;
         if (await this.lease(job, fence, owner)) {
-          const task = await this.prepare(job, fence, owner);
+          const task = await this.prepare(job, fence, owner, skip);
           if (task) {
             this.claimsSinceAged = agedIds.has(job.taskId) ? 0 : this.claimsSinceAged + 1;
             return { task, fence };
           }
+          // Queued again for the judge clients that build its programs: the next round leaves it out
+          if (this.taskArchitectures.get(job.taskId)?.some(architecture => skip.includes(architecture)))
+            contended = true;
         } else contended = true;
       }
-      // Every candidate was tried; if other consumers took some, there may be more jobs behind them
+      // Every candidate was tried; if other consumers took some (or some were left to others), there may be more jobs
+      // behind them
       if (!contended) return null;
     }
     /* eslint-enable no-await-in-loop */
@@ -477,7 +503,27 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private async prepare(job: JudgeJobRow, fence: number, owner: JudgeJobOwner): Promise<JudgeTask<JudgeTaskExtraInfo>> {
+  // The remembered tasks that need one of `architectures`
+  private tasksNeeding(architectures: string[]): string[] {
+    return [...this.taskArchitectures]
+      .filter(([, needed]) => needed.some(architecture => architectures.includes(architecture)))
+      .map(([taskId]) => taskId);
+  }
+
+  private rememberArchitectures(taskId: string, architectures: string[]) {
+    this.taskArchitectures.delete(taskId);
+    this.taskArchitectures.set(taskId, architectures);
+    if (this.taskArchitectures.size > MAX_REMEMBERED_ARCHITECTURES)
+      this.taskArchitectures.delete(this.taskArchitectures.keys().next().value);
+  }
+
+  /** The task to send for a leased job, or null if there's none to send now (its lease is ended). */
+  private async prepare(
+    job: JudgeJobRow,
+    fence: number,
+    owner: JudgeJobOwner,
+    skipArchitectures: string[] = []
+  ): Promise<JudgeTask<JudgeTaskExtraInfo>> {
     const taskInfo = `{ taskId: ${job.taskId}, type: ${job.type} }`;
     let task: JudgeTask<JudgeTaskExtraInfo>;
     try {
@@ -495,6 +541,30 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
       await this.endLease(this.connection.manager, job.taskId, fence, owner.connectionId, JudgeJobState.Canceled);
       return null;
     }
+
+    // Only judge clients that leave some architectures to others look into the task
+    const architectures = skipArchitectures.length ? taskArchitectures(task.extraInfo) : [];
+    const unbuildable = architectures.filter(architecture => skipArchitectures.includes(architecture));
+    if (unbuildable.length) {
+      this.rememberArchitectures(job.taskId, architectures);
+      logger.verbose(
+        `Leased judge task ${taskInfo}, but it needs ${unbuildable.join(", ")}-bit programs, which other judge ` +
+          `clients build; queued again for them`
+      );
+      const queued = await this.endLease(
+        this.connection.manager,
+        job.taskId,
+        fence,
+        owner.connectionId,
+        JudgeJobState.Queued,
+        JudgeJobAttemptOutcome.Incompatible,
+        { availableAt: () => "NOW(3)" }
+      );
+      if (queued) this.notifyJobsAvailable();
+      return null;
+    }
+    // Sent to a judge client that builds its programs: a judge client that doesn't learns it again if it's queued again
+    this.taskArchitectures.delete(job.taskId);
 
     this.metricJudgeTaskQueueTime.observe(
       { type: task.type, priority_type: task.priorityType },

@@ -16,6 +16,7 @@ LLMOJ is an online judge based on LibreOJ, with AI tools for problem setting. Ne
 | [Operations](Operations-Configuration.md) | Nginx, MariaDB, Redis, MinIO and systemd after installation; health checks, backups and counts |
 | [Runbook](Runbook.md) | What to do when doctor warns, a metric crosses its line, or users report a problem |
 | [Capacity](Capacity.md) | How a small site performed under a measured load, before and after this release |
+| [ARM64 servers](ARM64.md) | Installing on arm64 (AArch64), what differs for C and C++, and judge machines of both architectures |
 
 ## Using LLMOJ
 
@@ -62,4 +63,4 @@ The member list (`/u`) opens from **View all** in the **Top Users** panel on the
 
 A full installation (`--role all`) runs the website, storage and a local judge, and can use remote judge machines too. A website-only installation (`--role web`) builds no local judging environment: remote judges handle submissions, and up-to-date ones (protocol version 4) also run AI validation and test data generation (see [Distributed judging](Distributed-Judging.md)).
 
-LLMOJ is tested on Ubuntu 24.04 amd64. Its own code is under the MIT license; upstream components keep their licenses.
+LLMOJ is tested on Ubuntu 24.04 amd64, and on Ubuntu 26.04 arm64 in an emulated virtual machine. Its own code is under the MIT license; upstream components keep their licenses.

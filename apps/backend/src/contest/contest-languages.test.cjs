@@ -133,10 +133,21 @@ test("frontend, backend, deployed inventory and judge adapters agree on all 12 u
   for (const list of [Object.values(CodeLanguage), Object.values(frontend.CodeLanguage), judge])
     assert.deepEqual([...list].sort(), [...inventory].sort());
   assert.equal(inventory.length, 12);
+  // The judge builds what the rootfs of its machine has a toolchain for: amd64's, or arm64's (64-bit only)
+  const judgeArchitectures = arch =>
+    new Function(
+      "exports",
+      "process",
+      ts.transpileModule(fs.readFileSync(path.join(repoRoot, "apps/judge/src/architecture.ts"), "utf8"), {
+        compilerOptions
+      }).outputText + "\nreturn exports.C_ARCHITECTURES;"
+    )({}, { arch });
   for (const language of ["c", "cpp"]) {
     const architectures = frontend.compileAndRunOptions[language].find(option => option.name === "m").values;
     assert.deepEqual(architectures, profile[language].architectures);
     assert(!architectures.includes("x32"));
+    assert.deepEqual([...judgeArchitectures("x64")], profile[language].architectures);
+    assert.deepEqual([...judgeArchitectures("arm64")], profile[language].arm64Architectures);
   }
   assert.equal(all.length, 27);
   assert.deepEqual(frontend.contestLanguageValues, all);

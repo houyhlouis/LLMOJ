@@ -156,6 +156,10 @@ export class AppState {
   @observable
   serverPreference: ApiTypes.PreferenceConfig = null;
 
+  // The C and C++ architectures (option `m`) the site's judge machines build programs for; null: not known (all)
+  @observable
+  judgeArchitectures: string[] = null;
+
   @observable
   serverVersion: ApiTypes.ServerVersionDto = null;
 

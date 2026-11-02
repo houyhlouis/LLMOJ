@@ -10,7 +10,9 @@ export enum JudgeTaskType {
 // Raised when judge clients announce something new to the server. Judge clients that announce nothing are version 1.
 // Version 3 announces the judge's runtime and checks the files of a task against their SHA-256.
 // Version 4 runs AiExecution tasks and uploads the files they generate ("requestUploads").
-export const JUDGE_PROTOCOL_VERSION = 4;
+// Version 5 announces the architectures it builds C and C++ programs for ("architectures"): arm64 judges build no
+// 32-bit programs.
+export const JUDGE_PROTOCOL_VERSION = 5;
 
 /** What a judge judges with, as recorded with each result. */
 export interface JudgeRuntimeInfo {
@@ -37,6 +39,9 @@ export interface JudgeClientCapabilities {
   aiExecutionSlots: number;
   // Since protocol version 3
   runtime?: JudgeRuntimeInfo;
+  // Since protocol version 5: the values of the C and C++ option `m` it builds programs for. "64" is the machine's
+  // own 64-bit architecture, "32" 32-bit x86, which only x86-64 judges build. Older judges run on x86-64 only.
+  architectures?: string[];
 }
 
 export interface JudgeTaskMeta {

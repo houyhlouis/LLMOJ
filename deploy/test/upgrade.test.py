@@ -489,6 +489,61 @@ class UpgradeTests(unittest.TestCase):
                 self.up.compatibility(self.source)
         (self.source/'packages/shared/src/index.ts').write_text('changed shared code')
         with self.assertRaisesRegex(u.UpgradeError,'frozen runtime contract'): self.up.compatibility(self.source)
+    RECIPE = ('apps/judge/src/languages/compile-java.sh','apps/judge/src/languages/compile-python.sh',
+              'infra/sandbox-rootfs/csc','infra/sandbox-rootfs/fsharpc','infra/sandbox-rootfs/mono',
+              'infra/sandbox-rootfs/build.sh','infra/sandbox-rootfs/Dockerfile','infra/sandbox-rootfs/smoke-test.sh',
+              'infra/sandbox-rootfs/arm64/Dockerfile','infra/sandbox-rootfs/arm64/smoke-test.sh')
+    def rootfs_fixture(self,architecture):
+        """Both trees have both rootfs recipes, and this machine's rootfs is installed."""
+        for tree in (self.root,self.source):
+            for relative in self.RECIPE:
+                (tree/relative).parent.mkdir(parents=True,exist_ok=True); (tree/relative).write_text('recipe '+relative)
+        (self.root/'runtime/rootfs-id').write_text(u.rootfs_recipe_id(self.root,architecture)+'\n')
+    def test_rootfs_recipe_ids_are_the_ones_the_sandbox_build_plans(self):
+        repository=Path(__file__).resolve().parents[2]
+        for architecture in ('amd64','arm64'):
+            plan=subprocess.run(['bash',str(repository/'deploy/sandbox/build.sh'),'plan'],capture_output=True,text=True,check=True,
+                                env=dict(os.environ,ROOTFS_ARCHITECTURE=architecture)).stdout
+            self.assertIn('ROOTFS_ID='+u.rootfs_recipe_id(repository,architecture)+'\n',plan)
+        self.assertNotEqual(u.rootfs_recipe_id(repository,'amd64'),u.rootfs_recipe_id(repository,'arm64'))
+    def test_rootfs_recipes_may_change_while_this_machines_stays_the_same(self):
+        for machine,own,other in (('x86_64','infra/sandbox-rootfs','infra/sandbox-rootfs/arm64'),
+                                  ('aarch64','infra/sandbox-rootfs/arm64','infra/sandbox-rootfs')):
+            with self.subTest(machine=machine),patch.object(u.platform,'machine',return_value=machine):
+                self.rootfs_fixture(u.ARCHITECTURES[machine]); self.up.preflight()
+                # The other architecture's recipe, and the build script (which no rootfs ID covers)
+                (self.source/other/'Dockerfile').write_text('the other recipe, changed')
+                (self.source/'infra/sandbox-rootfs/build.sh').write_text('builds either')
+                self.up.compatibility(self.source)
+                self.assertEqual(self.up.rootfs_recipe_changes,sorted([other+'/Dockerfile','infra/sandbox-rootfs/build.sh']))
+                self.assertEqual((self.up.runtime_changes,self.up.native_rebuild),([],[]))
+                # A new recipe file of the other architecture
+                (self.source/other/'notes.txt').write_text('added')
+                self.up.compatibility(self.source)
+                # This machine's recipe
+                (self.source/own/'smoke-test.sh').write_text('changed')
+                with self.assertRaisesRegex(u.UpgradeError,'sandbox rootfs recipe of this machine'):
+                    self.up.compatibility(self.source)
+                (self.source/own/'notes.txt').unlink(missing_ok=True); (self.source/other/'notes.txt').unlink()
+        # Without an installed rootfs ID, or on another architecture, nothing is known to stay: refused
+        with patch.object(u.platform,'machine',return_value='x86_64'):
+            self.rootfs_fixture('amd64'); self.up.preflight()
+            (self.source/'infra/sandbox-rootfs/arm64/Dockerfile').write_text('changed')
+            (self.root/'runtime/rootfs-id').unlink()
+            with self.assertRaisesRegex(u.UpgradeError,'sandbox rootfs recipe of this machine'): self.up.compatibility(self.source)
+        with patch.object(u.platform,'machine',return_value='riscv64'):
+            self.rootfs_fixture('amd64'); self.up.preflight()
+            (self.source/'infra/sandbox-rootfs/arm64/Dockerfile').write_text('changed')
+            with self.assertRaisesRegex(u.UpgradeError,'sandbox rootfs recipe of this machine'): self.up.compatibility(self.source)
+            # A web installation has no rootfs
+            self.up.role='web'; (self.source/'infra/sandbox-rootfs/Dockerfile').write_text('changed')
+            self.up.compatibility(self.source)
+        # Other infrastructure stays frozen
+        self.up.role='all'
+        with patch.object(u.platform,'machine',return_value='x86_64'):
+            self.rootfs_fixture('amd64'); self.up.preflight()
+            (self.source/'infra/frontend-cdn').mkdir(parents=True,exist_ok=True); (self.source/'infra/frontend-cdn/download.ts').write_text('x')
+            with self.assertRaisesRegex(u.UpgradeError,'frozen runtime contract'): self.up.compatibility(self.source)
     def test_frontend_build_inputs_may_change_but_other_bootstrap_packages_may_not(self):
         self.up.preflight()
         for relative in ('packages/service-worker/retire-service-worker.js','packages/service-worker/src/installer.ts'):
@@ -958,7 +1013,10 @@ class HealthTests(unittest.TestCase):
             answer=answers.pop(0) if answers else ConnectionRefusedError()
             if isinstance(answer, BaseException): raise answer
             return self.Response(*answer)
-        with patch.object(u.urllib.request,'urlopen',urlopen), patch.object(u.time,'sleep'):
+        # A clock that the waits advance
+        clock=[0.0]
+        def sleep(seconds): clock[0]+=seconds
+        with patch.object(u.urllib.request,'urlopen',urlopen), patch.object(u.time,'sleep',sleep), patch.object(u.time,'monotonic',lambda: clock[0]):
             try:
                 up.health(); return urls, None
             except u.UpgradeError as error:
@@ -973,13 +1031,18 @@ class HealthTests(unittest.TestCase):
         self.assertIsNone(error); self.assertEqual(urls, ['/api/health/ready']*3)
 
     def test_backend_that_never_gets_ready_fails(self):
-        urls, error=self.run_health([self.http_error(503)]*60)
-        self.assertIsNotNone(error); self.assertEqual(len(urls), 60); self.assertNotIn('/docs-json', urls)
+        # Asked once a second for three minutes, longer than the installer waits, for slower servers
+        self.assertEqual(u.BACKEND_READY_SECONDS, 180)
+        urls, error=self.run_health([self.http_error(503)]*200)
+        self.assertIsNotNone(error); self.assertEqual(len(urls), 181); self.assertNotIn('/docs-json', urls)
+        # Ready after two minutes and a half
+        urls, error=self.run_health([ConnectionRefusedError()]*150+[(200, {'status': 'ready'})])
+        self.assertIsNone(error); self.assertEqual(len(urls), 151)
 
     def test_older_backend_without_readiness_is_checked_by_its_api_description(self):
         urls, error=self.run_health([self.http_error(404), ConnectionRefusedError(), (200, {'openapi': '3.0.0', 'paths': {'/api/x': {}}})])
         self.assertIsNone(error); self.assertEqual(urls, ['/api/health/ready', '/docs-json', '/docs-json'])
-        urls, error=self.run_health([self.http_error(404)]+[(200, {'openapi': '3.0.0', 'paths': {}})]*59)
+        urls, error=self.run_health([self.http_error(404)]+[(200, {'openapi': '3.0.0', 'paths': {}})]*200)
         self.assertIsNotNone(error)
 
 

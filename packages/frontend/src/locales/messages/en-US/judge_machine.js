@@ -48,6 +48,8 @@ return {
     protocol_version: "Protocol version",
     judge_program: "Judge program",
     sandbox_image: "Sandbox image",
+    architecture: "Architecture",
+    c_architectures: "C and C++ programs",
     legacy: "Legacy",
     legacy_notes:
       "This judge machine runs an older version that doesn't announce what it can do, so it is sent only submissions. Update it to judge Hacks and Self Evals."
@@ -86,6 +88,9 @@ return {
     REAUTHENTICATION_REQUIRED: "Confirm your password to see or change judge machine keys."
   },
   no_judge_machine: "No judge machine",
+  architecture_mismatch: "Online judge machines have different architectures: {architectures}",
+  architecture_mismatch_notes:
+    "32-bit C and C++ programs are judged only by x86-64 judge machines; everything else by any of them, each with the sandbox image of its own architecture. The running time of the same program differs between machines, and long double has a different precision on AArch64, so judge a contest on one kind of machine (drain the others while it runs).",
   runtime_mismatch: "Online judge machines judge with different judge programs or sandbox images",
   runtime_mismatch_notes:
     "A submission may then get a different result depending on which one judges it. Update them all to the same release. Each result records which judge machine judged it and with what."

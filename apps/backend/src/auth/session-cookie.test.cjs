@@ -232,3 +232,13 @@ test("page loads learn the marker of a cookie session, and only of one", async (
   assert.equal((await info({}, { sessionId: 9, user: member })).sessionMarker, undefined);
   assert.equal((await info({}, undefined)).sessionMarker, undefined);
 });
+
+test("page loads learn which C and C++ architectures the site's judge machines build", async () => {
+  const service = sessions();
+  const fleet = async judgeClientService =>
+    (await Object.assign(auth(service), { judgeClientService }).getSessionInfo({}, {}, undefined, {}))
+      .judgeArchitectures;
+  assert.deepEqual(await fleet({ getFleetArchitectures: async () => ["64"] }), ["64"]);
+  assert.deepEqual(await fleet({ getFleetArchitectures: async () => ["64", "32"] }), ["64", "32"]);
+  assert.deepEqual(await fleet(undefined), ["64", "32"], "all of them when the judge module isn't there");
+});

@@ -29,6 +29,6 @@ import { AuthModule } from "../auth/auth.module";
   ],
   controllers: [JudgeClientController],
   providers: [JudgeGateway, JudgeClientService, JudgeQueueService, JudgeRuntimeService],
-  exports: [JudgeGateway, JudgeQueueService, JudgeRuntimeService]
+  exports: [JudgeGateway, JudgeQueueService, JudgeRuntimeService, JudgeClientService]
 })
 export class JudgeModule {}

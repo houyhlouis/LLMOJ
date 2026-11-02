@@ -259,6 +259,48 @@ class RuntimeUpgradeTests(unittest.TestCase):
         with self.assertRaisesRegex(u.UpgradeError, 'reverts'):
             self.up.compatibility(self.source)
 
+    def record_installed_tree(self, tree):
+        complete = self.root/'config/install-complete.json'
+        state = json.loads(complete.read_text())
+        complete.write_text(json.dumps({**state, 'treeSha256': tree}))
+
+    def test_runtime_files_a_newer_installation_has_may_change_too(self):
+        # Installed by a release newer than the reviewed target, without any upgrade yet
+        self.deployed_reviewed_runtime()
+        relative = 'packages/judge-protocol/src/index.ts'
+        (self.root/relative).write_bytes(b'export enum JudgeTaskType {\n  Submission = "Submission"\n}\n// installed newer\n')
+        self.change(relative, b'export enum JudgeTaskType {\n  Submission = "Submission"\n}\n// changed by this upgrade\n')
+        with self.assertRaisesRegex(u.UpgradeError, 'supported community baselines'):
+            self.up.compatibility(self.source)
+        # The installer recorded the tree it installed, and the installed source is still that tree
+        self.record_installed_tree(u.tree_digest(self.root))
+        self.up.compatibility(self.source)
+        self.assertIn(relative, self.up.runtime_changes)
+        # Edited since
+        self.record_installed_tree('0'*64)
+        with self.assertRaisesRegex(u.UpgradeError, 'supported community baselines'):
+            self.up.compatibility(self.source)
+        for value in (None, 5, ['x']):
+            self.record_installed_tree(value)
+            with self.assertRaisesRegex(u.UpgradeError, 'supported community baselines'):
+                self.up.compatibility(self.source)
+
+    def test_a_fresh_installation_without_a_record_upgrades_once_to_what_it_runs(self):
+        # Installed fresh by a newer release before installers recorded their tree (wiki/Upgrade.md)
+        self.deployed_reviewed_runtime()
+        relative = 'packages/judge-protocol/src/index.ts'
+        installed = b'export enum JudgeTaskType {\n  Submission = "Submission"\n}\n// installed newer\n'
+        (self.root/relative).write_bytes(installed)
+        # Upgrading to the version it already runs changes none of these files
+        self.change(relative, installed)
+        self.up.compatibility(self.source)
+        self.assertEqual(self.up.runtime_changes, [])
+        # That upgrade's record lets the next one change them
+        self.record_completed_upgrade(u.tree_digest(self.root))
+        self.change(relative, installed + b'// changed by the next upgrade\n')
+        self.up.compatibility(self.source)
+        self.assertIn(relative, self.up.runtime_changes)
+
     def test_incomplete_or_malformed_upgrade_records_prove_nothing(self):
         self.deployed_reviewed_runtime()
         relative = 'apps/judge/src/task/index.ts'

@@ -5,7 +5,7 @@
 This guide sets up a judge on its own server, without the website, database, Redis or MinIO. The judge connects to the site itself, using its own key, so the site needs no open port on the judge.
 
 You need:
-- Ubuntu 24.04 or 26.04 (amd64), systemd 254 or later and cgroup v2. Ubuntu 26.04 hasn't been tested end to end yet. Containers that restrict namespaces, mounts or cgroups won't work.
+- Ubuntu 24.04 or 26.04 on amd64 or arm64 (see [ARM64 servers](ARM64.md)), systemd 254 or later and cgroup v2. Ubuntu 26.04 hasn't been tested end to end yet. Containers that restrict namespaces, mounts or cgroups won't work.
 - At least 2 CPUs and 256 MiB of memory for one judge slot, and 30 GiB of free disk. Building on the judge needs more memory: 8 GiB is recommended.
 - A judge registered on the site, with its key (see [Distributed judging](Distributed-Judging.md)).
 
@@ -28,20 +28,22 @@ fi
 
 ## 2. Install Node.js and pnpm, and build the judge
 
-These are the versions and checksum the installer uses. If the checksum doesn't match, stop.
+These are the versions and checksums the installer uses, for amd64 (`x86_64`) and arm64 (`aarch64`). If the checksum doesn't match, stop.
 
 ```bash
+case "$(uname -m)" in
+  x86_64) OJ_NODE=node-v24.21.0-linux-x64 OJ_NODE_SHA256=fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6 ;;
+  aarch64) OJ_NODE=node-v24.21.0-linux-arm64 OJ_NODE_SHA256=6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2 ;;
+esac
 OJ_NODE_STAGE=$(mktemp -d)
 curl --proto '=https' --tlsv1.2 -fL --retry 3 \
-  https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz \
+  "https://nodejs.org/dist/v24.21.0/$OJ_NODE.tar.xz" \
   -o "$OJ_NODE_STAGE/node.tar.xz"
-printf '%s  %s\n' \
-  fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6 \
-  "$OJ_NODE_STAGE/node.tar.xz" | sha256sum --check
+printf '%s  %s\n' "$OJ_NODE_SHA256" "$OJ_NODE_STAGE/node.tar.xz" | sha256sum --check
 # Continue only after the checksum succeeds:
 sudo install -d -m 0755 /opt/LLMOJ/runtime
 sudo tar -xJf "$OJ_NODE_STAGE/node.tar.xz" -C /opt/LLMOJ/runtime
-sudo ln -sfn node-v24.21.0-linux-x64 /opt/LLMOJ/runtime/node
+sudo ln -sfn "$OJ_NODE" /opt/LLMOJ/runtime/node
 rm -r -- "$OJ_NODE_STAGE"
 
 sudo env PATH=/opt/LLMOJ/runtime/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
@@ -78,14 +80,14 @@ sudo env BUILDX_BUILDER=default bash deploy/sandbox/build.sh build
 bash deploy/sandbox/build.sh plan
 ```
 
-Install it with the `ROOTFS_ID` and archive path that the build printed. As in the installer, x32 programs are compiled but not run; the other checks still run.
+The image is built for this server's architecture, from its own recipe on arm64. Install it with the `ROOTFS_ID` and archive path that the build printed. As in the installer, x32 programs are compiled but not run on amd64; the other checks still run.
 
 ```bash
 sudo env LIBREOJ_X32_SUPPORTED=0 unshare --net --mount --propagation private -- \
   bash deploy/sandbox/build.sh stage /opt/LLMOJ/runtime/sandbox-archives/rootfs-ACTUAL_ROOTFS_ID.tar.gz
 ```
 
-Instead of installing Docker on the judge, you can build the same recipe on a trusted machine and copy `rootfs-<ID>.tar.gz` and its `.sha256` file to the judge, then install them as above. Don't mix versions. Docker is only used to build the image: submissions run in LLMOJ's own sandbox.
+Instead of installing Docker on the judge, you can build the same recipe on a trusted machine of the same architecture and copy `rootfs-<ID>.tar.gz` and its `.sha256` file to the judge, then install them as above (an amd64 machine can build the arm64 image too: see [ARM64 servers](ARM64.md#building-the-arm64-image-on-another-machine)). Don't mix versions. Docker is only used to build the image: submissions run in LLMOJ's own sandbox.
 
 ## 4. Save the key and write the configuration
 
@@ -116,7 +118,7 @@ The resulting `config/judge.yaml` is readable only by root. A remote judge has n
 Install only the judge's service and its working directory mounts (not the website's services), check the sandbox, then start judging:
 
 ```bash
-sudo chmod -R a+rX apps packages node_modules runtime/node-v24.21.0-linux-x64 runtime/tooling runtime/pnpm-store
+sudo chmod -R a+rX apps packages node_modules "$(readlink -f runtime/node)" runtime/tooling runtime/pnpm-store
 shopt -s nullglob
 OJ_JUDGE_MOUNTS=(deploy/systemd/*.mount)
 sudo systemd-analyze verify deploy/systemd/libreoj-judge.service \

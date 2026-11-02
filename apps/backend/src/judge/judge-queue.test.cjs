@@ -584,3 +584,110 @@ test(
     assert.equal(await queue.liveContestRunning(), false);
   }
 );
+
+test(
+  "judge clients that build no 32-bit programs leave those tasks to the ones that do, without waiting behind them",
+  { skip, timeout: 120000 },
+  async t => {
+    const database = JSON.parse(fs.readFileSync(configPath, "utf8")).services.database;
+    assert.match(database.database, /^llmoj_test_judge_queue$/, "Use only the dedicated disposable test database");
+    const redisService = await startRedis(t);
+    const ds = new DataSource({
+      ...database,
+      entities: [JudgeJobEntity, JudgeJobAttemptEntity],
+      synchronize: false,
+      logging: false
+    });
+    await ds.initialize();
+    assert.equal((await ds.query("SHOW TABLES")).length, 0, "Test database must be empty; no table is removed");
+    t.after(async () => {
+      for (const table of ["judge_job", "judge_job_attempt"]) await ds.query(`DROP TABLE IF EXISTS \`${table}\``);
+      await ds.destroy();
+    });
+    await ds.synchronize();
+
+    const tasks = fakeTaskService(ds);
+    // Each task's programs: the submission's architecture, and for some a 32-bit checker
+    const programs = new Map();
+    const program = m => ({ language: "cpp", code: "", compileAndRunOptions: { compiler: "g++", std: "c++17", O: "2", m } });
+    tasks.prepare = taskId => {
+      const { m, checker } = programs.get(taskId);
+      return {
+        taskId,
+        type: "Submission",
+        priorityType: 1,
+        priority: 1,
+        extraInfo: {
+          submissionContent: program(m),
+          judgeInfo: checker ? { checker: { type: "custom", interface: "testlib", ...program(checker) } } : {}
+        }
+      };
+    };
+    const metric = metrics();
+    const queue = new JudgeQueueService(ds, redisService, metric);
+    queue.registerTaskType("Submission", tasks);
+    await queue.onModuleInit();
+    t.after(() => queue.onModuleDestroy());
+    const names = new Map();
+    let priority = 1;
+    const add = async (name, m, checker) => {
+      const taskId = crypto.randomUUID();
+      programs.set(taskId, { m, checker });
+      names.set(taskId, name);
+      tasks.active.set(taskId, priority);
+      await queue.enqueue(taskId, "Submission", (priority += 1e-6));
+      return taskId;
+    };
+    const arm = { connectionId: "socket-arm", judgeClientId: 1 };
+    const x86 = { connectionId: "socket-x86", judgeClientId: 2 };
+    const next = async (owner, options) => {
+      const claimed = await queue.claim(owner, ["Submission"], options);
+      return claimed && names.get(claimed.task.taskId);
+    };
+    const incompatible = async () =>
+      Number(
+        (await ds.query("SELECT COUNT(*) AS count FROM judge_job_attempt WHERE outcome = 'Incompatible'"))[0].count
+      );
+
+    // More 32-bit tasks than one claim reads ahead of the 64-bit ones, one 64-bit with a 32-bit checker
+    const thirtyTwo = [];
+    for (let i = 0; i < 12; i++) thirtyTwo.push(await add(`32-${i}`, "32"));
+    await add("64-checker-32", "64", "32");
+    await add("64-a", "64");
+    await add("64-b", "64");
+    const skip = { skipArchitectures: ["32"] };
+    assert.equal(await next(arm, skip), "64-a");
+    // Each was leased once, seen to need 32 bits and queued again at once, not as an interruption
+    assert.equal(await incompatible(), 13);
+    for (const taskId of thirtyTwo) {
+      const [row] = await ds.query("SELECT state, fence, unfinishedLeases, leaseOwner FROM judge_job WHERE taskId = ?", [
+        taskId
+      ]);
+      assert.deepEqual(
+        [row.state, Number(row.fence), Number(row.unfinishedLeases), row.leaseOwner],
+        ["Queued", 1, 0, null]
+      );
+    }
+    assert.equal(metric.observed.length, 1, "queue time is observed only for the task that was sent");
+    // Known now: not leased again
+    assert.equal(await next(arm, skip), "64-b");
+    assert.equal(await next(arm, skip), null);
+    assert.equal(await incompatible(), 13);
+
+    // An x86-64 judge client takes them in order; with no judge client that builds them, any judge client does
+    assert.equal(queue.taskArchitectures.size, 13);
+    assert.equal(await next(x86), "32-0");
+    assert.equal(await next(x86, {}), "32-1");
+    assert.equal(await next(arm), "32-2");
+    assert.equal(await incompatible(), 13);
+    // Only the ones still queued are remembered (and left out of the arm64 judge client's claims)
+    assert.equal(queue.taskArchitectures.size, 10);
+    assert(!queue.taskArchitectures.has(thirtyTwo[0]));
+
+    // A task whose programs changed is judged by what it needs when leased
+    programs.get(thirtyTwo[3]).m = "64";
+    programs.get(thirtyTwo[3]).checker = undefined;
+    queue.taskArchitectures.clear();
+    assert.equal(await next(arm, skip), "32-3");
+  }
+);

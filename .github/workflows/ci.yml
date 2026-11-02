@@ -63,8 +63,17 @@ jobs:
         run: node deploy/test/run-tests.mjs --ci wiki
 
   native:
-    name: Native
-    runs-on: ubuntu-latest
+    # The sandbox, its syscall filter and the judge's native code on both architectures LLMOJ runs on
+    name: Native (${{ matrix.architecture }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-latest
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -103,6 +112,9 @@ jobs:
             apps/judge/CMakeLists.txt \
             apps/judge/native \
             apps/judge/package.json \
+            apps/judge/src/architecture.ts \
+            apps/judge/src/architecture.test.cjs \
+            apps/judge/src/languages \
             apps/judge/src/launcher \
             apps/judge/test/launcher-fixture.c \
             apps/judge/test/launcher-server.root.cjs \
@@ -137,6 +149,9 @@ jobs:
       - if: steps.changes.outputs.native == 'true'
         name: Check the built-in checker program as the judge starts it
         run: node --test apps/judge/src/checkers/builtin.test.cjs
+      - if: steps.changes.outputs.native == 'true'
+        name: Check the C and C++ architectures of this machine
+        run: node --test apps/judge/src/architecture.test.cjs
       - if: steps.changes.outputs.native == 'true'
         run: |
           sudo systemd-run \

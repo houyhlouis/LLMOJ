@@ -33,6 +33,10 @@ export class GetSessionInfoResponseDto {
   @ApiProperty()
   serverVersion: ServerVersionDto;
 
+  // The C and C++ architectures (option `m`) the site's judge machines build programs for: arm64 ones build no 32-bit
+  @ApiProperty({ type: [String] })
+  judgeArchitectures: string[];
+
   // The marker of the session when the session cookie carries it, for the page to keep instead of a token
   @ApiProperty({ required: false })
   sessionMarker?: string;

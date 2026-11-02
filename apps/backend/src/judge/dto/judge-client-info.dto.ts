@@ -29,6 +29,15 @@ export class JudgeClientCapabilitiesDto {
     description: "What it judges with; absent for judge clients older than protocol version 3"
   })
   runtime?: JudgeRuntimeDto;
+
+  @ApiProperty({
+    type: [String],
+    required: false,
+    description:
+      'The C and C++ architectures (option "m") it builds programs for; absent for judge clients older than protocol ' +
+      "version 5, which run on x86-64 and build both"
+  })
+  architectures?: string[];
 }
 
 export class JudgeClientInfoDto {

@@ -91,7 +91,8 @@ class InstallerBoundaries(unittest.TestCase):
                 with self.assertRaisesRegex(support.InstallerError, "at least 2 effective CPUs and 256 MiB RAM"):
                     support.check_initial_judge_capacity(args)
 
-    def test_preflight_accepts_512_mib_without_old_three_gib_floor(self):
+    def preflight(self, machine):
+        """The preflight's output on a 512 MiB Ubuntu 24.04 server of `machine` (platform.machine())."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "systemd").mkdir()
@@ -106,7 +107,7 @@ class InstallerBoundaries(unittest.TestCase):
                         "cpu_slots": 2, "memory_slots": 2, "memory_mib": 512}
             with mock.patch.object(support, "Path", side_effect=lambda value: paths.get(value, Path(value))), \
                     mock.patch.object(support.platform, "freedesktop_os_release", return_value={"ID": "ubuntu", "VERSION_ID": "24.04"}), \
-                    mock.patch.object(support.platform, "machine", return_value="x86_64"), \
+                    mock.patch.object(support.platform, "machine", return_value=machine), \
                     mock.patch.object(support.subprocess, "check_output", return_value="systemd 255\n"), \
                     mock.patch.object(support.subprocess, "run", return_value=argparse.Namespace(returncode=1, stdout="")), \
                     mock.patch.object(support, "check_state", return_value=False), \
@@ -116,7 +117,36 @@ class InstallerBoundaries(unittest.TestCase):
                     mock.patch.object(support, "judge_capacity_module", return_value=module), \
                     mock.patch.object(support.sys, "stdout", new_callable=io.StringIO) as output:
                 support.preflight(args)
-                self.assertIn("2 slots, 3 effective CPUs, 512 MiB RAM", output.getvalue())
+                return output.getvalue()
+
+    def test_preflight_accepts_512_mib_without_old_three_gib_floor(self):
+        self.assertIn("2 slots, 3 effective CPUs, 512 MiB RAM", self.preflight("x86_64"))
+
+    def test_preflight_accepts_amd64_and_arm64_servers_only(self):
+        self.assertIn("Preflight passed: Ubuntu 24.04 amd64,", self.preflight("x86_64"))
+        self.assertIn("Preflight passed: Ubuntu 24.04 arm64,", self.preflight("aarch64"))
+        for machine in ("riscv64", "armv7l", "i686", "ppc64le"):
+            with self.subTest(machine=machine):
+                with self.assertRaisesRegex(support.InstallerError, f"amd64 \\(x86_64\\) and arm64 \\(aarch64\\) only, not {machine}"):
+                    self.preflight(machine)
+
+    def test_completion_records_the_architecture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "llmoj" / "instance"
+            (root / "config").mkdir(parents=True)
+            (root / "runtime").mkdir()
+            (root / "runtime/rootfs-id").write_text("a" * 64 + "\n")
+            arguments = ["finish", "--root", str(root), "--origin", "http://127.0.0.1", "--port", "80"]
+            with mock.patch.object(support.sys, "argv", ["install-support.py", *arguments]), \
+                    mock.patch.object(support.os, "geteuid", return_value=0), \
+                    mock.patch.object(support.platform, "machine", return_value="aarch64"):
+                support.main()
+            complete = json.loads((root / "config/install-complete.json").read_text())
+            self.assertEqual((complete["architecture"], complete["rootfsId"]), ("arm64", "a" * 64))
+            # The installed source, as the upgrader computes it
+            self.assertEqual(complete["treeSha256"], support.upgrade_module().tree_digest(root))
+            self.assertNotIn("architecture", support.state_for(argparse.Namespace(root=root, origin="", port=80)),
+                             "older installations' metadata stays valid for retries")
 
     def test_existing_judge_config_and_web_do_not_reapply_initial_default(self):
         with tempfile.TemporaryDirectory() as parent:

@@ -47,6 +47,8 @@ return {
     protocol_version: "协议版本",
     judge_program: "评测程序",
     sandbox_image: "沙箱镜像",
+    architecture: "架构",
+    c_architectures: "C 与 C++ 程序",
     legacy: "旧版",
     legacy_notes: "该评测机运行的旧版本不会声明自身能力，因此只会收到提交。更新后才能评测 Hack 与自测。"
   },
@@ -84,6 +86,9 @@ return {
     REAUTHENTICATION_REQUIRED: "查看或修改评测机密钥前，请先确认密码。"
   },
   no_judge_machine: "暂无评测机",
+  architecture_mismatch: "在线评测机的架构不同：{architectures}",
+  architecture_mismatch_notes:
+    "32 位 C 与 C++ 程序只由 x86-64 评测机评测，其他任务由任意评测机评测，各自使用本架构的沙箱镜像。同一程序在不同机器上的运行时间不同，AArch64 上 long double 的精度也不同，因此一场比赛请只用同一种评测机（比赛期间暂停其他评测机）。",
   runtime_mismatch: "在线评测机使用的评测程序或沙箱镜像不一致",
   runtime_mismatch_notes:
     "同一提交可能因评测机不同而得到不同结果。请将它们都更新到同一版本。每个评测结果都会记录由哪台评测机、用什么评测。"

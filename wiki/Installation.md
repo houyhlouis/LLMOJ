@@ -4,7 +4,7 @@
 
 ## Requirements
 
-- **Operating system:** Ubuntu 24.04 or 26.04, amd64, on an ordinary virtual machine or physical server. Restricted Docker or LXC containers aren't supported.
+- **Operating system:** Ubuntu 24.04 or 26.04, amd64 or arm64 (see [ARM64 servers](ARM64.md)), on an ordinary virtual machine or physical server. Restricted Docker or LXC containers aren't supported.
 - **System features:** systemd 254 or later, and cgroup v2 with the cpu, memory and pids controllers.
 - **Judging on the same server:** at least 2 CPUs and 256 MiB of memory available to LLMOJ. 8 GiB of memory makes the first build more comfortable.
 - **Disk space:** 30 GiB free for a full installation, 10 GiB for a web-only one.

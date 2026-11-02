@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, Req, Res } from "@nestjs/common";
+import { Controller, Get, Post, Body, Query, Req, Res, Inject, Optional, forwardRef } from "@nestjs/common";
 import { ApiOperation, ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 
 import { Response } from "express";
@@ -66,6 +66,8 @@ import { AuditLogObjectType, AuditService } from "../audit/audit.service";
 import { UserMigrationService } from "../migration/user-migration.service";
 import { UserMigrationInfoEntity } from "../migration/user-migration-info.entity";
 import { delay, DELAY_FOR_SECURITY } from "../common/delay";
+import { JudgeClientService } from "../judge/judge-client.service";
+import { C_ARCHITECTURES } from "../judge/judge-architecture";
 
 // Refer to auth.middleware.ts for req.session
 
@@ -86,7 +88,8 @@ export class AuthController {
     private readonly userMigrationService: UserMigrationService,
     private readonly registrationReviews: RegistrationReviewService,
     private readonly registrationSettings: RegistrationSettingsService,
-    private readonly twoFactorService: TwoFactorService
+    private readonly twoFactorService: TwoFactorService,
+    @Optional() @Inject(forwardRef(() => JudgeClientService)) private readonly judgeClientService?: JudgeClientService
   ) {}
 
   @Get("getSessionInfo")
@@ -115,7 +118,10 @@ export class AuthController {
       serverVersion: {
         hash: appGitRepoInfo.abbreviatedSha,
         date: appGitRepoInfo.committerDate
-      }
+      },
+      judgeArchitectures: this.judgeClientService
+        ? await this.judgeClientService.getFleetArchitectures()
+        : [...C_ARCHITECTURES]
     };
 
     if (user) {

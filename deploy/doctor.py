@@ -14,6 +14,7 @@ import ipaddress
 import json
 import math
 import os
+import platform
 from pathlib import Path
 import pwd
 import re
@@ -27,6 +28,10 @@ import urllib.parse
 import urllib.request
 
 OK, INFO, WARN, FAIL = 'ok', 'info', 'warn', 'fail'
+# The machine architectures LLMOJ runs on (platform.machine()), as named for packages and as people know them
+ARCHITECTURES = {'x86_64': ('amd64', 'x86-64'), 'aarch64': ('arm64', 'AArch64')}
+# The architecture an ELF program is built for (its e_machine)
+ELF_MACHINES = {62: 'x86_64', 183: 'aarch64'}
 GIB = 1024 ** 3
 WEB_SERVICES = ('libreoj-mariadb.service', 'libreoj-redis.service', 'libreoj-minio.service',
                 'libreoj-backend.service', 'libreoj-nginx.service')
@@ -109,6 +114,13 @@ class Host:
 
     def read(self, path):
         return Path(path).read_text()
+
+    def read_bytes(self, path, size):
+        with open(path, 'rb') as stream:
+            return stream.read(size)
+
+    def machine(self):
+        return platform.machine()
 
     def now(self):
         return time.time()
@@ -485,6 +497,20 @@ class Doctor:
                                     f'沙箱镜像与配置一致（{str(sandbox.get("rootfsId"))[:12]}）'))
         else:
             r.add(FAIL, 'rootfs', say('The sandbox image doesn\'t match config/judge.yaml', '沙箱镜像与 config/judge.yaml 不一致'))
+        # Its programs must be this machine's: an image built for another architecture runs nothing
+        try:
+            header = self.host.read_bytes(rootfs/'usr/bin/bash', 20)
+            built_for = ELF_MACHINES.get(int.from_bytes(header[18:20], 'little'), 'unknown') if header[:4] == b'\x7fELF' else None
+        except OSError:
+            built_for = None
+        machine = self.host.machine()
+        if built_for and built_for != machine:
+            name = ARCHITECTURES.get(built_for, (built_for, built_for))[0]
+            r.add(FAIL, 'rootfs-architecture',
+                  say(f'The sandbox image is built for {name}, not for this {ARCHITECTURES.get(machine, (machine,))[0]} '
+                      f'machine: rebuild it with deploy/sandbox/build.sh',
+                      f'沙箱镜像是为 {name} 构建的，与本机（{ARCHITECTURES.get(machine, (machine,))[0]}）不符：请用 '
+                      f'deploy/sandbox/build.sh 重新构建'))
         unit = self.host.unit(JUDGE_SERVICE)
         group = unit.get('ControlGroup') or ''
         if group:
@@ -635,6 +661,14 @@ class Doctor:
     def machine(self):
         r = self.report
         r.start(say('This server', '本服务器'))
+        machine = self.host.machine()
+        if machine in ARCHITECTURES:
+            debian, known_as = ARCHITECTURES[machine]
+            r.add(OK, 'architecture', say(f'{debian} ({known_as})', f'{debian}（{known_as}）')
+                  + (say(': C and C++ programs are built 64-bit only', '：C 与 C++ 程序只能编译为 64 位') if debian == 'arm64' else ''))
+        else:
+            r.add(FAIL, 'architecture', say(f'{machine}: LLMOJ runs on amd64 (x86-64) and arm64 (AArch64) only',
+                                            f'{machine}：LLMOJ 只支持 amd64（x86-64）和 arm64（AArch64）'))
         seen = set()
         for path in (self.root, self.root/'data/mariadb', self.root/'data/minio', self.root/'backups'):
             try:

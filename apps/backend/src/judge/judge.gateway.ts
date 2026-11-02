@@ -38,6 +38,7 @@ import {
 } from "./judge-queue.service";
 import { JudgeJobAttemptOutcome } from "./judge-job.entity";
 import { JudgeRuntimeService, parseJudgeRuntime } from "./judge-runtime.service";
+import { C_ARCHITECTURES, judgeClientArchitectures, parseArchitectures } from "./judge-architecture";
 
 import { logger } from "../logger";
 import { MinioSignFor, FileService, JUDGE_FILE_DOWNLOAD_EXPIRE_TIME } from "../file/file.service";
@@ -119,6 +120,8 @@ const isCount = (value: unknown, maximum: number) =>
 function parseCapabilities(value: unknown): JudgeClientCapabilities {
   const capabilities = value as JudgeClientCapabilities;
   const runtime = capabilities && typeof capabilities === "object" ? parseJudgeRuntime(capabilities.runtime) : null;
+  const architectures =
+    capabilities && typeof capabilities === "object" ? parseArchitectures(capabilities.architectures) : undefined;
   const taskTypes = Object.values(JudgeTaskType) as unknown[];
   if (
     !capabilities ||
@@ -141,7 +144,8 @@ function parseCapabilities(value: unknown): JudgeClientCapabilities {
     executionSlots: capabilities.executionSlots,
     memoryBudget: capabilities.memoryBudget,
     aiExecutionSlots: capabilities.aiExecutionSlots,
-    ...(runtime ? { runtime } : {})
+    ...(runtime ? { runtime } : {}),
+    ...(architectures ? { architectures } : {})
   };
 }
 
@@ -517,12 +521,23 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     }
   }
 
+  // The architectures other judge clients build that this one doesn't: the tasks that need them wait for those. With
+  // none, it's sent them too, and they end with a compilation error that says why.
+  private async skippedArchitectures(state: JudgeClientState): Promise<string[]> {
+    const own = judgeClientArchitectures(state.capabilities);
+    if (C_ARCHITECTURES.every(architecture => own.includes(architecture))) return [];
+    const fleet = await this.judgeClientService.getFleetArchitectures();
+    return fleet.filter(architecture => !own.includes(architecture));
+  }
+
   /**
    * While a contest is running, a judge machine keeps the policy's number of task threads for its submissions: once
    * its other tasks fill the rest, a thread asking for a task gets only those. It needs more threads than it keeps.
    */
   private async claimOptions(state: JudgeClientState): Promise<JudgeClaimOptions> {
-    if (!this.judgePolicyService) return {};
+    const skipArchitectures = await this.skippedArchitectures(state);
+    const architectures = skipArchitectures.length ? { skipArchitectures } : {};
+    if (!this.judgePolicyService) return architectures;
     const policy = await this.judgePolicyService.current();
     const threads = state.capabilities?.consumerThreads ?? 0;
     const reserved = policy.contestReservedThreads;
@@ -530,6 +545,7 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
       ({ task }) => task.priorityType !== JudgeTaskPriorityType.LiveContest
     ).length;
     return {
+      ...architectures,
       liveContestOnly:
         reserved > 0 &&
         threads > reserved &&

@@ -32,6 +32,15 @@ interface JudgeClientSystemInfo {
   extraInfo: string;
 }
 
+// The machine architecture a judge machine announced (Node.js names), as people name it
+const MACHINES: Record<string, string> = { x64: "x86-64", arm64: "AArch64" };
+
+/** The C and C++ architectures a judge machine builds programs for; as on x86-64 for older ones, which announce none. */
+function judgeArchitectures(capabilities: ApiTypes.JudgeClientCapabilitiesDto) {
+  if (capabilities.architectures) return capabilities.architectures;
+  return !capabilities.runtime || capabilities.runtime.arch === "x64" ? ["64", "32"] : ["64"];
+}
+
 async function fetchData(): Promise<JudgeMachinePageProps> {
   const { requestError, response } = await api.judgeClient.listJudgeClients();
   if (requestError) throw new RouteError(requestError);
@@ -45,6 +54,7 @@ interface JudgeMachinePageProps {
 
 let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
   const _ = useLocalizer("judge_machine");
+  const _language = useLocalizer("code_language");
   const navigation = useNavigationChecked();
 
   useEffect(() => {
@@ -156,8 +166,15 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
           _(".capabilities.sandbox_image"),
           <code title={runtime.sandboxImage}>{runtime.sandboxImage.slice(0, 12)}</code>
         ],
-        ["Node.js", runtime.node]
+        ["Node.js", runtime.node],
+        [_(".capabilities.architecture"), MACHINES[runtime.arch] || runtime.arch]
       );
+    rows.push([
+      _(".capabilities.c_architectures"),
+      judgeArchitectures(capabilities)
+        .map(m => _language(`.cpp.options.m.values.${m}`))
+        .join(", ")
+    ]);
     return (
       <Popup
         trigger={
@@ -263,9 +280,17 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
   const onlineRuntimes = props.judgeClients
     .filter(judgeClient => judgeClient.online && judgeClient.capabilities?.runtime)
     .map(judgeClient => judgeClient.capabilities.runtime);
-  const runtimesDiffer =
-    new Set(onlineRuntimes.map(runtime => runtime.judgeProgram)).size > 1 ||
-    new Set(onlineRuntimes.map(runtime => runtime.sandboxImage)).size > 1;
+  // x86-64 and arm64 judge machines: each has its own sandbox image, so only a different one of the same kind counts
+  const machines = [...new Set(onlineRuntimes.map(runtime => MACHINES[runtime.arch] || runtime.arch))];
+  const sandboxImagesDiffer = machines.some(
+    machine =>
+      new Set(
+        onlineRuntimes
+          .filter(runtime => (MACHINES[runtime.arch] || runtime.arch) === machine)
+          .map(runtime => runtime.sandboxImage)
+      ).size > 1
+  );
+  const runtimesDiffer = new Set(onlineRuntimes.map(runtime => runtime.judgeProgram)).size > 1 || sandboxImagesDiffer;
 
   return (
     <>
@@ -305,6 +330,14 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
           icon="exclamation triangle"
           header={_(".runtime_mismatch")}
           content={_(".runtime_mismatch_notes")}
+        />
+      )}
+      {machines.length > 1 && (
+        <Message
+          info
+          icon="microchip"
+          header={_(".architecture_mismatch", { architectures: machines.join(", ") })}
+          content={_(".architecture_mismatch_notes")}
         />
       )}
       {!props.judgeClients.length ? (

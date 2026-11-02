@@ -45,6 +45,7 @@ const judgeRuntimeModule = load("judge-runtime.service.ts", {
   "./judge-client.entity": {},
   "./dto/judge-runtime.dto": {}
 });
+const judgeArchitectureModule = load("judge-architecture.ts", {});
 const { JudgeGateway, aiExecutionLimit } = load("judge.gateway.ts", {
   "@nestjs/common": { forwardRef: x => x, Inject: decorator, Optional: decorator },
   "@nestjs/websockets": {
@@ -64,6 +65,7 @@ const { JudgeGateway, aiExecutionLimit } = load("judge.gateway.ts", {
     JudgeJobAttemptOutcome: { Disconnected: "Disconnected", Abandoned: "Abandoned", Expired: "Expired" }
   },
   "./judge-runtime.service": judgeRuntimeModule,
+  "./judge-architecture": judgeArchitectureModule,
   "../logger": { logger: { log: noop, verbose: noop, error: noop, warn: message => warnings.push(message) } },
   "../file/file.service": { MinioSignFor: { Judge: "Judge" }, JUDGE_FILE_DOWNLOAD_EXPIRE_TIME: 21600 },
   "../event-report/event-report.service": { EventReportType: { Success: "Success", Warning: "Warning" } },
@@ -562,4 +564,51 @@ test("while a contest runs, judge machines keep the policy's task threads for it
   await gateway.onConsumeTask(c.client, 0);
   await gateway.onConsumeTask(legacy.client, 0);
   assert.deepEqual(claimOptions, [options(false), options(false), options(false), options(false)]);
+});
+
+test("judge clients that build no 32-bit programs leave those tasks to ones that do, while the site has any", async () => {
+  const { gateway, queue, claimOptions, stored, connect } = fixture();
+  let fleet = ["64", "32"];
+  let fleetReads = 0;
+  gateway.judgeClientService.getFleetArchitectures = async () => {
+    fleetReads++;
+    return fleet;
+  };
+  const consume = async (judge, taskId) => {
+    queue.push(submissionTask(taskId, []));
+    await gateway.onConsumeTask(judge.client, 0);
+    return claimOptions.at(-1);
+  };
+
+  // An arm64 judge client (protocol version 5) announces only 64-bit; unknown values are dropped
+  const arm = await connect(1);
+  await gateway.onCapabilities(arm.client, capabilities({ protocolVersion: 5, architectures: ["64", "x32", 64] }));
+  assert.deepEqual(stored.at(-1), [1, capabilities({ protocolVersion: 5, architectures: ["64"] })]);
+  assert.deepEqual(await consume(arm, "task-1"), { skipArchitectures: ["32"] });
+  // With no judge client that builds them, it's sent them too
+  fleet = ["64"];
+  assert.deepEqual(await consume(arm, "task-2"), {});
+
+  // x86-64 ones build everything: nothing to skip, and the site's judge clients aren't even read
+  fleet = ["64", "32"];
+  const reads = fleetReads;
+  const x86 = await connect(2);
+  await gateway.onCapabilities(x86.client, capabilities({ protocolVersion: 5, architectures: ["32", "64"] }));
+  assert.deepEqual(stored.at(-1), [2, capabilities({ protocolVersion: 5, architectures: ["64", "32"] })]);
+  assert.deepEqual(await consume(x86, "task-3"), {});
+  const legacy = await connect(3);
+  await gateway.onCapabilities(legacy.client, capabilities({ protocolVersion: 4, runtime: runtime() }));
+  assert.deepEqual(await consume(legacy, "task-4"), {});
+  assert.equal(fleetReads, reads);
+
+  // An older judge client on arm64 is known by its runtime; an invalid announcement of architectures is left out
+  const oldArm = await connect(4);
+  await gateway.onCapabilities(oldArm.client, capabilities({ protocolVersion: 4, runtime: runtime({ arch: "arm64" }), architectures: "64" }));
+  assert.deepEqual(stored.at(-1), [4, capabilities({ protocolVersion: 4, runtime: runtime({ arch: "arm64" }) })]);
+  assert.deepEqual(await consume(oldArm, "task-5"), { skipArchitectures: ["32"] });
+
+  // Together with the live contest policy
+  gateway.judgePolicyService = { current: async () => ({ contestReservedThreads: 0, agingMinutes: 30 }) };
+  assert.deepEqual(await consume(arm, "task-6"), { skipArchitectures: ["32"], liveContestOnly: false, agingSeconds: 1800 });
+  assert.deepEqual(await consume(x86, "task-7"), { liveContestOnly: false, agingSeconds: 1800 });
 });

@@ -20,6 +20,12 @@ export interface LanguageConfig<T> {
   };
 
   /**
+   * Why a program with these options can't be compiled on this judge machine (e.g. a 32-bit C++ program on arm64),
+   * shown as its compilation error; nothing if it can.
+   */
+  unavailable?: (compileAndRunOptions: T) => string | null;
+
+  /**
    * Return the options for running the compiler in the sandbox.
    */
   compile: (options: {

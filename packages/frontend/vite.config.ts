@@ -185,7 +185,10 @@ export default defineConfig(async () => ({
   },
   css: {
     // The minifier drops what browsers ignore anyway, such as Fomantic UI's "[data-tooltip][data-inverted]:after .header"
-    lightningcss: { errorRecovery: true }
+    lightningcss: { errorRecovery: true },
+    // Less in the build's own thread: a worker gives up when that thread doesn't answer it within 5 seconds, as on a
+    // slow or busy machine (an emulated arm64 one did). The output is the same.
+    preprocessorMaxWorkers: 0
   },
   // MobX's legacy decorators (experimentalDecorators in tsconfig.json)
   oxc: {

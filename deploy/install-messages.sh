@@ -25,6 +25,7 @@ translate() {
         'Docker Hub mirrors (comma-separated HTTPS URLs; blank keeps Docker defaults; changes restart Docker)') message='Docker Hub 镜像加速源（HTTPS，多个用逗号分隔；留空保留默认；修改会重启 Docker）' ;;
         'Directory: %s\nSite origin: %s\nListen address: %s:%s\nRole: %s\nSite name: %s\n') message='目录：%s\n访问地址：%s\n监听地址：%s:%s\n模式：%s\n站名：%s\n' ;;
         'Docker package source: %s/linux/ubuntu\nDocker Hub mirrors: %s\n') message='Docker 软件包源：%s/linux/ubuntu\nDocker Hub 镜像加速源：%s\n' ;;
+        'Architecture: %s\n') message='架构：%s\n' ;;
         'Applying registry mirrors and restarting Docker (existing containers may be affected).\n') message='应用镜像加速源并重启 Docker（可能影响已有容器）。\n' ;;
         'Input ended; use --yes for non-interactive installation') message='输入结束；无人值守安装请使用 --yes' ;;
         'Interactive installation needs a terminal; download the script to a file and run it') message='交互安装需要终端；请先下载脚本，再运行该文件' ;;

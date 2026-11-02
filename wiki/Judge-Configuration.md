@@ -128,7 +128,7 @@ A seccomp filter also refuses system calls that judged programs don't need (`san
 - keyrings, io_uring, bpf, performance events and userfaultfd;
 - kernel modules, rebooting, swap, and setting the system time or name.
 
-These calls fail with "operation not permitted", including through the 32-bit system call table (`-m32` programs and `int 0x80`); x32 calls fail too. `clone3` reports "not implemented", so that the C library falls back to `clone`, whose flags the filter can check. If the filter can't be installed, nothing runs.
+These calls fail with "operation not permitted". On amd64 that includes the 32-bit system call table (`-m32` programs and `int 0x80`), and x32 calls fail too; on arm64 the filter checks AArch64's table, and 32-bit ARM programs are killed (see [ARM64 servers](ARM64.md#the-sandbox-on-arm64)). `clone3` reports "not implemented", so that the C library falls back to `clone`, whose flags the filter can check. If the filter can't be installed, nothing runs.
 
 **Built-in checkers** (integers, floats, tokens, lines and binary) compare an output with its answer outside the sandbox, as the judge's account. They run in a small program of their own, `apps/judge/build/Release/builtin_checker`, which the judge starts for each check:
 - with only the output and the answer open (the program closes any other descriptor it was given);
@@ -137,7 +137,7 @@ These calls fail with "operation not permitted", including through the 32-bit sy
 
 A check that times out, writes too much or crashes gives that test case **Judgement Failed** with the reason. If the program can't be started at all, for example when the judge has no descriptors left, the submission fails with **System Error**, as before. Before this, the checkers ran in a copy of the judge process made with `fork`, which kept one descriptor open per check.
 
-To check this judge, compiling and running every language through the judge's own code, running each built-in checker, and probing the filter with 64-bit and 32-bit programs:
+To check this judge, compiling and running every language through the judge's own code, running each built-in checker, and probing the filter with 64-bit programs, and on amd64 32-bit ones too:
 
 ```bash
 sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh

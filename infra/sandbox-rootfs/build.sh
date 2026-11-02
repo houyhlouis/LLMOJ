@@ -6,14 +6,23 @@ SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd "$SCRIPT_DIRECTORY/../.." && pwd)"
 OUTPUT_DIRECTORY="${OUTPUT_DIRECTORY:-$SCRIPT_DIRECTORY/dist}"
 
+# The rootfs of this machine's architecture, unless ROOTFS_ARCHITECTURE names the other one (Docker then needs QEMU
+# user emulation). Each has its own recipe, and so its own ID: amd64 (x86-64) the files here, arm64 (AArch64) those in
+# arm64/ with the shared wrappers.
+case "${ROOTFS_ARCHITECTURE:-$(uname -m)}" in
+    amd64|x86_64) ROOTFS_ARCHITECTURE=amd64; RECIPE_DIRECTORY=infra/sandbox-rootfs ;;
+    arm64|aarch64) ROOTFS_ARCHITECTURE=arm64; RECIPE_DIRECTORY=infra/sandbox-rootfs/arm64 ;;
+    *) echo "There is no rootfs recipe for ${ROOTFS_ARCHITECTURE:-$(uname -m)} (amd64 and arm64 have one)" >&2; exit 1 ;;
+esac
+
 mapfile -t RECIPE_FILES <<EOF
 apps/judge/src/languages/compile-java.sh
 apps/judge/src/languages/compile-python.sh
-infra/sandbox-rootfs/Dockerfile
+$RECIPE_DIRECTORY/Dockerfile
 infra/sandbox-rootfs/csc
 infra/sandbox-rootfs/fsharpc
 infra/sandbox-rootfs/mono
-infra/sandbox-rootfs/smoke-test.sh
+$RECIPE_DIRECTORY/smoke-test.sh
 EOF
 
 ROOTFS_ID="$({
@@ -27,9 +36,9 @@ TEMPORARY_DIRECTORY="$(mktemp -d "$OUTPUT_DIRECTORY/.rootfs-build-XXXXXXXX")"
 trap 'rm -rf "$TEMPORARY_DIRECTORY"' EXIT
 
 docker buildx build \
-    --platform linux/amd64 \
+    --platform "linux/$ROOTFS_ARCHITECTURE" \
     --build-arg "ROOTFS_ID=$ROOTFS_ID" \
-    --file "$SCRIPT_DIRECTORY/Dockerfile" \
+    --file "$REPOSITORY_ROOT/$RECIPE_DIRECTORY/Dockerfile" \
     --output "type=tar,dest=$TEMPORARY_DIRECTORY/rootfs.tar" \
     "$REPOSITORY_ROOT"
 
@@ -46,4 +55,5 @@ mv "$TEMPORARY_DIRECTORY/rootfs.tar.gz" "$OUTPUT_DIRECTORY/$ARCHIVE"
 )
 
 printf 'ROOTFS_ID=%s\n' "$ROOTFS_ID"
+printf 'ARCHITECTURE=%s\n' "$ROOTFS_ARCHITECTURE"
 printf 'ARCHIVE=%s\n' "$OUTPUT_DIRECTORY/$ARCHIVE"

@@ -43,7 +43,7 @@ return {
         name: "Architecture",
         values: {
           64: "64-bit",
-          32: "32-bit",
+          32: "32-bit (x86)",
           x32: "64-bit (with 32-bit pointers)"
         }
       }
@@ -88,7 +88,7 @@ return {
         name: "Architecture",
         values: {
           64: "64-bit",
-          32: "32-bit",
+          32: "32-bit (x86)",
           x32: "64-bit (with 32-bit pointers)"
         }
       }

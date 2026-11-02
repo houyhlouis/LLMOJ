@@ -4,11 +4,13 @@ import { observer } from "mobx-react";
 
 import { useLocalizer } from "@/utils/hooks";
 import {
+  availableOptionValues,
   compileAndRunOptions,
   CodeLanguageOptionType,
   CodeLanguage,
   getPreferredCompileAndRunOptions
 } from "@/interfaces/CodeLanguage";
+import { appState } from "@/appState";
 
 interface CodeLanguageAndOptionsProps {
   pending?: boolean;
@@ -28,7 +30,9 @@ let CodeLanguageAndOptions: React.FC<CodeLanguageAndOptionsProps> = props => {
   const _ = useLocalizer("code_language");
 
   const compileAndRunOptionsBackup = useRef(new Map<CodeLanguage, Record<string, unknown>>()).current;
-  function permittedValues(language: CodeLanguage, name: string, values: string[]) {
+  function permittedValues(language: CodeLanguage, name: string, allValues: string[]) {
+    const option = compileAndRunOptions[language].find(option => option.name === name);
+    const values = option ? availableOptionValues(language, option) : allValues;
     if (
       !props.allowedVariants ||
       props.allowedVariants.includes(language) ||
@@ -50,6 +54,22 @@ let CodeLanguageAndOptions: React.FC<CodeLanguageAndOptionsProps> = props => {
     if (language !== props.language) props.onUpdateLanguage(language);
     if (JSON.stringify(next) !== JSON.stringify(props.compileAndRunOptions)) props.onUpdateCompileAndRunOptions(next);
   }, [props.allowedVariants?.join(","), props.language, props.pending]);
+  // A choice the site's judge machines can't build (a 32-bit program where all are arm64) becomes one they can
+  useEffect(() => {
+    if (props.pending || props.allowedVariants?.length) return;
+    const next = { ...props.compileAndRunOptions };
+    for (const option of compileAndRunOptions[props.language] ?? []) {
+      const values = availableOptionValues(props.language, option);
+      if (option.name in next && !values.includes(next[option.name] as string))
+        next[option.name] = values.includes(option.defaultValue) ? option.defaultValue : values[0];
+    }
+    if (JSON.stringify(next) !== JSON.stringify(props.compileAndRunOptions)) props.onUpdateCompileAndRunOptions(next);
+  }, [
+    props.language,
+    props.pending,
+    JSON.stringify(props.compileAndRunOptions),
+    appState.judgeArchitectures?.join(",")
+  ]);
   function onSwitchLanguage(newLanguage: CodeLanguage) {
     const oldLanguage = props.language;
     compileAndRunOptionsBackup.set(oldLanguage, props.compileAndRunOptions);
