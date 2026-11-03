@@ -513,7 +513,8 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     try {
       return await this.judgeQueueService.signTaskUploads(
         { taskId: assignment.task.taskId, type: assignment.task.type },
-        request.files.map(({ name, size }) => ({ name, size }))
+        request.files.map(({ name, size }) => ({ name, size })),
+        request.evidence === true
       );
     } catch (e) {
       logger.error(`Failed to sign uploads of judge task ${assignment.task.taskId}: ${e}`);

@@ -53,6 +53,15 @@ declare namespace ApiTypes {
     customEndpoints: "public" | "approved";
     endpoints: ApiTypes.AiApprovedEndpointDto[];
   }
+  export interface AiFailureArtifactDto {
+    jobId: string;
+    id: string;
+    role: "input" | "actual" | "expected" | "diagnostics";
+    offset?: number;
+  }
+  export interface AiFailuresDto {
+    jobId: string;
+  }
   export interface AiJobIdDto {
     id: string;
   }

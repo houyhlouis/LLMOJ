@@ -168,9 +168,25 @@ Tavily 以 `advanced` 搜索请求最多五条结果。MCP 服务器通过 Strea
 
 - 文件上传成功后才会创建任务。**取消上传** 可以停止准备或上传，离开页面也会取消它们。服务器接受任务之后，关闭页面不会停止任务：请在 **我的 AI 任务** 中取消。如果启动任务超时，请先在 **我的 AI 任务** 中查看，再决定是否重新导入。
 - 取消无法撤销服务商已经收取的费用，也无法撤销任务已经发布的内容。
-- 如果生成的 `make.cpp` 无法编译，模型有一次修复的机会。上传的 checker、交互器、manager 和 grader 永远不会被改写。第二次失败、样例失败或数据检查失败都会使任务失败。
+- 如果生成的 `make.cpp` 无法编译，模型有一次修复的机会，并会收到编译器自己的报错（最多 8000 个字符）。上传的 checker、交互器、manager 和 grader 永远不会被改写。第二次失败、样例失败或数据检查失败都会使任务失败。
 - 题解在发布前会检查其中关于出处和计分的说法；这不能代替你自己审阅其中的算法。
 - 如果浏览器无法读取文件（例如以 Snap 安装的 Firefox 读取 root 拥有的文件），请把文件复制到桌面用户拥有的文件夹。不要关闭浏览器的沙箱。
+
+## 失败详情
+
+AI 任务运行程序失败时，会在删除这次运行的工作文件之前，保存失败的内容和涉及的原始数据。在 **我的 AI 任务**（以及题目的 **AI** 面板）中任务下方的 **失败详情** 按时间倒序列出它们：
+
+- **失败类型**：编译失败、输入被校验器拒绝、输出不一致、运行时错误、超时或超内存、输出过多、SPJ（评测器）失败或接受了格式错误的输出、对抗程序无效、错误或低效算法未被拦截、超出执行时间预算，或评测环境故障（而非程序本身的问题）。**使本次运行失败的原因** 标出使任务最近一次运行失败的那一条。
+- **哪个程序、哪个用例**：例如 std.cpp 在 *differential case 7、子任务 2*，或另一种正解在某个正式测试点。用例编号不是随机种子：生成器每次都使用新的随机数，只有保存下来的输入才能复现失败。
+- **运行情况**：结果、退出码，以及时间和内存与限制的对比。
+- **对照对象**：官方样例的输出、暴力解的输出（同样由 AI 编写，因此不一致并不能证明标程错误），或标程的输出。使用内置比较方式时，还会显示两个输出第一处不同的位置。
+- **证据**：输入、程序输出、对照输出和诊断信息（编译器报错、SPJ 或程序的错误输出），每一项都标明大小，以及它属于公开样例、隐藏测试数据还是仅出题人可见的内容。预览显示开头部分（诊断信息去掉编译器的终端颜色）；**显示更多** 每次读取 64 KiB，**下载** 通过有效期 2 分钟的链接获取逐字节一致的完整文件（下载会记录在审计日志中）。
+- **未被拦截的对抗程序** 会说明额外的反例搜索是用完了尝试次数，还是因为没有可替换的测试点而无法进行。它在对拍中失败过的小规模输入会作为相关的小规模反例显示：这不是导出的测试数据，因此不算拦截了该程序。
+- **题解中的代码** 未通过样例检查时也会保存并加以标注；任务改用 AI 独立生成的标程继续。
+
+只有任务的所有者可以查看，并且仅在其仍有权运行该任务时：需要 AI 和测试数据权限，以及修改该题目的权限。证据保留 **14 天**；摘要在不含数据的情况下保留 90 天。每项证据最多保存 16 MiB（更大的只保存开头，并会注明），每次失败的运行最多 64 MiB；每个任务最多 256 MiB 和 64 条失败记录，整个站点最多 2 GiB。证据未能保存时（超出上述限制、存储故障，或评测机的协议版本低于 6），失败记录会说明原因，而不显示数据。
+
+证据与站点的文件存放在一起，是 `temporary/ai-evidence/` 下的临时对象，过期后由后端删除；失败记录保存在 `ai_observation` 表中。在 `web` 站点上，评测机会先上传失败运行的证据，再报告失败；后端重启期间报告的失败，会在任务再次运行时或由每 10 分钟一次的清理记录下来。
 
 ## AI 在哪里运行，密钥保存在哪里
 
@@ -188,4 +204,4 @@ AI 撰写的题解显示在题目的 **题解** 标签和作者的 **我的讨�
 
 ## 来源
 
-[ai.dto.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.dto.ts)、[ai.types.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.types.ts)、[ai-provider.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-provider.ts)、[ai-admission.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-admission.service.ts)、[ai-responses.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-responses.ts)、[ai.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.service.ts)、[ai-workflow.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-workflow.service.ts)、[ai-job-coordinator.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-job-coordinator.service.ts)、[ai-artifact-publisher.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-artifact-publisher.service.ts)、[ai-crypto.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-crypto.ts)、[ai-testdata-quality.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-testdata-quality.ts)、[aiQuality.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiQuality.ts)、[aiRunner.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiRunner.ts)。
+[ai.dto.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.dto.ts)、[ai.types.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.types.ts)、[ai-provider.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-provider.ts)、[ai-admission.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-admission.service.ts)、[ai-responses.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-responses.ts)、[ai.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.service.ts)、[ai-workflow.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-workflow.service.ts)、[ai-job-coordinator.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-job-coordinator.service.ts)、[ai-artifact-publisher.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-artifact-publisher.service.ts)、[ai-crypto.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-crypto.ts)、[ai-testdata-quality.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-testdata-quality.ts)、[aiQuality.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiQuality.ts)、[aiRunner.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiRunner.ts)、[aiEvidence.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiEvidence.ts)、[ai-evidence.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-evidence.service.ts)、[ai-observation.ts](https://github.com/houyhlouis/LLMOJ/blob/main/packages/judge-protocol/src/ai-observation.ts)。

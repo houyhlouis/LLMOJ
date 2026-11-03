@@ -1,20 +1,30 @@
 import { createHash, randomUUID } from "crypto";
-import { createReadStream, promises as fs, statSync } from "fs";
+import { constants, createReadStream, promises as fs, statSync } from "fs";
 import { createConnection } from "net";
 import os from "os";
 import path from "path";
 
-import { forwardRef, Inject, Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { forwardRef, Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 
 import { DataSource, In, LessThan, Not } from "typeorm";
 
-import { AiExecutionProgress, JudgeTaskType, JudgeUploadTarget } from "@libreoj/judge-protocol";
+import {
+  AI_EVIDENCE_FILE,
+  AI_EVIDENCE_LIMITS,
+  AiExecutionProgress,
+  AiFailureKind,
+  AiRunFailure,
+  JudgeTaskType,
+  JudgeUploadTarget,
+  parseAiRunFailure
+} from "@libreoj/judge-protocol";
 
 import { AiExecutionEntity, AiExecutionState } from "./ai-execution.entity";
 import { AiJobEntity } from "./ai.entity";
 import { AiError } from "./ai.types";
 import { aiCancellationError, currentAiRuntime } from "./ai-runtime";
+import { AiEvidenceService, EvidenceSource, RecordOptions } from "./ai-evidence.service";
 
 import { logger } from "../logger";
 import { FileService, TEMPORARY_OBJECT_PREFIX } from "../file/file.service";
@@ -62,6 +72,19 @@ const ACTIVE_STATES = [AiExecutionState.Queued, AiExecutionState.Running];
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const requestObject = (taskId: string) => `${OBJECT_PREFIX}${taskId}/request.json`;
 const fileObject = (taskId: string, name: string) => `${OBJECT_PREFIX}${taskId}/files/${name}`;
+// A failed run's evidence, uploaded by the judge before it reports the failure
+const evidenceUploadObject = (taskId: string, name: string) => `${OBJECT_PREFIX}${taskId}/evidence/${name}`;
+const EVIDENCE_UPLOAD = "evidence/";
+// Failures of the transport and time limits the backend observes itself, as typed failures
+const OBSERVED_FAILURES: Record<string, AiFailureKind> = {
+  SANDBOX_TIMEOUT: "budget_exhausted",
+  SANDBOX_UNAVAILABLE: "infrastructure_error",
+  SANDBOX_DISCONNECTED: "infrastructure_error",
+  INVALID_SANDBOX_RESPONSE: "infrastructure_error",
+  INVALID_SANDBOX_FILE: "infrastructure_error",
+  TESTDATA_TOO_LARGE: "output_limit"
+};
+const MAX_FAILURE_FILE = 1024 * 1024;
 
 /** How long a run may take: from its number of program runs, as the AI runner computes its own budget. */
 export function aiExecutionBudget(request: RunnerRequest): number {
@@ -100,6 +123,15 @@ export class AiExecutionService
   // Each job keeps the mode its run started with, until it's cleaned up
   private readonly modes = new Map<string, AiExecutionMode>();
 
+  // Failures whose runner reported them with evidence (recorded or not): not recorded again as unclassified
+  private reportedFailures: WeakSet<object>;
+
+  private get reported() {
+    // Tests build this service without its constructor
+    this.reportedFailures ||= new WeakSet();
+    return this.reportedFailures;
+  }
+
   private sweepTimer: ReturnType<typeof setInterval>;
 
   constructor(
@@ -109,7 +141,9 @@ export class AiExecutionService
     private readonly judgeQueueService: JudgeQueueService,
     @Inject(forwardRef(() => JudgeGateway))
     private readonly judgeGateway: JudgeGateway,
-    private readonly redisService: RedisService
+    private readonly redisService: RedisService,
+    @Optional()
+    private readonly evidence?: AiEvidenceService
   ) {
     this.judgeQueueService.registerTaskType(JudgeTaskType.AiExecution, this);
   }
@@ -164,20 +198,183 @@ export class AiExecutionService
     progress: (value: RunnerMessage) => Promise<void>,
     checkJob: () => Promise<unknown>
   ): Promise<RunnerMessage> {
-    if (this.mode(job.id) === "local")
-      return await this.runLocal(
+    let phase = "queued";
+    const report = async (value: RunnerMessage) => {
+      if (value?.phase) phase = String(value.phase);
+      await progress(value);
+    };
+    try {
+      if (this.mode(job.id) === "local") {
+        await this.harvestLocal(job);
+        return await this.runLocal(
+          job,
+          {
+            ...request,
+            ...(request.sampleFiles
+              ? {
+                  sampleFiles: request.sampleFiles.map(({ inputFile, outputFile }) => ({ inputFile, outputFile }))
+                }
+              : {})
+          },
+          report,
+          checkJob
+        );
+      }
+      return await this.runQueued(job, request, report, checkJob);
+    } catch (error) {
+      await this.observe(job, request, error, phase);
+      throw error;
+    }
+  }
+
+  // Failed runs' observations (review Part III, W01)
+
+  // How a failure of this run is recorded: a tutorial's solution that fails its check doesn't end the job
+  private recordOptions(job: AiJobEntity, operation: string, candidateFailure: boolean): RecordOptions {
+    return {
+      runToken: job.runToken,
+      ...(operation === "validate-reference" && candidateFailure ? { context: "tutorial-reference" as const } : {})
+    };
+  }
+
+  // Records a run's failure with its evidence; returns its observation, or nothing if it couldn't be recorded
+  private async recordFailure(
+    job: AiJobEntity,
+    failure: AiRunFailure,
+    source: EvidenceSource,
+    options: RecordOptions
+  ): Promise<string> {
+    if (!this.evidence) return undefined;
+    try {
+      return await this.evidence.record(job, failure, source, options);
+    } catch (e) {
+      logger.error(`Failed to record the failure of an AI run of job ${job.id}: ${e}`);
+      return undefined;
+    }
+  }
+
+  // Records a failure without evidence of the runner's (the backend's own observation), unless one is recorded
+  private async observe(job: AiJobEntity, request: RunnerRequest, error: unknown, phase: string) {
+    if (!this.evidence || !(error instanceof AiError) || error.observationId || this.reported.has(error)) return;
+    const kind =
+      error.code === "SANDBOX_GENERATION_FAILED" ? "unclassified" : (OBSERVED_FAILURES[error.code] as AiFailureKind);
+    if (!kind) return;
+    const operation = request.operation === "validate-reference" ? "validate-reference" : "generate";
+    try {
+      error.observationId = await this.evidence.recordObserved(
+        job,
+        randomUUID(),
         {
-          ...request,
-          ...(request.sampleFiles
+          kind,
+          phase,
+          summary: error.message,
+          ...(kind === "unclassified"
             ? {
-                sampleFiles: request.sampleFiles.map(({ inputFile, outputFile }) => ({ inputFile, outputFile }))
+                evidenceError:
+                  this.mode(job.id) === "local"
+                    ? "The AI runner kept no evidence"
+                    : "The judge machine kept no evidence: update it (judge protocol version 6)"
               }
             : {})
         },
-        progress,
-        checkJob
+        operation,
+        this.recordOptions(job, operation, error.candidateFailure === true)
       );
-    return await this.runQueued(job, request, progress, checkJob);
+    } catch (e) {
+      logger.error(`Failed to record the failure of an AI run of job ${job.id}: ${e}`);
+    }
+  }
+
+  // The local runner's evidence, in the job's directory until its cleanup
+  private localEvidence(jobId: string): EvidenceSource {
+    const directory = path.join(this.outputDirectory(jobId), "failure");
+    return {
+      origin: "local",
+      fetch: async name => (AI_EVIDENCE_FILE.test(name) ? { path: path.join(directory, name) } : null)
+    };
+  }
+
+  // A judge machine's evidence, uploaded with its run; copied here to be checked and stored
+  private judgeEvidence(taskId: string): EvidenceSource {
+    return {
+      origin: "judge",
+      fetch: async (name, size) => {
+        if (!AI_EVIDENCE_FILE.test(name)) return null;
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), "ai-evidence-"));
+        const done = () => fs.rm(directory, { recursive: true, force: true });
+        try {
+          await this.fileService.downloadFileToPath(
+            evidenceUploadObject(taskId, name),
+            path.join(directory, name),
+            size
+          );
+        } catch {
+          await done();
+          return null;
+        }
+        return { path: path.join(directory, name), done };
+      }
+    };
+  }
+
+  // A failure the local runner kept but wasn't recorded (e.g. the backend restarted): recorded before the next run
+  private async harvestLocal(job: AiJobEntity) {
+    if (!this.evidence) return;
+    let file: fs.FileHandle;
+    try {
+      file = await fs.open(
+        path.join(this.outputDirectory(job.id), "failure", "failure.json"),
+        // eslint-disable-next-line no-bitwise
+        constants.O_RDONLY | constants.O_NOFOLLOW
+      );
+    } catch {
+      return;
+    }
+    try {
+      const stat = await file.stat();
+      if (!stat.isFile() || stat.size > MAX_FAILURE_FILE) return;
+      const failure = parseAiRunFailure(JSON.parse(await file.readFile("utf8")));
+      if (failure)
+        await this.evidence.record(job, failure, this.localEvidence(job.id), {
+          ...(failure.operation === "validate-reference" ? { context: "tutorial-reference" as const } : {})
+        });
+    } catch (e) {
+      logger.error(`Failed to record an earlier failure of an AI run of job ${job.id}: ${e}`);
+    } finally {
+      await file.close();
+    }
+  }
+
+  /**
+   * Failed runs of a judge machine whose failure wasn't recorded (e.g. the backend restarted): recorded, then removed.
+   * Returns those that couldn't be recorded.
+   */
+  private async harvestFailed(where: { jobId?: string; taskId?: string }): Promise<string[]> {
+    const unrecorded: string[] = [];
+    if (!this.evidence) return unrecorded;
+    const failed = await this.repository.find({ where: { ...where, state: AiExecutionState.Failed } });
+    for (const execution of failed) {
+      const failure = parseAiRunFailure(execution.result?.failure);
+      // eslint-disable-next-line no-await-in-loop -- Few
+      const job = failure ? await this.connection.getRepository(AiJobEntity).findOneBy({ id: execution.jobId }) : null;
+      if (job) {
+        try {
+          // eslint-disable-next-line no-await-in-loop -- One at a time
+          await this.evidence.record(job, failure, this.judgeEvidence(execution.taskId), {
+            ...(failure.operation === "validate-reference" && execution.result?.candidateFailure
+              ? { context: "tutorial-reference" as const }
+              : {})
+          });
+        } catch (e) {
+          logger.error(`Failed to record the failure of AI run ${execution.taskId}: ${e}`);
+          unrecorded.push(execution.taskId);
+          continue;
+        }
+      }
+      // eslint-disable-next-line no-await-in-loop -- One at a time
+      await this.removeExecution(execution.taskId);
+    }
+    return unrecorded;
   }
 
   /** Deletes what a job's runs left: the local runner's output, or the downloaded files and unfinished runs. */
@@ -215,6 +412,7 @@ export class AiExecutionService
   }
 
   private runLocal(
+    job: AiJobEntity,
     request: RunnerRequest,
     progress: (value: RunnerMessage) => Promise<void>,
     checkJob: () => Promise<unknown>
@@ -271,6 +469,19 @@ export class AiExecutionService
               else if (message.type === "error") {
                 const error = new AiError("SANDBOX_GENERATION_FAILED", String(message.message || "").slice(0, 2000));
                 error.candidateFailure = message.candidateFailure === true;
+                // Kept before the job's output directory, where the evidence is, is cleaned up
+                const failure = parseAiRunFailure(message.failure);
+                if (failure) {
+                  this.reported.add(error);
+                  [error.failure] = failure.observations;
+                }
+                if (failure)
+                  error.observationId = await this.recordFailure(
+                    job,
+                    failure,
+                    this.localEvidence(job.id),
+                    this.recordOptions(job, request.operation, error.candidateFailure)
+                  );
                 throw error;
               } else if (message.type === "complete") {
                 settled = true;
@@ -320,7 +531,9 @@ export class AiExecutionService
     const serialized = Buffer.from(JSON.stringify(runnerRequest));
     if (serialized.length > MAX_REQUEST) throw new AiError("SAMPLES_TOO_LARGE");
 
-    // A run of this job from before (e.g. before the backend restarted) isn't waited for any more
+    // A run of this job from before (e.g. before the backend restarted) isn't waited for any more; a failed one's
+    // failure is recorded
+    await this.harvestFailed({ jobId: job.id }).catch(e => logger.error(`Failed to record earlier AI runs: ${e}`));
     await this.cancelJobExecutions(job.id);
     const taskId = randomUUID();
     await this.fileService.putTemporaryObject(requestObject(taskId), serialized);
@@ -370,6 +583,21 @@ export class AiExecutionService
             String(execution.result?.message || "").slice(0, 2000)
           );
           error.candidateFailure = execution.result?.candidateFailure === true;
+          const failure = parseAiRunFailure(execution.result?.failure);
+          if (failure) {
+            this.reported.add(error);
+            [error.failure] = failure.observations;
+            // eslint-disable-next-line no-await-in-loop -- Once
+            error.observationId = await this.recordFailure(
+              job,
+              failure,
+              this.judgeEvidence(taskId),
+              this.recordOptions(job, request.operation, error.candidateFailure)
+            );
+            // Recorded: the run and its uploads can go
+            // eslint-disable-next-line no-await-in-loop -- Once
+            if (error.observationId) await this.removeExecution(taskId);
+          }
           throw error;
         }
         if (execution.state === AiExecutionState.Canceled) throw new AiError("SANDBOX_DISCONNECTED");
@@ -510,7 +738,8 @@ export class AiExecutionService
             ? { result: progress.result, files: progress.files }
             : {
                 message: String(progress.message || "").slice(0, 2000),
-                candidateFailure: progress.candidateFailure === true
+                candidateFailure: progress.candidateFailure === true,
+                ...(parseAiRunFailure(progress.failure) ? { failure: parseAiRunFailure(progress.failure) } : {})
               })
         }
       : { finished: true, status: "Failed", message: "The judge machine sent an invalid result" };
@@ -541,9 +770,17 @@ export class AiExecutionService
     );
   }
 
-  /** Upload forms for the files a run generated, each for exactly its size. */
-  async signUploads(taskId: string, files: { name: string; size: number }[]): Promise<JudgeUploadTarget[]> {
+  /**
+   * Upload forms for the files a run generated, each for exactly its size; or for a failed run's evidence, named and
+   * bounded as AiRunFailure allows, before the run reports its failure.
+   */
+  async signUploads(
+    taskId: string,
+    files: { name: string; size: number }[],
+    evidence = false
+  ): Promise<JudgeUploadTarget[]> {
     const execution = await this.repository.findOneBy({ taskId, state: AiExecutionState.Running });
+    if (evidence) return execution ? await this.signEvidenceUploads(execution, files) : [];
     if (!execution || !Array.isArray(files) || files.length === 0 || files.length > MAX_FILES) return [];
     const names = new Set<string>();
     let total = 0;
@@ -561,11 +798,54 @@ export class AiExecutionService
       total += file.size;
     }
     if (total > MAX_TOTAL) return [];
-    const uploads = files.map(({ name, size }) => ({ name, size }));
+    const uploads = [
+      ...(execution.uploads || []).filter(upload => upload.name.startsWith(EVIDENCE_UPLOAD)),
+      ...files.map(({ name, size }) => ({ name, size }))
+    ];
     await this.repository.update({ taskId, state: AiExecutionState.Running }, { uploads });
     return await Promise.all(
       uploads.map(async ({ name, size }) => {
         const signed = await this.fileService.signJudgeUpload(fileObject(taskId, name), size);
+        return {
+          name,
+          url: signed.url,
+          extraFormData: signed.extraFormData as Record<string, string>,
+          fileFieldName: signed.fileFieldName
+        };
+      })
+    );
+  }
+
+  private async signEvidenceUploads(
+    execution: AiExecutionEntity,
+    files: { name: string; size: number }[]
+  ): Promise<JudgeUploadTarget[]> {
+    if (!Array.isArray(files) || !files.length || files.length > AI_EVIDENCE_LIMITS.observations * 4) return [];
+    const names = new Set<string>();
+    let total = 0;
+    for (const file of files) {
+      if (
+        !file ||
+        typeof file.name !== "string" ||
+        !AI_EVIDENCE_FILE.test(file.name) ||
+        names.has(file.name) ||
+        !Number.isSafeInteger(file.size) ||
+        file.size < 0 ||
+        file.size > AI_EVIDENCE_LIMITS.artifactBytes
+      )
+        return [];
+      names.add(file.name);
+      total += file.size;
+    }
+    if (total > AI_EVIDENCE_LIMITS.runBytes) return [];
+    const uploads = [
+      ...(execution.uploads || []).filter(upload => !upload.name.startsWith(EVIDENCE_UPLOAD)),
+      ...files.map(({ name, size }) => ({ name: `${EVIDENCE_UPLOAD}${name}`, size }))
+    ];
+    await this.repository.update({ taskId: execution.taskId, state: AiExecutionState.Running }, { uploads });
+    return await Promise.all(
+      files.map(async ({ name, size }) => {
+        const signed = await this.fileService.signJudgeUpload(evidenceUploadObject(execution.taskId, name), size);
         return {
           name,
           url: signed.url,
@@ -596,10 +876,32 @@ export class AiExecutionService
     });
     // eslint-disable-next-line no-await-in-loop -- Few
     for (const { taskId } of stale) await this.cancelExecution(taskId);
+    // A failed run nobody recorded (its job no longer waited) keeps its evidence: recorded first. One that can't be
+    // recorded now is tried again, until it's as old as an active run may be.
+    const failed = await this.repository.find({
+      select: ["taskId"],
+      where: { state: AiExecutionState.Failed, finishedAt: LessThan(new Date(now - FINISHED_RETENTION)) }
+    });
+    const retried: string[] = [];
+    for (const { taskId } of failed)
+      retried.push(
+        // eslint-disable-next-line no-await-in-loop -- Few
+        ...(await this.harvestFailed({ taskId }).catch(e => {
+          logger.error(`Failed to record AI run ${taskId}: ${e}`);
+          return [taskId];
+        }))
+      );
     await this.repository.delete({
       state: Not(In(ACTIVE_STATES)),
-      finishedAt: LessThan(new Date(now - FINISHED_RETENTION))
+      finishedAt: LessThan(new Date(now - FINISHED_RETENTION)),
+      ...(retried.length ? { taskId: Not(In(retried)) } : {})
     });
+    if (retried.length)
+      await this.repository.delete({
+        taskId: In(retried),
+        finishedAt: LessThan(new Date(now - FINISHED_RETENTION - ACTIVE_LIMIT))
+      });
+    await this.evidence?.sweep(now);
     // Objects of runs that are gone. A run stores its request just before its row, so only old ones are deleted.
     const taskIdOf = (name: string) => name.slice(OBJECT_PREFIX.length).split("/")[0];
     const objects = (await this.fileService.listTemporaryObjects(OBJECT_PREFIX)).filter(

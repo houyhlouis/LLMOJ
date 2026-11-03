@@ -25,6 +25,7 @@ import { AiAdmissionService } from "./ai-admission.service";
 import { AiConfigurationService } from "./ai-configuration.service";
 import { AiJobCoordinator } from "./ai-job-coordinator.service";
 import { AiWorkflowService } from "./ai-workflow.service";
+import { AiEvidenceService, AiFailureSummary } from "./ai-evidence.service";
 
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeType } from "../user/user-privilege.service";
@@ -69,6 +70,8 @@ export class AiService {
   @Inject(AiAdmissionService) private readonly admission: AiAdmissionService;
 
   @Optional() @Inject(AiEndpointPolicyService) private readonly endpointPolicies?: AiEndpointPolicyService;
+
+  @Optional() @Inject(AiEvidenceService) private readonly evidence?: AiEvidenceService;
 
   constructor(
     @InjectRepository(AiJobEntity) private readonly jobs: Repository<AiJobEntity>,
@@ -335,7 +338,7 @@ export class AiService {
     return { paused, userDailyTokens, userDailyRequests, jobRequests };
   }
 
-  private serialize(job: AiJobEntity) {
+  private serialize(job: AiJobEntity, observations?: { count: number; failure?: AiFailureSummary }) {
     return {
       id: job.id,
       problemId: job.problemId,
@@ -364,7 +367,10 @@ export class AiService {
               samplesPassed: job.state.referenceSource.samplesPassed || 0,
               validated: job.state.referenceSource.validated === true
             }
-          : undefined
+          : undefined,
+        // Failed runs kept with their evidence (see failures), and the one that ended the latest run
+        observationCount: observations?.count || 0,
+        failure: observations?.failure
       }
     };
   }
@@ -376,7 +382,11 @@ export class AiService {
       order: { createdAt: "DESC" },
       take: 50
     });
-    return { jobs: jobs.map(job => this.serialize(job)), paused: (await this.coordinator.policy()).paused };
+    const observations = await this.evidence?.summaries(jobs);
+    return {
+      jobs: jobs.map(job => this.serialize(job, observations?.get(job.id))),
+      paused: (await this.coordinator.policy()).paused
+    };
   }
 
   async start(user: UserEntity, input: StartAiJobDto) {
@@ -414,6 +424,42 @@ export class AiService {
     if (!user) throw new AiError("PERMISSION_DENIED");
     await this.coordinator.cancel(user, id);
     return {};
+  }
+
+  // The job, if `user` may see the evidence of its failed runs
+  private async evidenceJob(user: UserEntity, jobId: string) {
+    if (!user) throw new AiError("PERMISSION_DENIED");
+    const job = await this.jobs.findOneBy({ id: jobId, ownerId: user.id });
+    if (!job) throw new AiError("NO_SUCH_JOB");
+    await this.coordinator.assertEvidenceAccess(user, job);
+    if (!this.evidence) throw new AiError("EVIDENCE_UNAVAILABLE");
+    return job;
+  }
+
+  /** A job's failed runs, latest first: what failed, how, and previews of the evidence kept. */
+  async failures(user: UserEntity, jobId: string) {
+    const job = await this.evidenceJob(user, jobId);
+    return { failures: await this.evidence.list(job) };
+  }
+
+  /** A part of an artifact of a failed run, from `offset`. */
+  async failureArtifact(
+    user: UserEntity,
+    value: { jobId: string; id: string; role: "input" | "actual" | "expected" | "diagnostics"; offset?: number }
+  ) {
+    const job = await this.evidenceJob(user, value.jobId);
+    return await this.evidence.readArtifact(job, value.id, value.role, value.offset ?? 0);
+  }
+
+  /** A short-lived link to download an artifact of a failed run. */
+  async downloadFailureArtifact(
+    user: UserEntity,
+    value: { jobId: string; id: string; role: "input" | "actual" | "expected" | "diagnostics" }
+  ) {
+    const job = await this.evidenceJob(user, value.jobId);
+    const url = await this.evidence.downloadLink(job, value.id, value.role);
+    await this.coordinator.recordAiAudit(user, "evidence.download", job, { observationId: value.id, role: value.role });
+    return { url };
   }
 
   async retry(user: UserEntity, id: string, retryFrom?: "validate-samples" | "std") {

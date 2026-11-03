@@ -11,7 +11,9 @@ import {
   AiTestDto,
   AiUsageQueryDto,
   AiPrepareAttachmentDto,
-  AiRetryJobDto
+  AiRetryJobDto,
+  AiFailuresDto,
+  AiFailureArtifactDto
 } from "./ai.dto";
 
 import { UserEntity } from "../user/user.entity";
@@ -77,5 +79,21 @@ export class AiController {
 
   @Post("retry") retry(@CurrentUser() user: UserEntity, @Body() body: AiRetryJobDto) {
     return this.call(() => this.ai.retry(user, body.id, body.retryFrom));
+  }
+
+  // A job's failed runs, with their evidence (owner only)
+  @Post("failures") failures(@CurrentUser() user: UserEntity, @Body() body: AiFailuresDto) {
+    return this.call(() => this.ai.failures(user, body.jobId));
+  }
+
+  @Post("failureArtifact") failureArtifact(@CurrentUser() user: UserEntity, @Body() body: AiFailureArtifactDto) {
+    return this.call(() => this.ai.failureArtifact(user, body));
+  }
+
+  @Post("downloadFailureArtifact") downloadFailureArtifact(
+    @CurrentUser() user: UserEntity,
+    @Body() body: AiFailureArtifactDto
+  ) {
+    return this.call(() => this.ai.downloadFailureArtifact(user, body));
   }
 }

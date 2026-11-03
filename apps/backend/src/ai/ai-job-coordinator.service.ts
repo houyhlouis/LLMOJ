@@ -385,6 +385,21 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
     return user;
   }
 
+  /**
+   * Whether `user` may see the evidence of `job`'s failed runs (inputs, outputs and diagnostics, which may be hidden
+   * test data): the job's owner, while still allowed to run it on its problem.
+   */
+  async assertEvidenceAccess(user: UserEntity, job: AiJobEntity) {
+    if (!user || !job || job.ownerId !== user.id) throw new AiError("NO_SUCH_JOB");
+    await this.requirePrivilege(user, UserPrivilegeType.UseAi);
+    const testdata = ["testdata", "all", "import"].includes(job.action);
+    if (testdata) await this.requirePrivilege(user, UserPrivilegeType.GenerateTestdata);
+    if (job.problemId) await this.editable(user, job.problemId);
+    else if (job.action === "import") await this.requirePrivilege(user, UserPrivilegeType.ImportProblem);
+    if (testdata && !(await this.privileges.permissionDecision(user, UserPrivilegeType.EditProblemData, true)))
+      throw new AiError("PERMISSION_DENIED");
+  }
+
   async assertImportAuthorization(job: AiJobEntity, manager?: EntityManager) {
     const user = await this.assertJob(job, manager);
     await this.requirePrivilege(user, UserPrivilegeType.ImportProblem, manager);

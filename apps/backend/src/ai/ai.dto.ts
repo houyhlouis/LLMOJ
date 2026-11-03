@@ -90,6 +90,19 @@ export class AiRetryJobDto extends AiJobIdDto {
   @IsOptional() @IsIn(["validate-samples", "std"]) retryFrom?: "validate-samples" | "std";
 }
 
+export class AiFailuresDto {
+  @IsString() @Length(36, 36) jobId: string;
+}
+export class AiFailureArtifactDto extends AiFailuresDto {
+  // The observation
+  @IsString() @Length(36, 36) id: string;
+
+  @IsIn(["input", "actual", "expected", "diagnostics"]) role: "input" | "actual" | "expected" | "diagnostics";
+
+  // Where to read from (failureArtifact)
+  @IsOptional() @IsInt() @Min(0) @Max(2147483647) offset?: number;
+}
+
 export class AiPrepareAttachmentDto {
   @IsString() @Length(1, 256) filename: string;
 

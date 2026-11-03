@@ -619,6 +619,19 @@ export class FileService implements OnModuleInit {
     return Buffer.concat(chunks);
   }
 
+  /** Reads `length` bytes of a temporary object from `offset`. */
+  async readObjectRange(name: string, offset: number, length: number): Promise<Buffer> {
+    if (!name.startsWith(TEMPORARY_OBJECT_PREFIX)) throw new Error("Not a temporary object");
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of await this.minioClient.getPartialObject(this.bucket, name, offset, length)) {
+      size += chunk.length;
+      if (size > length) throw new Error("FILE_SIZE_LIMIT");
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
+  }
+
   /** The temporary objects under `prefix`. */
   async listTemporaryObjects(prefix: string): Promise<{ name: string; lastModified: Date }[]> {
     if (!prefix.startsWith(TEMPORARY_OBJECT_PREFIX)) throw new Error("Not a temporary prefix");

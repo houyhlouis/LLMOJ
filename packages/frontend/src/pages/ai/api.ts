@@ -65,6 +65,12 @@ const errors: Record<string, [string, string]> = {
   ],
   NO_SUCH_PROBLEM: ["题目不存在。", "The problem does not exist."],
   NO_SUCH_JOB: ["任务不存在。", "The job does not exist."],
+  NO_SUCH_OBSERVATION: ["该失败记录不存在。", "This failure record doesn't exist."],
+  EVIDENCE_UNAVAILABLE: [
+    "该失败证据未保存或已过期删除。",
+    "This failure evidence wasn't kept, or it has expired and was deleted."
+  ],
+  INVALID_ARTIFACT_RANGE: ["请求的证据范围无效。", "The requested part of the evidence is invalid."],
   JOB_NOT_FAILED: ["只有失败的任务可以重试。", "Only failed jobs can be retried."],
   JOB_CANCELLED: ["任务已取消。", "The job was cancelled."],
   EMPTY_MODEL_OUTPUT: ["模型没有返回有效内容。", "The model returned no content."],
@@ -488,6 +494,69 @@ export async function startAiAfterSave(problemId: number) {
   if (!appState.currentUserHasPrivilege("UseAi" as any)) return;
   return aiCall("start", { problemId, action: "metadata", automatic: true });
 }
+export type AiArtifactRole = "input" | "actual" | "expected" | "diagnostics";
+export interface AiArtifact {
+  name: string;
+  role: AiArtifactRole;
+  classification: "public" | "author-private" | "hidden-test";
+  size: number;
+  originalSize: number;
+  sha256: string;
+  preview: string;
+  binary: boolean;
+  stored: boolean;
+  missing?: string;
+}
+/** A failed AI run, as kept with its evidence (ai/failures). */
+export interface AiObservation {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  evidence: "stored" | "partial" | "none" | "unavailable" | "expired";
+  current: boolean;
+  kind: string;
+  fatal: boolean;
+  relation?: "small_counterexample";
+  context?: "tutorial-reference";
+  origin: "local" | "judge" | "backend";
+  operation: "generate" | "validate-reference";
+  phase: string;
+  role?: string;
+  candidate?: string;
+  subject?: string;
+  subtask?: number;
+  scenarioIndex?: number;
+  verdict?: string;
+  expectedBasis?: "official_sample" | "candidate_oracle" | "reference_output";
+  execution?: {
+    status: string;
+    exitCode?: number;
+    termination?: string;
+    timeMs?: number;
+    memoryBytes?: number;
+    timeLimitMs?: number;
+    memoryLimitBytes?: number;
+  };
+  difference?: {
+    unit: "token" | "line" | "byte";
+    index: number;
+    actualLine?: number;
+    expectedLine?: number;
+    actual: string;
+    expected: string;
+  };
+  search?: { attempts: number; budget: number; stoppedBy: "budget" | "capacity" };
+  summary: string;
+  evidenceError?: string;
+  artifacts: AiArtifact[];
+  profile?: {
+    architecture: string;
+    compiler: string;
+    checker: string;
+    auxiliary: { timeLimitMs: number; memoryLimitMiB: number };
+    solution: { timeLimitMs: number; memoryLimitMiB: number };
+  };
+}
 export interface AiJob {
   id: string;
   problemId?: number;
@@ -507,6 +576,11 @@ export interface AiJob {
     referenceSource?: { kind: "tutorial" | "model"; discussionId?: number; samplesPassed: number; validated: boolean };
     requestedCount?: number;
     generatedCount?: number;
+    observationCount?: number;
+    failure?: Pick<
+      AiObservation,
+      "id" | "kind" | "phase" | "role" | "candidate" | "subject" | "verdict" | "evidence" | "expiresAt"
+    >;
     testdataQuality?: {
       version: 1;
       fuzzPassed: number;

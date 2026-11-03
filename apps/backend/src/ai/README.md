@@ -36,6 +36,14 @@ The final report records differential counts and each rejected candidate's final
 
 Interactive and communication problems keep their existing hidden-state and protocol validation. Their jobs explicitly report that the independent brute-force and wrong-algorithm quality gate currently applies only to traditional problems.
 
+## Failure evidence
+
+A failed run of a job's programs is kept as typed observations with their evidence (review Part III, W01), before the run's workspace is cleaned up. The shared contract is `packages/judge-protocol/src/ai-observation.ts`, exported by `@libreoj/judge-protocol`: failure kinds, artifact roles and classifications, limits, `textPreview`, `firstDifference` and `parseAiRunFailure`, which the backend applies to everything a runner sends.
+
+- **Judge.** Each place a failure passes through adds what it knows (`aiFailure.ts`): the sandbox run its program, verdict and measurements, a comparison its input, outputs and the checker's message, the quality checks the program's role, the case and what the output was compared with (`expectedBasis`: an official sample, the candidate oracle or the reference output). `aiEvidence.ts` writes the exact bytes into the run's evidence directory within fixed limits (16 MiB per artifact, 64 MiB and 8 observations per run; a larger artifact keeps its start and says so) and describes them in `failure.json`. A canceled run keeps nothing. A challenge that survives carries its first small failing input as a related `small_counterexample` observation, and whether the extra search stopped at its budget or for lack of a replaceable case. The local runner's directory is `<generated>/<job>/failure`, which the backend reads before it asks for the job's cleanup; a judge machine (protocol 6) uploads it through forms signed for evidence names only, then reports the failure as `AiExecutionProgress.failure`.
+- **Backend.** `AiEvidenceService.record` copies each artifact into `temporary/ai-evidence/<observation>/<role>` after checking its size and SHA-256 against the report, and stores the observations in `ai_observation` with IDs derived from the run's attempt, so recording a run twice records it once. Artifacts that can't be stored are recorded as missing, with why; nothing unverified is kept. Evidence is bounded per job (256 MiB, 64 observations) and for the site (2 GiB), and deleted after 14 days (previews and difference excerpts too); the observation stays 90 days. A failure reported while no backend waited is recorded when the job runs again, or by the 10-minute AI run cleanup before it removes the run. Transport and time-limit failures the backend sees itself are recorded without evidence, and a runner that sent none as `unclassified`.
+- **Use.** The typed failure decides the one `make.cpp` compile repair (the message is read only for older judges), and the repair prompt gets the compiler's kept diagnostics without terminal colours (also left out of the job's error message and diagnostics previews; the kept bytes have them). A tutorial's solution that fails its check is recorded with `context: "tutorial-reference"`, not as the failure that ended the job. The job owner reads observations through `ai/failures`, `ai/failureArtifact` (64 KiB parts that end on whole characters) and `ai/downloadFailureArtifact` (a 2-minute link, audited), only while they may still run the job (`AiJobCoordinator.assertEvidenceAccess`).
+
 ## Tests
 
 Run the mock unit tests and type check from `apps/backend`:
@@ -48,7 +56,7 @@ node --test --test-concurrency=1 src/ai/*.test.cjs
 The judge quality suite runs without a rootfs or native sandbox:
 
 ```sh
-node --test apps/judge/src/aiQuality.test.cjs
+node --test apps/judge/src/aiQuality.test.cjs apps/judge/src/aiEvidence.test.cjs
 ```
 
 Run that command from the repository root. CI runs both the backend mock suite and this judge suite, as documented in the bilingual development guides. Real sandbox acceptance requires a dedicated execution environment and verifies compilation, actual resource verdicts and checker behavior separately.

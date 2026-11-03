@@ -140,6 +140,56 @@
   color: var(--theme-message-error-foreground);
 }
 
+// Failed runs and their evidence
+.failures {
+  margin-top: 8px;
+
+  > :global(.button) {
+    margin: 0;
+  }
+}
+
+.observation {
+  margin-top: 12px;
+  padding-left: 12px;
+  border-left: 3px solid var(--theme-border);
+}
+
+.observationHeading {
+  margin-bottom: 4px;
+}
+
+.observationSummary {
+  margin-top: 8px;
+  white-space: pre-wrap;
+}
+
+.artifact {
+  margin-top: 10px;
+}
+
+.artifactHeading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+
+  > :global(.button) {
+    margin: 0;
+  }
+}
+
+.evidence {
+  max-height: 320px;
+  overflow: auto;
+  margin: 6px 0 0;
+  padding: 8px;
+  border: 1px solid var(--theme-border);
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: pre;
+}
+
 .usageToolbar {
   display: flex;
   align-items: baseline;

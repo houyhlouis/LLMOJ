@@ -1,3 +1,5 @@
+import type { AiFailureObservation } from "@libreoj/judge-protocol";
+
 export interface LlmConfiguration {
   type: "chat" | "responses" | "anthropic";
   baseUrl: string;
@@ -46,6 +48,12 @@ export interface AiStatementText {
 
 export class AiError extends Error {
   candidateFailure?: boolean;
+
+  // The kept observation of the run failure this is (see AiEvidenceService)
+  observationId?: string;
+
+  // What the runner reported failed, typed (see AiRunFailure)
+  failure?: AiFailureObservation;
 
   constructor(
     public code: string,

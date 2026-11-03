@@ -214,7 +214,7 @@ function componentHarness(file, options = {}) {
         clearInterval() {},
         Date,
         Intl,
-        window: { confirm: () => options.confirm !== false }
+        window: { confirm: () => options.confirm !== false, ...options.window }
       },
       { filename }
     );
@@ -222,6 +222,7 @@ function componentHarness(file, options = {}) {
   }
   const exported = load(path.join(src, file));
   component =
+    (options.component && exported[options.component]) ||
     exported.RegistrationReviewPage ||
     observedComponent ||
     (typeof exported.default === "function" ? exported.default : exported.default.view.type);

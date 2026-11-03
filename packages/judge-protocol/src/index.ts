@@ -1,3 +1,8 @@
+import type { AiRunFailure } from "./ai-observation";
+
+// Failed AI runs and their evidence, as judges report them and the backend checks them
+export * from "./ai-observation";
+
 export enum JudgeTaskType {
   Submission = "Submission",
   Hack = "Hack",
@@ -12,7 +17,9 @@ export enum JudgeTaskType {
 // Version 4 runs AiExecution tasks and uploads the files they generate ("requestUploads").
 // Version 5 announces the architectures it builds C and C++ programs for ("architectures"): arm64 judges build no
 // 32-bit programs.
-export const JUDGE_PROTOCOL_VERSION = 5;
+// Version 6 reports a failed AiExecution task as a typed failure ("failure") and uploads its evidence first
+// ("requestUploads" with "evidence").
+export const JUDGE_PROTOCOL_VERSION = 6;
 
 /** What a judge judges with, as recorded with each result. */
 export interface JudgeRuntimeInfo {
@@ -75,12 +82,16 @@ export interface AiExecutionProgress {
   message?: string;
   // Failed: the program under test (e.g. a reference solution) failed, not the run itself
   candidateFailure?: boolean;
+  // Failed, since protocol version 6: what failed, with the evidence uploaded for it
+  failure?: AiRunFailure;
 }
 
 /** Sent by a judge client as "requestUploads", to upload the files a task generated. */
 export interface JudgeUploadRequest {
   taskId: string;
   files: { name: string; size: number }[];
+  // The evidence of a failed run (see AiRunFailure), named as AI_EVIDENCE_FILE allows, instead of generated files
+  evidence?: boolean;
 }
 
 /** Where to upload one file: an HTML form POST, like a browser upload. */

@@ -228,3 +228,16 @@ test('the AI execution table is added exactly once', async () => {
   await assert.rejects(() => validateAiExecutionSchema(fixture(true), [...AI_EXECUTION_SQL]), /AI execution table/);
   assert.equal(AI_EXECUTION_SQL.length, 1);
 });
+
+test('the AI failure evidence table is added exactly once', async () => {
+  const { validateAiEvidenceSchema, AI_EVIDENCE_SQL, AI_OBSERVATION_CREATE_SQL } = await import('../ai-evidence-schema.mjs');
+  assert.deepEqual(validateQueries([...AI_EVIDENCE_SQL]), [...AI_EVIDENCE_SQL]);
+  assert.throws(() => validateQueries([AI_OBSERVATION_CREATE_SQL.replace('`jobId` varchar(36) NOT NULL', '`jobId` varchar(36) NULL')]));
+  assert.throws(() => validateQueries([AI_OBSERVATION_CREATE_SQL.replace(', PRIMARY KEY (`id`)', '')]));
+  const fixture = present => ({ query: async () => [{ count: present ? 1 : 0 }] });
+  await validateAiEvidenceSchema(fixture(false), [...AI_EVIDENCE_SQL]);
+  await validateAiEvidenceSchema(fixture(true), []);
+  await assert.rejects(() => validateAiEvidenceSchema(fixture(false), []), /AI failure evidence table/);
+  await assert.rejects(() => validateAiEvidenceSchema(fixture(true), [...AI_EVIDENCE_SQL]), /AI failure evidence table/);
+  assert.equal(AI_EVIDENCE_SQL.length, 1);
+});

@@ -647,6 +647,9 @@ class RuntimeUpgradeTests(unittest.TestCase):
     def test_ai_reservation_ddl_preserves_schema_sync_guard(self):
         self.assert_guard_survives('CREATE TABLE `ai_reservation` (...)')
 
+    def test_ai_observation_ddl_preserves_schema_sync_guard(self):
+        self.assert_guard_survives('CREATE TABLE `ai_observation` (...)')
+
     def test_self_eval_ddl_preserves_schema_sync_guard_on_empty_data_rollback(self):
         self.assert_guard_survives('CREATE TABLE `self_eval_quota` (...)')
 

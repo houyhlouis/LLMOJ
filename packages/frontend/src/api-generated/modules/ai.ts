@@ -15,3 +15,9 @@ export const start = createPostApi<ApiTypes.StartAiJobDto, void>("ai/start", {})
 export const jobs = createPostApi<ApiTypes.AiJobQueryDto, void>("ai/jobs", {});
 export const cancel = createPostApi<ApiTypes.AiJobIdDto, void>("ai/cancel", {});
 export const retry = createPostApi<ApiTypes.AiRetryJobDto, void>("ai/retry", {});
+export const failures = createPostApi<ApiTypes.AiFailuresDto, void>("ai/failures", {});
+export const failureArtifact = createPostApi<ApiTypes.AiFailureArtifactDto, void>("ai/failureArtifact", {});
+export const downloadFailureArtifact = createPostApi<ApiTypes.AiFailureArtifactDto, void>(
+  "ai/downloadFailureArtifact",
+  {}
+);

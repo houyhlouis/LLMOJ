@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 
 import winston from "winston";
-import { AiExecutionProgress } from "@libreoj/judge-protocol";
+import type { AiExecutionProgress, AiRunFailure } from "@libreoj/judge-protocol";
 
 import { Task } from "..";
 
@@ -27,6 +27,56 @@ const isGeneratedFile = (name: unknown) =>
 const UPLOAD_CONCURRENCY = 2;
 
 /**
+ * Uploads a failed run's evidence (see aiEvidence.ts) to where the server says, before the failure is reported and
+ * the workspace removed. The failure is reported without its evidence when that can't be done.
+ */
+async function uploadEvidence(
+  task: Task<AiExecutionExtraInfo, AiExecutionProgress>,
+  failure: AiRunFailure,
+  directory: string
+) {
+  const artifacts = failure.observations.flatMap(observation => observation.artifacts);
+  if (!artifacts.length) return failure;
+  try {
+    rpc.ensureNotCanceled(task.taskId);
+    const targets = await rpc.requestUploads({
+      taskId: task.taskId,
+      files: artifacts.map(({ name, size }) => ({ name, size })),
+      evidence: true
+    });
+    if (
+      !Array.isArray(targets) ||
+      targets.length !== artifacts.length ||
+      targets.some((target, i) => target?.name !== artifacts[i].name)
+    )
+      throw new Error("The server refused to take the evidence");
+    for (const target of targets) {
+      rpc.ensureNotCanceled(task.taskId);
+      // eslint-disable-next-line no-await-in-loop -- One at a time; at most 64 MiB together
+      const data = await fs.promises.readFile(path.join(directory, target.name), {
+        // eslint-disable-next-line no-bitwise
+        flag: fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
+      });
+      // eslint-disable-next-line no-await-in-loop -- One at a time
+      await uploadWithForm(target, data, `evidence ${target.name}`);
+    }
+    return failure;
+  } catch (error) {
+    if (error instanceof CanceledError) throw error;
+    const reason = `The evidence couldn't be uploaded (${String(error?.message || error).slice(0, 100)})`;
+    winston.warn(`AI execution task ${task.taskId}: ${reason}`);
+    return {
+      ...failure,
+      observations: failure.observations.map(observation => ({
+        ...observation,
+        artifacts: [],
+        ...(observation.artifacts.length ? { evidenceError: reason } : {})
+      }))
+    };
+  }
+}
+
+/**
  * Runs an AI job's programs like the local AI runner does, in this judge's sandbox and execution slots, and uploads
  * the files they generated to where the server says. The server then checks and publishes them.
  */
@@ -34,6 +84,7 @@ export default async function onAiExecution(task: Task<AiExecutionExtraInfo, AiE
   const work = safelyJoinPath(config.dataStore, "ai-work", task.taskId);
   const samples = path.join(work, "samples");
   const output = path.join(work, "output");
+  const evidence = path.join(work, "evidence");
   try {
     const { request, sampleFiles = [] } = task.extraInfo;
     validate(request);
@@ -70,7 +121,7 @@ export default async function onAiExecution(task: Task<AiExecutionExtraInfo, AiE
           });
       },
       () => rpc.isCanceled(task.taskId),
-      { sampleDirectory: samples, outputRoot: output },
+      { sampleDirectory: samples, outputRoot: output, evidenceDirectory: evidence, attemptId: task.taskId },
       task.taskId
     );
     if (!complete) throw new Error("The AI runner finished without a result");
@@ -123,11 +174,13 @@ export default async function onAiExecution(task: Task<AiExecutionExtraInfo, AiE
     if (error instanceof CanceledError || rpc.isCanceled(task.taskId)) throw new CanceledError();
     const message = String(error?.message || error).slice(0, 2000);
     winston.error(`AI execution task ${task.taskId} failed: ${message}`);
+    const failure: AiRunFailure = error?.failure ? await uploadEvidence(task, error.failure, evidence) : null;
     task.reportProgressRaw({
       finished: true,
       status: "Failed",
       message,
-      candidateFailure: task.extraInfo?.request?.operation === "validate-reference" && error?.candidateFailure === true
+      candidateFailure: task.extraInfo?.request?.operation === "validate-reference" && error?.candidateFailure === true,
+      ...(failure ? { failure } : {})
     });
   } finally {
     await fs.promises.rm(work, { recursive: true, force: true });

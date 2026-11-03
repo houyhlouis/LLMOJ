@@ -798,11 +798,12 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
   /** Upload forms for the files a task generated, from the task's service; none if it doesn't take files. */
   async signTaskUploads(
     taskMeta: JudgeTaskMeta,
-    files: { name: string; size: number }[]
+    files: { name: string; size: number }[],
+    evidence = false
   ): Promise<JudgeUploadTarget[]> {
     const taskService = this.taskServices.get(taskMeta.type);
     if (!taskService?.signUploads) return [];
-    return await taskService.signUploads(taskMeta.taskId, files);
+    return await taskService.signUploads(taskMeta.taskId, files, evidence);
   }
 
   /** Cancels a task's job, e.g. when its submission is rejudged or deleted. */

@@ -39,7 +39,7 @@ function fixture(t, generation, options = {}) {
   const calls = { ensured: [], uploads: [], requested: [], progress: [], layouts: [] };
   let canceled = false;
   const onAiExecution = load({
-    winston: { __esModule: true, default: { error: () => {} } },
+    winston: { __esModule: true, default: { error: () => {}, warn: () => {} } },
     "../../config": { __esModule: true, default: { dataStore: path.join(root, "data") } },
     "../../rpc": {
       __esModule: true,
@@ -196,4 +196,69 @@ test("a canceled run reports nothing more", async t => {
   await assert.rejects(run(extraInfo), CanceledError);
   assert.deepEqual(calls.uploads, []);
   assert.equal(calls.progress.some(progress => progress.finished), false);
+});
+
+// A failed run's evidence (review Part III, W01): uploaded before the failure is reported and the workspace removed
+const evidenceFailure = artifacts => ({
+  schemaVersion: 2,
+  attemptId: "bbbbbbbb-0000-4000-8000-000000000003",
+  operation: "generate",
+  sourceHashes: {},
+  profile: {},
+  observations: [{ kind: "solver_disagreement", fatal: true, phase: "generate", summary: "Output mismatch", artifacts }]
+});
+async function failWithEvidence(request, emit, layout) {
+  assert.equal(layout.attemptId, "bbbbbbbb-0000-4000-8000-000000000003", "the task is the run's attempt");
+  fs.mkdirSync(layout.evidenceDirectory, { recursive: true });
+  fs.writeFileSync(path.join(layout.evidenceDirectory, "0.input"), "1 2\n");
+  fs.writeFileSync(path.join(layout.evidenceDirectory, "0.actual"), "4\n");
+  throw Object.assign(new Error("Output mismatch"), {
+    failure: evidenceFailure([
+      { name: "0.input", role: "input", size: 4 },
+      { name: "0.actual", role: "actual", size: 2 }
+    ])
+  });
+}
+
+test("a failure's evidence is uploaded, named as evidence, before the failure is reported", async t => {
+  const { run, calls, root } = fixture(t, failWithEvidence);
+  await run(extraInfo);
+  assert.deepEqual(calls.requested, [
+    {
+      taskId: "bbbbbbbb-0000-4000-8000-000000000003",
+      files: [
+        { name: "0.input", size: 4 },
+        { name: "0.actual", size: 2 }
+      ],
+      evidence: true
+    }
+  ]);
+  assert.deepEqual(calls.uploads, [
+    ["0.input", "1 2\n"],
+    ["0.actual", "4\n"]
+  ]);
+  const [report] = calls.progress;
+  assert.equal(report.status, "Failed");
+  assert.deepEqual(
+    report.failure.observations[0].artifacts.map(artifact => artifact.name),
+    ["0.input", "0.actual"]
+  );
+  assert.deepEqual(fs.readdirSync(path.join(root, "data", "ai-work")), [], "then the workspace is removed");
+});
+
+test("evidence the server won't take is reported as not kept, and the failure still is", async t => {
+  const { run, calls } = fixture(t, failWithEvidence, { refuse: true });
+  await run(extraInfo);
+  assert.deepEqual(calls.uploads, []);
+  const [observation] = calls.progress[0].failure.observations;
+  assert.deepEqual(observation.artifacts, []);
+  assert.match(observation.evidenceError, /The evidence couldn't be uploaded \(The server refused to take the evidence\)/);
+  assert.equal(calls.progress[0].message, "Output mismatch");
+});
+
+test("a canceled run uploads no evidence", async t => {
+  const { run, calls } = fixture(t, failWithEvidence, { cancel: true });
+  await assert.rejects(run(extraInfo), CanceledError);
+  assert.deepEqual(calls.requested, []);
+  assert.deepEqual(calls.uploads, []);
 });

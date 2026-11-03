@@ -30,6 +30,7 @@ import {
 } from "./ai-reference";
 
 import { AiExecutionService } from "./ai-execution.service";
+import { AiEvidenceService } from "./ai-evidence.service";
 import { AiConfigurationService } from "./ai-configuration.service";
 import { AiJobCoordinator, AiWorkflowRunner } from "./ai-job-coordinator.service";
 import { AiArtifactPublisher, AiProblemSnapshot } from "./ai-artifact-publisher.service";
@@ -81,6 +82,9 @@ const SYSTEM = `You are a bilingual competitive-programming problem editor. Retu
 export class AiWorkflowService implements AiWorkflowRunner {
   // Runs the AI programs, locally or on judge machines
   @AuditOptional() @Inject(AiExecutionService) private readonly execution: AiExecutionService;
+
+  // The evidence of failed runs (e.g. a compiler's whole diagnostics)
+  @AuditOptional() @Inject(AiEvidenceService) private readonly evidence?: AiEvidenceService;
 
   constructor(
     @InjectDataSource() private readonly db: DataSource,
@@ -2047,11 +2051,19 @@ export class AiWorkflowService implements AiWorkflowRunner {
     try {
       return await this.runSandbox(job, request, report);
     } catch (error) {
+      // The runner says what failed; a runner that doesn't (an older judge machine) is read from its message
+      const { failure } = error instanceof AiError ? error : { failure: undefined };
+      const makeDidNotCompile = failure
+        ? failure.kind === "compile_error" &&
+          failure.role === "make" &&
+          failure.execution?.termination === "exited" &&
+          failure.execution?.exitCode === 1
+        : phase === "compile-make" &&
+          /^SANDBOX_GENERATION_FAILED: make compilation failed \(.*exit=1, termination=exited,/.test(error.message);
       if (
         !(error instanceof AiError) ||
         error.code !== "SANDBOX_GENERATION_FAILED" ||
-        phase !== "compile-make" ||
-        !/^SANDBOX_GENERATION_FAILED: make compilation failed \(.*exit=1, termination=exited,/.test(error.message) ||
+        !makeDidNotCompile ||
         job.state.makeCompileRepairAttempts
       )
         throw error;
@@ -2065,8 +2077,12 @@ export class AiWorkflowService implements AiWorkflowRunner {
       // Persist the budget before spending on a repair; worker restarts cannot reset it.
       job.state.makeCompileRepairAttempts = 1;
       await this.coordinator.checkpoint(job, "testdata.repair-make", job.progress);
+      // The compiler's whole diagnostics as kept, not only what the message carries
+      const kept = error.observationId
+        ? await this.evidence?.readText(job.id, error.observationId, "diagnostics", 8000).catch((): string => null)
+        : null;
       let diagnostic = JSON.stringify({
-        compilerError: error.message.slice(0, 2000),
+        compilerError: kept || error.message.slice(0, 2000),
         source: request.makeCode,
         problem: snapshot,
         plan: job.state.plan

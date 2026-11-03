@@ -37,6 +37,13 @@ export interface JudgeTaskService<TaskProgress extends JudgeTaskProgress, ExtraI
   /** The queue gave up on the task: if the resource still references it, give the resource a terminal error. */
   onTaskFailed(taskId: string, message: string): Promise<void>;
 
-  /** For a task that generates files: forms to upload them with, or none if they aren't accepted. */
-  signUploads?(taskId: string, files: { name: string; size: number }[]): Promise<JudgeUploadTarget[]>;
+  /**
+   * For a task that generates files: forms to upload them with, or none if they aren't accepted. `evidence`: the files
+   * are a failed run's evidence instead.
+   */
+  signUploads?(
+    taskId: string,
+    files: { name: string; size: number }[],
+    evidence?: boolean
+  ): Promise<JudgeUploadTarget[]>;
 }

@@ -3,6 +3,7 @@ import { Button, Header, Message, Progress } from "semantic-ui-react";
 import { observer } from "mobx-react";
 import { Link } from "@/utils/hooks";
 import { aiCall, aiText, aiError, actionName, AiJob } from "./api";
+import AiFailureDetails, { failureKindName, programName } from "./AiFailureDetails";
 import style from "./Ai.module.less";
 
 export default observer(function AiJobs({
@@ -253,6 +254,15 @@ export default observer(function AiJobs({
                     {aiError(job.error || "INTERNAL_ERROR")}
                   </p>
                 )}
+                {job.status === "failed" && job.result.failure && (
+                  <p className={style.jobDetail}>
+                    {failureKindName(job.result.failure.kind)}
+                    {job.result.failure.role &&
+                      ` · ${programName(job.result.failure.role, job.result.failure.candidate)}`}
+                    {job.result.failure.subject && ` · ${job.result.failure.subject}`}
+                  </p>
+                )}
+                <AiFailureDetails job={job} />
               </div>
             );
           })}

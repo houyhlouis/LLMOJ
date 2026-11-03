@@ -10,11 +10,12 @@ import winston from "winston";
 
 import Queue from "promise-queue";
 
-import { SandboxStatus } from "simple-sandbox";
+import { SandboxResult, SandboxStatus } from "simple-sandbox";
+import type { AiExecutionMeasure, AiFailureKind, AiOutputComparison } from "@libreoj/judge-protocol";
 
 import { runBuiltinChecker } from "./checkers/builtin";
 import { Checker, parseTestlibMessage } from "./checkers";
-import { isOmittableString } from "./omittableString";
+import { isOmittableString, omittableStringToString } from "./omittableString";
 import {
   runTestcase as runInteractionTestcase,
   TestcaseStatusInteraction,
@@ -23,6 +24,8 @@ import {
 import { Disposer } from "./posixUtils";
 import { CompileResultSuccess } from "./compile";
 import { AiQuality, QualityRequest, QualityVerdict, qualitySources, validateQuality } from "./aiQuality";
+import { describe, detailsOf, reclassify, within } from "./aiFailure";
+import { keepFailure, pinEvidence, profileOf, sourceHashesOf } from "./aiEvidence";
 
 import config from "./config";
 import getLanguage from "./languages";
@@ -76,6 +79,10 @@ const MAX_REQUEST = 16 * 1024 * 1024;
 const active = new Set<string>();
 // Admit eight backend jobs; three pipelines share the same seven execution slots as submissions.
 const generationQueue = new Queue(3);
+// Each running request's latest run of each program, for the evidence of a failure
+const runMeasures = new WeakMap<Request, Map<string, AiExecutionMeasure>>();
+// Diagnostics (compiler output, stderr) kept as evidence, up to this size
+const MAX_DIAGNOSTICS = 1024 * 1024;
 
 export type Emit = (event: Record<string, unknown>) => void;
 
@@ -89,6 +96,9 @@ export interface GenerationLayout {
   outputRoot: string;
   // The group allowed to read the output (the local backend); none for a queued task, whose output is uploaded
   outputGroup?: number;
+  // Where a failed run's evidence is kept (see aiEvidence.ts), and the run's ID in it (a new one if not given)
+  evidenceDirectory: string;
+  attemptId?: string;
 }
 
 // The local runner's layout: shared with the backend on this server
@@ -98,7 +108,9 @@ function localLayout(jobId: string): GenerationLayout {
     // The backend's directory is its own; the sandbox launcher opens the files (and nothing else) for the judge
     openSample: name => launcher().openSample(jobId, name),
     outputRoot: config.aiGeneratedDirectory,
-    outputGroup: config.aiRunnerGid
+    outputGroup: config.aiRunnerGid,
+    // The backend reads it from the job's directory before it asks for the job's cleanup
+    evidenceDirectory: path.join(config.aiGeneratedDirectory, jobId, "failure")
   };
 }
 
@@ -138,6 +150,47 @@ async function openSampleFile(layout: GenerationLayout, source: fs.promises.File
 
 function referenceError(message: string, candidateFailure: boolean, qualityVerdict?: QualityVerdict): Error {
   return Object.assign(new Error(message), { candidateFailure, qualityVerdict });
+}
+
+function measureOf(result: SandboxResult, timeLimitMs?: number, memoryLimitMiB?: number): AiExecutionMeasure {
+  return {
+    status: (SandboxStatus[result.status] || "Unknown") as AiExecutionMeasure["status"],
+    exitCode: result.code,
+    ...(result.termination ? { termination: result.termination } : {}),
+    timeMs: Math.round(result.time / 1e3) / 1e3,
+    memoryBytes: result.memory,
+    ...(timeLimitMs ? { timeLimitMs } : {}),
+    ...(memoryLimitMiB ? { memoryLimitBytes: memoryLimitMiB * 1024 * 1024 } : {})
+  };
+}
+
+function kindOfStatus(status: SandboxStatus): AiFailureKind {
+  return (
+    (
+      {
+        [SandboxStatus.TimeLimitExceeded]: "time_limit",
+        [SandboxStatus.MemoryLimitExceeded]: "memory_limit",
+        [SandboxStatus.RuntimeError]: "runtime_error",
+        [SandboxStatus.OutputLimitExceeded]: "output_limit",
+        [SandboxStatus.Cancelled]: "canceled"
+      } as Partial<Record<SandboxStatus, AiFailureKind>>
+    )[status] || "infrastructure_error"
+  );
+}
+
+// The start of a file a program wrote (stderr), as evidence
+async function readDiagnostics(filename: string): Promise<Buffer> {
+  const file = await fs.promises.open(filename, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW).catch(() => null);
+  if (!file) return Buffer.alloc(0);
+  try {
+    const stat = await file.stat();
+    if (!stat.isFile()) return Buffer.alloc(0);
+    const buffer = Buffer.alloc(Math.min(stat.size, MAX_DIAGNOSTICS));
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await file.close();
+  }
 }
 
 export function validate(request: Request) {
@@ -362,10 +415,24 @@ async function compileSource(source: string, name: string, binaryDirectory: stri
         const diagnostics = `status=${SandboxStatus[result.status]}, exit=${result.code}, termination=${
           result.termination || "unknown"
         }, timeMs=${(result.time / 1e6).toFixed(3)}, memoryBytes=${result.memory}`;
-        const output = message.toString("utf8").trim().slice(0, 12000);
-        throw referenceError(
-          `${step.label} compilation failed (${diagnostics}): ${output || "No compiler output"}`,
-          step.candidate && result.termination === "exited"
+        // Without the colours the compiler gives its messages for the submission page; the evidence keeps them
+        const output = message
+          .toString("utf8")
+          // eslint-disable-next-line no-control-regex
+          .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+          .trim()
+          .slice(0, 12000);
+        throw describe(
+          referenceError(
+            `${step.label} compilation failed (${diagnostics}): ${output || "No compiler output"}`,
+            step.candidate && result.termination === "exited"
+          ),
+          {
+            kind: result.status === SandboxStatus.Unknown ? "infrastructure_error" : "compile_error",
+            role: step.label === "grader" ? "grader" : name,
+            execution: measureOf(result),
+            data: { diagnostics: message.subarray(0, MAX_DIAGNOSTICS) }
+          }
         );
       }
     }
@@ -434,8 +501,11 @@ async function execute(
         ],
         cpuAffinity: CpuAffinityStrategy.UserProgram
       });
+      const measure = measureOf(result, timeLimit, memoryLimit);
+      runMeasures.get(request)?.set(name, measure);
       if (name === "checker") {
-        const stderr = (await readRegular(path.join(working, "stderr")).catch(() => Buffer.alloc(0))).toString("utf8");
+        const stderrBytes = await readDiagnostics(path.join(working, "stderr"));
+        const stderr = stderrBytes.toString("utf8");
         const completed =
           result.status === SandboxStatus.OK ||
           (result.status === SandboxStatus.RuntimeError && result.termination === "exited");
@@ -445,26 +515,48 @@ async function execute(
           !isOmittableString(verdict) &&
           verdict.score != null &&
           !(result.code !== 0 && stderr.startsWith("ok"));
-        if (!valid || verdict.score !== 100)
-          throw referenceError(
-            `checker: ${SandboxStatus[result.status]} (exit ${result.code}) ${stderr.slice(0, 2000)}`,
-            !!valid && verdict.score < 100,
-            valid && verdict.score < 100 ? "WA" : undefined
+        if (!valid || verdict.score !== 100) {
+          const data = { input: files.input, actual: files.actual, expected: files.expected, diagnostics: stderrBytes };
+          throw describe(
+            referenceError(
+              `checker: ${SandboxStatus[result.status]} (exit ${result.code}) ${stderr.slice(0, 2000)}`,
+              !!valid && verdict.score < 100,
+              valid && verdict.score < 100 ? "WA" : undefined
+            ),
+            // A rejection is the checked program's; the checker failed only if it gave no valid verdict
+            valid
+              ? { kind: "solver_disagreement", verdict: "WA", data }
+              : { kind: "checker_failure", role: "checker", execution: measure, data }
           );
+        }
         return Buffer.alloc(0);
       }
       if (result.status !== SandboxStatus.OK || result.code !== 0) {
-        const message = await readRegular(path.join(working, "stderr")).catch(() => Buffer.from(""));
+        const message = await readDiagnostics(path.join(working, "stderr"));
         const verdicts = new Map<number, QualityVerdict>([
           [SandboxStatus.TimeLimitExceeded, "TLE"],
           [SandboxStatus.MemoryLimitExceeded, "MLE"],
           [SandboxStatus.RuntimeError, "RE"],
           [SandboxStatus.OutputLimitExceeded, "RE"]
         ]);
-        throw referenceError(
-          `${name}: ${SandboxStatus[result.status]} (exit ${result.code}) ${message.toString("utf8").slice(0, 2000)}`,
-          name === "std" && result.status !== SandboxStatus.Unknown,
-          verdicts.get(result.status)
+        throw describe(
+          referenceError(
+            `${name}: ${SandboxStatus[result.status]} (exit ${result.code}) ${message.toString("utf8").slice(0, 2000)}`,
+            name === "std" && result.status !== SandboxStatus.Unknown,
+            verdicts.get(result.status)
+          ),
+          {
+            kind: result.status === SandboxStatus.OK ? "runtime_error" : kindOfStatus(result.status),
+            role: name,
+            ...(verdicts.has(result.status) || result.status === SandboxStatus.OK
+              ? {
+                  verdict:
+                    result.status === SandboxStatus.OutputLimitExceeded ? "OLE" : verdicts.get(result.status) || "RE"
+                }
+              : {}),
+            execution: measure,
+            data: { input, diagnostics: message }
+          }
         );
       }
       try {
@@ -488,7 +580,20 @@ async function execute(
         return await readRegular(path.join(working, fileIo?.outputFilename || "stdout"));
       } catch (error) {
         if (name === "std" && fileIo && error.code === "ENOENT")
-          throw referenceError("Reference solution did not create its configured output file", true);
+          throw describe(referenceError("Reference solution did not create its configured output file", true), {
+            kind: "runtime_error",
+            role: "std",
+            execution: measure,
+            data: { input }
+          });
+        if (/exceeds (?:size limit|256 MiB)/.test(error.message))
+          throw describe(error, {
+            kind: "output_limit",
+            role: name,
+            verdict: "OLE",
+            execution: measure,
+            data: { input }
+          });
         throw error;
       }
     } finally {
@@ -545,13 +650,32 @@ async function executeProtocol(binaryDirectory: string, request: Request, input:
           disposer,
           communication ? { stage, managerDirectory: path.join(directory, "manager-state") } : undefined
         );
-        if (result.status !== TestcaseStatusInteraction.Accepted || result.score !== 100)
-          throw referenceError(
-            `Reference protocol failed at run ${stage}: ${result.status} ${JSON.stringify(
-              result.interactorMessage || result.systemMessage || ""
-            ).slice(0, 2000)}`,
-            result.status !== TestcaseStatusInteraction.JudgementFailed && result.failureOrigin !== "interactor"
+        if (result.status !== TestcaseStatusInteraction.Accepted || result.score !== 100) {
+          const programFailed =
+            result.status === TestcaseStatusInteraction.JudgementFailed || result.failureOrigin === "interactor";
+          const kinds: Partial<Record<TestcaseStatusInteraction, AiFailureKind>> = {
+            [TestcaseStatusInteraction.WrongAnswer]: "solver_disagreement",
+            [TestcaseStatusInteraction.PartiallyCorrect]: "solver_disagreement",
+            [TestcaseStatusInteraction.RuntimeError]: "runtime_error",
+            [TestcaseStatusInteraction.TimeLimitExceeded]: "time_limit",
+            [TestcaseStatusInteraction.MemoryLimitExceeded]: "memory_limit",
+            [TestcaseStatusInteraction.OutputLimitExceeded]: "output_limit",
+            [TestcaseStatusInteraction.JudgementFailed]: "checker_failure"
+          };
+          const message = JSON.stringify(result.interactorMessage || result.systemMessage || "").slice(0, 2000);
+          throw describe(
+            referenceError(
+              `Reference protocol failed at run ${stage}: ${result.status} ${message}`,
+              result.status !== TestcaseStatusInteraction.JudgementFailed && result.failureOrigin !== "interactor"
+            ),
+            {
+              kind: kinds[result.status] || "infrastructure_error",
+              role: programFailed ? program : "std",
+              subject: `protocol run ${stage}`,
+              data: { input, diagnostics: Buffer.from(message) }
+            }
           );
+        }
       }
     } finally {
       disposer.dispose();
@@ -565,7 +689,7 @@ async function executeProtocol(binaryDirectory: string, request: Request, input:
  */
 export async function generate(
   request: Request,
-  emit: Emit,
+  reportEvent: Emit,
   checkCanceled: () => void,
   layout: GenerationLayout = localLayout(request.jobId)
 ) {
@@ -574,6 +698,13 @@ export async function generate(
   let snapshot: string;
   const sampleHashes: string[] = [];
   let totalSampleBytes = 0;
+  let phase = "queued";
+  const emit: Emit = event => {
+    if (event.type === "progress") phase = String(event.phase);
+    reportEvent(event);
+  };
+  const measures = new Map<string, AiExecutionMeasure>();
+  runMeasures.set(request, measures);
   try {
     if (request.sampleFiles?.length) {
       snapshot = await fs.promises.mkdtemp(path.join(layout.outputRoot, ".samples-"));
@@ -624,9 +755,63 @@ export async function generate(
       }
     }
     return await generateWithSamples(request, emit, checkCanceled, snapshot, sampleHashes, layout);
+  } catch (error) {
+    // Before the sample snapshot is removed: a failure's evidence may be in it
+    if (error && typeof error === "object")
+      error.failure = await keepRunFailure(request, error, phase, layout, measures);
+    throw error;
   } finally {
+    runMeasures.delete(request);
     if (snapshot) await fs.promises.rm(snapshot, { recursive: true, force: true });
   }
+}
+
+// Keeps a failed run's evidence in the layout's evidence directory (see aiEvidence.ts)
+async function keepRunFailure(
+  request: Request,
+  error: unknown,
+  phase: string,
+  layout: GenerationLayout,
+  measures?: Map<string, AiExecutionMeasure>
+) {
+  const comparison = (request.checker || { type: "lines", caseSensitive: true }) as AiOutputComparison;
+  const checker = request.checkerCode
+    ? "custom"
+    : [
+        comparison.type,
+        ...("caseSensitive" in comparison && !comparison.caseSensitive ? ["case-insensitive"] : []),
+        ...(comparison.type === "floats" ? [`precision ${comparison.precision}`] : [])
+      ].join(", ");
+  return await keepFailure(error, phase, {
+    directory: layout.evidenceDirectory,
+    share: filename => shareWithBackend(filename, layout),
+    attemptId: layout.attemptId || crypto.randomUUID(),
+    operation: request.operation === "validate-reference" ? "validate-reference" : "generate",
+    sourceHashes: sourceHashesOf(
+      [
+        ["make", request.makeCode],
+        ["std", request.stdCode],
+        ["checker", request.checkerCode],
+        ["validator", request.validatorCode],
+        ["interactor", request.interactorCode],
+        ["manager", request.managerCode],
+        ["grader", request.graderCode],
+        ...(request.quality ? qualitySources(request.quality) : [])
+      ],
+      request.extraSourceFiles
+    ),
+    profile: profileOf(
+      {
+        auxiliary: { timeLimitMs: request.timeLimitMs, memoryLimitMiB: request.memoryLimitMiB },
+        solution: { timeLimitMs: request.stdTimeLimitMs, memoryLimitMiB: request.stdMemoryLimitMiB },
+        oracle: { timeLimitMs: 5000, memoryLimitMiB: 512 }
+      },
+      "g++ -std=c++17 -O2",
+      checker
+    ),
+    comparison: request.checkerCode ? null : comparison,
+    measures
+  });
 }
 
 async function generateWithSamples(
@@ -750,7 +935,16 @@ async function generateWithSamples(
           // eslint-disable-next-line no-control-regex
           .replace(/[\u0000-\u001f\u007f]/g, " ")
           .slice(0, 2000);
-        throw new Error(`Input validator rejected ${label}: ${reason}`);
+        const kind = detailsOf(error)?.kind;
+        throw reclassify(new Error(`Input validator rejected ${label}: ${reason}`), error, {
+          // A validator that couldn't run rejected nothing
+          kind: kind === "infrastructure_error" || kind === "canceled" ? kind : "validator_rejection",
+          role: "validator",
+          subject: label,
+          // Subtask 0 is a sample, by its number
+          ...(subtask > 0 ? { subtask, scenarioIndex: caseIndex } : {}),
+          data: { input }
+        });
       }
     };
     let samplesPassed = 0;
@@ -776,7 +970,7 @@ async function generateWithSamples(
           );
         } catch (error) {
           error.message = `${typeof label === "number" ? `sample ${label}` : label}: ${error.message}`;
-          throw error;
+          throw describe(error, { subject: typeof label === "number" ? `sample ${label}` : label });
         }
       } else {
         const comparison = await fs.promises.mkdtemp(path.join(directory, "comparison-"));
@@ -794,9 +988,27 @@ async function generateWithSamples(
             paths[1],
             request.checker || { type: "lines", caseSensitive: true }
           );
+          const subject = typeof label === "number" ? `sample ${label}` : label;
           if (!result || typeof result !== "object" || !("score" in result) || result.score == null)
-            throw new Error(`Builtin checker failed while checking ${label}`);
-          if (result.score !== 100) throw referenceError(`Output mismatch: ${label}`, true, "WA");
+            throw describe(new Error(`Builtin checker failed while checking ${label}`), {
+              kind: "infrastructure_error",
+              subject,
+              data: { input, actual, expected }
+            });
+          if (result.score !== 100)
+            throw describe(referenceError(`Output mismatch: ${label}`, true, "WA"), {
+              kind: "solver_disagreement",
+              verdict: "WA",
+              subject,
+              data: {
+                input,
+                actual,
+                expected,
+                ...(result.checkerMessage
+                  ? { diagnostics: Buffer.from(omittableStringToString(result.checkerMessage)) }
+                  : {})
+              }
+            });
         } finally {
           await fs.promises.rm(comparison, { recursive: true, force: true });
         }
@@ -822,6 +1034,10 @@ async function generateWithSamples(
               checkCanceled();
               await compareSample(input, actual, expected, label);
               checkCanceled();
+            } catch (error) {
+              // The output is removed with the directory
+              await pinEvidence(error, temporary);
+              throw error;
             } finally {
               await fs.promises.rm(temporary, { recursive: true, force: true });
             }
@@ -836,21 +1052,34 @@ async function generateWithSamples(
       checkCanceled();
       const input = Buffer.from(sample.input);
       const expected = Buffer.from(sample.output);
-      if (request.validatorCode) {
-        await validateInput(input, 0, sampleIndex + 1, `sample ${sampleIndex + 1} (subtask 0)`);
-        checkCanceled();
-        sampleInputsPassed++;
-        emit({
-          type: "progress",
-          phase: "validate-sample-inputs",
-          completed: sampleInputsPassed,
-          total: sampleCount
-        });
-      }
-      const actual = await execute(binaryDirectory, "std", request, input);
-      checkCanceled();
-      await compareSample(input, actual, expected, samplesPassed + 1);
-      if (quality) await quality.checkSample(input, expected, samplesPassed + 1);
+      await within(
+        {
+          phase: "validate-samples",
+          subject: `sample ${samplesPassed + 1}`,
+          classification: "public",
+          role: "std",
+          expectedBasis: "official_sample",
+          data: { input, expected }
+        },
+        // eslint-disable-next-line no-loop-func -- Awaited before the loop goes on
+        async () => {
+          if (request.validatorCode) {
+            await validateInput(input, 0, sampleIndex + 1, `sample ${sampleIndex + 1} (subtask 0)`);
+            checkCanceled();
+            sampleInputsPassed++;
+            emit({
+              type: "progress",
+              phase: "validate-sample-inputs",
+              completed: sampleInputsPassed,
+              total: sampleCount
+            });
+          }
+          const actual = await execute(binaryDirectory, "std", request, input);
+          checkCanceled();
+          await compareSample(input, actual, expected, samplesPassed + 1);
+          if (quality) await quality.checkSample(input, expected, samplesPassed + 1);
+        }
+      );
       samplesPassed++;
       emit({ type: "progress", phase: "validate-samples", completed: samplesPassed, total: sampleCount });
     }
@@ -859,17 +1088,36 @@ async function generateWithSamples(
       const sampleNumber = samplesPassed + 1;
       const input = { path: path.join(snapshot, sample.inputFile) };
       const expected = { path: path.join(snapshot, sample.outputFile) };
-      if (request.validatorCode) {
-        await validateInput(input, 0, sampleNumber, `sample ${sampleNumber} (subtask 0)`);
-        checkCanceled();
-        sampleInputsPassed++;
-        emit({ type: "progress", phase: "validate-sample-inputs", completed: sampleInputsPassed, total: sampleCount });
-      }
       const actual = { path: path.join(snapshot, `.actual-${sampleNumber}`) };
-      await execute(binaryDirectory, "std", request, input, [], {}, actual.path);
-      checkCanceled();
-      await compareSample(input, actual, expected, sampleNumber);
-      if (quality) await quality.checkSample(input, expected, sampleNumber);
+      // The sample files stay in the snapshot until the failure is kept
+      await within(
+        {
+          phase: "validate-samples",
+          subject: `sample ${sampleNumber}`,
+          classification: "author-private",
+          role: "std",
+          expectedBasis: "official_sample",
+          data: { input, expected }
+        },
+        // eslint-disable-next-line no-loop-func -- Awaited before the loop goes on
+        async () => {
+          if (request.validatorCode) {
+            await validateInput(input, 0, sampleNumber, `sample ${sampleNumber} (subtask 0)`);
+            checkCanceled();
+            sampleInputsPassed++;
+            emit({
+              type: "progress",
+              phase: "validate-sample-inputs",
+              completed: sampleInputsPassed,
+              total: sampleCount
+            });
+          }
+          await execute(binaryDirectory, "std", request, input, [], {}, actual.path);
+          checkCanceled();
+          await compareSample(input, actual, expected, sampleNumber);
+          if (quality) await quality.checkSample(input, expected, sampleNumber);
+        }
+      );
       await fs.promises.unlink(actual.path);
       samplesPassed++;
       emit({ type: "progress", phase: "validate-samples", completed: samplesPassed, total: sampleCount });
@@ -877,11 +1125,22 @@ async function generateWithSamples(
     for (const sample of protocol ? request.protocolSamples || [] : []) {
       checkCanceled();
       const input = Buffer.from(sample.input);
-      if (request.validatorCode) {
-        await validateInput(input, 0, protocolSamplesPassed + 1, "protocol sample");
-        sampleInputsPassed++;
-      }
-      await executeProtocol(binaryDirectory, request, input);
+      await within(
+        {
+          phase: "validate-protocol-samples",
+          subject: `protocol sample ${protocolSamplesPassed + 1}`,
+          classification: "public",
+          data: { input }
+        },
+        // eslint-disable-next-line no-loop-func -- Awaited before the loop goes on
+        async () => {
+          if (request.validatorCode) {
+            await validateInput(input, 0, protocolSamplesPassed + 1, "protocol sample");
+            sampleInputsPassed++;
+          }
+          await executeProtocol(binaryDirectory, request, input);
+        }
+      );
       protocolSamplesPassed++;
       emit({
         type: "progress",
@@ -895,34 +1154,56 @@ async function generateWithSamples(
     for (let index = 0; index < request.cases.length; index++) {
       checkCanceled();
       const { subtask, seed } = request.cases[index];
-      const input = await execute(binaryDirectory, "make", request, Buffer.from(`${subtask} ${seed}\n`), [
-        String(subtask),
-        String(seed)
-      ]);
+      const subject = `case ${index + 1} (subtask ${subtask}, case index ${seed})`;
+      const details = {
+        phase: "generate",
+        subject,
+        subtask,
+        scenarioIndex: seed,
+        classification: "hidden-test" as const
+      };
+      const input = await within(
+        details,
+        async () =>
+          await execute(binaryDirectory, "make", request, Buffer.from(`${subtask} ${seed}\n`), [
+            String(subtask),
+            String(seed)
+          ])
+      );
       checkCanceled();
-      if (request.validatorCode) {
-        await validateInput(input, subtask, seed, `case ${index + 1} (subtask ${subtask}, case index ${seed})`);
+      // eslint-disable-next-line no-loop-func -- Awaited before the loop goes on
+      const answer = await within({ ...details, data: { input } }, async () => {
+        if (request.validatorCode) {
+          await validateInput(input, subtask, seed, subject);
+          checkCanceled();
+          inputsPassed++;
+          emit({ type: "progress", phase: "validate-inputs", completed: inputsPassed, total: request.cases.length });
+        }
+        const output = protocol ? Buffer.alloc(0) : await execute(binaryDirectory, "std", request, input);
+        if (protocol) {
+          await executeProtocol(binaryDirectory, request, input);
+          protocolCasesPassed++;
+        }
         checkCanceled();
-        inputsPassed++;
-        emit({ type: "progress", phase: "validate-inputs", completed: inputsPassed, total: request.cases.length });
-      }
-      const answer = protocol ? Buffer.alloc(0) : await execute(binaryDirectory, "std", request, input);
-      if (protocol) {
-        await executeProtocol(binaryDirectory, request, input);
-        protocolCasesPassed++;
-      }
-      checkCanceled();
-      if (quality) await quality.checkCorrect(input, answer, subtask, `case ${index + 1}`);
-      if (!quality && !protocol && request.checkerCode)
-        await execute(
-          binaryDirectory,
-          "checker",
-          request,
-          Buffer.alloc(0),
-          [`${WORKING}/input`, `${WORKING}/actual`, `${WORKING}/expected`],
-          { input, actual: answer, expected: answer }
-        );
-      const kills = quality ? await quality.findKills(input, answer, subtask) : [];
+        if (quality) await quality.checkCorrect(input, output, subtask, `case ${index + 1}`);
+        if (!quality && !protocol && request.checkerCode)
+          await within({ role: "std", expectedBasis: "reference_output" }, async () => {
+            await execute(
+              binaryDirectory,
+              "checker",
+              request,
+              Buffer.alloc(0),
+              [`${WORKING}/input`, `${WORKING}/actual`, `${WORKING}/expected`],
+              { input, actual: output, expected: output }
+            );
+          });
+        return output;
+      });
+      const kills = quality
+        ? await within({ ...details, data: { input, expected: answer } }, () =>
+            quality.findKills(input, answer, subtask)
+          )
+        : [];
       checkCanceled();
       await publish(`${index + 1}.in`, input);
       await publish(`${index + 1}.out`, answer);
@@ -934,22 +1215,40 @@ async function generateWithSamples(
       while (next) {
         checkCanceled();
         const { subtask, seed } = next;
-        const input = await execute(binaryDirectory, "make", request, Buffer.from(`${subtask} ${seed}\n`), [
-          String(subtask),
-          String(seed)
-        ]);
-        await validateInput(input, subtask, seed, `adversarial search (subtask ${subtask}, seed ${seed})`);
-        const answer = await execute(binaryDirectory, "std", request, input);
-        await quality.checkCorrect(input, answer, subtask, `adversarial search seed ${seed}`);
-        const kills = await quality.findKills(input, answer, subtask);
-        if (kills.length) {
-          const index = quality.replacementIndex(finalCases, subtask);
-          if (index < 0) throw new Error("No unprotected case available for an adversarial replacement");
-          checkCanceled();
-          await replaceCase(index, input, answer);
-          finalCases[index] = next;
-          quality.recordReplacement(index, kills);
-        }
+        const details = {
+          phase: "quality-search",
+          subject: `adversarial search (subtask ${subtask}, case index ${seed})`,
+          subtask,
+          scenarioIndex: seed,
+          classification: "hidden-test" as const
+        };
+        const input = await within(
+          details,
+          async () =>
+            await execute(binaryDirectory, "make", request, Buffer.from(`${subtask} ${seed}\n`), [
+              String(subtask),
+              String(seed)
+            ])
+        );
+        // eslint-disable-next-line no-loop-func -- Awaited before the loop goes on
+        await within({ ...details, data: { input } }, async () => {
+          await validateInput(input, subtask, seed, `adversarial search (subtask ${subtask}, seed ${seed})`);
+          const answer = await execute(binaryDirectory, "std", request, input);
+          await quality.checkCorrect(input, answer, subtask, `adversarial search seed ${seed}`);
+          const kills = await quality.findKills(input, answer, subtask);
+          if (kills.length) {
+            const index = quality.replacementIndex(finalCases, subtask);
+            if (index < 0)
+              throw describe(new Error("No unprotected case available for an adversarial replacement"), {
+                kind: "insufficient_case_capacity",
+                data: { input, expected: answer }
+              });
+            checkCanceled();
+            await replaceCase(index, input, answer);
+            finalCases[index] = next;
+            quality.recordReplacement(index, kills);
+          }
+        });
         next = quality.nextSearchCase(finalCases);
       }
     }
@@ -997,8 +1296,12 @@ export async function runGeneration(
   layout?: GenerationLayout,
   key = request.jobId
 ) {
-  if (active.has(key)) throw new Error("Job already running");
-  if (active.size >= 8) throw new Error("AI generation queue is full");
+  if (active.has(key) || active.size >= 8) {
+    const error = new Error(active.has(key) ? "Job already running" : "AI generation queue is full");
+    throw Object.assign(error, {
+      failure: await keepRunFailure(request, error, "queued", layout || localLayout(request.jobId))
+    });
+  }
   active.add(key);
   try {
     const baseExecutions =
@@ -1111,7 +1414,9 @@ export async function startAiRunner() {
           emit({
             type: "error",
             message: error.message || String(error),
-            candidateFailure: request?.operation === "validate-reference" && error.candidateFailure === true
+            candidateFailure: request?.operation === "validate-reference" && error.candidateFailure === true,
+            // What failed, with its evidence in the job's failure directory
+            ...(error.failure ? { failure: error.failure } : {})
           });
         } finally {
           socket.end();

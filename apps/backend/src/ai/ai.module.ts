@@ -13,6 +13,8 @@ import { AiArtifactPublisher } from "./ai-artifact-publisher.service";
 import { AiWorkflowService } from "./ai-workflow.service";
 import { AiExecutionEntity } from "./ai-execution.entity";
 import { AiExecutionService } from "./ai-execution.service";
+import { AiObservationEntity } from "./ai-observation.entity";
+import { AiEvidenceService } from "./ai-evidence.service";
 import { AiController } from "./ai.controller";
 
 import { AuditModule } from "../audit/audit.module";
@@ -36,7 +38,8 @@ import { RedisModule } from "../redis/redis.module";
       AiUsageEntity,
       AiResponseCheckpointEntity,
       AiReservationEntity,
-      AiExecutionEntity
+      AiExecutionEntity,
+      AiObservationEntity
     ]),
     forwardRef(() => ProblemModule),
     forwardRef(() => UserModule),
@@ -53,7 +56,8 @@ import { RedisModule } from "../redis/redis.module";
     AiService,
     AiUsageService,
     AiAdmissionService,
-    AiExecutionService
+    AiExecutionService,
+    AiEvidenceService
   ],
   controllers: [AiController],
   exports: [AiService]
