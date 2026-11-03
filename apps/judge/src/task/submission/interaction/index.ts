@@ -4,6 +4,7 @@ import { v4 as uuid } from "uuid";
 import { SandboxStatus } from "simple-sandbox";
 
 import { JudgeInfoInteraction, TestcaseConfig } from "./judgeInfo";
+import { interactorLimits } from "./limits";
 
 import { SubmissionTask, SubmissionStatus, ProblemSample } from "..";
 import { compile, CompileResultSuccess } from "../../../compile";
@@ -178,8 +179,11 @@ export async function runTestcase(
     compileResultExtraInfo: compileResult.extraInfo
   });
   // By default use the testcase's time limit.
-  const interactorTimeLimit = Math.max(timeLimit, judgeInfo.interactor.timeLimit || timeLimit);
-  const interactorMemoryLimit = judgeInfo.interactor.memoryLimit || judgeInfo.memoryLimit;
+  const { timeLimit: interactorTimeLimit, memoryLimit: interactorMemoryLimit } = interactorLimits(
+    judgeInfo.interactor,
+    timeLimit,
+    judgeInfo.memoryLimit
+  );
   const interactorRunConfig = interactorLanguageConfig.run({
     binaryDirectoryInside: interactorBinaryDirectory.inside,
     workingDirectoryInside: interactorWorkingDirectory.inside,

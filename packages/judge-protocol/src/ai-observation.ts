@@ -152,6 +152,8 @@ export interface AiExecutionProfile {
   solution: { timeLimitMs: number; memoryLimitMiB: number };
   oracle: { timeLimitMs: number; memoryLimitMiB: number };
   checker: string;
+  // SHA-256 of the run's execution profiles (see ai-profile.ts); absent from judges of protocol version 6
+  executionProfiles?: string;
 }
 
 /** A failed AI run: what failed, the sources and limits it ran with, and its evidence. */
@@ -498,7 +500,10 @@ export function parseAiRunFailure(value: unknown): AiRunFailure | null {
         auxiliary: parseLimits(profile.auxiliary),
         solution: parseLimits(profile.solution),
         oracle: parseLimits(profile.oracle),
-        checker: required(text(profile.checker, AI_EVIDENCE_LIMITS.label))
+        checker: required(text(profile.checker, AI_EVIDENCE_LIMITS.label)),
+        ...optional(profile, "executionProfiles", digest =>
+          typeof digest === "string" && SHA256.test(digest) ? digest : null
+        )
       },
       observations
     };

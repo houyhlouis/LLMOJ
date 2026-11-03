@@ -11,7 +11,14 @@ import winston from "winston";
 import Queue from "promise-queue";
 
 import { SandboxResult, SandboxStatus } from "simple-sandbox";
-import type { AiExecutionMeasure, AiFailureKind, AiOutputComparison } from "@libreoj/judge-protocol";
+import {
+  aiContractDigest,
+  parseAiExecutionProfiles,
+  type AiExecutionMeasure,
+  type AiExecutionProfiles,
+  type AiFailureKind,
+  type AiOutputComparison
+} from "@libreoj/judge-protocol";
 
 import { runBuiltinChecker } from "./checkers/builtin";
 import { Checker, parseTestlibMessage } from "./checkers";
@@ -26,6 +33,8 @@ import { CompileResultSuccess } from "./compile";
 import { AiQuality, QualityRequest, QualityVerdict, qualitySources, validateQuality } from "./aiQuality";
 import { describe, detailsOf, reclassify, within } from "./aiFailure";
 import { keepFailure, pinEvidence, profileOf, sourceHashesOf } from "./aiEvidence";
+import { legacyProfiles, programDirectory, programSandbox, PROGRAM_FILE, roleProfile } from "./aiProfile";
+import { cArchitectureUnavailable } from "./architecture";
 
 import config from "./config";
 import getLanguage from "./languages";
@@ -66,6 +75,8 @@ export interface Request {
   stdTimeLimitMs?: number;
   stdMemoryLimitMiB?: number;
   memoryLimitMiB?: number;
+  // How each role's programs are compiled and run (judge protocol version 7); see aiProfile.ts without them
+  profiles?: AiExecutionProfiles;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -325,6 +336,20 @@ export function validate(request: Request) {
     )
       throw new Error("Invalid sample filename");
   }
+  if (request.profiles != null) {
+    const profiles = parseAiExecutionProfiles(request.profiles);
+    if (!profiles) throw new Error("Invalid execution profiles");
+    const { std, generator } = profiles.roles;
+    if (
+      std?.fileIo?.inputFilename !== request.stdFileIo?.inputFilename ||
+      std?.fileIo?.outputFilename !== request.stdFileIo?.outputFilename
+    )
+      throw new Error("The reference solution's profile and file IO differ");
+    // The limits a run's budget is computed from, as the profiles give them
+    if (std) [request.stdTimeLimitMs, request.stdMemoryLimitMiB] = [std.timeLimitMs, std.memoryLimitMiB];
+    if (generator) [request.timeLimitMs, request.memoryLimitMiB] = [generator.timeLimitMs, generator.memoryLimitMiB];
+    request.profiles = profiles;
+  }
   request.timeLimitMs ??= 5000;
   request.memoryLimitMiB ??= 512;
   if (!Number.isInteger(request.timeLimitMs) || request.timeLimitMs < 100 || request.timeLimitMs > 10000)
@@ -341,6 +366,17 @@ export function validate(request: Request) {
     request.stdMemoryLimitMiB > 4096
   )
     throw new Error("Invalid reference execution memory limit");
+  request.profiles ??= legacyProfiles(request);
+  for (const [name, code] of [
+    ["make", validating ? null : request.makeCode],
+    ["std", request.stdCode],
+    ["interactor", request.interactorCode],
+    ["manager", request.managerCode],
+    ["checker", request.checkerCode],
+    ["validator", request.validatorCode],
+    ...(request.quality ? qualitySources(request.quality) : [])
+  ])
+    if (code != null) roleProfile(request.profiles, name);
 }
 
 async function readRegular(filename: string, limit = MAX_FILE): Promise<Buffer> {
@@ -354,46 +390,65 @@ async function readRegular(filename: string, limit = MAX_FILE): Promise<Buffer> 
   }
 }
 
+/**
+ * Compiles a program with its role's profile (options, and testlib.h and the extra source files only if it gets them),
+ * into a binary directory of its own.
+ */
 async function compileSource(source: string, name: string, binaryDirectory: string, request: Request) {
+  const profile = roleProfile(request.profiles, name);
+  const options = profile.compileAndRunOptions;
+  const unavailable = cArchitectureUnavailable(options.m);
+  if (unavailable)
+    throw describe(new Error(`${name} can't be compiled here: ${unavailable.trim()}`), {
+      kind: "infrastructure_error",
+      role: name
+    });
   await runTaskQueued({ memory: COMPILE_RESERVATION, ai: true }, async taskDirectory => {
     const sourceDirectory = path.join(taskDirectory, "source");
     const buildDirectory = path.join(taskDirectory, "build");
     const temp = path.join(taskDirectory, "temp");
     await Promise.all([sourceDirectory, buildDirectory, temp].map(ensureDirectoryEmpty));
     await fs.promises.writeFile(path.join(sourceDirectory, "main.cpp"), source);
-    await fs.promises.copyFile(
-      path.resolve(__dirname, "../vendor/testlib/testlib.h"),
-      path.join(sourceDirectory, "testlib.h")
-    );
-    for (const [filename, content] of Object.entries(request.extraSourceFiles || {}))
-      await fs.promises.writeFile(path.join(sourceDirectory, filename), content);
+    if (profile.testlib)
+      await fs.promises.copyFile(
+        path.resolve(__dirname, "../vendor/testlib/testlib.h"),
+        path.join(sourceDirectory, "testlib.h")
+      );
+    if (profile.extraSources)
+      for (const [filename, content] of Object.entries(request.extraSourceFiles || {}))
+        await fs.promises.writeFile(path.join(sourceDirectory, filename), content);
     if (name === "std" && request.graderCode)
       await fs.promises.writeFile(path.join(sourceDirectory, "__grader.cpp"), request.graderCode);
     const cpp = getLanguage("cpp");
     const compilation = cpp.compile({
       sourceDirectoryInside: SOURCE,
       sourcePathInside: `${SOURCE}/main.cpp`,
-      additionalSourcePathsInside: name === "std" && request.graderCode ? [`${SOURCE}/__grader.cpp`] : undefined,
       binaryDirectoryInside: BINARY,
-      compileAndRunOptions: { compiler: "g++", std: "c++17", O: "2", m: "64" }
+      compileAndRunOptions: options
     });
+    // The same flags as one compilation, for the reference solution and the grader compiled apart (which of them
+    // failed is the evidence) and linked together
+    const flags = compilation.parameters.filter(
+      (parameter, i, all) =>
+        parameter != null && parameter !== "-o" && all[i - 1] !== "-o" && parameter !== `${SOURCE}/main.cpp`
+    );
     const steps =
       name === "std" && request.graderCode
         ? [
             {
               label: "grader",
               candidate: false,
-              parameters: ["-std=c++17", "-O2", "-c", `${SOURCE}/__grader.cpp`, "-o", `${BINARY}/grader.o`]
+              parameters: [...flags, "-c", `${SOURCE}/__grader.cpp`, "-o", `${BINARY}/grader.o`]
             },
             {
               label: "std",
               candidate: true,
-              parameters: ["-std=c++17", "-O2", "-c", `${SOURCE}/main.cpp`, "-o", `${BINARY}/std.o`]
+              parameters: [...flags, "-c", `${SOURCE}/main.cpp`, "-o", `${BINARY}/std.o`]
             },
             {
               label: "std link",
               candidate: true,
-              parameters: [`${BINARY}/grader.o`, `${BINARY}/std.o`, "-o", `${BINARY}/a.out`]
+              parameters: [...flags, `${BINARY}/grader.o`, `${BINARY}/std.o`, "-o", `${BINARY}/${PROGRAM_FILE}`]
             }
           ]
         : [{ label: name, candidate: name === "std", parameters: compilation.parameters }];
@@ -436,8 +491,10 @@ async function compileSource(source: string, name: string, binaryDirectory: stri
         );
       }
     }
-    const binary = await readRegular(path.join(buildDirectory, "a.out"));
-    await fs.promises.writeFile(path.join(binaryDirectory, name), binary, { mode: 0o555 });
+    const binary = await readRegular(path.join(buildDirectory, PROGRAM_FILE));
+    const directory = programDirectory(binaryDirectory, name);
+    await fs.promises.mkdir(directory, { mode: 0o755 });
+    await fs.promises.writeFile(path.join(directory, PROGRAM_FILE), binary, { mode: 0o555 });
   });
 }
 
@@ -452,8 +509,8 @@ async function execute(
   files: Record<string, Buffer | { path: string }> = {},
   outputPath?: string
 ): Promise<Buffer> {
-  const reservation = { memory: Math.max(request.memoryLimitMiB, request.stdMemoryLimitMiB), ai: true };
-  return await runTaskQueued(reservation, async taskDirectory => {
+  const profile = roleProfile(request.profiles, name);
+  return await runTaskQueued({ memory: profile.memoryLimitMiB, ai: true }, async taskDirectory => {
     const working = path.join(taskDirectory, "working");
     const temp = path.join(taskDirectory, "temp");
     await Promise.all([ensureDirectoryEmpty(working), ensureDirectoryEmpty(temp)]);
@@ -465,41 +522,32 @@ async function execute(
           await fs.promises.link(content.path, path.join(references, filename));
         }
       }
-      const solution = name === "std" || /^quality-(?:alt|challenge)-/.test(name);
-      const oracle = name === "quality-oracle";
-      let timeLimit = solution ? request.stdTimeLimitMs : request.timeLimitMs;
-      let memoryLimit = solution ? request.stdMemoryLimitMiB : request.memoryLimitMiB;
-      if (oracle) {
-        timeLimit = 5000;
-        memoryLimit = 512;
-      }
-      const fileIo = name === "std" ? request.stdFileIo : null;
+      const { timeLimitMs: timeLimit, memoryLimitMiB: memoryLimit, fileIo } = profile;
       if (fileIo) {
         if (Buffer.isBuffer(input)) await fs.promises.writeFile(path.join(working, fileIo.inputFilename), input);
         else await fs.promises.copyFile(input.path, path.join(working, fileIo.inputFilename));
       }
       const standardInput = Buffer.isBuffer(input) ? `${WORKING}/stdin` : `${SOURCE}/stdin`;
+      // Its own binary only: no program sees another's (review Part III, H05)
+      const sandbox = programSandbox(
+        profile,
+        { outside: programDirectory(binaryDirectory, name), inside: BINARY },
+        { outside: working, inside: WORKING },
+        { outside: references, inside: SOURCE }
+      );
       const result = await runSandbox(null, {
-        executable: `${BINARY}/${name}`,
+        ...sandbox,
         parameters: parameters.map(parameter => {
           const filename = parameter.startsWith(`${WORKING}/`) ? parameter.slice(WORKING.length + 1) : null;
           return filename && files[filename] && !Buffer.isBuffer(files[filename]) ? `${SOURCE}/${filename}` : parameter;
         }),
         process: 1,
-        time: timeLimit,
-        memory: memoryLimit * 1024 * 1024,
-        stackSize: memoryLimit * 1024 * 1024,
         stdin: fileIo ? "/dev/null" : standardInput,
         stdout: `${WORKING}/stdout`,
         stderr: `${WORKING}/stderr`,
         workingDirectory: WORKING,
         tempDirectoryOutside: temp,
-        extraMounts: [
-          { mappedPath: { outside: binaryDirectory, inside: BINARY }, readOnly: true },
-          { mappedPath: { outside: working, inside: WORKING }, readOnly: false },
-          { mappedPath: { outside: references, inside: SOURCE }, readOnly: true }
-        ],
-        cpuAffinity: CpuAffinityStrategy.UserProgram
+        cpuAffinity: sandbox.cpuAffinity as CpuAffinityStrategy
       });
       const measure = measureOf(result, timeLimit, memoryLimit);
       runMeasures.get(request)?.set(name, measure);
@@ -603,24 +651,27 @@ async function execute(
 }
 
 async function executeProtocol(binaryDirectory: string, request: Request, input: Buffer) {
+  const communication = request.problemType === "Communication";
+  const program = communication ? "manager" : "interactor";
+  const solution = roleProfile(request.profiles, "std");
+  const helper = roleProfile(request.profiles, program);
   // The program and its interactor or manager run together
-  const reservation = { memory: request.memoryLimitMiB + request.stdMemoryLimitMiB, ai: true };
+  const reservation = { memory: helper.memoryLimitMiB + solution.memoryLimitMiB, ai: true };
   return await runTaskQueued(reservation, async directory => {
     const disposer = new Disposer();
-    const communication = request.problemType === "Communication";
-    const program = communication ? "manager" : "interactor";
-    const options = { compiler: "g++", std: "c++17", O: "2", m: "64" };
+    // As the published judging settings give them (the judge takes the larger time limit of the two for the helper)
     const judgeInfo = {
-      timeLimit: request.stdTimeLimitMs,
-      memoryLimit: request.stdMemoryLimitMiB,
+      timeLimit: solution.timeLimitMs,
+      memoryLimit: solution.memoryLimitMiB,
       subtasks: [],
       interactor: {
         interface: "stdio" as const,
         filename: `${program}.cpp`,
         language: "cpp",
-        compileAndRunOptions: options,
-        timeLimit: request.timeLimitMs,
-        memoryLimit: request.memoryLimitMiB
+        compileAndRunOptions: helper.compileAndRunOptions,
+        timeLimit: helper.timeLimitMs,
+        memoryLimit: helper.memoryLimitMiB,
+        ...(helper.sharedMemorySize ? { sharedMemorySize: helper.sharedMemorySize } : {})
       }
     };
     const task = {
@@ -628,12 +679,17 @@ async function executeProtocol(binaryDirectory: string, request: Request, input:
       extraInfo: {
         judgeInfo,
         testData: {},
-        submissionContent: { language: "cpp", compileAndRunOptions: options, code: request.stdCode }
+        submissionContent: {
+          language: "cpp",
+          compileAndRunOptions: solution.compileAndRunOptions,
+          code: request.stdCode
+        }
       }
     };
+    // Each in its own binary directory, as everywhere
     const compiled: ExtraParametersInteraction = [
-      new CompileResultSuccess("", "", path.join(binaryDirectory, "std-isolated"), 0, ""),
-      new CompileResultSuccess("", "", path.join(binaryDirectory, `${program}-isolated`), 0, "")
+      new CompileResultSuccess("", "", programDirectory(binaryDirectory, "std"), 0, ""),
+      new CompileResultSuccess("", "", programDirectory(binaryDirectory, program), 0, "")
     ];
     try {
       for (const stage of (communication ? [1, 2] : [1]) as (1 | 2)[]) {
@@ -766,6 +822,12 @@ export async function generate(
   }
 }
 
+// The reference solution's compiler and options, as the failure's profile names them
+function compilerOf(profiles: AiExecutionProfiles | null) {
+  const options = profiles?.roles.std?.compileAndRunOptions;
+  return options ? `${options.compiler} -std=${options.std} -O${options.O} -m${options.m}` : "g++ -std=c++17 -O2";
+}
+
 // Keeps a failed run's evidence in the layout's evidence directory (see aiEvidence.ts)
 async function keepRunFailure(
   request: Request,
@@ -775,6 +837,8 @@ async function keepRunFailure(
   measures?: Map<string, AiExecutionMeasure>
 ) {
   const comparison = (request.checker || { type: "lines", caseSensitive: true }) as AiOutputComparison;
+  // The profiles, once the request was checked (a request refused before then has none it ran with)
+  const profiles = parseAiExecutionProfiles(request.profiles);
   const checker = request.checkerCode
     ? "custom"
     : [
@@ -804,9 +868,12 @@ async function keepRunFailure(
       {
         auxiliary: { timeLimitMs: request.timeLimitMs, memoryLimitMiB: request.memoryLimitMiB },
         solution: { timeLimitMs: request.stdTimeLimitMs, memoryLimitMiB: request.stdMemoryLimitMiB },
-        oracle: { timeLimitMs: 5000, memoryLimitMiB: 512 }
+        oracle: profiles?.roles.oracle
+          ? { timeLimitMs: profiles.roles.oracle.timeLimitMs, memoryLimitMiB: profiles.roles.oracle.memoryLimitMiB }
+          : { timeLimitMs: 5000, memoryLimitMiB: 512 },
+        ...(profiles ? { executionProfiles: aiContractDigest(profiles) } : {})
       },
-      "g++ -std=c++17 -O2",
+      compilerOf(profiles),
       checker
     ),
     comparison: request.checkerCode ? null : comparison,
@@ -912,14 +979,6 @@ async function generateWithSamples(
     }
     if (request.graderCode) await publish("grader.cpp", request.graderCode);
     for (const [filename, source] of Object.entries(request.extraSourceFiles || {})) await publish(filename, source);
-    if (protocol) {
-      for (const name of ["std", request.problemType === "Communication" ? "manager" : "interactor"]) {
-        const isolated = path.join(binaryDirectory, `${name}-isolated`);
-        await fs.promises.mkdir(isolated);
-        await fs.promises.copyFile(path.join(binaryDirectory, name), path.join(isolated, "a.out"));
-        await fs.promises.chmod(path.join(isolated, "a.out"), 0o555);
-      }
-    }
     // Keep validation in the same isolated execution queue as generation and judging.
     // The source has no access to host files or a network; stderr is bounded and sanitized.
     const validateInput = async (
@@ -1264,6 +1323,8 @@ async function generateWithSamples(
         sampleInputsPassed,
         protocolCasesPassed,
         protocolSamplesPassed,
+        // What the programs ran with, for the backend to compare with what it sent
+        profiles: aiContractDigest(request.profiles),
         ...(qualityResult ? { quality: qualityResult } : {})
       },
       requestHash: hash

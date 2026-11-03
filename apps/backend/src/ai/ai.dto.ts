@@ -13,6 +13,7 @@ import {
 import { Type } from "class-transformer";
 
 import { AiAction } from "./ai.entity";
+import { AiRetryFrom } from "./ai.types";
 import { MAX_CONFIGURED_OUTPUT_TOKENS } from "./ai-validation";
 
 export class LlmConfigurationDto {
@@ -87,7 +88,7 @@ export class AiUsageQueryDto {
   @IsOptional() @IsInt() @Min(1) @Max(366) days?: number;
 }
 export class AiRetryJobDto extends AiJobIdDto {
-  @IsOptional() @IsIn(["validate-samples", "std"]) retryFrom?: "validate-samples" | "std";
+  @IsOptional() @IsIn(["validate-samples", "std", "replace-scoring"]) retryFrom?: AiRetryFrom;
 }
 
 export class AiFailuresDto {

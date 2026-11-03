@@ -148,6 +148,27 @@ export class ProblemTypeTraditionalService implements ProblemTypeServiceInterfac
           recipe.standardFileIo.inputFilename === recipe.standardFileIo.outputFilename)
       )
         throw ["INVALID_SELF_EVAL_RECIPE"]; // eslint-disable-line no-throw-literal
+      if (recipe.limits != null) {
+        const { limits } = recipe;
+        const valid = (value: unknown, maximum: number) =>
+          Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= maximum;
+        // A recipe without its validator keeps no limits for it
+        if (limits && typeof limits === "object" && !recipe.validatorFile) delete limits.validator;
+        if (
+          typeof limits !== "object" ||
+          Array.isArray(limits) ||
+          Object.keys(limits).some(key => !["generator", "validator"].includes(key)) ||
+          Object.values(limits).some(
+            program =>
+              !program ||
+              typeof program !== "object" ||
+              !valid(program.timeLimit, 60000) ||
+              !valid(program.memoryLimit, 4096)
+          )
+        )
+          throw ["INVALID_SELF_EVAL_RECIPE"]; // eslint-disable-line no-throw-literal
+        for (const program of Object.values(limits)) restrictProperties(program, ["timeLimit", "memoryLimit"]);
+      }
       restrictProperties(recipe, [
         "generatorFile",
         "standardFile",
@@ -156,7 +177,8 @@ export class ProblemTypeTraditionalService implements ProblemTypeServiceInterfac
         "standardSha256",
         "validatorSha256",
         "subtaskIds",
-        "standardFileIo"
+        "standardFileIo",
+        "limits"
       ]);
       restrictProperties(recipe.standardFileIo, ["inputFilename", "outputFilename"]);
     }

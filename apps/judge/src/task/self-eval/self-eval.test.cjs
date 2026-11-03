@@ -25,8 +25,8 @@ function fixture(root) {
         compiles.push(content);
         return { content, async dereference() {} };
       },
-      runProgram: async (_id, content, compiled, input, _time, _memory, _fileIo, parameters) => {
-        calls.push({ code: compiled.content.code, input, parameters });
+      runProgram: async (_id, content, compiled, input, time, memory, _fileIo, parameters) => {
+        calls.push({ code: compiled.content.code, input, parameters, time, memory });
         return {
           status: "OK",
           output: Buffer.from(compiled.content.code === "make" ? "hidden input" : "answer"),
@@ -171,6 +171,36 @@ test("source hash drift refuses preparation before any generator can run", async
     await f.onSelfEvalPrepare(job);
     assert.equal(job.progress.at(-1).status, "ConfigurationError");
     assert.equal(f.calls.length, 0);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("the generator and validator run with the limits the AI job checked them with, or as before without them", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "llmoj-selfeval-limits-unit-"));
+  try {
+    const f = fixture(root);
+    f.sources["validator.cpp"] = path.join(root, "validator.cpp");
+    fs.writeFileSync(f.sources["validator.cpp"], "validator");
+    const testData = { "generator.cpp": "generator.cpp", "standard.cpp": "standard.cpp", "validator.cpp": "validator.cpp" };
+    const recipe = {
+      ...f.recipe,
+      validatorFile: "validator.cpp",
+      validatorSha256: crypto.createHash("sha256").update("validator").digest("hex")
+    };
+    const limits = { generator: { timeLimit: 5000, memoryLimit: 512 }, validator: { timeLimit: 4000, memoryLimit: 384 } };
+    for (const [selfEval, expected] of [
+      [{ ...recipe, limits }, [[5000, 512], [4000, 384], [700, 64]]],
+      [recipe, [[1000, 128], [1000, 128], [700, 64]]],
+      [{ ...recipe, limits: { validator: limits.validator } }, [[1000, 128], [4000, 384], [700, 64]]]
+    ]) {
+      f.calls.length = 0;
+      const job = f.task({ scope: "contest:7:problem:1", judgeInfo: { timeLimit: 700, memoryLimit: 64, selfEval }, testData });
+      await f.onSelfEvalPrepare(job);
+      assert.equal(job.progress.at(-1).status, "Ready");
+      // Generator, validator, then the reference solution with the problem's limits
+      assert.deepEqual(f.calls.map(call => [call.time, call.memory]), expected);
+    }
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
   }

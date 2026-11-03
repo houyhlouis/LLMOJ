@@ -36,6 +36,16 @@ The final report records differential counts and each rejected candidate's final
 
 Interactive and communication problems keep their existing hidden-state and protocol validation. Their jobs explicitly report that the independent brute-force and wrong-algorithm quality gate currently applies only to traditional problems.
 
+## Judging contract
+
+A test-data job works within its problem's judging contract (review Part III, W02), resolved by `ai-judging-contract.ts` before the job spends anything on programs.
+
+- **Execution profiles.** Each role of a run (`std`, `alternative`, `challenge`, `oracle`, `generator`, `validator`, `checker`, `interactor`, `manager`) has a profile: C++ compile options, time and memory limits, CPU class (user program, checker or interactor, as the judge runs it) and whether it's compiled with the bundled `testlib.h` and the problem's extra source files. The shared type and parser are `packages/judge-protocol/src/ai-profile.ts`. A checker, interactor or manager the problem already has keeps its own options and limits (the problem's where it has none); one the job writes gets the defaults and explicit limits of at least 5,000 ms and 256 MiB (at least the problem's), which it is published with. Solutions run with the problem's limits and file I/O, the job's own programs (generators, validator, oracle) with 5,000 ms and 512 MiB, and Self Eval runs the published generator and validator with those too (`selfEval.limits`). Helper settings the job can't check with (other options, limits above 60 s or 4,096 MiB) are refused before the plan (`AI_HELPER_SETTINGS_UNSUPPORTED`).
+- **The runner.** The AI runner (judge protocol 7) compiles and runs every program with its role's profile and nothing else, and reports the profiles' digest with its result; a result without it is refused (`INVALID_SANDBOX_RESPONSE`). Only judges of protocol 7 are sent AI runs. A request without profiles, from an older backend, runs as before (`aiProfile.ts`, `legacyProfiles`).
+- **Isolation.** Each program is compiled into a directory of its own and runs with only that directory mounted (read-only): no role can list, read or run another's binary. The protocol path already ran its two programs this way.
+- **Publication.** Before activation, `profileDifferences` reads the judging settings to be published the way the judge does (a checker's own limits or the problem's, an interactor's time limit at least the problem's) and stops publication if any published program would be judged with other settings than it was checked with (`AI_PROFILE_MISMATCH`).
+- **Scoring.** A problem whose judging settings have subtasks of their own has an established scoring policy: each subtask's points (automatic points worked out), scoring type (`Sum`, `GroupMin`, `GroupMul`), dependencies and own limits, and whether samples are judged first. Its SHA-256 (`scoringDigest`) is unchanged by regenerated cases that keep it. The plan is asked for these subtasks when the statement's correspond to them one to one, and keeps them (their points included); both publication paths (traditional and protocol) use `publishedSubtasks`. A plan whose subtasks differ in number, order or points, or settings bound to the replaced cases (a subtask's own limits, test case points or limits), stop the job right after the plan with `AI_SCORING_REVIEW_REQUIRED` and `state.scoringReview` (both policies and why). The owner approves exactly that change by retrying with `retryFrom: "replace-scoring"` (audited with both digests); retried without it, the job plans again after the owner changed the subtasks. A problem without subtasks of its own gets the plan's, each a sum. `data.yaml` records the scoring decision and digest, and the execution profiles with their digest.
+
 ## Failure evidence
 
 A failed run of a job's programs is kept as typed observations with their evidence (review Part III, W01), before the run's workspace is cleaned up. The shared contract is `packages/judge-protocol/src/ai-observation.ts`, exported by `@libreoj/judge-protocol`: failure kinds, artifact roles and classifications, limits, `textPreview`, `firstDifference` and `parseAiRunFailure`, which the backend applies to everything a runner sends.
@@ -56,8 +66,10 @@ node --test --test-concurrency=1 src/ai/*.test.cjs
 The judge quality suite runs without a rootfs or native sandbox:
 
 ```sh
-node --test apps/judge/src/aiQuality.test.cjs apps/judge/src/aiEvidence.test.cjs
+node --test apps/judge/src/aiQuality.test.cjs apps/judge/src/aiEvidence.test.cjs apps/judge/src/aiProfile.test.cjs
 ```
+
+`aiProfile.test.cjs` also checks the judging contract against the judge's own reading of judging settings (checker limits, interactor limits, compile parameters).
 
 Run that command from the repository root. CI runs both the backend mock suite and this judge suite, as documented in the bilingual development guides. Real sandbox acceptance requires a dedicated execution environment and verifies compilation, actual resource verdicts and checker behavior separately.
 
@@ -83,4 +95,4 @@ Browser integration requires Playwright available as a local backend development
 
 ## NOI contest Self Eval integration
 
-Successful traditional-data publication binds immutable, hash-checked copies of the exact generator, standard solution and validator used by that job. The enabled NOI / OI contest problem’s Self Eval dialog can explicitly start the existing `testdata` workflow through its AI button, regenerate formal data, reload matching make/std sources and then prepare the fixed hidden prediction set before the contest begins. The prediction judge reuses the problem’s formal checker/SPJ; handwritten configuration needs only make/std, with the bound formal validator reused when available. This binding does not expose ordinary problem-bank Self Eval or alter official scores. Runtime/API scope and quotas are enforced independently by SelfEvalService. See the bilingual [Self Eval guide](../../../../wiki/Self-Evaluation.md).
+Successful traditional-data publication binds immutable, hash-checked copies of the exact generator, standard solution and validator used by that job. The enabled NOI / OI contest problem’s Self Eval dialog can explicitly start the existing `testdata` workflow through its AI button, regenerate formal data, reload matching make/std sources and then prepare the fixed hidden prediction set before the contest begins. The prediction judge reuses the problem’s formal checker/SPJ; handwritten configuration needs only make/std, with the bound formal validator reused when available. The generator and validator run with the limits the job checked them with (`selfEval.limits`). This binding does not expose ordinary problem-bank Self Eval or alter official scores. Runtime/API scope and quotas are enforced independently by SelfEvalService. See the bilingual [Self Eval guide](../../../../wiki/Self-Evaluation.md).

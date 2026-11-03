@@ -30,6 +30,9 @@ interface Recipe {
   validatorSha256?: string;
   subtaskIds: number[];
   standardFileIo?: JudgeInfoTraditional["fileIo"];
+  // The generator's and validator's limits, as the AI job checked them; without them, the problem's (at least 1 s and
+  // 128 MiB)
+  limits?: Partial<Record<"generator" | "validator", { timeLimit: number; memoryLimit: number }>>;
 }
 interface ExtraInfo {
   judgeInfo: JudgeInfoTraditional & { selfEval?: Recipe };
@@ -84,8 +87,8 @@ export async function onSelfEvalPrepare(task: Task<ExtraInfo, SelfEvalProgress>)
         content,
         programs[0],
         `${subtask} ${seed}\n`,
-        Math.max(1000, judgeInfo.timeLimit),
-        Math.max(128, judgeInfo.memoryLimit),
+        recipe.limits?.generator?.timeLimit ?? Math.max(1000, judgeInfo.timeLimit),
+        recipe.limits?.generator?.memoryLimit ?? Math.max(128, judgeInfo.memoryLimit),
         undefined,
         [String(subtask), String(seed)]
       );
@@ -105,8 +108,8 @@ export async function onSelfEvalPrepare(task: Task<ExtraInfo, SelfEvalProgress>)
           content,
           programs[2],
           generated.output,
-          Math.max(1000, judgeInfo.timeLimit),
-          Math.max(128, judgeInfo.memoryLimit),
+          recipe.limits?.validator?.timeLimit ?? Math.max(1000, judgeInfo.timeLimit),
+          recipe.limits?.validator?.memoryLimit ?? Math.max(128, judgeInfo.memoryLimit),
           undefined,
           [String(subtask), String(seed)]
         ));

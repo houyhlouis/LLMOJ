@@ -21,3 +21,53 @@ test('malformed structured public interfaces cannot reach source generation',asy
 test('actual SPJ/interactor/manager generation requests preserve legal integer and whitespace forms',async()=>{const provider=require('./ai-provider.ts'),original=provider.generateText;try{for(const type of ['Traditional','Interaction','Communication'])await fixture(type,type==='Communication'?'run-twice':undefined,async f=>{const role=type==='Traditional'?'checker':type==='Interaction'?'interactor':'manager';delete f.job.state[role+'Code'];if(type==='Traditional')f.job.state.plan.needsSpj=true;let requests=0;provider.generateText=async(_config,_system,prompt)=>{requests++;assert(prompt.startsWith('Generate ONLY '+role+'.cpp'));assert.match(prompt,/parse the complete signed decimal token by value/);assert.match(prompt,/accept leading zeros and an optional plus sign/);assert.match(prompt,/strict formatting ONLY to explicitly stated exact syntax/);assert.match(prompt,/do not weaken required literal protocol commands/);return cpp;};await f.run();assert.equal(requests,1);assert.equal(f.publications.length,1);});}finally{provider.generateText=original;}});
 
 test('grader plan and both generated bridge roles preserve exact typed string bytes and lengths',()=>fixture('Communication','grader',async f=>{const provider=require('./ai-provider.ts'),original=provider.generateText,plan=f.job.state.plan;delete f.job.state.plan;delete f.job.state.managerCode;delete f.job.state.graderCode;delete f.job.state.protocolExtraSourceFiles;const seen=[];const inspect=(role,prompt)=>{seen.push(role);assert.match(prompt,/both manager and grader MUST implement that same framing/);assert.match(prompt,/explicit byte length and exactly that many raw bytes/);assert.match(prompt,/Never use operator>> token extraction, trim, split, strlen/);assert.match(prompt,/actual complete function return value/);assert.match(prompt,/any whitespace\/NUL byte or a 17-byte value is invalid/);assert.match(prompt,/Preserve exact public function signatures/);assert.match(prompt,/NEVER to the contents or length of a typed string/);};f.service.model=async(_config,prompt)=>{if(prompt.startsWith('Design a test-data plan')){inspect('plan',prompt);return plan;}assert(prompt.startsWith('Generate a GCC 14 C++17 communication grader'));inspect('grader',prompt);return{graderCode:cpp,extraSourceFiles:[{filename:'public.h',code:'void Alice(int); void Bob();'}]};};provider.generateText=async(_config,_system,prompt)=>{assert(prompt.startsWith('Generate ONLY manager.cpp'));inspect('manager',prompt);return cpp;};try{await f.run();assert.deepEqual(seen,['plan','manager','grader']);assert.equal(f.publications.length,1);}finally{provider.generateText=original;}}));
+
+// Review Part III, W02: the protocol path keeps the problem's scoring with the same builder, and its own interactor's
+// settings, which its checks run with
+test('protocol regeneration keeps the scoring and the interactor settings it was checked with', () =>
+  fixture('Interaction', undefined, async f => {
+    const { existingScoring } = require('./ai-judging-contract.ts');
+    const interactor = {
+      interface: 'stdio',
+      language: 'cpp',
+      compileAndRunOptions: { compiler: 'clang++', std: 'c++20', O: '3', m: '64' },
+      filename: 'interactor.cpp',
+      timeLimit: 3000,
+      memoryLimit: 64,
+      sharedMemorySize: 8
+    };
+    f.snapshot.judgeInfo = {
+      timeLimit: 1700,
+      memoryLimit: 128,
+      runSamples: false,
+      subtasks: [{ points: 100, scoringType: 'GroupMin', testcases: [{ inputFile: 'old.in' }] }],
+      interactor
+    };
+    f.job.state.testdataSnapshotHash = f.service.testdataFingerprint(f.snapshot);
+    await f.run();
+    const [info] = f.publications;
+    assert.deepEqual(info.subtasks.map(({ testcases, ...settings }) => settings), [{ points: 100, scoringType: 'GroupMin' }]);
+    assert.equal(existingScoring(info).digest, existingScoring(f.snapshot.judgeInfo).digest);
+    assert.deepEqual({ ...info.interactor, filename: 'interactor.cpp' }, interactor);
+    assert.deepEqual(f.requests[0].profiles.roles.interactor, {
+      language: 'cpp',
+      compileAndRunOptions: interactor.compileAndRunOptions,
+      timeLimitMs: 3000,
+      memoryLimitMiB: 64,
+      cpu: 'Interactor',
+      testlib: true,
+      extraSources: true,
+      sharedMemorySize: 8,
+      origin: 'problem'
+    });
+  }));
+
+test('a generated interactor is checked with the limits it is published with', () =>
+  fixture('Interaction', undefined, async f => {
+    await f.run();
+    const [info] = f.publications;
+    const profile = f.requests[0].profiles.roles.interactor;
+    assert.deepEqual([info.interactor.timeLimit, info.interactor.memoryLimit], [5000, 256]);
+    assert.deepEqual([profile.timeLimitMs, profile.memoryLimitMiB, profile.origin], [5000, 256, 'ai']);
+    assert.equal(f.requests[0].profiles.roles.checker, undefined);
+  }));

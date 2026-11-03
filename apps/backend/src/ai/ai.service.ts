@@ -7,7 +7,7 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 
 import { AiJobEntity } from "./ai.entity";
-import { AiConfiguration, AiError, providerPresets } from "./ai.types";
+import { AiConfiguration, AiError, AiRetryFrom, providerPresets } from "./ai.types";
 import {
   generateText,
   isAllowedPrivateHost,
@@ -347,7 +347,7 @@ export class AiService {
       progress: job.progress,
       step: job.step,
       error: job.error,
-      retryOptions: this.workflow.canRetrySamples(job) ? ["validate-samples", "std"] : [],
+      retryOptions: this.workflow.retryOptions(job),
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
       result: {
@@ -370,7 +370,12 @@ export class AiService {
           : undefined,
         // Failed runs kept with their evidence (see failures), and the one that ended the latest run
         observationCount: observations?.count || 0,
-        failure: observations?.failure
+        failure: observations?.failure,
+        // How the published data awards points and runs its helpers (see ai-judging-contract.ts)
+        scoring: job.state.generated?.scoring,
+        helpers: job.state.generated?.helpers,
+        // A scoring change that waits for the owner's approval
+        scoringReview: job.status === "failed" ? job.state.scoringReview : undefined
       }
     };
   }
@@ -462,7 +467,7 @@ export class AiService {
     return { url };
   }
 
-  async retry(user: UserEntity, id: string, retryFrom?: "validate-samples" | "std") {
+  async retry(user: UserEntity, id: string, retryFrom?: AiRetryFrom) {
     await this.coordinator.requirePrivilege(user, UserPrivilegeType.UseAi);
     const job = await this.jobs.findOneBy({ id, ownerId: user.id });
     if (!job) throw new AiError("NO_SUCH_JOB");
@@ -470,8 +475,13 @@ export class AiService {
     if (job.problemId) await this.coordinator.editable(user, job.problemId);
     if (["testdata", "all", "import"].includes(job.action))
       await this.coordinator.requirePrivilege(user, UserPrivilegeType.GenerateTestdata);
+    // An approved scoring change is recorded with what was approved
+    const review = retryFrom === "replace-scoring" ? job.state.scoringReview : undefined;
     await this.coordinator.requeue(user, job, () => this.workflow.retryState(job, retryFrom));
-    await this.coordinator.recordAiAudit(user, "job.retry", job, { retryFrom: retryFrom || "default" });
+    await this.coordinator.recordAiAudit(user, "job.retry", job, {
+      retryFrom: retryFrom || "default",
+      ...(review ? { scoringFrom: review.currentDigest, scoringTo: review.proposedDigest } : {})
+    });
     this.coordinator.wake();
     return {};
   }

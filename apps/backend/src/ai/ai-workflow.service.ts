@@ -11,8 +11,10 @@ import { DataSource, EntityManager } from "typeorm";
 
 import yaml from "js-yaml";
 
+import { aiContractDigest } from "@libreoj/judge-protocol";
+
 import { AiJobEntity, AiAction } from "./ai.entity";
-import { AiConfiguration, AiError } from "./ai.types";
+import { AiConfiguration, AiError, AiRetryFrom } from "./ai.types";
 import { generateText, searchWeb, parseModelJson } from "./ai-provider";
 import { discoverProblemSource, importSourceCandidates } from "./ai-source-search";
 import { resolveAiFileIo, detectAiFileIo } from "./ai-file-io";
@@ -40,6 +42,19 @@ import { CALIBRATION, exactCodeforcesRating } from "./codeforces-calibration";
 import { normalizeAiMarkdown, normalizeAiSections, AI_MARKDOWN_RULES } from "./ai-content";
 
 import { allocateAiTestcases } from "./ai-case-allocation";
+import {
+  AiProfileInput,
+  decideScoring,
+  existingScoring,
+  helperSummaries,
+  problemHelperSettings,
+  profileDifferences,
+  publishedChecker,
+  publishedProtocolHelper,
+  publishedSubtasks,
+  resolveAiProfiles,
+  selfEvalLimits
+} from "./ai-judging-contract";
 import {
   normalizeAiQualityPlan,
   allocateAiFuzzCases,
@@ -294,8 +309,24 @@ export class AiWorkflowService implements AiWorkflowRunner {
     }
   }
 
-  retryState(job: AiJobEntity, retryFrom?: "validate-samples" | "std"): AiJobEntity["state"] {
+  retryState(job: AiJobEntity, retryFrom?: AiRetryFrom): AiJobEntity["state"] {
     const state = { ...job.state };
+    if (retryFrom === "replace-scoring") {
+      // The owner approves exactly the change they were shown: if the problem or the plan changes, it's reviewed again
+      const review = job.state.scoringReview;
+      if (!this.retryOptions(job).includes("replace-scoring")) throw new AiError("INVALID_RETRY_MODE");
+      state.scoringApproval = { currentDigest: review.currentDigest, proposedDigest: review.proposedDigest };
+      delete state.scoringReview;
+      return state;
+    }
+    if (job.error?.startsWith("AI_SCORING_REVIEW_REQUIRED")) {
+      // Retried as it is, after the owner changed the problem's subtasks (or not): planned again from the start
+      delete state.plan;
+      delete state.scoringReview;
+      delete state.testdataSnapshotHash;
+      delete state.testdataPublishedSnapshotHash;
+      return state;
+    }
     // A rejected OCR result is not a completed artifact. An explicit retry must read the
     // original image/Markdown again instead of replaying the same invalid extraction forever.
     if (job.action === "import" && !job.problemId) {
@@ -372,6 +403,13 @@ export class AiWorkflowService implements AiWorkflowRunner {
       }
     }
     return state;
+  }
+
+  /** The ways a failed job can be retried besides from its failed step (see AiRetryFrom). */
+  retryOptions(job: AiJobEntity): AiRetryFrom[] {
+    if (job.status === "failed" && job.error?.startsWith("AI_SCORING_REVIEW_REQUIRED") && job.state.scoringReview)
+      return ["replace-scoring"];
+    return this.canRetrySamples(job) ? ["validate-samples", "std"] : [];
   }
 
   canRetrySamples(job: AiJobEntity): boolean {
@@ -1152,10 +1190,7 @@ export class AiWorkflowService implements AiWorkflowRunner {
               stdFileIo: plan.fileIo || null,
               samples,
               sampleFiles: sampleFiles.files,
-              timeLimitMs: 5000,
-              memoryLimitMiB: 512,
-              stdTimeLimitMs: plan.timeLimitMs,
-              stdMemoryLimitMiB: plan.memoryLimitMiB
+              ...this.runProfiles(problem, snapshot, plan, plan.fileIo || null)
             },
             async () => {
               await this.coordinator.assertJob(job);
@@ -1310,6 +1345,16 @@ export class AiWorkflowService implements AiWorkflowRunner {
         }`
       : "";
     const existingHelpers = await this.readExistingAiHelpers(job, problem, snapshot);
+    // The problem's own helpers with settings the job can't check them with are refused before it spends anything
+    resolveAiProfiles({
+      problemType: problem.type as AiProfileInput["problemType"],
+      judgeInfo: existingJudgeInfo,
+      timeLimitMs: existingJudgeInfo.timeLimit || 1000,
+      memoryLimitMiB: existingJudgeInfo.memoryLimit || 256,
+      checker: !!problemHelperSettings(existingJudgeInfo, "checker")
+    });
+    // How the problem already awards points, if it does: kept unless its owner approves a change (review Part III, H04)
+    const establishedScoring = existingScoring(existingJudgeInfo);
     for (const key of ["checkerCode", "interactorCode", "managerCode", "graderCode"])
       if (!job.state[key] && existingHelpers[key]) job.state[key] = existingHelpers[key];
     if (existingHelpers.extraSourceFiles)
@@ -1324,7 +1369,17 @@ export class AiWorkflowService implements AiWorkflowRunner {
         config,
         `Design a test-data plan following EXACTLY the subtask constraints and scores in this statement. There will be ${count} input/output pairs. Return JSON {"subtasks":[{"id":1,"points":100,"constraints":"precise legal bounds and special properties","coverage":["minimum","maximum","adversarial structures"]}],"needsSpj":false,"spjReason":"...","caseSensitive":true,"outputComparison":"tokens","timeLimitMs":1000,"memoryLimitMiB":256,"fileIo":null}. The effective judging fileIo is already verified as ${JSON.stringify(
           effectiveFileIo
-        )}; echo it unchanged. A null value means stdin/stdout. The backend keeps this authoritative setting regardless of your suggestion. Filenames in attachments or sample data are not contestant file-I/O requirements. Never infer file names from an archive, source website, problem title, or generic input-file prose. If no subtasks exist create one full-constraint subtask worth 100. Each subtask must have at least one generated case; retain every stated subtask, at most 1000 subtasks; the actual total case count will be raised if needed to preserve equal points per case. Scores must sum to 100. Parse the stated time limit into milliseconds and memory limit into MiB (1 MB is treated as 1 MiB). If not stated, use the supplied judgeInfo limits. Decide whether multiple valid answers, floating tolerance, or case-insensitive answer tokens require a special checker. caseSensitive must be a boolean: false if the statement accepts any letter case, true otherwise. Case-insensitive token output requires needsSpj=true and a whitespace-tokenizing case-folding checker. Preserve every explicitly permitted output format. outputComparison is tokens by default, so legal spaces, CRLF and line wrapping are equivalent; use lines ONLY if the statement explicitly makes line structure significant. Floating tolerance is never approximated by token equality: require SPJ with the exact stated tolerance, including absolute/relative combination. Reject nonfinite values and extra tokens. State both per-field bounds and global constraints (including sums over test cases, relationships, and invariants after EVERY update) in each subtask. Maximum individual values must never violate a combined bound. Do not invent missing ranges. ${protocolInstructions}\n${data}`
+        )}; echo it unchanged. A null value means stdin/stdout. The backend keeps this authoritative setting regardless of your suggestion. Filenames in attachments or sample data are not contestant file-I/O requirements. Never infer file names from an archive, source website, problem title, or generic input-file prose. ${
+          establishedScoring
+            ? `The problem's judging settings already define ${
+                establishedScoring.policy.subtasks.length
+              } subtasks in this order, worth ${JSON.stringify(
+                establishedScoring.policy.subtasks.map(item => Math.round(item.points * 100) / 100)
+              )} points: when the statement's subtasks correspond to them one to one, return exactly these, in this order, with ids 1..${
+                establishedScoring.policy.subtasks.length
+              } and these points. Otherwise return the statement's own subtasks; never invent a correspondence. `
+            : ""
+        }If no subtasks exist create one full-constraint subtask worth 100. Each subtask must have at least one generated case; retain every stated subtask, at most 1000 subtasks; the actual total case count will be raised if needed to preserve equal points per case. Scores must sum to 100. Parse the stated time limit into milliseconds and memory limit into MiB (1 MB is treated as 1 MiB). If not stated, use the supplied judgeInfo limits. Decide whether multiple valid answers, floating tolerance, or case-insensitive answer tokens require a special checker. caseSensitive must be a boolean: false if the statement accepts any letter case, true otherwise. Case-insensitive token output requires needsSpj=true and a whitespace-tokenizing case-folding checker. Preserve every explicitly permitted output format. outputComparison is tokens by default, so legal spaces, CRLF and line wrapping are equivalent; use lines ONLY if the statement explicitly makes line structure significant. Floating tolerance is never approximated by token equality: require SPJ with the exact stated tolerance, including absolute/relative combination. Reject nonfinite values and extra tokens. State both per-field bounds and global constraints (including sums over test cases, relationships, and invariants after EVERY update) in each subtask. Maximum individual values must never violate a combined bound. Do not invent missing ranges. ${protocolInstructions}\n${data}`
       );
       if (
         !plan ||
@@ -1406,6 +1461,20 @@ export class AiWorkflowService implements AiWorkflowRunner {
     }
     if (snapshot.judgeInfo.timeLimit != null) plan.timeLimitMs = snapshot.judgeInfo.timeLimit;
     if (snapshot.judgeInfo.memoryLimit != null) plan.memoryLimitMiB = snapshot.judgeInfo.memoryLimit;
+    // Before any program is written: the problem's scoring is kept, or its owner reviews the change
+    const scoring = decideScoring(establishedScoring, plan.subtasks, !protocolProblem, job.state.scoringApproval);
+    if ("review" in scoring) {
+      job.state.scoringReview = scoring.review;
+      await this.coordinator.checkpoint(job, "testdata.plan", job.progress);
+      throw new AiError("AI_SCORING_REVIEW_REQUIRED");
+    }
+    const scoringDecision = scoring.decision;
+    delete job.state.scoringReview;
+    // The cases are shared out by the points the problem keeps
+    if (scoringDecision.problemSubtasks)
+      plan.subtasks.forEach((item, index) => {
+        item.points = scoringDecision.policy.subtasks[index].points;
+      });
     const allocation = allocateAiTestcases(plan.subtasks, job.input.count);
     count = allocation.count;
     job.state.caseAllocation = allocation;
@@ -1678,6 +1747,8 @@ export class AiWorkflowService implements AiWorkflowRunner {
     }
     // The runner wire field "seed" is a case index, not an RNG seed.
     const { cases } = allocation;
+    // How each program is compiled and run, as the published judging settings will give them (review Part III, H03)
+    const run = this.runProfiles(problem, snapshot, plan, job.state.stdFileIo || null);
     await this.coordinator.checkpoint(job, "testdata.compile", base + share * 0.45);
     const sampleFiles = protocolProblem
       ? { files: [], directory: null }
@@ -1717,10 +1788,7 @@ export class AiWorkflowService implements AiWorkflowRunner {
           validatorCode: job.state.validatorCode,
           ...(plan.needsSpj ? { checkerCode: job.state.checkerCode } : {}),
           cases,
-          timeLimitMs: 5000,
-          memoryLimitMiB: 512,
-          stdTimeLimitMs: plan.timeLimitMs,
-          stdMemoryLimitMiB: plan.memoryLimitMiB,
+          ...run,
           samples: inlineSamples,
           sampleFiles: sampleFiles.files
         },
@@ -1849,25 +1917,17 @@ export class AiWorkflowService implements AiWorkflowRunner {
         memoryLimit: plan.memoryLimitMiB,
         fileIo: planFileIo,
         extraSourceFiles: previous.extraSourceFiles,
-        runSamples: true,
+        runSamples: scoringDecision.policy.runSamples,
         hiddenSamples: previous.hiddenSamples || [],
-        subtasks: plan.subtasks.map(item => ({
-          points: item.points,
-          scoringType: "Sum",
-          testcases: cases.flatMap((testcase, index) =>
-            testcase.subtask === item.id
-              ? [{ inputFile: `${prefix}${index + 1}.in`, outputFile: `${prefix}${index + 1}.out` }]
-              : []
-          )
-        })),
+        // One builder for both paths: the decided scoring, with the new cases (review Part III, H04)
+        subtasks: publishedSubtasks(
+          scoringDecision,
+          plan.subtasks.map(item => item.id),
+          cases,
+          index => ({ inputFile: `${prefix}${index + 1}.in`, outputFile: `${prefix}${index + 1}.out` })
+        ),
         checker: plan.needsSpj
-          ? {
-              type: "custom",
-              interface: "testlib",
-              language: CodeLanguage.Cpp,
-              compileAndRunOptions: { compiler: "g++", std: "c++17", O: "2", m: "64" },
-              filename: `${prefix}checker.cpp`
-            }
+          ? publishedChecker(run.profiles, previous.checker, `${prefix}checker.cpp`)
           : plan.builtinChecker || { type: plan.outputComparison || "tokens", caseSensitive: plan.caseSensitive }
       };
       if (protocolProblem) {
@@ -1899,22 +1959,14 @@ export class AiWorkflowService implements AiWorkflowRunner {
         judgeInfo = {
           timeLimit: plan.timeLimitMs,
           memoryLimit: plan.memoryLimitMiB,
-          runSamples: false,
-          subtasks: plan.subtasks.map(item => ({
-            points: item.points,
-            scoringType: "Sum",
-            testcases: cases.flatMap((testcase, index) =>
-              testcase.subtask === item.id ? [{ inputFile: `${prefix}${index + 1}.in` }] : []
-            )
-          })),
-          [role]: {
-            interface: role === "interactor" ? "stdio" : "run-twice",
-            language: CodeLanguage.Cpp,
-            compileAndRunOptions: { compiler: "g++", std: "c++17", O: "2", m: "64" },
-            filename: `${prefix}${role}.cpp`,
-            timeLimit: Math.max(5000, plan.timeLimitMs),
-            memoryLimit: Math.max(256, plan.memoryLimitMiB)
-          },
+          runSamples: scoringDecision.policy.runSamples,
+          subtasks: publishedSubtasks(
+            scoringDecision,
+            plan.subtasks.map(item => item.id),
+            cases,
+            index => ({ inputFile: `${prefix}${index + 1}.in` })
+          ),
+          [role]: publishedProtocolHelper(run.profiles, role, previous[role], `${prefix}${role}.cpp`),
           extraSourceFiles: {
             ...(previous.extraSourceFiles || {}),
             [CodeLanguage.Cpp]: { ...(previous.extraSourceFiles?.[CodeLanguage.Cpp] || {}), ...extraSources }
@@ -1962,10 +2014,15 @@ export class AiWorkflowService implements AiWorkflowRunner {
             standardSha256: createHash("sha256").update(job.state.stdCode).digest("hex"),
             validatorSha256: createHash("sha256").update(job.state.validatorCode).digest("hex"),
             subtaskIds: plan.subtasks.map(item => item.id),
-            ...(job.state.stdFileIo ? { standardFileIo: job.state.stdFileIo } : {})
+            ...(job.state.stdFileIo ? { standardFileIo: job.state.stdFileIo } : {}),
+            // Self Eval runs them with the limits they were checked with
+            limits: selfEvalLimits(run.profiles)
           }
         });
       }
+      // Each published program is judged as it was checked: no larger budget, no other options (review Part III, H03)
+      const differences = profileDifferences(run.profiles, judgeInfo, problem.type);
+      if (differences.length) throw new AiError("AI_PROFILE_MISMATCH", differences.join(", "));
       const yamlContent = yaml.dump({
         ...judgeInfo,
         generation: {
@@ -1977,6 +2034,12 @@ export class AiWorkflowService implements AiWorkflowRunner {
             subtasks: allocation.allocations
           },
           sampleValidation: result.validation || "runner",
+          scoring: {
+            status: scoringDecision.status,
+            digest: scoringDecision.digest,
+            ...(scoringDecision.previousDigest ? { previousDigest: scoringDecision.previousDigest } : {})
+          },
+          executionProfiles: { digest: aiContractDigest(run.profiles), ...run.profiles },
           ...(qualityRequest
             ? {
                 qualityPlan: job.state.qualityPlan,
@@ -2028,6 +2091,14 @@ export class AiWorkflowService implements AiWorkflowRunner {
         subtasks: plan.subtasks.length,
         checker: plan.needsSpj,
         sampleValidation: result.validation,
+        scoring: {
+          status: scoringDecision.status,
+          subtasks: scoringDecision.policy.subtasks.length,
+          digest: scoringDecision.digest,
+          ...(scoringDecision.previousDigest ? { previousDigest: scoringDecision.previousDigest } : {})
+        },
+        profiles: aiContractDigest(run.profiles),
+        helpers: helperSummaries(run.profiles),
         ...(qualityRequest ? { qualityValidation: result.validation.quality } : {})
       };
     } finally {
@@ -2114,9 +2185,42 @@ export class AiWorkflowService implements AiWorkflowRunner {
     await this.execution?.cleanup(jobId);
   }
 
+  /**
+   * A run's execution profiles (see ai-judging-contract.ts), and the limits a runner reads from them for its budget.
+   * `stdFileIo` is the reference solution's: a tutorial's may use the problem's files, a generated one never does.
+   */
+  private runProfiles(
+    problem: ProblemEntity,
+    snapshot: AiProblemSnapshot,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Legacy AI plan shapes are validated at runtime.
+    plan: any,
+    stdFileIo: { inputFilename: string; outputFilename: string } | null
+  ) {
+    const profiles = resolveAiProfiles({
+      problemType: problem.type as AiProfileInput["problemType"],
+      judgeInfo: snapshot.judgeInfo,
+      timeLimitMs: plan.timeLimitMs,
+      memoryLimitMiB: plan.memoryLimitMiB,
+      fileIo: stdFileIo,
+      checker: !!plan.needsSpj
+    });
+    const { generator, std } = profiles.roles;
+    return {
+      profiles,
+      timeLimitMs: generator.timeLimitMs,
+      memoryLimitMiB: generator.memoryLimitMiB,
+      stdTimeLimitMs: std.timeLimitMs,
+      stdMemoryLimitMiB: std.memoryLimitMiB
+    };
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The versioned runner wire payload is checked by the operation-specific consumers below.
-  private runSandbox(job: AiJobEntity, request: any, progress: (value: any) => Promise<void>): Promise<any> {
-    if (!this.execution) return Promise.reject(new AiError("SANDBOX_UNAVAILABLE"));
-    return this.execution.run(job, request, progress, async () => await this.coordinator.assertJob(job));
+  private async runSandbox(job: AiJobEntity, request: any, progress: (value: any) => Promise<void>): Promise<any> {
+    if (!this.execution) throw new AiError("SANDBOX_UNAVAILABLE");
+    const result = await this.execution.run(job, request, progress, async () => await this.coordinator.assertJob(job));
+    // The programs ran with exactly the profiles sent (a runner that ignored them can't qualify anything)
+    if (request.profiles && result?.validation?.profiles !== aiContractDigest(request.profiles))
+      throw new AiError("INVALID_SANDBOX_RESPONSE", "The runner didn't report the execution profiles it was sent");
+    return result;
   }
 }

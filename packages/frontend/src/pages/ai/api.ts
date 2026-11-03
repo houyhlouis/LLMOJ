@@ -237,6 +237,18 @@ const errors: Record<string, [string, string]> = {
     "当前辅助评测程序的语言或接口不支持 AI 自动生成；请使用受支持的 C++、testlib、标准输入输出协议，或手动配置评测。",
     "The configured judging helper is unsupported by AI generation. Use a supported C++/testlib/stdio protocol or configure judging manually."
   ],
+  AI_HELPER_SETTINGS_UNSUPPORTED: [
+    "题目自带的评测辅助程序使用了 AI 无法按原设置检验的编译选项或限制（时限至多 60 秒、内存至多 4096 MiB）。请调整其设置后重试。",
+    "The problem's own judging helper has compile options or limits that AI generation can't check it with (at most 60 seconds and 4096 MiB). Change its settings and retry."
+  ],
+  AI_SCORING_REVIEW_REQUIRED: [
+    "生成的数据无法按题目现有的计分设置发布。请查看下方的差异：确认后可按新的设置继续，或先在评测设置中修改子任务后重试。",
+    "The generated data can't be published with the problem's current scoring settings. Review the difference below: approve it to continue with the new settings, or change the subtasks in the judging settings first and retry."
+  ],
+  AI_PROFILE_MISMATCH: [
+    "即将发布的评测设置与检验数据时使用的设置不一致，已停止发布。",
+    "The judging settings to be published differ from the ones the data was checked with, so nothing was published."
+  ],
   AI_PROTOCOL_HELPER_MISSING: [
     "已配置的辅助评测程序源文件缺失，请上传文件或修正评测配置。",
     "A configured judging helper source file is missing. Upload it or correct the judge settings."
@@ -557,6 +569,26 @@ export interface AiObservation {
     solution: { timeLimitMs: number; memoryLimitMiB: number };
   };
 }
+export type AiRetryFrom = "validate-samples" | "std" | "replace-scoring";
+
+/** How a problem awards points, as an AI job keeps or replaces it. */
+export interface AiScoringPolicy {
+  runSamples: boolean;
+  subtasks: Array<{
+    points: number;
+    scoringType: "Sum" | "GroupMin" | "GroupMul";
+    dependencies: number[];
+    timeLimit?: number;
+    memoryLimit?: number;
+  }>;
+}
+
+export type AiScoringReason =
+  | { code: "SUBTASK_COUNT"; current: number; proposed: number }
+  | { code: "SUBTASK_POINTS"; subtask: number; current: number; proposed: number }
+  | { code: "SUBTASK_ORDER" }
+  | { code: "SUBTASK_LIMITS" | "CASE_LIMITS" | "CASE_POINTS"; subtask: number };
+
 export interface AiJob {
   id: string;
   problemId?: number;
@@ -565,7 +597,7 @@ export interface AiJob {
   progress: number;
   step: string;
   error?: string;
-  retryOptions?: Array<"validate-samples" | "std">;
+  retryOptions?: AiRetryFrom[];
   result: {
     discussionId?: number;
     discussionIds?: Record<string, number>;
@@ -577,6 +609,21 @@ export interface AiJob {
     requestedCount?: number;
     generatedCount?: number;
     observationCount?: number;
+    scoring?: { status: "kept" | "new" | "replaced"; subtasks: number; digest: string; previousDigest?: string };
+    helpers?: Array<{
+      role: "checker" | "interactor" | "manager";
+      origin: "problem" | "ai";
+      options: string;
+      timeLimitMs: number;
+      memoryLimitMiB: number;
+    }>;
+    scoringReview?: {
+      current: AiScoringPolicy;
+      proposed: AiScoringPolicy;
+      currentDigest: string;
+      proposedDigest: string;
+      reasons: AiScoringReason[];
+    };
     failure?: Pick<
       AiObservation,
       "id" | "kind" | "phase" | "role" | "candidate" | "subject" | "verdict" | "evidence" | "expiresAt"

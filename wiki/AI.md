@@ -164,11 +164,22 @@ The job shows the differential counts, the second solution's checks, each target
 
 Interactive and communication problems keep their protocol simulation and checks but can't use this independent testing; they get a `TESTDATA_QUALITY_PROTOCOL_UNSUPPORTED` warning. However many tests pass, they can't prove that every wrong or slow program fails, or that the reference solution is correct. All this takes more model calls, money and time; see [AI environment](AI-Environment.md).
 
+## Scoring and judging settings
+
+Generating test data replaces a problem's test cases, not how they're judged.
+
+- **Scoring.** If the problem's judging settings have subtasks of their own, the job keeps them: each subtask's points, how it's scored (the sum of its test cases, its lowest test case, which makes it all or nothing, or their product), the subtasks it depends on, and whether a submission that fails a sample gets no points. The new test cases are shared out by those points. The job stops right after planning, before writing any program, if the statement's subtasks don't match the problem's (another number, order or points), if a subtask has its own time or memory limit, or if test cases have their own points or limits (those belong to the cases being replaced). It then shows **The problem's settings** beside **Published if you approve**, and why. **Approve the new scoring and continue** publishes exactly that change, and the approval is recorded in the audit log; if the problem or the plan has changed since, the change is shown again. To keep the problem's scoring instead, change its subtasks in the judging settings and choose **Retry (subtasks changed)**. A problem without subtasks of its own gets the statement's, each the sum of its test cases.
+- **Checkers, interactors and managers.** One the problem already has keeps its compile options (compiler, C++ standard, optimization, architecture) and its time and memory limits, and the job checks the data with exactly those. One the job writes is published with explicit limits, at least 5 seconds and 256 MiB (the problem's limits if they're higher): the ones it was checked with. A checker is never checked with more time or memory than it gets when judging submissions. Settings the job can't check with (limits over 60 seconds or 4,096 MiB) stop it before it starts.
+- **Isolation.** Each program of a job (generators, reference solution, input validator, checker, oracle, second solution and challenges) runs seeing only its own compiled program, never another's: a challenge can't pass by running the reference solution.
+- **In the job.** A finished job says whether it kept, set or replaced the scoring settings, and how its checker, interactor or manager was compiled and limited. `data.yaml` records the scoring decision with its SHA-256 digest (`scoring`), and each program's settings (`executionProfiles`).
+
+AI test data programs run on judges of protocol version 7 or later; see [Distributed judging](Distributed-Judging.md#ai).
+
 ## Uploads, cancelling and failures
 
 - A job is created only after its files have uploaded successfully. **Cancel upload** stops a preparation or upload, and leaving the page cancels them. Once the server has accepted a job, closing the page doesn't stop it: cancel it in **My AI jobs**. If starting a job timed out, look at **My AI jobs** before importing again.
 - Cancelling can't undo what the provider has already charged or what the job has already published.
-- If the generated `make.cpp` doesn't compile, the model gets one chance to repair it, with the compiler's own messages (up to 8,000 characters). Uploaded checkers, interactors, managers and graders are never rewritten. A second failure, a sample failure or a failed data check fails the job.
+- If the generated `make.cpp` doesn't compile, the model gets one chance to repair it, with the compiler's own messages (up to 8,000 characters). Uploaded checkers, interactors, managers and graders are never rewritten, and keep their own compile options and limits. A second failure, a sample failure or a failed data check fails the job.
 - Solutions are checked for claims about sources and scoring before they're published; this doesn't replace reviewing their algorithms yourself.
 - If a browser can't read a file (for example Firefox installed as a Snap reading files owned by root), copy the file into a folder your desktop user owns. Don't turn off the browser's sandbox.
 
@@ -200,7 +211,7 @@ Usage records keep each request's provider, model, timing and reported usage, ne
 
 AI-written solutions appear in the problem's **Solutions** tab and in their author's **My discussions**; see [Solutions](Solutions.md).
 
-Publishing official data for a traditional problem also saves the make.cpp, std.cpp and input validator that produced it, for later NOI / OI contests with [Self Eval](Self-Evaluation.md). In **Configure Self Eval**, **AI: generate official data and Self Eval programs** runs the test data action and uses the manager's own AI configuration and permissions.
+Publishing official data for a traditional problem also saves the make.cpp, std.cpp and input validator that produced it, for later NOI / OI contests with [Self Eval](Self-Evaluation.md). In **Configure Self Eval**, **AI: generate official data and Self Eval programs** runs the test data action and uses the manager's own AI configuration and permissions. Self Eval runs that generator and validator with the time and memory limits the job checked them with.
 
 ## Sources
 

@@ -470,7 +470,7 @@ test("generated files are only signed for a task assigned to the requesting judg
   const b = await connect(2);
   await gateway.onCapabilities(
     a.client,
-    capabilities({ protocolVersion: 4, taskTypes: ["Submission", "AiExecution"] })
+    capabilities({ protocolVersion: 7, taskTypes: ["Submission", "AiExecution"] })
   );
   queue.push(aiTask("ai-1"));
   await gateway.onConsumeTask(a.client, 0);
@@ -501,7 +501,7 @@ test("AI runs leave a judge client's other threads to other work", async () => {
   await gateway.onCapabilities(
     a.client,
     capabilities({
-      protocolVersion: 4,
+      protocolVersion: 7,
       taskTypes: ["Submission", "AiExecution"],
       consumerThreads: 3,
       aiExecutionSlots: 6
@@ -517,17 +517,33 @@ test("AI runs leave a judge client's other threads to other work", async () => {
     "two of three threads at most"
   );
   assert.equal(aiExecutionLimit(null), 0);
+  const current = { protocolVersion: protocol.AI_EXECUTION_PROTOCOL_VERSION };
   assert.equal(
-    aiExecutionLimit(capabilities({ consumerThreads: 1, aiExecutionSlots: 4 })),
+    aiExecutionLimit(capabilities({ ...current, consumerThreads: 1, aiExecutionSlots: 4 })),
     0,
     "a single thread runs none"
   );
   assert.equal(
-    aiExecutionLimit(capabilities({ consumerThreads: 8, aiExecutionSlots: 2 })),
+    aiExecutionLimit(capabilities({ ...current, consumerThreads: 8, aiExecutionSlots: 2 })),
     2,
     "nor more than its AI slots"
   );
-  assert.equal(aiExecutionLimit(capabilities({ consumerThreads: 3, aiExecutionSlots: 0 })), 1);
+  assert.equal(aiExecutionLimit(capabilities({ ...current, consumerThreads: 3, aiExecutionSlots: 0 })), 1);
+});
+
+test("judge clients that can't run AI programs with their execution profiles are sent no AI runs", async () => {
+  const { gateway, queue, claims, connect } = fixture();
+  const a = await connect(1);
+  // Protocol version 6 runs AiExecution tasks, but every program with the same settings and seeing the others' binaries
+  await gateway.onCapabilities(
+    a.client,
+    capabilities({ protocolVersion: 6, taskTypes: ["Submission", "AiExecution"], consumerThreads: 8 })
+  );
+  queue.push(aiTask("ai-0"));
+  await gateway.onConsumeTask(a.client, 0);
+  assert.deepEqual(claims.at(-1)[1], ["Submission"]);
+  assert.equal(aiExecutionLimit(capabilities({ protocolVersion: 6, consumerThreads: 8 })), 0);
+  assert.equal(aiExecutionLimit(capabilities({ protocolVersion: 7, consumerThreads: 8 })), 6);
 });
 
 test("while a contest runs, judge machines keep the policy's task threads for its submissions", async () => {

@@ -279,7 +279,9 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
           ...(previous?.validatorFile && previous.validatorSha256
             ? {
                 validatorFile: previous.validatorFile,
-                validatorSha256: previous.validatorSha256
+                validatorSha256: previous.validatorSha256,
+                // The kept validator's limits; the new generator has none but the problem's
+                ...(previous.limits?.validator ? { limits: { validator: previous.limits.validator } } : {})
               }
             : {}),
           ...(request.standardFileIo ? { standardFileIo: request.standardFileIo } : {})

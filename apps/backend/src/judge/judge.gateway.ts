@@ -15,6 +15,7 @@ import { Redis } from "ioredis";
 import proxyAddr from "proxy-addr";
 
 import {
+  AI_EXECUTION_PROTOCOL_VERSION,
   JudgeClientCapabilities,
   JudgeClientSystemInfo,
   JudgeTaskMeta,
@@ -107,9 +108,12 @@ const LEGACY_TASK_TYPES = [JudgeTaskType.Submission];
 const MAX_UPLOADS_PER_REQUEST = 20000;
 
 // AI runs take a task thread for long; a judge client keeps one thread for other work, and runs at most as many as
-// its AI slots. One with a single thread runs none.
+// its AI slots. One with a single thread runs none, and so does one too old to run each program with its role's
+// execution profile and its own binary only (judge protocol version 7): it could check a program under other settings
+// than it's judged with after publication.
 export function aiExecutionLimit(capabilities: JudgeClientCapabilities): number {
   if (!capabilities || capabilities.consumerThreads < 2) return 0;
+  if (!(capabilities.protocolVersion >= AI_EXECUTION_PROTOCOL_VERSION)) return 0;
   return Math.max(1, Math.min(capabilities.aiExecutionSlots || 1, capabilities.consumerThreads - 1));
 }
 

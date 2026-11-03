@@ -2,8 +2,9 @@ import React, { useEffect, useRef, useState } from "react";
 import { Button, Header, Message, Progress } from "semantic-ui-react";
 import { observer } from "mobx-react";
 import { Link } from "@/utils/hooks";
-import { aiCall, aiText, aiError, actionName, AiJob } from "./api";
+import { aiCall, aiText, aiError, actionName, AiJob, AiRetryFrom } from "./api";
 import AiFailureDetails, { failureKindName, programName } from "./AiFailureDetails";
+import AiScoringReview, { AiJudgingSummary } from "./AiScoringReview";
 import style from "./Ai.module.less";
 
 export default observer(function AiJobs({
@@ -46,7 +47,7 @@ export default observer(function AiJobs({
     };
   }, [problemId, refreshKey]);
   const [changing, setChanging] = useState<string>(null);
-  const change = async (method: string, id: string, retryFrom?: "validate-samples" | "std") => {
+  const change = async (method: string, id: string, retryFrom?: AiRetryFrom) => {
     setChanging(id);
     setError("");
     try {
@@ -144,7 +145,27 @@ export default observer(function AiJobs({
                     </Button>
                   )}
                   {job.status === "failed" &&
-                    (job.retryOptions?.length ? (
+                    (job.retryOptions?.includes("replace-scoring") ? (
+                      <>
+                        <Button
+                          size="mini"
+                          type="button"
+                          primary
+                          disabled={changing === job.id}
+                          onClick={() => change("retry", job.id, "replace-scoring")}
+                        >
+                          {aiText("确认新的计分设置并继续", "Approve the new scoring and continue")}
+                        </Button>
+                        <Button
+                          size="mini"
+                          type="button"
+                          disabled={changing === job.id}
+                          onClick={() => change("retry", job.id)}
+                        >
+                          {aiText("重试（已修改子任务）", "Retry (subtasks changed)")}
+                        </Button>
+                      </>
+                    ) : job.retryOptions?.length ? (
                       job.retryOptions.map(retryFrom => (
                         <Button
                           key={retryFrom}
@@ -224,6 +245,7 @@ export default observer(function AiJobs({
                     ))}
                   </>
                 )}
+                <AiJudgingSummary result={job.result} />
                 {(job.result.warnings || [])
                   .filter(warning =>
                     [
@@ -253,6 +275,9 @@ export default observer(function AiJobs({
                   <p className={style.jobError} role="alert">
                     {aiError(job.error || "INTERNAL_ERROR")}
                   </p>
+                )}
+                {job.status === "failed" && job.result.scoringReview && (
+                  <AiScoringReview review={job.result.scoringReview} />
                 )}
                 {job.status === "failed" && job.result.failure && (
                   <p className={style.jobDetail}>

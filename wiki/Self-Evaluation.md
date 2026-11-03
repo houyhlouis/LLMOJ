@@ -36,6 +36,7 @@ When it finishes, the generated programs appear in the configuration and you cli
 - Runs refused for invalid input, missing permission, missing data or failed preparation don't count.
 - Each account can have at most three runs waiting at once, and simultaneous requests can't go over the limit.
 - A set has at most 20 subtasks, with one generated test for each configured subtask. Each input and each expected output may be up to 4 MiB, and the whole set up to 16 MiB.
+- make.cpp and the validator run with the time and memory limits AI generation checked them with (5 seconds and 512 MiB); entered by hand, with the problem's limits, at least 1 second and 128 MiB. std.cpp runs with the problem's limits.
 
 These limits are LLMOJ settings, not the rules of any particular NOI event. Passing Self Eval doesn't guarantee full marks in official judging.
 

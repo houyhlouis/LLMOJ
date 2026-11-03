@@ -51,6 +51,14 @@ test("a task needs the architectures of every C and C++ program in it", () => {
     ["32"]
   );
   assert.deepEqual(taskArchitectures({ validator: program("cpp", "32"), reference: program("cpp", "64") }), ["32"]);
+  // An AI run's programs, by their execution profiles: a problem's checker set to 32-bit goes where it can be built
+  assert.deepEqual(
+    taskArchitectures({
+      request: { profiles: { version: 1, roles: { std: program("cpp", "64"), checker: program("cpp", "32") } } },
+      sampleFiles: []
+    }),
+    ["32"]
+  );
   assert.deepEqual(taskArchitectures({ testData: [{ name: "1.in" }], judgeInfo: { subtasks: [{ testcases: [] }] } }), []);
   for (const value of [null, undefined, "x", 3, []]) assert.deepEqual(taskArchitectures(value), []);
   // A program nested deeper than any task does isn't looked for

@@ -246,7 +246,9 @@ test("formal self-evaluation recipes reject missing sources, malformed hashes an
       recipe => { recipe.subtaskIds = [1, 1]; }, recipe => { recipe.standardFileIo = { inputFilename: "../secret", outputFilename: "out" }; },
       recipe => { recipe.standardFileIo = { inputFilename: "same", outputFilename: "same" }; },
       recipe => { delete recipe.validatorFile; }, recipe => { recipe.validatorSha256 = "bad"; },
-      recipe => { recipe.subtaskIds = [99]; }]) {
+      recipe => { recipe.subtaskIds = [99]; }, recipe => { recipe.limits = { generator: { timeLimit: 0, memoryLimit: 512 } }; },
+      recipe => { recipe.limits = { generator: { timeLimit: 5000 } }; }, recipe => { recipe.limits = { checker: { timeLimit: 1, memoryLimit: 1 } }; },
+      recipe => { recipe.limits = { validator: { timeLimit: 60001, memoryLimit: 512 } }; }, recipe => { recipe.limits = []; }]) {
       const info = structuredClone(state.active);
       mutation(info.selfEval);
       assert.throws(() => problemType.validateAndFilterJudgeInfo(info, files, true), error => Array.isArray(error) && error.includes("INVALID_SELF_EVAL_RECIPE"));
@@ -255,6 +257,12 @@ test("formal self-evaluation recipes reject missing sources, malformed hashes an
     delete manual.selfEval.validatorFile;
     delete manual.selfEval.validatorSha256;
     assert.doesNotThrow(() => problemType.validateAndFilterJudgeInfo(manual, files, true));
+    // Without its validator, a recipe keeps no limits for it
+    assert.deepEqual(manual.selfEval.limits, { generator: { timeLimit: 5000, memoryLimit: 512 } });
+    const extra = structuredClone(state.active);
+    extra.selfEval.limits.generator.note = "dropped";
+    problemType.validateAndFilterJudgeInfo(extra, files, true);
+    assert.deepEqual(extra.selfEval.limits.generator, { timeLimit: 5000, memoryLimit: 512 });
   });
 });
 
@@ -488,5 +496,177 @@ test("successful publication stores the quality receipt and YAML verification so
       challenges: request.quality.challenges.map(item => ({ id: item.id, sha256: digest(item.code) }))
     });
     assert.equal(state.events.at(-1), "cleanup");
+  });
+});
+
+// Review Part III, W02: the judging contract a regeneration works within
+const { existingScoring } = require("./ai-judging-contract.ts");
+const { aiContractDigest } = require("@libreoj/judge-protocol");
+
+// A run's requests, as the runner gets them
+function recordRequests(service) {
+  const sandbox = service.runSandbox;
+  const requests = [];
+  service.runSandbox = async (job, request) => {
+    requests.push(request);
+    return await sandbox(job, request);
+  };
+  return requests;
+}
+
+const establishedJudgeInfo = () => ({
+  timeLimit: 1000,
+  memoryLimit: 128,
+  fileIo: null,
+  extraSourceFiles: {},
+  runSamples: false,
+  // The problem's own checker, with options and limits of its own
+  checker: {
+    type: "custom",
+    interface: "testlib",
+    language: "cpp",
+    compileAndRunOptions: { compiler: "clang++", std: "c++20", O: "3", m: "64" },
+    filename: "old-checker.cpp",
+    timeLimit: 2000,
+    memoryLimit: 300
+  },
+  subtasks: [
+    { points: 20, scoringType: "GroupMin", testcases: [{ inputFile: "old-1.in", outputFile: "old-1.out" }] },
+    { scoringType: "Sum", dependencies: [0], testcases: [{ inputFile: "old-2.in", outputFile: "old-2.out" }] },
+    { scoringType: "GroupMul", dependencies: [0, 1], testcases: [{ inputFile: "old-3.in", outputFile: "old-3.out" }] }
+  ]
+});
+
+test("regenerated data keeps the problem's scoring and its own checker's settings, and is checked with them", async () => {
+  const initial = establishedJudgeInfo();
+  await fixture(async ({ state, job, service, run }) => {
+    job.state.plan.subtasks = [
+      { id: 1, points: 20 },
+      { id: 2, points: 40 },
+      { id: 3, points: 40 }
+    ];
+    const requests = recordRequests(service);
+    await run();
+    assert.equal(state.activations, 1);
+    // The same types, dependencies and points as before (automatic ones stay automatic), and only new cases
+    assert.deepEqual(
+      state.active.subtasks.map(({ testcases, ...settings }) => settings),
+      initial.subtasks.map(({ testcases, ...settings }) => settings)
+    );
+    assert.deepEqual(state.active.subtasks.map(subtask => subtask.testcases.length), [1, 2, 2]);
+    assert.equal(state.active.runSamples, false);
+    assert.equal(existingScoring(state.active).digest, existingScoring(initial).digest);
+    assert.deepEqual(job.state.generated.scoring, {
+      status: "kept",
+      subtasks: 3,
+      digest: existingScoring(initial).digest
+    });
+    // The checker is judged with the settings it was checked with: its own
+    const [request] = requests;
+    assert.deepEqual({ ...state.active.checker, filename: "old-checker.cpp" }, initial.checker);
+    assert.match(state.active.checker.filename, /^ai-managed-.*-checker\.cpp$/);
+    assert.deepEqual(request.profiles.roles.checker, {
+      language: "cpp",
+      compileAndRunOptions: { compiler: "clang++", std: "c++20", O: "3", m: "64" },
+      timeLimitMs: 2000,
+      memoryLimitMiB: 300,
+      cpu: "Checker",
+      testlib: true,
+      extraSources: false,
+      origin: "problem"
+    });
+    assert.deepEqual(state.active.selfEval.limits, {
+      generator: { timeLimit: 5000, memoryLimit: 512 },
+      validator: { timeLimit: 5000, memoryLimit: 512 }
+    });
+    const generation = require("js-yaml").load(state.files.get("data.yaml")).generation;
+    assert.deepEqual(generation.scoring, { status: "kept", digest: existingScoring(initial).digest });
+    assert.equal(generation.executionProfiles.digest, aiContractDigest(request.profiles));
+    assert.deepEqual(job.state.generated.helpers, [
+      { role: "checker", origin: "problem", options: "clang++ -std=c++20 -O3", timeLimitMs: 2000, memoryLimitMiB: 300 }
+    ]);
+  }, initial);
+});
+
+test("subtasks that differ from the problem's stop for review before any program runs; only the approved change goes on", async () => {
+  await fixture(async ({ state, job, service, run }) => {
+    const before = existingScoring(state.active);
+    job.state.plan.subtasks = [
+      { id: 1, points: 40 },
+      { id: 2, points: 60 }
+    ];
+    const requests = recordRequests(service);
+    await assert.rejects(run(), /AI_SCORING_REVIEW_REQUIRED/);
+    assert.equal(requests.length, 0, "nothing ran");
+    assert.equal(state.activations, 0);
+    const review = job.state.scoringReview;
+    assert.deepEqual(review.reasons, [{ code: "SUBTASK_COUNT", current: 1, proposed: 2 }]);
+    assert.equal(review.currentDigest, before.digest);
+    Object.assign(job, { status: "failed", error: "AI_SCORING_REVIEW_REQUIRED" });
+    assert.deepEqual(service.retryOptions(job), ["replace-scoring"]);
+    // Retried as it is (after the owner changed the subtasks), it's planned again
+    const plain = service.retryState(job);
+    assert.equal(plain.plan, undefined);
+    assert.equal(plain.scoringReview, undefined);
+    assert.equal(plain.testdataSnapshotHash, undefined);
+    // Approved: the job goes on with exactly the reviewed change
+    job.state = service.retryState(job, "replace-scoring");
+    assert.deepEqual(job.state.scoringApproval, { currentDigest: review.currentDigest, proposedDigest: review.proposedDigest });
+    await run();
+    assert.equal(state.activations, 1);
+    assert.deepEqual(
+      state.active.subtasks.map(subtask => [subtask.points, subtask.scoringType, subtask.testcases.length]),
+      [
+        [40, "Sum", 2],
+        [60, "Sum", 3]
+      ]
+    );
+    assert.equal(state.active.runSamples, true);
+    assert.deepEqual(job.state.generated.scoring, {
+      status: "replaced",
+      subtasks: 2,
+      digest: review.proposedDigest,
+      previousDigest: before.digest
+    });
+    // The checker the job wrote is published with the limits it was checked with
+    const request = requests.at(-1);
+    assert.deepEqual([request.profiles.roles.checker.timeLimitMs, request.profiles.roles.checker.memoryLimitMiB], [5000, 256]);
+    assert.deepEqual([state.active.checker.timeLimit, state.active.checker.memoryLimit], [5000, 256]);
+    assert.deepEqual(state.active.checker.compileAndRunOptions, { compiler: "g++", std: "c++17", O: "2", m: "64" });
+  });
+});
+
+test("an approval is of the change it was shown: another plan is reviewed again", async () => {
+  await fixture(async ({ state, job, service, run }) => {
+    job.state.plan.subtasks = [
+      { id: 1, points: 40 },
+      { id: 2, points: 60 }
+    ];
+    await assert.rejects(run(), /AI_SCORING_REVIEW_REQUIRED/);
+    Object.assign(job, { status: "failed", error: "AI_SCORING_REVIEW_REQUIRED" });
+    job.state = service.retryState(job, "replace-scoring");
+    job.state.plan.subtasks = [
+      { id: 1, points: 60 },
+      { id: 2, points: 40 }
+    ];
+    await assert.rejects(run(), /AI_SCORING_REVIEW_REQUIRED/);
+    assert.equal(state.activations, 0);
+    // Nothing to approve on another failure
+    Object.assign(job, { error: "SANDBOX_GENERATION_FAILED" });
+    assert.throws(() => service.retryState(job, "replace-scoring"), /INVALID_RETRY_MODE/);
+  });
+});
+
+test("a runner that doesn't report the profiles it was sent qualifies nothing", async () => {
+  const service = bareAiServices();
+  service.coordinator = { assertJob: async () => ({ id: 1 }) };
+  const profiles = { version: 1, roles: {} };
+  for (const reported of [undefined, "0".repeat(64)]) {
+    service.execution = { run: async () => ({ validation: { profiles: reported } }) };
+    await assert.rejects(service.runSandbox({ id: "job" }, { profiles }, async () => {}), /INVALID_SANDBOX_RESPONSE/);
+  }
+  service.execution = { run: async () => ({ validation: { profiles: aiContractDigest(profiles) } }) };
+  assert.deepEqual(await service.runSandbox({ id: "job" }, { profiles }, async () => {}), {
+    validation: { profiles: aiContractDigest(profiles) }
   });
 });

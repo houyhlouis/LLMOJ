@@ -17,6 +17,8 @@ export interface ProblemJudgeInfoTraditional extends ProblemJudgeInfo {
     validatorSha256?: string;
     subtaskIds: number[];
     standardFileIo?: { inputFilename: string; outputFilename: string };
+    // The generator's and validator's limits (ms, MiB), as the AI job that produced them checked them with
+    limits?: Partial<Record<"generator" | "validator", { timeLimit: number; memoryLimit: number }>>;
   };
 
   timeLimit: number;
