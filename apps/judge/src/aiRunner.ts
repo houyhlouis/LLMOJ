@@ -45,7 +45,7 @@ import {
   discardJob,
   holdingJob,
   JobBuilds,
-  OperationInputs,
+  GeneratorInputs,
   pruneAiCheckpoints,
   runtimeIdentity
 } from "./aiCheckpoint";
@@ -69,8 +69,8 @@ import {
 
 export interface Request {
   operation?: "generate" | "cleanup" | "validate-reference" | "replay";
-  // The backend's key of the logical operation (judge protocol version 8): an attempt of the same one replays the
-  // inputs an interrupted attempt generated (see aiCheckpoint.ts)
+  // The backend's key of the logical operation (judge protocol version 8): a run of one replays the inputs its
+  // generators made in an earlier run of the job (see aiCheckpoint.ts)
   operationKey?: string;
   // Operation "replay": the kept failure to run again
   replay?: AiReplayRequest;
@@ -473,7 +473,7 @@ async function compileSource(
   binaryDirectory: string,
   request: Request,
   builds?: JobBuilds
-) {
+): Promise<string | null> {
   const profile = roleProfile(request.profiles, name);
   const options = profile.compileAndRunOptions;
   const unavailable = cArchitectureUnavailable(options.m);
@@ -495,7 +495,7 @@ async function compileSource(
   const kept = key ? await builds.take(key) : null;
   if (kept) {
     await installProgram(binaryDirectory, name, kept);
-    return;
+    return key;
   }
   await runTaskQueued({ memory: COMPILE_RESERVATION, ai: true }, async taskDirectory => {
     const sourceDirectory = path.join(taskDirectory, "source");
@@ -589,6 +589,7 @@ async function compileSource(
     await installProgram(binaryDirectory, name, binary);
     if (key) await builds.keep(key, binary);
   });
+  return key;
 }
 
 async function execute(
@@ -1085,10 +1086,9 @@ async function generateWithSamples(
   }
   const startedAt = new Date().toISOString();
   const runtime = await runtimeIdentity();
-  // The job's builds, and the inputs an interrupted attempt of this operation generated (see aiCheckpoint.ts)
+  // The job's builds, and the inputs its generators made in an earlier run, by generator (see aiCheckpoint.ts)
   const builds = new JobBuilds(request.jobId);
-  const inputs =
-    request.operationKey && !validating ? new OperationInputs(request.jobId, request.operationKey, runtime) : null;
+  const inputs = new Map<string, GeneratorInputs>();
   // The cases' files, as they are when the run completes
   const corpus: AiCorpusCase[] = [];
   const fileHash = (data: Buffer) => ({
@@ -1141,15 +1141,20 @@ async function generateWithSamples(
   }
   // A generator's input for a case: the one an interrupted attempt of this operation generated, or a new one
   async function generated(name: string, subtask: number, caseIndex: number) {
-    const kept = await inputs?.take(name, subtask, caseIndex);
+    const kept = await inputs.get(name)?.take(name, subtask, caseIndex);
     if (kept) return kept;
     const input = await execute(binaryDirectory, name, request, Buffer.from(`${subtask} ${caseIndex}\n`), [
       String(subtask),
       String(caseIndex)
     ]);
-    await inputs?.keep(name, subtask, caseIndex, input);
+    await inputs.get(name)?.keep(name, subtask, caseIndex, input);
     return input;
   }
+  // A generator's build: the inputs it made are kept by it, for an operation the backend keeps track of
+  const generator = (name: string, key: string | null) => {
+    if (key && request.operationKey && !validating && ["make", "quality-small-make"].includes(name))
+      inputs.set(name, new GeneratorInputs(request.jobId, key, runtime));
+  };
   try {
     for (const [name, source] of [
       ...(validating ? [] : [["make", request.makeCode]]),
@@ -1161,7 +1166,7 @@ async function generateWithSamples(
     ]) {
       emit({ type: "progress", phase: `compile-${name}`, completed: 0, total: request.cases.length });
       checkCanceled();
-      await compileSource(source, name, binaryDirectory, request, builds);
+      generator(name, await compileSource(source, name, binaryDirectory, request, builds));
       checkCanceled();
       await publish(`${name}.cpp`, source);
     }
@@ -1169,7 +1174,7 @@ async function generateWithSamples(
     for (const [name, source] of request.quality ? qualitySources(request.quality) : []) {
       checkCanceled();
       emit({ type: "progress", phase: `compile-${name}`, completed: 0, total: request.cases.length });
-      await compileSource(source, name, binaryDirectory, request, builds);
+      generator(name, await compileSource(source, name, binaryDirectory, request, builds));
       checkCanceled();
     }
     if (request.graderCode) await publish("grader.cpp", request.graderCode);
@@ -1464,7 +1469,7 @@ async function generateWithSamples(
       runtime,
       startedAt,
       finishedAt: new Date().toISOString(),
-      reuse: { builds: builds.reused, inputs: inputs?.reused || 0 }
+      reuse: { builds: builds.reused, inputs: [...inputs.values()].reduce((sum, kept) => sum + kept.reused, 0) }
     };
     const result = {
       type: "complete",
@@ -1496,7 +1501,7 @@ async function generateWithSamples(
     await fs.promises.writeFile(resultPath, JSON.stringify(result), { mode: 0o640 });
     await shareWithBackend(resultPath, layout);
     // The result has the cases now
-    await inputs?.discard();
+    for (const kept of inputs.values()) await kept.discard();
     emit(result);
   } catch (error) {
     await fs.promises.rm(directory, { recursive: true, force: true });

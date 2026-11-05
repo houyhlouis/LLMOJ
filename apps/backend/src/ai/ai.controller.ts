@@ -79,7 +79,7 @@ export class AiController {
   }
 
   @Post("retry") retry(@CurrentUser() user: UserEntity, @Body() body: AiRetryJobDto) {
-    return this.call(() => this.ai.retry(user, body.id, body.retryFrom));
+    return this.call(() => this.ai.retry(user, body.id, body.retryFrom, body.role));
   }
 
   // A job's failed runs, with their evidence (owner only)

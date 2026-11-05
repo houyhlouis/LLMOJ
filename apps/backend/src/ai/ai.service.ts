@@ -27,6 +27,7 @@ import { AiJobCoordinator } from "./ai-job-coordinator.service";
 import { AiWorkflowService } from "./ai-workflow.service";
 import { AiEvidenceService, AiFailureSummary } from "./ai-evidence.service";
 import { AiReplayService } from "./ai-replay.service";
+import { AI_REPAIR_LIMITS, AiRepairState } from "./ai-repair";
 
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeType } from "../user/user-privilege.service";
@@ -58,6 +59,20 @@ async function boundedDiagnosticCall<T>(userId: number, work: () => Promise<T>):
     if (remaining > 0) diagnosticCalls.set(userId, remaining);
     else diagnosticCalls.delete(userId);
   }
+}
+
+/** A job's repairs as its owner sees them. */
+function repairView(job: AiJobEntity) {
+  const repairs = job.state.repair as AiRepairState;
+  if (!repairs?.revisions) return undefined;
+  return {
+    automatic: repairs.automatic,
+    limits: { automatic: AI_REPAIR_LIMITS.automatic, total: AI_REPAIR_LIMITS.total },
+    // Without the failures' signatures, which only the job compares
+    revisions: repairs.revisions.map(revision => ({ ...revision, signature: undefined })),
+    review: job.status === "failed" ? repairs.review : undefined,
+    pending: repairs.pending
+  };
 }
 
 /**
@@ -351,6 +366,8 @@ export class AiService {
       step: job.step,
       error: job.error,
       retryOptions: this.workflow.retryOptions(job),
+      // The programs the owner may have repaired (retry "repair")
+      repairRoles: this.workflow.repairRoles(job),
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
       result: {
@@ -381,7 +398,10 @@ export class AiService {
         execution: job.state.generated?.execution,
         corpus: job.state.generated?.corpus,
         // A scoring change that waits for the owner's approval
-        scoringReview: job.status === "failed" ? job.state.scoringReview : undefined
+        scoringReview: job.status === "failed" ? job.state.scoringReview : undefined,
+        // The programs the job replaced, and why it stopped for its owner (review Part III, W04)
+        repair: repairView(job),
+        revision: job.state.generated?.revision
       }
     };
   }
@@ -487,7 +507,7 @@ export class AiService {
     return { url };
   }
 
-  async retry(user: UserEntity, id: string, retryFrom?: AiRetryFrom) {
+  async retry(user: UserEntity, id: string, retryFrom?: AiRetryFrom, role?: string) {
     await this.coordinator.requirePrivilege(user, UserPrivilegeType.UseAi);
     const job = await this.jobs.findOneBy({ id, ownerId: user.id });
     if (!job) throw new AiError("NO_SUCH_JOB");
@@ -499,9 +519,10 @@ export class AiService {
     if (await this.replays?.running(job.id)) throw new AiError("AI_REPLAY_BUSY");
     // An approved scoring change is recorded with what was approved
     const review = retryFrom === "replace-scoring" ? job.state.scoringReview : undefined;
-    await this.coordinator.requeue(user, job, () => this.workflow.retryState(job, retryFrom));
+    await this.coordinator.requeue(user, job, () => this.workflow.retryState(job, retryFrom, role));
     await this.coordinator.recordAiAudit(user, "job.retry", job, {
       retryFrom: retryFrom || "default",
+      ...(retryFrom === "repair" ? { role } : {}),
       ...(review ? { scoringFrom: review.currentDigest, scoringTo: review.proposedDigest } : {})
     });
     this.coordinator.wake();

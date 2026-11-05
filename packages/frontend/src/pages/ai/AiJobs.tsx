@@ -5,6 +5,7 @@ import { Link } from "@/utils/hooks";
 import { aiCall, aiText, aiError, actionName, AiJob, AiRetryFrom } from "./api";
 import AiFailureDetails, { failureKindName, programName } from "./AiFailureDetails";
 import AiScoringReview, { AiJudgingSummary, AiRunSummary } from "./AiScoringReview";
+import AiRepairs from "./AiRepairs";
 import style from "./Ai.module.less";
 
 export default observer(function AiJobs({
@@ -47,11 +48,11 @@ export default observer(function AiJobs({
     };
   }, [problemId, refreshKey]);
   const [changing, setChanging] = useState<string>(null);
-  const change = async (method: string, id: string, retryFrom?: AiRetryFrom) => {
+  const change = async (method: string, id: string, retryFrom?: AiRetryFrom, role?: string) => {
     setChanging(id);
     setError("");
     try {
-      await aiCall(method, { id, ...(retryFrom ? { retryFrom } : {}) });
+      await aiCall(method, { id, ...(retryFrom ? { retryFrom } : {}), ...(role ? { role } : {}) });
       const result = await aiCall<{ jobs: AiJob[]; paused?: boolean }>("jobs", problemId ? { problemId } : {});
       setJobs(result.jobs);
       setPaused(result.paused === true);
@@ -165,20 +166,22 @@ export default observer(function AiJobs({
                           {aiText("重试（已修改子任务）", "Retry (subtasks changed)")}
                         </Button>
                       </>
-                    ) : job.retryOptions?.length ? (
-                      job.retryOptions.map(retryFrom => (
-                        <Button
-                          key={retryFrom}
-                          size="mini"
-                          type="button"
-                          disabled={changing === job.id}
-                          onClick={() => change("retry", job.id, retryFrom)}
-                        >
-                          {retryFrom === "validate-samples"
-                            ? aiText("重新校验样例（样例已修正）", "Retry sample validation (samples corrected)")
-                            : aiText("重新生成 std.cpp（标程错误）", "Regenerate std.cpp (incorrect solution)")}
-                        </Button>
-                      ))
+                    ) : job.retryOptions?.some(option => ["validate-samples", "std"].includes(option)) ? (
+                      job.retryOptions
+                        .filter(option => ["validate-samples", "std"].includes(option))
+                        .map(retryFrom => (
+                          <Button
+                            key={retryFrom}
+                            size="mini"
+                            type="button"
+                            disabled={changing === job.id}
+                            onClick={() => change("retry", job.id, retryFrom)}
+                          >
+                            {retryFrom === "validate-samples"
+                              ? aiText("重新校验样例（样例已修正）", "Retry sample validation (samples corrected)")
+                              : aiText("重新生成 std.cpp（标程错误）", "Regenerate std.cpp (incorrect solution)")}
+                          </Button>
+                        ))
                     ) : (
                       <Button
                         size="mini"
@@ -186,7 +189,9 @@ export default observer(function AiJobs({
                         disabled={changing === job.id}
                         onClick={() => change("retry", job.id)}
                       >
-                        {aiText("从失败步骤重试", "Retry failed step")}
+                        {job.result.repair?.review
+                          ? aiText("用同样的程序重新运行", "Run the same programs again")
+                          : aiText("从失败步骤重试", "Retry failed step")}
                       </Button>
                     ))}
                 </div>
@@ -280,6 +285,11 @@ export default observer(function AiJobs({
                 {job.status === "failed" && job.result.scoringReview && (
                   <AiScoringReview review={job.result.scoringReview} />
                 )}
+                <AiRepairs
+                  job={job}
+                  busy={changing === job.id}
+                  onRetry={(retryFrom, role) => change("retry", job.id, retryFrom, role)}
+                />
                 {job.status === "failed" && job.result.failure && (
                   <p className={style.jobDetail}>
                     {failureKindName(job.result.failure.kind)}

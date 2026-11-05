@@ -59,6 +59,14 @@ const errors: Record<string, [string, string]> = {
     "生成器编译失败，已尝试一次自动修复。",
     "Generator compilation failed; one automatic repair was attempted."
   ],
+  AI_PROGRAM_REPAIRED: [
+    "生成过程中有程序失败，任务修复了该程序（见修复记录）。",
+    "A program failed during generation and the job repaired it (see Repairs)."
+  ],
+  AI_REPAIR_REVIEW_REQUIRED: [
+    "任务暂停，等待你决定如何处理失败。",
+    "The job stopped for your decision about a failure."
+  ],
   GENERATOR_FILENAME_CONFLICT: [
     "已有附加源码正在使用 make.cpp、std.cpp、validator.cpp 或 data.yaml，请先重命名冲突文件。",
     "Existing extra source files use make.cpp, std.cpp, validator.cpp or data.yaml. Rename the conflicting file first."
@@ -252,6 +260,10 @@ const errors: Record<string, [string, string]> = {
   AI_REPLAY_BUSY: [
     "已有一次重放在运行（每个任务、每位用户同时只能运行一次重放），请等它结束。",
     "A replay is already running (one at a time for each job and each user). Wait for it to finish."
+  ],
+  INVALID_RETRY_MODE: [
+    "这个任务不能以所选方式重试（例如所选程序不能修复）。请刷新后重新选择。",
+    "The job can't be retried that way (e.g. the chosen program can't be repaired). Refresh and choose again."
   ],
   AI_JOB_ACTIVE: [
     "任务正在运行或排队，结束后才能重放其失败。",
@@ -614,8 +626,51 @@ export interface AiReplayRecord {
   origin?: "local" | "judge";
   runtime?: AiRuntimeIdentity;
   error?: string;
+  // The repair it tested: the job replayed the failure with that repair's program
+  repair?: number;
 }
-export type AiRetryFrom = "validate-samples" | "std" | "replace-scoring";
+// "repair": a program the owner chose (with `role`); "regenerate": every program written again from the same plan
+export type AiRetryFrom = "validate-samples" | "std" | "replace-scoring" | "repair" | "regenerate";
+
+/** A program an AI job replaced to repair a failure (review Part III, W04). */
+export interface AiRepairRevision {
+  round: number;
+  role: string;
+  by: "automatic" | "owner";
+  observationId: string;
+  failure: { kind: string; phase: string; subject?: string };
+  from: string;
+  to: string;
+  at: string;
+  rejected?: "IDENTICAL" | "INVALID";
+  test?: "passed" | "failed" | "unstable" | "untested";
+  result?: string;
+}
+
+/** Why an AI job stopped for its owner instead of repairing a program by itself. */
+export interface AiRepairReview {
+  reason:
+    | "ATTRIBUTION"
+    | "PROBLEM_HELPER"
+    | "TUTORIAL_REFERENCE"
+    | "CAPACITY"
+    | "BUDGET"
+    | "UNCLASSIFIED"
+    | "REPAIR_LIMIT"
+    | "UNCHANGED"
+    | "IDENTICAL"
+    | "INVALID"
+    | "STALE"
+    | "INFRASTRUCTURE"
+    | "EVIDENCE";
+  roles: string[];
+  observationId?: string;
+  kind: string;
+  phase?: string;
+  role?: string;
+  subject?: string;
+  at: string;
+}
 
 /** How a problem awards points, as an AI job keeps or replaces it. */
 export interface AiScoringPolicy {
@@ -644,6 +699,8 @@ export interface AiJob {
   step: string;
   error?: string;
   retryOptions?: AiRetryFrom[];
+  // The programs the owner may have repaired (retry "repair")
+  repairRoles?: string[];
   result: {
     discussionId?: number;
     discussionIds?: Record<string, number>;
@@ -669,6 +726,16 @@ export interface AiJob {
       reuse: { builds: number; inputs: number };
     };
     corpus?: { digest: string; cases: number; adversarial: number };
+    // The programs the job replaced, and why it stopped for its owner (review Part III, W04)
+    repair?: {
+      automatic: number;
+      limits: { automatic: number; total: number };
+      revisions: AiRepairRevision[];
+      review?: AiRepairReview;
+      pending?: { role: string; observationId: string };
+    };
+    // The programs the published test data was made and checked with
+    revision?: { digest: string; repairs: number };
     helpers?: Array<{
       role: "checker" | "interactor" | "manager";
       origin: "problem" | "ai";

@@ -91,7 +91,7 @@ These are fixed in the code; setting variables with similar names has no effect.
 | Waiting for the worker | Scales with the number of cases and checks, up to 4 hours in total. Not a limit on how long a generated program may run. |
 | Temporary results | Kept for 24 hours; cleaned up hourly. Published problem data is stored separately. |
 | Budget holds | Kept 48 hours, then deleted; they count only within the last 24 hours |
-| `make.cpp` repair | One automatic repair after a compile error |
+| Repairs of failed programs | 3 made by the job itself and 8 in all, for the job's life; the same programs run again at most 2 times after infrastructure failures, until you retry |
 
 Browser reads also depend on the operating system: Firefox installed as a Snap couldn't read test files owned by root, while copies owned by the desktop user worked. Use such copies; don't turn off AppArmor or the browser's sandbox.
 

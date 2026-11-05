@@ -179,7 +179,7 @@ AI test data programs run on judges of protocol version 8; see [Distributed judg
 
 - A job is created only after its files have uploaded successfully. **Cancel upload** stops a preparation or upload, and leaving the page cancels them. Once the server has accepted a job, closing the page doesn't stop it: cancel it in **My AI jobs**. If starting a job timed out, look at **My AI jobs** before importing again.
 - Cancelling can't undo what the provider has already charged or what the job has already published.
-- If the generated `make.cpp` doesn't compile, the model gets one chance to repair it, with the compiler's own messages (up to 8,000 characters). Uploaded checkers, interactors, managers and graders are never rewritten, and keep their own compile options and limits. A second failure, a sample failure or a failed data check fails the job.
+- When a program fails while generating test data, the job repairs the one program it wrote that's at fault, runs the same programs again, or stops for your decision: see [When generation fails](#when-generation-fails). Uploaded checkers, interactors, managers and graders are never rewritten, and keep their own compile options and limits.
 - Solutions are checked for claims about sources and scoring before they're published; this doesn't replace reviewing their algorithms yourself.
 - If a browser can't read a file (for example Firefox installed as a Snap reading files owned by root), copy the file into a folder your desktop user owns. Don't turn off the browser's sandbox.
 
@@ -191,11 +191,38 @@ If the server restarts while a job generates test data (an upgrade, a crash), th
 - If the site's own judge runs them, the run stops with the restart; when the job resumes, it runs again with the compiled programs and inputs the judge kept.
 - If the run had finished, its result is taken as it is, not made again, even if the job stopped while publishing it.
 
-A job that fails after its run finished (for example because the problem changed meanwhile) keeps that result for 24 hours: retrying with exactly the same programs and settings publishes it instead of generating new data. Any change to a program, the cases or the settings makes a new run, which never takes the old one's cases (it takes its compiled programs that didn't change).
+A job that fails after its run finished (for example because the problem changed meanwhile) keeps that result for 24 hours: retrying with exactly the same programs and settings publishes it instead of generating new data. Any change to a program, the cases or the settings makes a new run, which never takes the old one's result. It takes the compiled programs that didn't change and, while the generator is the same, the inputs it generated: a repaired reference solution is checked on the inputs the old one failed on.
 
 A finished job says where its data was made: on this server or on a judge machine, whether the job collected a finished result again after it stopped, and how many compiled programs and inputs were reused. `data.yaml` records this (`generation.execution`) with the SHA-256 and size of every case (`generation.corpus`), and the published files are exactly those cases.
 
-What a judge keeps for this (each job's compiled programs and each run's generated inputs, in its data store under `ai-builds` and `ai-corpus`) is deleted when the job finishes, or a day after it was last used.
+What a judge keeps for this (each job's compiled programs and each generator's inputs, in its data store under `ai-builds` and `ai-corpus`) is deleted when the job finishes, or a day after it was last used.
+
+## When generation fails
+
+When a program of a test data job fails, the job decides what to do from what failed (see [Failure details](#failure-details)) instead of writing every program again:
+
+- **The infrastructure failed** (the connection to a judge machine, storage or the sandbox, not the programs): the job runs the same programs again, without asking the model, up to 2 times. A correct program (the reference solution, the oracle or the second solution) that went over its time or memory limit is first run again on the kept input; if it doesn't fail again, the job runs everything again instead of rewriting it.
+- **One program the job wrote is at fault**: the job asks the model to repair that program, sending it the failure, the evidence and the program's source. Every other program stays as it is, and so do the plan, the cases, the limits and the checks. For example, a second solution that doesn't compile is repaired without touching the generator, the oracle, the input validator, the reference solution or the checker. Which program is at fault:
+  - a compilation error: the program that didn't compile;
+  - the input validator rejects a statement sample: the validator (samples are legal);
+  - the input validator rejects a generated input: the generator that made it (the validator is never loosened to accept it);
+  - a program crashes, goes over a limit or writes too much: that program;
+  - the reference solution's output differs from an official sample's, compared by a built-in checker: the reference solution;
+  - a checker crashes or accepts malformed output: the checker;
+  - a challenge program isn't a valid one: that challenge, for the same target;
+  - a wrong or slow program wasn't rejected: the generator, given the target to build an input for.
+- **The repair is tested first** against the kept failure: the program is compiled again, or run again on the kept input. If it still fails the same way, the job stops there. Otherwise all the programs run again.
+- **The job stops for your decision** when nothing trusted says which program is wrong, or when the program isn't the job's to change:
+  - the reference solution disagrees with the oracle, or the second solution with the reference solution (all AI-written: none is trusted over the other), or a sample's output with a checker the job wrote: choose the program to repair;
+  - the problem's own checker, interactor or manager failed: fix it in the problem's judging settings, then retry (the job never changes them);
+  - the reference solution is a tutorial's code: you may have it repaired, and it becomes a separate program; the tutorial stays as it is;
+  - no test case could be replaced with a counterexample, the execution budget ran out, or nothing says which program failed;
+  - a repair didn't change the failure, the model proposed the same program or one that isn't valid, or the job used its repairs.
+- **Limits.** A job makes at most 3 repairs by itself and 8 in all. Restarts and retries don't reset these counts. Each repair is one model request, counted in your budgets like any other.
+
+In **My AI jobs**, a job that stopped says why, with **Repair** for each program involved, and **Write all programs again**, which writes every program again from the same plan (what retrying did before). **Run the same programs again** retries with the programs as they are, for example after the infrastructure recovered. **Repairs** lists each repair: the program, the failure it repaired, whether the job made it or you chose it, whether it passed the kept failure, and how the next run ended; a replay that tested a repair says so under **Failure details**. A finished job says how many repairs its data was made after, and `data.yaml` records the SHA-256 of every program the data was made and checked with, and the repairs (`generation.revision`). Repairs are recorded in the audit log (`ai.job.repair`).
+
+The model is never sent the problem's own sample files, only statement samples and what the job's programs made, and configured keys are removed from what it's sent.
 
 ## Failure details
 

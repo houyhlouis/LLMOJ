@@ -193,6 +193,8 @@ export interface AiReplayRecord {
   runtime?: { judgeProgram: string; sandboxImage: string; arch: string };
   // Why it failed itself
   error?: string;
+  // The repair it tested (review Part III, W04): the job replayed the failure with that repair's program
+  repair?: number;
 }
 
 export const replayStatus = (kind: StoredAiObservation["kind"], runs: AiReplayRun[]) => aiReplayOutcome(kind, runs);

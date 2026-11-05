@@ -228,6 +228,6 @@ test("a finished job says where its test data was made, and whether it was made 
   );
   assert.equal(
     line({ execution: execution({ result: "resumed", reuse: { builds: 9, inputs: 40 } }) }),
-    "Made on a judge machine, the job waiting again for the same run after it stopped · 9 programs taken from earlier builds · 40 inputs from the interrupted attempt"
+    "Made on a judge machine, the job waiting again for the same run after it stopped · 9 programs taken from earlier builds · 40 inputs the same generator made in an earlier run"
   );
 });

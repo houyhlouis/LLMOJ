@@ -50,7 +50,9 @@ export interface AiStatementText {
  * How a failed job is retried: its sample check again (the samples were corrected), with a new reference solution, or
  * with the scoring change its owner reviewed (see ai-judging-contract.ts).
  */
-export type AiRetryFrom = "validate-samples" | "std" | "replace-scoring";
+// "repair": one program the owner chose, repaired from the failure the job stopped at; "regenerate": every program
+// written again from the same plan
+export type AiRetryFrom = "validate-samples" | "std" | "replace-scoring" | "repair" | "regenerate";
 
 export class AiError extends Error {
   candidateFailure?: boolean;

@@ -85,17 +85,48 @@ test('safe tutorials retain bilingual publication, with scoring and source conte
 
 const bad = '#include <random>\nint main(){std::random_device rd; std::mt19937_64 rnd(rd);return 0;}';
 const good = '#include <random>\nint main(){std::random_device rd; const auto seed = rd(); std::mt19937_64 rnd(seed);return 0;}';
-const compileFailure=(detail='no matching function for mt19937_64(random_device&)')=>new AiError('SANDBOX_GENERATION_FAILED',
-  'make compilation failed (status=RuntimeError, exit=1, termination=exited, timeMs=1, memoryBytes=1): '+detail);
+// A typed compile failure of make.cpp (judge protocol 6 and later), kept with its whole diagnostics
+const compileFailure=(detail='no matching function for mt19937_64(random_device&)',execution={status:'RuntimeError',exitCode:1,termination:'exited'},role='make')=>{
+  const error=new AiError('SANDBOX_GENERATION_FAILED',`${role} compilation failed: `+detail.slice(0,200));
+  error.failure={kind:'compile_error',fatal:true,role,phase:`compile-${role}`,execution,summary:error.message,artifacts:[
+    {role:'diagnostics',classification:'author-private',name:'0.diagnostics',size:detail.length,originalSize:detail.length,sha256:'d'.repeat(64),preview:detail.slice(0,100),binary:false,stored:true}]};
+  error.diagnostics=detail;
+  return error;
+};
 function repairFixture() {
-  const checks=[], user={id:1}, job={id:'repair-memory',state:{makeCode:bad},progress:45};
+  const checks=[], user={id:1}, job={id:'repair-memory',ownerId:1,state:{makeCode:bad,plan:{},validatorCode:'official validator',stdCode:'accepted std',managerCode:'official manager',problemHelpers:['manager']},progress:45,step:'testdata.compile'};
   const svc=aiServices({}, {}, {}, {userHasPrivilege:async()=>true,permissionDecision:async()=>true});
   svc.assertSnapshot=async()=>{checks.push('authorize');return user;};
   svc.checkpoint=async(_j,phase)=>checks.push(phase);
+  svc.services.workflow.retryDelay=0;
   const request={makeCode:bad,validatorCode:'official validator',stdCode:'accepted std',managerCode:'official manager',extraSourceFiles:{'message.h':'official header'}};
+  const rows=new Map();
+  // A failed run's observation is kept as the runner reported it, with the program it failed with
+  const keep=(error,source)=>{
+    if(!error.failure)return error;
+    error.observationId=error.observationId||`00000000-0000-4000-8000-${String(rows.size+1).padStart(12,'0')}`;
+    rows.set(error.observationId,{id:error.observationId,evidence:'stored',expiresAt:new Date(Date.now()+86400000),
+      observation:{...error.failure,origin:'local',operation:'generate',attemptId:'a',sourceHashes:{make:require('node:crypto').createHash('sha256').update(source).digest('hex')}},diagnostics:error.diagnostics});
+    return error;
+  };
+  svc.services.workflow.evidence={
+    observation:async(_j,id)=>{if(!rows.has(id))throw new AiError('NO_SUCH_OBSERVATION');return rows.get(id);},
+    readText:async(_j,id,_role,limit)=>rows.get(id).diagnostics.slice(0,limit),
+    addReplay:async()=>{},updateReplay:async()=>{}
+  };
+  // The repaired generator is compiled first, as the kept failure was
+  const compiled=[];
+  svc.replayRequest=async(current,_p,plan)=>({request:{profiles:{},replay:{...plan,programs:{make:current.state.makeCode}}},programs:{make:current.state.makeCode},profiles:'same'});
+  svc.execution={replay:async(_j,req)=>{
+    compiled.push(req.replay.programs.make);
+    const now=new Date().toISOString();
+    return {validation:{profiles:require('@libreoj/judge-protocol').aiContractDigest({})},
+      execution:{contract:require('@libreoj/judge-protocol').AI_EXECUTION_PROTOCOL_VERSION,attemptId:'b',runtime:{judgeProgram:'0'.repeat(64),sandboxImage:'t',arch:'x64'},startedAt:now,finishedAt:now,reuse:{builds:0,inputs:0}},
+      replay:{runs:[{outcome:'passed',summary:'ok'}]}};
+  }};
   const config={llm:{apiKey:'synthetic-llm-secret'},search:{apiKey:'synthetic-search-secret'}};
-  const run=()=>svc.runGenerationSandbox(job,config,{statements:[],judgeInfo:{}},request,async()=>{});
-  return {svc,job,request,config,checks,run};
+  const run=()=>svc.runGenerationSandbox(job,config,{id:8,type:'Traditional'},{statements:[],judgeInfo:{}},request,async()=>{});
+  return {svc,job,request,config,checks,run,keep,compiled};
 }
 async function withModel(fn, work) {
   const old=provider.generateText;provider.generateText=fn;
@@ -113,39 +144,45 @@ test('real GCC compiler diagnostics trigger one repair, which compiles; other ro
       const filename=path.join(directory,'make.cpp');fs.writeFileSync(filename,req.makeCode);
       const out=spawnSync('g++',['-std=c++17','-fsyntax-only',filename],{encoding:'utf8'});
       if(out.error)throw out.error;
-      if(out.status!==0)throw compileFailure(out.stderr);
+      if(out.status!==0)throw f.keep(compileFailure(out.stderr),req.makeCode);
       return {validated:true};
     };
     await withModel(async(_config,_system,prompt)=>{
       calls++;assert.match(prompt,/no matching function/);assert.match(prompt,/rnd\(rd\)/);
-      assert.equal(f.job.state.makeCompileRepairAttempts,1,'budget persisted before model');
-      assert(f.checks.includes('testdata.repair-make'));
+      assert.equal(f.job.state.repair.automatic,1,'budget persisted before model');
+      assert(f.checks.includes('testdata.repair'));
       return good;
     },async()=>assert.equal((await f.run()).validated,true));
     assert.equal(calls,1);assert.equal(compiles,2);assert.equal(f.job.state.makeCode,good);
+    assert.deepEqual(f.compiled,[good],'tested against the kept failure first');
     assert.equal(f.checks.filter(x=>x==='authorize').length,2);
   }finally{fs.rmSync(directory,{recursive:true,force:true});}
 });
 
-test('a bad repair stops after one request; durable budget survives a repeated invocation',async()=>{
+test('a bad repair stops after one request; the same failure of the same program never asks again',async()=>{
   const f=repairFixture();let calls=0,runs=0;
-  f.svc.runSandbox=async(_j,_r,p)=>{runs++;await p({phase:'compile-make'});throw compileFailure();};
+  f.svc.runSandbox=async(_j,req,p)=>{runs++;await p({phase:'compile-make'});throw f.keep(compileFailure(),req.makeCode);};
   await withModel(async()=>{calls++;return bad;},async()=>{
     await assert.rejects(f.run(),/SANDBOX_GENERATION_FAILED/);
     await assert.rejects(f.run(),/SANDBOX_GENERATION_FAILED/);
   });
-  assert.equal(calls,1);assert.equal(runs,3);
+  assert.equal(calls,1);assert.equal(runs,2);
+  assert.equal(f.job.state.repair.review.reason,'UNCHANGED');
+  assert.equal(f.job.state.repair.revisions[0].rejected,'IDENTICAL');
 });
 
-test('infrastructure, cancellation, other-role compilation and later validation failures are not repaired',async()=>{
-  for (const [phase,error] of [
-    ['compile-make',new AiError('JOB_CANCELLED')],['compile-make',new AiError('SANDBOX_UNAVAILABLE')],
-    ['compile-manager',compileFailure()],['validate-inputs',compileFailure()],
-    ['compile-make',new AiError('SANDBOX_GENERATION_FAILED','make compilation failed (status=TimeLimitExceeded, exit=-1, termination=signaled): no output')]
+test('infrastructure, cancellation, the problem\'s own helpers and untyped failures are not repaired',async()=>{
+  const killed={status:'TimeLimitExceeded',exitCode:-1,termination:'signaled'};
+  for (const [error,review] of [
+    [new AiError('JOB_CANCELLED'),undefined],[new AiError('SANDBOX_UNAVAILABLE'),'INFRASTRUCTURE'],
+    [compileFailure(undefined,undefined,'manager'),'PROBLEM_HELPER'],
+    [new AiError('SANDBOX_GENERATION_FAILED','make compilation failed (exit=1, termination=exited): untyped'),'UNCLASSIFIED'],
+    [compileFailure('no output',killed),'INFRASTRUCTURE']
   ]) {
-    const f=repairFixture();f.svc.runSandbox=async(_j,_r,p)=>{await p({phase});throw error;};
+    const f=repairFixture();f.svc.runSandbox=async(_j,req,p)=>{await p({phase:'compile-make'});throw f.keep(error,req.makeCode);};
     await withModel(async()=>assert.fail('must not spend on repair'),async()=>await assert.rejects(f.run(),e=>e===error));
-    assert.equal(f.job.state.makeCompileRepairAttempts,undefined);
+    assert.equal(f.job.state.repair.automatic,0);
+    assert.equal(f.job.state.repair.review?.reason,review,error.message);
   }
 });
 
@@ -153,7 +190,7 @@ test('permission/cancellation/snapshot revocation before and during repair preve
   for(const errorCode of ['JOB_CANCELLED','PERMISSION_DENIED','PROBLEM_CHANGED_DURING_AI'])
     for(const when of ['before','during']){
       const f=repairFixture();let calls=0,runs=0,checks=0;
-      f.svc.runSandbox=async(_j,_r,p)=>{runs++;await p({phase:'compile-make'});throw compileFailure();};
+      f.svc.runSandbox=async(_j,req,p)=>{runs++;await p({phase:'compile-make'});throw f.keep(compileFailure(),req.makeCode);};
       f.svc.assertSnapshot=async()=>{if(++checks===(when==='before'?1:2))throw new AiError(errorCode);return{id:1};};
       await withModel(async()=>{calls++;return good;},async()=>await assert.rejects(f.run(),new RegExp(errorCode)));
       assert.equal(calls,when==='before'?0:1);assert.equal(runs,1);assert.equal(f.job.state.makeCode,bad);
@@ -162,11 +199,11 @@ test('permission/cancellation/snapshot revocation before and during repair preve
 
 test('the repair diagnostic is bounded and redacts known configured secrets without sending configuration',async()=>{
   const f=repairFixture();let runs=0;
-  f.request.makeCode=bad+' // synthetic-llm-secret';
-  f.svc.runSandbox=async(_j,_r,p)=>{if(++runs>1)return {};await p({phase:'compile-make'});throw compileFailure('synthetic-search-secret '+ 'x'.repeat(4000));};
+  f.request.makeCode=bad+' // synthetic-llm-secret';f.job.state.makeCode=f.request.makeCode;
+  f.svc.runSandbox=async(_j,req,p)=>{if(++runs>1)return {};await p({phase:'compile-make'});throw f.keep(compileFailure('synthetic-search-secret '+ 'x'.repeat(10000)),req.makeCode);};
   await withModel(async(_config,_system,prompt)=>{
     assert(!prompt.includes('synthetic-llm-secret'));assert(!prompt.includes('synthetic-search-secret'));
-    assert(!prompt.includes('x'.repeat(2100)));assert.match(prompt,/REDACTED/);return good;
+    assert(!prompt.includes('x'.repeat(8100)));assert.match(prompt,/REDACTED/);return good;
   },f.run);
 });
 
@@ -191,8 +228,8 @@ test('data-generation and data-edit rights are checked again before spending on 
     const f=repairFixture();
     f.svc.privileges.userHasPrivilege=async()=>permission!=='generate';
     f.svc.privileges.permissionDecision=async()=>permission!=='edit';
-    f.svc.runSandbox=async(_j,_r,p)=>{await p({phase:'compile-make'});throw compileFailure();};
+    f.svc.runSandbox=async(_j,req,p)=>{await p({phase:'compile-make'});throw f.keep(compileFailure(),req.makeCode);};
     await withModel(async()=>assert.fail('revoked permission must not incur a repair call'),async()=>await assert.rejects(f.run(),/PERMISSION_DENIED/));
-    assert.equal(f.job.state.makeCompileRepairAttempts,undefined);
+    assert.equal(f.job.state.repair.automatic,0);
   }
 });

@@ -697,7 +697,7 @@ test("input validator is generated independently from make/std and a runner reje
   }
 });
 
-test("retry regenerates failed programs while retaining committed artifacts", () => {
+test("a retry keeps the programs of a failed run; writing them again is the owner's choice (review Part III, H02)", () => {
   const svc = aiServices({}, {}, {}, {}, {}, {}, {});
   const state = {
     completed: ["import", "tutorial"],
@@ -706,30 +706,50 @@ test("retry regenerates failed programs while retaining committed artifacts", ()
     makeCode: "bad make",
     stdCode: "bad std",
     checkerCode: "bad checker",
-    validatorCode: "bad validator"
+    validatorCode: "bad validator",
+    qualityValidation: { version: 1 }
   };
-  const result = svc.retryState({ state, error: "SANDBOX_GENERATION_FAILED: checker failed sample" });
-  assert.equal(result.makeCode, undefined);
-  assert.equal(result.stdCode, undefined);
-  assert.equal(result.checkerCode, undefined);
-  assert.equal(result.validatorCode, undefined);
+  // A failed run is retried with the same programs: the job routes its failure again and repairs one program
+  for (const error of [
+    "SANDBOX_GENERATION_FAILED: checker failed sample",
+    "SANDBOX_GENERATION_FAILED: validator: cumulative bound exceeded",
+    "SANDBOX_UNAVAILABLE",
+    "TESTDATA_QUALITY_GATE_FAILED: Invalid adversarial witness"
+  ]) {
+    const result = svc.retryState({ status: "failed", state, error });
+    for (const field of ["makeCode", "stdCode", "checkerCode", "validatorCode", "plan"])
+      assert.equal(result[field], state[field], `${error}: ${field}`);
+    assert.equal(result.qualityValidation, undefined);
+    assert.equal(result.generationFailure, undefined);
+  }
+  // Writing every program again, from the same plan, when the owner chooses it after the job stopped for them
+  const stopped = {
+    ...state,
+    repair: { version: 1, automatic: 3, infrastructure: 0, revisions: [], review: { reason: "REPAIR_LIMIT", roles: [], kind: "compile_error" } }
+  };
+  const result = svc.retryState({ status: "failed", state: stopped, error: "SANDBOX_GENERATION_FAILED: checker failed sample" }, "regenerate");
+  for (const field of ["makeCode", "stdCode", "checkerCode", "validatorCode"]) assert.equal(result[field], undefined);
   assert.deepEqual(result.completed, ["import", "tutorial"]);
   assert.equal(result.discussionId, 7);
   assert.equal(result.plan, state.plan);
   assert.match(result.generationFailure, /checker failed sample/);
   assert.equal(state.makeCode, "bad make");
-  assert.equal(svc.retryState({ state, error: "PROBLEM_CHANGED_DURING_AI" }).plan, undefined);
-  assert.equal(svc.retryState({ state, error: "SANDBOX_UNAVAILABLE" }).stdCode, "bad std");
-  assert.equal(svc.retryState({ state, error: "SANDBOX_UNAVAILABLE" }).validatorCode, "bad validator");
-  const invalidInput = svc.retryState({
-    state,
-    error: "SANDBOX_GENERATION_FAILED: validator: cumulative bound exceeded"
+  // A plan the problem no longer matches: everything written from it goes
+  const changed = svc.retryState({ status: "failed", state, error: "PROBLEM_CHANGED_DURING_AI" });
+  for (const field of ["plan", "makeCode", "stdCode", "checkerCode", "validatorCode"]) assert.equal(changed[field], undefined);
+  // Only the checker, when only the checker was invalid
+  const partial = svc.retryState({ status: "failed", state, error: "PARTIAL_SCORE_CHECKER_NOT_ALLOWED" });
+  assert.equal(partial.checkerCode, undefined);
+  assert.equal(partial.makeCode, "bad make");
+  assert.equal(partial.validatorCode, "bad validator");
+  // The quality plan, its programs and the generator that was written for its targets
+  const quality = svc.retryState({
+    status: "failed",
+    state: { ...state, qualityPlan: {}, qualityArtifacts: {} },
+    error: "INVALID_AI_QUALITY_PLAN"
   });
-  for (const field of ["makeCode", "stdCode", "checkerCode", "validatorCode"])
-    assert.equal(invalidInput[field], undefined);
-  assert.equal(invalidInput.discussionId, 7);
-  assert.match(invalidInput.generationFailure, /cumulative bound exceeded/);
-  assert.equal(state.validatorCode, "bad validator");
+  for (const field of ["qualityPlan", "qualityArtifacts", "makeCode"]) assert.equal(quality[field], undefined);
+  for (const field of ["stdCode", "checkerCode", "validatorCode", "plan"]) assert.equal(quality[field], state[field]);
 });
 
 test("DeepSeek 384K output budget and max reasoning are valid; 1M is not an output budget", () => {

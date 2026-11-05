@@ -150,8 +150,13 @@ export function AiRunSummary({ result }: { result: AiJob["result"] }) {
       ),
     execution.reuse.inputs &&
       aiText(
-        `复用中断前生成的 ${execution.reuse.inputs} 个输入`,
-        `${execution.reuse.inputs} inputs from the interrupted attempt`
+        `复用同一生成器此前生成的 ${execution.reuse.inputs} 个输入`,
+        `${execution.reuse.inputs} inputs the same generator made in an earlier run`
+      ),
+    result.revision?.repairs &&
+      aiText(
+        `经过 ${result.revision.repairs} 次修复`,
+        `after ${result.revision.repairs} ${result.revision.repairs === 1 ? "repair" : "repairs"}`
       )
   ].filter(Boolean);
   return (

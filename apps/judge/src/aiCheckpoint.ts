@@ -1,12 +1,13 @@
 /*
  * What an AI run keeps for the next attempt (review Part III, H07/W03): a job's compiled programs, by everything their
- * binary depends on, and the inputs an operation's generators made. An attempt that a restart interrupted is then run
- * again with the same builds and the same cases, instead of new cases drawn with fresh randomness; an attempt of
- * another operation of the same job (e.g. a retry with a new checker) reuses the programs that didn't change.
+ * binary depends on, and the inputs its generators made, by generator. An attempt that a restart interrupted is then
+ * run again with the same builds and the same cases, instead of new cases drawn with fresh randomness; and a run after
+ * a repair (review Part III, W04) reuses the programs that didn't change, and, unless the repaired program is a
+ * generator, the inputs the failed run was given: the repaired program is checked on the same cases.
  *
  * Both are in the judge's own data store, not where the backend can write, and are bound to this judge's runtime (its
  * program and sandbox image): after an upgrade nothing is reused. They're deleted a day after their last use, when
- * the local backend cleans the job up, and (the inputs) when their operation completes.
+ * the local backend cleans the job up, and (the inputs) when a run that used them completes.
  */
 import crypto from "crypto";
 import fs from "fs";
@@ -23,9 +24,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const KEY = /^[0-9a-f]{64}$/;
 const MAX_FILE = 16 * 1024 * 1024;
 // Kept inputs are an optimization: none are kept when the disk is this close to full, nor more than this of one
-// operation's (the run's own output needs the space; inputs past it are generated again after an interruption)
+// generator's (the run's own output needs the space; inputs past it are generated again after an interruption)
 const DISK_RESERVE = 2 * 1024 * 1024 * 1024;
-const OPERATION_INPUTS = 512 * 1024 * 1024;
+const GENERATOR_INPUTS = 512 * 1024 * 1024;
 const GENERATOR = /^(?:make|quality-small-make)$/;
 
 const root = (name: string) => path.join(config.dataStore, name);
@@ -125,10 +126,10 @@ export class JobBuilds {
 }
 
 /**
- * The inputs an operation's generators made on this judge, by generator, subtask and case index: an attempt of the same
- * operation (the same programs, cases and settings, by the backend's operation key) on the same runtime replays them.
+ * The inputs one of a job's generators made on this judge, by subtask and case index: a run of the job with the same
+ * generator build (its `buildKey`, which covers its source, options and the runtime) replays them.
  */
-export class OperationInputs {
+export class GeneratorInputs {
   private readonly directory: string;
 
   // Inputs taken from here instead of generated
@@ -139,15 +140,15 @@ export class OperationInputs {
 
   constructor(
     jobId: string,
-    operationKey: string,
+    generator: string,
     runtime: AiRuntimeIdentity,
-    private readonly limit = OPERATION_INPUTS
+    private readonly limit = GENERATOR_INPUTS
   ) {
-    if (!UUID.test(jobId) || !KEY.test(operationKey)) throw new Error("Invalid AI operation");
+    if (!UUID.test(jobId) || !KEY.test(generator)) throw new Error("Invalid AI generator");
     this.directory = path.join(
       root(AI_CORPUS),
       jobId.toLowerCase(),
-      aiContractDigest({ version: 1, operationKey, runtime })
+      aiContractDigest({ version: 2, generator, runtime })
     );
   }
 
@@ -190,7 +191,7 @@ export class OperationInputs {
     }
   }
 
-  /** Once the operation completed: its result has the cases. */
+  /** Once a run that used them completed: its result has the cases. */
   async discard() {
     await fs.promises.rm(this.directory, { recursive: true, force: true });
   }

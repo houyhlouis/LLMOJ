@@ -8,9 +8,12 @@ import {
   IsBoolean,
   Length,
   ValidateNested,
-  IsDefined
+  IsDefined,
+  Matches
 } from "class-validator";
 import { Type } from "class-transformer";
+
+import { AI_PROGRAM_ROLE } from "@libreoj/judge-protocol";
 
 import { AiAction } from "./ai.entity";
 import { AiRetryFrom } from "./ai.types";
@@ -88,7 +91,10 @@ export class AiUsageQueryDto {
   @IsOptional() @IsInt() @Min(1) @Max(366) days?: number;
 }
 export class AiRetryJobDto extends AiJobIdDto {
-  @IsOptional() @IsIn(["validate-samples", "std", "replace-scoring"]) retryFrom?: AiRetryFrom;
+  @IsOptional() @IsIn(["validate-samples", "std", "replace-scoring", "repair", "regenerate"]) retryFrom?: AiRetryFrom;
+
+  // "repair": the program, by the role failures name it with (e.g. "std", "quality-alt-0")
+  @IsOptional() @IsString() @Matches(AI_PROGRAM_ROLE) role?: string;
 }
 
 export class AiFailuresDto {

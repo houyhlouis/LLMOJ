@@ -100,7 +100,8 @@ declare namespace ApiTypes {
   }
   export interface AiRetryJobDto {
     id: string;
-    retryFrom?: "validate-samples" | "std" | "replace-scoring";
+    retryFrom?: "validate-samples" | "std" | "replace-scoring" | "repair" | "regenerate";
+    role?: string;
   }
   export interface AiTestDto {
     target: "llm" | "search";

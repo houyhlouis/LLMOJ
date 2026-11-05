@@ -287,6 +287,7 @@ export function ReplayPanel({
           <p className={style.observationHeading}>
             <strong>{replayStatusName(record.status)}</strong>
             {` · ${replayCheckName(record.check)}`}
+            {record.repair && aiText(` · 检验第 ${record.repair} 次修复`, ` · testing repair ${record.repair}`)}
             {` · ${formatDateTime(record.startedAt)[1]}`}
             {record.origin === "judge" && aiText(" · 在评测机上运行", " · on a judge machine")}
           </p>
