@@ -1,9 +1,11 @@
 // Exact, additive schema of AI runs on judge machines: the runs an AI job sends to the judge queue instead of the
-// local AI runner. Imported only by the offline upgrader.
+// local AI runner. A table created by an upgrade comes with the columns of its logical operation
+// (ai-operation-schema.mjs). Imported only by the offline upgrader.
 export const AI_EXECUTION_CREATE_SQL = "CREATE TABLE `ai_execution` (`taskId` char(36) NOT NULL, " +
   "`jobId` varchar(36) NOT NULL, `state` varchar(10) NOT NULL, `sampleFiles` longtext NOT NULL, " +
   "`progress` longtext NULL, `result` longtext NULL, `uploads` longtext NULL, `createdAt` datetime(3) NOT NULL, " +
-  "`finishedAt` datetime(3) NULL, INDEX `IDX_f406176b1abd93cce8909f3e8c` (`state`, `createdAt`), " +
+  "`finishedAt` datetime(3) NULL, `operationKey` char(64) NULL, `operation` varchar(20) NULL, " +
+  "`collectedAt` datetime(3) NULL, INDEX `IDX_f406176b1abd93cce8909f3e8c` (`state`, `createdAt`), " +
   "INDEX `IDX_b1cb845eda11bbedb12e38812c` (`jobId`), PRIMARY KEY (`taskId`)) ENGINE=InnoDB";
 export const AI_EXECUTION_TABLES = Object.freeze(["ai_execution"]);
 export const AI_EXECUTION_SQL = Object.freeze([AI_EXECUTION_CREATE_SQL]);

@@ -699,6 +699,25 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Queues again the jobs a judge client leased through its earlier connections, once it has connected again. They have
+   * ended without a result: a judge client restarts when it loses its connection, and only its latest connection is
+   * its session. Their backend may have stopped without releasing them (e.g. it restarted), and they would otherwise
+   * be queued again only when their leases expire.
+   */
+  async releaseEarlierLeases(judgeClientId: number, connectionId: string): Promise<void> {
+    const leased: { taskId: string; fence: number; leaseOwner: string }[] = await this.connection.query(
+      "SELECT taskId, fence, leaseOwner FROM judge_job WHERE state = ? AND judgeClientId = ? AND leaseOwner <> ? LIMIT 1000",
+      [JudgeJobState.Leased, judgeClientId, connectionId]
+    );
+    /* eslint-disable no-await-in-loop */
+    for (const job of leased) {
+      logger.log(`Judge client ${judgeClientId} connected again: its earlier lease of judge task ${job.taskId} ended`);
+      await this.release(job.taskId, Number(job.fence), job.leaseOwner, JudgeJobAttemptOutcome.Disconnected);
+    }
+    /* eslint-enable no-await-in-loop */
+  }
+
   /** Gives up on a job, and lets its task's service show the failure. */
   private async fail(
     taskId: string,

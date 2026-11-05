@@ -21,3 +21,4 @@ export const downloadFailureArtifact = createPostApi<ApiTypes.AiFailureArtifactD
   "ai/downloadFailureArtifact",
   {}
 );
+export const replayFailure = createPostApi<ApiTypes.AiReplayFailureDto, void>("ai/replayFailure", {});

@@ -173,7 +173,7 @@ Generating test data replaces a problem's test cases, not how they're judged.
 - **Isolation.** Each program of a job (generators, reference solution, input validator, checker, oracle, second solution and challenges) runs seeing only its own compiled program, never another's: a challenge can't pass by running the reference solution.
 - **In the job.** A finished job says whether it kept, set or replaced the scoring settings, and how its checker, interactor or manager was compiled and limited. `data.yaml` records the scoring decision with its SHA-256 digest (`scoring`), and each program's settings (`executionProfiles`).
 
-AI test data programs run on judges of protocol version 7 or later; see [Distributed judging](Distributed-Judging.md#ai).
+AI test data programs run on judges of protocol version 8; see [Distributed judging](Distributed-Judging.md#ai).
 
 ## Uploads, cancelling and failures
 
@@ -182,6 +182,20 @@ AI test data programs run on judges of protocol version 7 or later; see [Distrib
 - If the generated `make.cpp` doesn't compile, the model gets one chance to repair it, with the compiler's own messages (up to 8,000 characters). Uploaded checkers, interactors, managers and graders are never rewritten, and keep their own compile options and limits. A second failure, a sample failure or a failed data check fails the job.
 - Solutions are checked for claims about sources and scoring before they're published; this doesn't replace reviewing their algorithms yourself.
 - If a browser can't read a file (for example Firefox installed as a Snap reading files owned by root), copy the file into a folder your desktop user owns. Don't turn off the browser's sandbox.
+
+## When a job is interrupted
+
+If the server restarts while a job generates test data (an upgrade, a crash), the job resumes where it stopped and doesn't start its test data over:
+
+- If its programs were running on a judge machine, the job waits for that same run again. If the judge restarted too, it runs it again with the programs it had already compiled and the inputs it had already generated: the cases made before the restart are kept byte for byte, although generators draw fresh randomness. Their checks are run again.
+- If the site's own judge runs them, the run stops with the restart; when the job resumes, it runs again with the compiled programs and inputs the judge kept.
+- If the run had finished, its result is taken as it is, not made again, even if the job stopped while publishing it.
+
+A job that fails after its run finished (for example because the problem changed meanwhile) keeps that result for 24 hours: retrying with exactly the same programs and settings publishes it instead of generating new data. Any change to a program, the cases or the settings makes a new run, which never takes the old one's cases (it takes its compiled programs that didn't change).
+
+A finished job says where its data was made: on this server or on a judge machine, whether the job collected a finished result again after it stopped, and how many compiled programs and inputs were reused. `data.yaml` records this (`generation.execution`) with the SHA-256 and size of every case (`generation.corpus`), and the published files are exactly those cases.
+
+What a judge keeps for this (each job's compiled programs and each run's generated inputs, in its data store under `ai-builds` and `ai-corpus`) is deleted when the job finishes, or a day after it was last used.
 
 ## Failure details
 
@@ -195,9 +209,16 @@ When a run of an AI job's programs fails, the job keeps what failed and the exac
 - **A challenge that wasn't rejected** shows whether the extra search for counterexamples ran out of attempts or couldn't run because no test case could be replaced. A small input it failed during differential testing is shown as a related small counterexample: it isn't exported test data, so it doesn't count as rejecting the program.
 - **A tutorial's solution** that failed its sample check is kept too, marked as such; the job went on with a model-written reference solution.
 
+**Replay** runs a failure's check again with the exact data that was kept: the reference solution against the oracle (or the official sample's output) on the kept input, the input validator on the kept input, a generator with the same subtask and case index, a program on the kept input, or the checker on the kept files. It runs 3 times (a compilation once), where the job's programs run, with the job's programs as they are now and the problem's current settings. Each replay shows:
+
+- **Reproduced** (every run failed the same way), **Not reproduced** (no run failed), **Unstable** (the runs didn't all end the same way) or **Failed another way**, and each run's outcome.
+- Whether it ran the programs that failed or the job's programs as they are now (a retry may have rewritten them: a replay then says whether they still fail on that input), and whether the problem's judging settings changed since.
+
+A failure that isn't about one input (a wrong or slow program that wasn't rejected, the execution budget, the judging infrastructure) or a tutorial's code can't be replayed, nor one whose evidence expired or wasn't kept whole; for interactive and communication problems, only compilations and input validation are. One replay runs at a time for each job and each user, none while the job is queued or running, and the job can't be retried during one. Replays are recorded in the audit log, and a failure keeps its 5 latest.
+
 Only the job's owner sees these, and only while they could still run the job: the AI and test data permissions, and permission to modify the problem. The evidence is kept for **14 days**; the summary stays 90 days without the data. Each kept artifact is at most 16 MiB (only the start of a larger one is kept, and it says so) and 64 MiB per failed run; a job keeps at most 256 MiB and 64 failures, and the whole site 2 GiB. When evidence couldn't be kept (the limits, a storage failure, or a judge machine older than protocol version 6), the failure says so instead of showing data.
 
-The evidence is stored with the site's files, as temporary objects under `temporary/ai-evidence/` that the backend deletes when they expire, and the failures in the `ai_observation` table. On a `web` site, the judge machine uploads the evidence of a failed run before it reports the failure; a failure reported while the backend was restarting is recorded when the job runs again, or by the cleanup every 10 minutes.
+The evidence is stored with the site's files, as temporary objects under `temporary/ai-evidence/` that the backend deletes when they expire, and the failures in the `ai_observation` table. On a `web` site, the judge machine uploads the evidence of a failed run before it reports the failure; a failure reported while the backend was restarting is the outcome the job takes when it runs again (the run isn't made again), or the cleanup every 10 minutes records it.
 
 ## Where AI runs and where keys are kept
 

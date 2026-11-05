@@ -94,6 +94,10 @@ declare namespace ApiTypes {
     filename: string;
     size: number;
   }
+  export interface AiReplayFailureDto {
+    jobId: string;
+    id: string;
+  }
   export interface AiRetryJobDto {
     id: string;
     retryFrom?: "validate-samples" | "std" | "replace-scoring";

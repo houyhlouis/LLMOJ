@@ -337,6 +337,27 @@ test(
     assert.equal(orphanLease.task.taskId, orphan);
     assert.equal(await report(b, orphan, orphanLease, 8, result("Accepted")), true);
 
+    // A backend crashes while its judge client runs a job; the judge client connects again (to another backend):
+    // the job is queued again at once, not when its lease expires. Another judge client's lease stays.
+    const interrupted = await newTask(a);
+    const elsewhere = await newTask(a, 1.5);
+    const interruptedLease = await a.claim(owner(10));
+    assert.equal(interruptedLease.task.taskId, interrupted);
+    assert.equal((await a.claim(owner(11))).task.taskId, elsewhere);
+    await b.releaseEarlierLeases(10, "socket-10");
+    assert.equal((await job(interrupted)).state, "Leased", "its current connection's lease stays");
+    await b.releaseEarlierLeases(10, "socket-10-again");
+    assert.equal((await job(interrupted)).state, "Queued");
+    assert.deepEqual(await attempts(interrupted), [[1, "Disconnected"]]);
+    assert.equal((await job(elsewhere)).state, "Leased");
+    assert.equal(await report(a, interrupted, interruptedLease, 10, result("Accepted")), false, "the old lease can't report");
+    const again = await b.claim(owner(10));
+    assert.deepEqual([again.task.taskId, again.fence], [interrupted, 2]);
+    assert.equal(await report(b, interrupted, again, 10, result("Accepted")), true);
+    await b.releaseEarlierLeases(11, "socket-11-again");
+    const elsewhereLease = await b.claim(owner(11));
+    assert.equal(await report(b, elsewhere, elsewhereLease, 11, result("Accepted")), true);
+
     // A backend crashes after the result commits, before the judge client's acknowledgement: not judged again.
     const committed = await newTask(a);
     claimed = await a.claim(owner(9));

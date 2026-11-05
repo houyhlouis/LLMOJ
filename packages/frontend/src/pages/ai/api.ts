@@ -245,6 +245,18 @@ const errors: Record<string, [string, string]> = {
     "生成的数据无法按题目现有的计分设置发布。请查看下方的差异：确认后可按新的设置继续，或先在评测设置中修改子任务后重试。",
     "The generated data can't be published with the problem's current scoring settings. Review the difference below: approve it to continue with the new settings, or change the subtasks in the judging settings first and retry."
   ],
+  AI_REPLAY_UNSUPPORTED: [
+    "无法重放此失败：所需的程序或保存的证据已不存在，或者这类失败无法按单个输入重放。",
+    "This failure can't be replayed: a program or the kept evidence it needs is gone, or it isn't a failure of one input."
+  ],
+  AI_REPLAY_BUSY: [
+    "已有一次重放在运行（每个任务、每位用户同时只能运行一次重放），请等它结束。",
+    "A replay is already running (one at a time for each job and each user). Wait for it to finish."
+  ],
+  AI_JOB_ACTIVE: [
+    "任务正在运行或排队，结束后才能重放其失败。",
+    "The job is queued or running. Its failures can be replayed once it stops."
+  ],
   AI_PROFILE_MISMATCH: [
     "即将发布的评测设置与检验数据时使用的设置不一致，已停止发布。",
     "The judging settings to be published differ from the ones the data was checked with, so nothing was published."
@@ -568,6 +580,40 @@ export interface AiObservation {
     auxiliary: { timeLimitMs: number; memoryLimitMiB: number };
     solution: { timeLimitMs: number; memoryLimitMiB: number };
   };
+  // Its latest replays, latest last, and whether it can be replayed now
+  replays?: AiReplayRecord[];
+  replay?: { available: true } | { available: false; reason: string };
+}
+
+/** What runs the programs of a job: where, on what, and what it took from earlier attempts. */
+export interface AiRuntimeIdentity {
+  judgeProgram: string;
+  sandboxImage: string;
+  arch: string;
+}
+
+/** One run of a replay. */
+export interface AiReplayRun {
+  outcome: "failed" | "passed";
+  kind?: string;
+  verdict?: string;
+  summary: string;
+  execution?: AiObservation["execution"];
+}
+
+/** A replay of a kept failure (ai/replayFailure), as kept with it. */
+export interface AiReplayRecord {
+  id: string;
+  status: "running" | "failed" | "reproduced" | "not_reproduced" | "unstable" | "different";
+  startedAt: string;
+  finishedAt?: string;
+  check: "compile" | "validate" | "generate" | "run" | "compare" | "checker";
+  revision: "same" | "changed" | "unknown";
+  profiles: "same" | "changed" | "unknown";
+  runs?: AiReplayRun[];
+  origin?: "local" | "judge";
+  runtime?: AiRuntimeIdentity;
+  error?: string;
 }
 export type AiRetryFrom = "validate-samples" | "std" | "replace-scoring";
 
@@ -610,6 +656,19 @@ export interface AiJob {
     generatedCount?: number;
     observationCount?: number;
     scoring?: { status: "kept" | "new" | "replaced"; subtasks: number; digest: string; previousDigest?: string };
+    // Where the published test data was made, and how its run was come by
+    execution?: {
+      operation: string;
+      origin: "local" | "judge";
+      task?: string;
+      result: "new" | "resumed" | "collected-again";
+      attempt: string;
+      runtime: AiRuntimeIdentity;
+      startedAt: string;
+      finishedAt: string;
+      reuse: { builds: number; inputs: number };
+    };
+    corpus?: { digest: string; cases: number; adversarial: number };
     helpers?: Array<{
       role: "checker" | "interactor" | "manager";
       origin: "problem" | "ai";

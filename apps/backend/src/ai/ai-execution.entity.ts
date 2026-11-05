@@ -17,7 +17,9 @@ export enum AiExecutionState {
 
 /**
  * A run of an AI job's programs on a judge machine (an AiExecution judge task), instead of the local AI runner. Its
- * request and the files it generates are temporary objects in storage; the AI job waits for its result here.
+ * request and the files it generates are temporary objects in storage; the AI job waits for its result here. It's an
+ * attempt of a logical operation (see ai-operation.ts): a job that restarts waits for it again, and its completed
+ * result stays until the job acknowledges it (or for AI_RESULT_RETENTION).
  */
 @Entity("ai_execution")
 @Index(["jobId"])
@@ -41,9 +43,9 @@ export class AiExecutionEntity {
   @JsonColumn({ nullable: true })
   progress: Pick<AiExecutionProgress, "phase" | "completed" | "total">;
 
-  // The judge's final progress
+  // The judge's final progress, and the runtime the backend recorded for the judge machine
   @JsonColumn({ nullable: true })
-  result: AiExecutionProgress;
+  result: AiExecutionProgress & { judgeRuntimeId?: number };
 
   // The files the judge was given upload forms for
   @JsonColumn({ nullable: true })
@@ -54,4 +56,16 @@ export class AiExecutionEntity {
 
   @Column({ type: "datetime", precision: 3, nullable: true })
   finishedAt: Date;
+
+  // The logical operation it's an attempt of: its key, and "generate", "validate-reference" or "replay". Null for a
+  // run from before (it's never attached to or collected again).
+  @Column({ type: "char", length: 64, nullable: true })
+  operationKey: string;
+
+  @Column({ type: "varchar", length: 20, nullable: true })
+  operation: string;
+
+  // When its job first took its result or failure
+  @Column({ type: "datetime", precision: 3, nullable: true })
+  collectedAt: Date;
 }

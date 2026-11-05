@@ -7,6 +7,10 @@
 // `bareAiServices()` is the same without running any constructor, as `Object.create(AiService.prototype)` was.
 //
 // The TypeScript loader must be registered before this file is required.
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
+const { AI_EXECUTION_PROTOCOL_VERSION } = require("@libreoj/judge-protocol");
 const { AiService } = require("./ai.service.ts");
 const { AiConfigurationService } = require("./ai-configuration.service.ts");
 const { AiJobCoordinator } = require("./ai-job-coordinator.service.ts");
@@ -50,6 +54,49 @@ const FIELDS = {
 };
 // A problem stub given as `problems` also stands for the services split out of ProblemService
 const PROBLEM_PARTS = ["problemAccess", "problemFiles", "problemTags"];
+
+const fileHash = filename => {
+  const data = fs.readFileSync(filename);
+  return { sha256: crypto.createHash("sha256").update(data).digest("hex"), size: data.length };
+};
+
+/**
+ * A stubbed `runSandbox` reports with its result what a runner of judge protocol version 8 does (review Part III,
+ * W03), unless it reports it itself: how the result was made, the operation it is, and its cases, from the files it
+ * wrote (1.in, 1.out, 2.in, …).
+ */
+function asCurrentRunner(run) {
+  return async (...args) => {
+    const result = await run(...args);
+    if (!result || typeof result !== "object") return result;
+    const now = new Date().toISOString();
+    const reported = {
+      operation: { key: "0".repeat(64), origin: "local", result: "new" },
+      execution: {
+        contract: AI_EXECUTION_PROTOCOL_VERSION,
+        attemptId: crypto.randomUUID(),
+        runtime: { judgeProgram: "0".repeat(64), sandboxImage: "test", arch: "x64" },
+        startedAt: now,
+        finishedAt: now,
+        reuse: { builds: 0, inputs: 0 }
+      }
+    };
+    if (result.corpus === undefined && typeof result.directory === "string" && Array.isArray(result.files)) {
+      const corpus = [];
+      for (let index = 1; result.files.includes(`${index}.in`) && result.files.includes(`${index}.out`); index++)
+        corpus.push({
+          index,
+          subtask: 1,
+          scenarioIndex: index,
+          origin: "generated",
+          input: fileHash(path.join(result.directory, `${index}.in`)),
+          output: fileHash(path.join(result.directory, `${index}.out`))
+        });
+      reported.corpus = corpus;
+    }
+    return { ...reported, ...result };
+  };
+}
 
 function methodOwners(name) {
   return Object.keys(CLASSES).filter(
@@ -96,7 +143,8 @@ function combined(services, explicitParts = new Set()) {
           return true;
         }
         const owners = methodOwners(name);
-        if (owners.length) for (const key of owners) services[key][name] = value;
+        const stub = name === "runSandbox" && typeof value === "function" ? asCurrentRunner(value) : value;
+        if (owners.length) for (const key of owners) services[key][name] = stub;
         else own[name] = value;
         return true;
       },

@@ -312,6 +312,10 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
 
     await this.lockService.lock(REDIS_LOCK_JUDGE_CLIENT_CONNECT_DISCONNECT.format(judgeClient.id), async () => {
       await this.judgeClientService.setJudgeClientOnlineSessionId(judgeClient, client.id);
+      // What it leased through an earlier connection ended with it (e.g. this backend restarted meanwhile)
+      await this.judgeQueueService
+        .releaseEarlierLeases(judgeClient.id, client.id)
+        .catch(e => logger.error(`Failed to queue again the tasks of judge client ${judgeClient.id}: ${e}`));
       // Until it announces them again
       await this.judgeClientService.updateJudgeClientCapabilities(judgeClient, null);
 

@@ -121,7 +121,7 @@ test('real GCC compiler diagnostics trigger one repair, which compiles; other ro
       assert.equal(f.job.state.makeCompileRepairAttempts,1,'budget persisted before model');
       assert(f.checks.includes('testdata.repair-make'));
       return good;
-    },async()=>assert.deepEqual(await f.run(),{validated:true}));
+    },async()=>assert.equal((await f.run()).validated,true));
     assert.equal(calls,1);assert.equal(compiles,2);assert.equal(f.job.state.makeCode,good);
     assert.equal(f.checks.filter(x=>x==='authorize').length,2);
   }finally{fs.rmSync(directory,{recursive:true,force:true});}

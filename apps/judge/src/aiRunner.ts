@@ -12,12 +12,18 @@ import Queue from "promise-queue";
 
 import { SandboxResult, SandboxStatus } from "simple-sandbox";
 import {
+  AI_EXECUTION_PROTOCOL_VERSION,
   aiContractDigest,
+  aiReplayRequestError,
   parseAiExecutionProfiles,
+  type AiCorpusCase,
   type AiExecutionMeasure,
   type AiExecutionProfiles,
+  type AiExecutionRecord,
   type AiFailureKind,
-  type AiOutputComparison
+  type AiOutputComparison,
+  type AiReplayRequest,
+  type AiReplayRun
 } from "@libreoj/judge-protocol";
 
 import { runBuiltinChecker } from "./checkers/builtin";
@@ -34,6 +40,15 @@ import { AiQuality, QualityRequest, QualityVerdict, qualitySources, validateQual
 import { describe, detailsOf, reclassify, within } from "./aiFailure";
 import { keepFailure, pinEvidence, profileOf, sourceHashesOf } from "./aiEvidence";
 import { legacyProfiles, programDirectory, programSandbox, PROGRAM_FILE, roleProfile } from "./aiProfile";
+import {
+  buildKey,
+  discardJob,
+  holdingJob,
+  JobBuilds,
+  OperationInputs,
+  pruneAiCheckpoints,
+  runtimeIdentity
+} from "./aiCheckpoint";
 import { cArchitectureUnavailable } from "./architecture";
 
 import config from "./config";
@@ -53,7 +68,12 @@ import {
 } from "./sandbox";
 
 export interface Request {
-  operation?: "generate" | "cleanup" | "validate-reference";
+  operation?: "generate" | "cleanup" | "validate-reference" | "replay";
+  // The backend's key of the logical operation (judge protocol version 8): an attempt of the same one replays the
+  // inputs an interrupted attempt generated (see aiCheckpoint.ts)
+  operationKey?: string;
+  // Operation "replay": the kept failure to run again
+  replay?: AiReplayRequest;
   problemType?: "Traditional" | "Interaction" | "Communication";
   interactorCode?: string;
   managerCode?: string;
@@ -80,6 +100,7 @@ export interface Request {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const OPERATION_KEY = /^[0-9a-f]{64}$/;
 const MAX_FILE = 16 * 1024 * 1024;
 const MAX_SAMPLE_FILE = 256 * 1024 * 1024;
 const SAMPLE_DIRECTORY = process.env.HYHOJ_AI_SAMPLE_INPUTS_DIR || "/opt/LLMOJ/data/ai-sample-inputs";
@@ -87,7 +108,10 @@ const MAX_TOTAL = 8 * 1024 * 1024 * 1024;
 const DISK_RESERVE = 2 * 1024 * 1024 * 1024;
 const RETENTION_MS = 24 * 60 * 60 * 1000;
 const MAX_REQUEST = 16 * 1024 * 1024;
-const active = new Set<string>();
+// The admitted runs, by key, and whether each one's requester is gone (canceled, or its connection closed)
+const active = new Map<string, () => boolean>();
+// A new request of a run whose requester is gone (its backend restarted) waits this long for it to stop
+const STOPPING_WAIT_MS = 60 * 1000;
 // Admit eight backend jobs; three pipelines share the same seven execution slots as submissions.
 const generationQueue = new Queue(3);
 // Each running request's latest run of each program, for the evidence of a failure
@@ -204,18 +228,55 @@ async function readDiagnostics(filename: string): Promise<Buffer> {
   }
 }
 
+// A replay: the check, the programs it runs and their profiles (it's sent no cases or samples)
+function validateReplay(request: Request, protocol: boolean) {
+  const error = aiReplayRequestError(request.replay);
+  if (error) throw new Error(error);
+  const { replay } = request;
+  if (protocol && !["compile", "validate"].includes(replay.check))
+    throw new Error("Only compilation and input validation are replayed for interactive and communication problems");
+  for (const code of [
+    ...Object.values(replay.programs),
+    ...Object.values(request.extraSourceFiles || {}),
+    ...(request.graderCode == null ? [] : [request.graderCode])
+  ])
+    if (typeof code !== "string" || !code.trim() || Buffer.byteLength(code) > 256 * 1024)
+      throw new Error("Invalid source code size");
+  const profiles = parseAiExecutionProfiles(request.profiles);
+  if (!profiles) throw new Error("A replay requires execution profiles");
+  const { std, generator } = profiles.roles;
+  if (
+    std?.fileIo?.inputFilename !== request.stdFileIo?.inputFilename ||
+    std?.fileIo?.outputFilename !== request.stdFileIo?.outputFilename
+  )
+    throw new Error("The reference solution's profile and file IO differ");
+  request.profiles = profiles;
+  [request.stdTimeLimitMs, request.stdMemoryLimitMiB] = std ? [std.timeLimitMs, std.memoryLimitMiB] : [5000, 512];
+  [request.timeLimitMs, request.memoryLimitMiB] = generator
+    ? [generator.timeLimitMs, generator.memoryLimitMiB]
+    : [5000, 512];
+  for (const name of Object.keys(replay.programs)) roleProfile(profiles, name);
+  request.cases = [];
+}
+
 export function validate(request: Request) {
   if (!request || typeof request.jobId !== "string" || !UUID.test(request.jobId)) throw new Error("Invalid job UUID");
   if (request.operation === "cleanup") return;
-  if (request.operation && !["generate", "validate-reference"].includes(request.operation))
+  if (request.operation && !["generate", "validate-reference", "replay"].includes(request.operation))
     throw new Error("Invalid operation");
+  if (
+    request.operationKey != null &&
+    (typeof request.operationKey !== "string" || !OPERATION_KEY.test(request.operationKey))
+  )
+    throw new Error("Invalid operation key");
   if (request.problemType && !["Traditional", "Interaction", "Communication"].includes(request.problemType))
     throw new Error("Invalid problem type");
   const protocol = request.problemType === "Interaction" || request.problemType === "Communication";
   const validating = request.operation === "validate-reference";
-  if (request.problemType === "Interaction" && !request.interactorCode)
+  const replaying = request.operation === "replay";
+  if (request.problemType === "Interaction" && !request.interactorCode && !replaying)
     throw new Error("Interactor source is required");
-  if (request.problemType === "Communication" && !request.managerCode)
+  if (request.problemType === "Communication" && !request.managerCode && !replaying)
     throw new Error("Communication manager source is required");
   if (request.graderCode && request.problemType !== "Communication") throw new Error("A grader requires Communication");
   const validName = (name: string) => typeof name === "string" && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(name);
@@ -264,6 +325,10 @@ export function validate(request: Request) {
         (!Number.isSafeInteger(request.checker.precision) || request.checker.precision <= 0)))
   )
     throw new Error("Invalid reference checker");
+  if (replaying) {
+    validateReplay(request, protocol);
+    return;
+  }
   if (
     request.protocolSamples != null &&
     (!Array.isArray(request.protocolSamples) || request.protocolSamples.length > 100)
@@ -390,11 +455,25 @@ async function readRegular(filename: string, limit = MAX_FILE): Promise<Buffer> 
   }
 }
 
+// Installs a program's binary in its own directory
+async function installProgram(binaryDirectory: string, name: string, binary: Buffer) {
+  const directory = programDirectory(binaryDirectory, name);
+  await fs.promises.mkdir(directory, { mode: 0o755 });
+  await fs.promises.writeFile(path.join(directory, PROGRAM_FILE), binary, { mode: 0o555 });
+}
+
 /**
  * Compiles a program with its role's profile (options, and testlib.h and the extra source files only if it gets them),
- * into a binary directory of its own.
+ * into a binary directory of its own. With `builds`, the job's earlier build of exactly the same is taken instead, and
+ * a new one is kept.
  */
-async function compileSource(source: string, name: string, binaryDirectory: string, request: Request) {
+async function compileSource(
+  source: string,
+  name: string,
+  binaryDirectory: string,
+  request: Request,
+  builds?: JobBuilds
+) {
   const profile = roleProfile(request.profiles, name);
   const options = profile.compileAndRunOptions;
   const unavailable = cArchitectureUnavailable(options.m);
@@ -403,6 +482,21 @@ async function compileSource(source: string, name: string, binaryDirectory: stri
       kind: "infrastructure_error",
       role: name
     });
+  const key = builds
+    ? buildKey({
+        source,
+        options,
+        testlib: profile.testlib,
+        extraSources: profile.extraSources ? request.extraSourceFiles || {} : null,
+        grader: name === "std" ? request.graderCode || null : null,
+        runtime: await runtimeIdentity()
+      })
+    : null;
+  const kept = key ? await builds.take(key) : null;
+  if (kept) {
+    await installProgram(binaryDirectory, name, kept);
+    return;
+  }
   await runTaskQueued({ memory: COMPILE_RESERVATION, ai: true }, async taskDirectory => {
     const sourceDirectory = path.join(taskDirectory, "source");
     const buildDirectory = path.join(taskDirectory, "build");
@@ -492,9 +586,8 @@ async function compileSource(source: string, name: string, binaryDirectory: stri
       }
     }
     const binary = await readRegular(path.join(buildDirectory, PROGRAM_FILE));
-    const directory = programDirectory(binaryDirectory, name);
-    await fs.promises.mkdir(directory, { mode: 0o755 });
-    await fs.promises.writeFile(path.join(directory, PROGRAM_FILE), binary, { mode: 0o555 });
+    await installProgram(binaryDirectory, name, binary);
+    if (key) await builds.keep(key, binary);
   });
 }
 
@@ -761,8 +854,13 @@ export async function generate(
   };
   const measures = new Map<string, AiExecutionMeasure>();
   runMeasures.set(request, measures);
+  // The files it reads: the sample files, or a replay's kept files
+  const sampleNames =
+    request.operation === "replay"
+      ? Object.values(request.replay.files)
+      : (request.sampleFiles || []).flatMap(sample => [sample.inputFile, sample.outputFile]);
   try {
-    if (request.sampleFiles?.length) {
+    if (sampleNames.length) {
       snapshot = await fs.promises.mkdtemp(path.join(layout.outputRoot, ".samples-"));
       const source = layout.openSample
         ? null
@@ -771,7 +869,7 @@ export async function generate(
             fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW
           );
       try {
-        const names = new Set(request.sampleFiles.flatMap(sample => [sample.inputFile, sample.outputFile]));
+        const names = new Set(sampleNames);
         for (const name of names) {
           checkCanceled();
           const input = await openSampleFile(layout, source, name);
@@ -810,10 +908,11 @@ export async function generate(
         await source?.close();
       }
     }
+    if (request.operation === "replay") return await replayFailure(request, emit, checkCanceled, snapshot, layout);
     return await generateWithSamples(request, emit, checkCanceled, snapshot, sampleHashes, layout);
   } catch (error) {
-    // Before the sample snapshot is removed: a failure's evidence may be in it
-    if (error && typeof error === "object")
+    // Before the sample snapshot is removed: a failure's evidence may be in it. A replay's failures are its result.
+    if (error && typeof error === "object" && request.operation !== "replay")
       error.failure = await keepRunFailure(request, error, phase, layout, measures);
     throw error;
   } finally {
@@ -881,6 +980,76 @@ async function keepRunFailure(
   });
 }
 
+/**
+ * Compares a program's output with what it's compared with, as a run compares them: with the request's custom checker
+ * if it has one, or else its builtin comparison. Temporary files go in `directory`.
+ */
+async function compareOutputs(
+  directory: string,
+  binaryDirectory: string,
+  request: Request,
+  input: Buffer | { path: string },
+  actual: Buffer | { path: string },
+  expected: Buffer | { path: string },
+  label: number | string
+) {
+  if (request.checkerCode) {
+    try {
+      await execute(
+        binaryDirectory,
+        "checker",
+        request,
+        Buffer.alloc(0),
+        [`${WORKING}/input`, `${WORKING}/actual`, `${WORKING}/expected`],
+        { input, actual, expected }
+      );
+    } catch (error) {
+      error.message = `${typeof label === "number" ? `sample ${label}` : label}: ${error.message}`;
+      throw describe(error, { subject: typeof label === "number" ? `sample ${label}` : label });
+    }
+  } else {
+    const comparison = await fs.promises.mkdtemp(path.join(directory, "comparison-"));
+    try {
+      const paths: string[] = [];
+      for (const [i, value] of [actual, expected].entries()) {
+        if (Buffer.isBuffer(value)) {
+          const filename = path.join(comparison, String(i));
+          await fs.promises.writeFile(filename, value);
+          paths.push(filename);
+        } else paths.push(value.path);
+      }
+      const result = await runBuiltinChecker(
+        paths[0],
+        paths[1],
+        request.checker || { type: "lines", caseSensitive: true }
+      );
+      const subject = typeof label === "number" ? `sample ${label}` : label;
+      if (!result || typeof result !== "object" || !("score" in result) || result.score == null)
+        throw describe(new Error(`Builtin checker failed while checking ${label}`), {
+          kind: "infrastructure_error",
+          subject,
+          data: { input, actual, expected }
+        });
+      if (result.score !== 100)
+        throw describe(referenceError(`Output mismatch: ${label}`, true, "WA"), {
+          kind: "solver_disagreement",
+          verdict: "WA",
+          subject,
+          data: {
+            input,
+            actual,
+            expected,
+            ...(result.checkerMessage
+              ? { diagnostics: Buffer.from(omittableStringToString(result.checkerMessage)) }
+              : {})
+          }
+        });
+    } finally {
+      await fs.promises.rm(comparison, { recursive: true, force: true });
+    }
+  }
+}
+
 async function generateWithSamples(
   request: Request,
   emit: Emit,
@@ -895,22 +1064,37 @@ async function generateWithSamples(
   const directory = validating
     ? await fs.promises.mkdtemp(path.join(layout.outputRoot, ".reference-"))
     : path.join(layout.outputRoot, request.jobId);
-  // Version the validation contract as well as hashing all supplied source bytes.
+  // Version the validation contract as well as hashing all supplied source bytes. Version 6 results record how they
+  // were made (see AiExecutionRecord): a result from before isn't reused.
   const hash = crypto
     .createHash("sha256")
-    .update(JSON.stringify({ version: 5, request, sampleHashes }))
+    .update(JSON.stringify({ version: 6, request, sampleHashes }))
     .digest("hex");
   const resultPath = path.join(directory, "result.json");
   // Only root can create output directories; no backend-controlled pathname or symlink is followed.
   try {
+    // The result of this very request, kept until the backend cleans the job up: it was made once, and is collected
+    // again (e.g. after the backend restarted before it published the test data)
     const previous = validating ? null : JSON.parse((await readRegular(resultPath)).toString("utf8"));
     if (previous?.requestHash === hash) {
-      emit(previous);
+      emit({ ...previous, reused: true });
       return;
     }
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
+  const startedAt = new Date().toISOString();
+  const runtime = await runtimeIdentity();
+  // The job's builds, and the inputs an interrupted attempt of this operation generated (see aiCheckpoint.ts)
+  const builds = new JobBuilds(request.jobId);
+  const inputs =
+    request.operationKey && !validating ? new OperationInputs(request.jobId, request.operationKey, runtime) : null;
+  // The cases' files, as they are when the run completes
+  const corpus: AiCorpusCase[] = [];
+  const fileHash = (data: Buffer) => ({
+    sha256: crypto.createHash("sha256").update(data).digest("hex"),
+    size: data.length
+  });
   await fs.promises.rm(directory, { recursive: true, force: true });
   await fs.promises.mkdir(directory, { mode: 0o750 });
   await shareWithBackend(directory, layout);
@@ -955,6 +1139,17 @@ async function generateWithSamples(
     await fs.promises.writeFile(outputPath, answer, { mode: 0o640 });
     totalBytes += replacementBytes - replacedBytes;
   }
+  // A generator's input for a case: the one an interrupted attempt of this operation generated, or a new one
+  async function generated(name: string, subtask: number, caseIndex: number) {
+    const kept = await inputs?.take(name, subtask, caseIndex);
+    if (kept) return kept;
+    const input = await execute(binaryDirectory, name, request, Buffer.from(`${subtask} ${caseIndex}\n`), [
+      String(subtask),
+      String(caseIndex)
+    ]);
+    await inputs?.keep(name, subtask, caseIndex, input);
+    return input;
+  }
   try {
     for (const [name, source] of [
       ...(validating ? [] : [["make", request.makeCode]]),
@@ -966,7 +1161,7 @@ async function generateWithSamples(
     ]) {
       emit({ type: "progress", phase: `compile-${name}`, completed: 0, total: request.cases.length });
       checkCanceled();
-      await compileSource(source, name, binaryDirectory, request);
+      await compileSource(source, name, binaryDirectory, request, builds);
       checkCanceled();
       await publish(`${name}.cpp`, source);
     }
@@ -974,7 +1169,7 @@ async function generateWithSamples(
     for (const [name, source] of request.quality ? qualitySources(request.quality) : []) {
       checkCanceled();
       emit({ type: "progress", phase: `compile-${name}`, completed: 0, total: request.cases.length });
-      await compileSource(source, name, binaryDirectory, request);
+      await compileSource(source, name, binaryDirectory, request, builds);
       checkCanceled();
     }
     if (request.graderCode) await publish("grader.cpp", request.graderCode);
@@ -1016,68 +1211,16 @@ async function generateWithSamples(
       actual: Buffer | { path: string },
       expected: Buffer | { path: string },
       label: number | string
-    ) => {
-      if (request.checkerCode) {
-        try {
-          await execute(
-            binaryDirectory,
-            "checker",
-            request,
-            Buffer.alloc(0),
-            [`${WORKING}/input`, `${WORKING}/actual`, `${WORKING}/expected`],
-            { input, actual, expected }
-          );
-        } catch (error) {
-          error.message = `${typeof label === "number" ? `sample ${label}` : label}: ${error.message}`;
-          throw describe(error, { subject: typeof label === "number" ? `sample ${label}` : label });
-        }
-      } else {
-        const comparison = await fs.promises.mkdtemp(path.join(directory, "comparison-"));
-        try {
-          const paths: string[] = [];
-          for (const [i, value] of [actual, expected].entries()) {
-            if (Buffer.isBuffer(value)) {
-              const filename = path.join(comparison, String(i));
-              await fs.promises.writeFile(filename, value);
-              paths.push(filename);
-            } else paths.push(value.path);
-          }
-          const result = await runBuiltinChecker(
-            paths[0],
-            paths[1],
-            request.checker || { type: "lines", caseSensitive: true }
-          );
-          const subject = typeof label === "number" ? `sample ${label}` : label;
-          if (!result || typeof result !== "object" || !("score" in result) || result.score == null)
-            throw describe(new Error(`Builtin checker failed while checking ${label}`), {
-              kind: "infrastructure_error",
-              subject,
-              data: { input, actual, expected }
-            });
-          if (result.score !== 100)
-            throw describe(referenceError(`Output mismatch: ${label}`, true, "WA"), {
-              kind: "solver_disagreement",
-              verdict: "WA",
-              subject,
-              data: {
-                input,
-                actual,
-                expected,
-                ...(result.checkerMessage
-                  ? { diagnostics: Buffer.from(omittableStringToString(result.checkerMessage)) }
-                  : {})
-              }
-            });
-        } finally {
-          await fs.promises.rm(comparison, { recursive: true, force: true });
-        }
-      }
-    };
+    ) => await compareOutputs(directory, binaryDirectory, request, input, actual, expected, label);
     const quality = request.quality
       ? new AiQuality(request.quality, {
           execute: async (name, input, parameters) => {
             checkCanceled();
-            const output = await execute(binaryDirectory, name, request, input, parameters);
+            // The small-case generator's inputs are kept and replayed like the generator's
+            const output =
+              name === "quality-small-make" && parameters?.length === 2
+                ? await generated(name, Number(parameters[0]), Number(parameters[1]))
+                : await execute(binaryDirectory, name, request, input, parameters);
             checkCanceled();
             return output;
           },
@@ -1221,14 +1364,7 @@ async function generateWithSamples(
         scenarioIndex: seed,
         classification: "hidden-test" as const
       };
-      const input = await within(
-        details,
-        async () =>
-          await execute(binaryDirectory, "make", request, Buffer.from(`${subtask} ${seed}\n`), [
-            String(subtask),
-            String(seed)
-          ])
-      );
+      const input = await within(details, async () => await generated("make", subtask, seed));
       checkCanceled();
       // eslint-disable-next-line no-loop-func -- Awaited before the loop goes on
       const answer = await within({ ...details, data: { input } }, async () => {
@@ -1266,6 +1402,14 @@ async function generateWithSamples(
       checkCanceled();
       await publish(`${index + 1}.in`, input);
       await publish(`${index + 1}.out`, answer);
+      corpus[index] = {
+        index: index + 1,
+        subtask,
+        scenarioIndex: seed,
+        origin: "generated",
+        input: fileHash(input),
+        output: fileHash(answer)
+      };
       if (quality) quality.recordCase(index, kills);
       emit({ type: "progress", phase: "generate", completed: index + 1, total: request.cases.length });
     }
@@ -1281,14 +1425,7 @@ async function generateWithSamples(
           scenarioIndex: seed,
           classification: "hidden-test" as const
         };
-        const input = await within(
-          details,
-          async () =>
-            await execute(binaryDirectory, "make", request, Buffer.from(`${subtask} ${seed}\n`), [
-              String(subtask),
-              String(seed)
-            ])
-        );
+        const input = await within(details, async () => await generated("make", subtask, seed));
         // eslint-disable-next-line no-loop-func -- Awaited before the loop goes on
         await within({ ...details, data: { input } }, async () => {
           await validateInput(input, subtask, seed, `adversarial search (subtask ${subtask}, seed ${seed})`);
@@ -1305,6 +1442,14 @@ async function generateWithSamples(
             checkCanceled();
             await replaceCase(index, input, answer);
             finalCases[index] = next;
+            corpus[index] = {
+              index: index + 1,
+              subtask,
+              scenarioIndex: seed,
+              origin: "adversarial",
+              input: fileHash(input),
+              output: fileHash(answer)
+            };
             quality.recordReplacement(index, kills);
           }
         });
@@ -1312,11 +1457,23 @@ async function generateWithSamples(
       }
     }
     const qualityResult = quality?.result();
+    const execution: AiExecutionRecord = {
+      contract: AI_EXECUTION_PROTOCOL_VERSION,
+      // This physical attempt: a judge task run again after a restart is another attempt of the same task
+      attemptId: crypto.randomUUID(),
+      runtime,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      reuse: { builds: builds.reused, inputs: inputs?.reused || 0 }
+    };
     const result = {
       type: "complete",
       directory,
       files,
       ...(quality ? { finalCases } : {}),
+      // The exact bytes of every case, and how the run was made
+      corpus,
+      execution,
       validation: {
         samplesPassed,
         inputsPassed,
@@ -1333,15 +1490,152 @@ async function generateWithSamples(
     await fs.promises.rm(binaryDirectory, { recursive: true, force: true });
     if (validating) {
       await fs.promises.rm(directory, { recursive: true, force: true });
-      emit({ type: "complete", files: [], validation: result.validation });
+      emit({ type: "complete", files: [], validation: result.validation, execution });
       return;
     }
     await fs.promises.writeFile(resultPath, JSON.stringify(result), { mode: 0o640 });
     await shareWithBackend(resultPath, layout);
+    // The result has the cases now
+    await inputs?.discard();
     emit(result);
   } catch (error) {
     await fs.promises.rm(directory, { recursive: true, force: true });
     throw error;
+  }
+}
+
+/**
+ * Runs a kept failure's check again (operation "replay", review Part III, W03): compiles the programs it needs (from
+ * the job's builds, except a compilation that is itself replayed), then runs the check `repeat` times and records
+ * whether each run failed, and how. Only a failure of the replay itself (the sandbox, storage, cancellation, its
+ * budget) fails it.
+ */
+async function replayFailure(
+  request: Request,
+  emit: Emit,
+  checkCanceled: () => void,
+  snapshot: string,
+  layout: GenerationLayout
+) {
+  const { replay } = request;
+  const startedAt = new Date().toISOString();
+  const runtime = await runtimeIdentity();
+  const builds = new JobBuilds(request.jobId);
+  // Compared and validated with the checker and validator it sends
+  const run: Request = { ...request, checkerCode: replay.programs.checker, validatorCode: replay.programs.validator };
+  const file = (name?: string) => (name ? { path: path.join(snapshot, name) } : undefined);
+  const [input, expected, actual] = [file(replay.files.input), file(replay.files.expected), file(replay.files.actual)];
+  const directory = await fs.promises.mkdtemp(path.join(layout.outputRoot, ".replay-"));
+  const binaryDirectory = path.join(directory, "bin");
+  const compare = (output: Buffer | { path: string }, against: Buffer | { path: string }) =>
+    compareOutputs(directory, binaryDirectory, run, input, output, against, "replay");
+  const once = async (attempt: number) => {
+    switch (replay.check) {
+      case "compile": {
+        // Compiled anew each time, never taken from the builds
+        const fresh = path.join(directory, `bin-${attempt}`);
+        await fs.promises.mkdir(fresh, { mode: 0o755 });
+        await compileSource(replay.programs[replay.role], replay.role, fresh, run);
+        return;
+      }
+      case "validate":
+        try {
+          await execute(binaryDirectory, "validator", run, input, [String(replay.subtask), String(replay.caseIndex)]);
+        } catch (error) {
+          const kind = detailsOf(error)?.kind;
+          throw reclassify(
+            new Error(`Input validator rejected the input: ${String(error?.message || error).slice(0, 2000)}`),
+            error,
+            {
+              kind: kind === "infrastructure_error" || kind === "canceled" ? kind : "validator_rejection",
+              role: "validator"
+            }
+          );
+        }
+        return;
+      case "generate":
+        await execute(binaryDirectory, replay.role, run, Buffer.from(`${replay.subtask} ${replay.caseIndex}\n`), [
+          String(replay.subtask),
+          String(replay.caseIndex)
+        ]);
+        return;
+      case "run":
+        await execute(binaryDirectory, replay.role, run, input);
+        return;
+      case "compare": {
+        const output = await execute(binaryDirectory, replay.role, run, input);
+        let reference: Buffer | { path: string } = output;
+        if (replay.against === "expected") reference = expected;
+        else if (replay.against !== "self") reference = await execute(binaryDirectory, replay.against, run, input);
+        await compare(output, reference);
+        return;
+      }
+      case "checker":
+        try {
+          await compare(actual, expected);
+        } catch (error) {
+          // A rejection is a valid verdict, and what the checker must give the malformed output
+          const details = detailsOf(error);
+          if (details?.kind === "solver_disagreement" && details.verdict === "WA") return;
+          throw error;
+        }
+        if (replay.expect === "reject")
+          throw describe(new Error("The checker accepted the malformed output"), {
+            kind: "checker_failure",
+            role: "checker"
+          });
+        return;
+      default:
+        throw new Error("Invalid replay check");
+    }
+  };
+  try {
+    await fs.promises.mkdir(binaryDirectory, { mode: 0o755 });
+    if (replay.check !== "compile")
+      for (const [name, source] of Object.entries(replay.programs)) {
+        checkCanceled();
+        emit({ type: "progress", phase: `compile-${name}`, completed: 0, total: replay.repeat });
+        await compileSource(source, name, binaryDirectory, run, builds);
+      }
+    const runs: AiReplayRun[] = [];
+    for (let attempt = 0; attempt < replay.repeat; attempt++) {
+      checkCanceled();
+      try {
+        await once(attempt);
+        runs.push({ outcome: "passed", summary: "" });
+      } catch (error) {
+        // Canceled, or out of its budget: the replay stops
+        checkCanceled();
+        const details = detailsOf(error);
+        if (!details?.kind || details.kind === "infrastructure_error" || details.kind === "canceled") throw error;
+        runs.push({
+          outcome: "failed",
+          kind: details.kind,
+          ...(details.verdict ? { verdict: details.verdict } : {}),
+          summary: String(error?.message || error).slice(0, 2000),
+          ...(details.execution ? { execution: details.execution } : {})
+        });
+      }
+      emit({ type: "progress", phase: "replay", completed: attempt + 1, total: replay.repeat });
+    }
+    const execution: AiExecutionRecord = {
+      contract: AI_EXECUTION_PROTOCOL_VERSION,
+      // This physical attempt: a judge task run again after a restart is another attempt of the same task
+      attemptId: crypto.randomUUID(),
+      runtime,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      reuse: { builds: builds.reused, inputs: 0 }
+    };
+    emit({
+      type: "complete",
+      files: [],
+      replay: { runs },
+      validation: { profiles: aiContractDigest(request.profiles) },
+      execution
+    });
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
   }
 }
 
@@ -1357,13 +1651,18 @@ export async function runGeneration(
   layout?: GenerationLayout,
   key = request.jobId
 ) {
+  for (const since = Date.now(); active.get(key)?.() && Date.now() - since < STOPPING_WAIT_MS;)
+    // eslint-disable-next-line no-await-in-loop -- Polled until it has stopped
+    await new Promise(resolve => {
+      setTimeout(resolve, 200);
+    });
   if (active.has(key) || active.size >= 8) {
     const error = new Error(active.has(key) ? "Job already running" : "AI generation queue is full");
     throw Object.assign(error, {
       failure: await keepRunFailure(request, error, "queued", layout || localLayout(request.jobId))
     });
   }
-  active.add(key);
+  active.set(key, isCanceled);
   try {
     const baseExecutions =
       request.cases.length +
@@ -1374,24 +1673,31 @@ export async function runGeneration(
       ? (request.quality.fuzzCases.length + request.cases.length + request.quality.extraAttempts) *
         (3 + request.quality.alternatives.length + request.quality.challenges.length)
       : 0;
+    // A replay's runs: its program, the one it's compared with, and the checker
+    const replayExecutions = request.replay ? request.replay.repeat * 3 : 0;
     const executionBudgetMs = Math.min(
       4 * 60 * 60 * 1000,
       180000 +
-        (baseExecutions + qualityExecutions) *
+        (baseExecutions + qualityExecutions + replayExecutions) *
           Math.max(20000, request.stdTimeLimitMs * (request.problemType === "Communication" ? 2 : 1) + 15000)
     );
     const deadline = Date.now() + executionBudgetMs;
     emit({ type: "progress", phase: "queued", completed: 0, total: request.cases.length });
     await generationQueue.add(() =>
-      generate(
-        request,
-        emit,
-        () => {
-          if (isCanceled()) throw new Error("Generation canceled");
-          if (Date.now() > deadline)
-            throw new Error(`Generation exceeded its ${Math.ceil(executionBudgetMs / 60000)}-minute execution budget`);
-        },
-        layout
+      // The job's builds and inputs stay while it runs
+      holdingJob(request.jobId, () =>
+        generate(
+          request,
+          emit,
+          () => {
+            if (isCanceled()) throw new Error("Generation canceled");
+            if (Date.now() > deadline)
+              throw new Error(
+                `Generation exceeded its ${Math.ceil(executionBudgetMs / 60000)}-minute execution budget`
+              );
+          },
+          layout
+        )
       )
     );
   } finally {
@@ -1402,7 +1708,7 @@ export async function runGeneration(
 async function pruneAbandonedOutputs() {
   for (const entry of await fs.promises.readdir(config.aiGeneratedDirectory, { withFileTypes: true })) {
     if (
-      (!UUID.test(entry.name) && !/^\.(?:samples|reference)-[A-Za-z0-9]+$/.test(entry.name)) ||
+      (!UUID.test(entry.name) && !/^\.(?:samples|reference|replay)-[A-Za-z0-9]+$/.test(entry.name)) ||
       !entry.isDirectory() ||
       active.has(entry.name)
     )
@@ -1423,7 +1729,16 @@ async function pruneAbandonedOutputs() {
   }
 }
 
+// Deletes old builds, inputs and workspaces of AI runs, also on a judge without the local runner
+function pruneCheckpoints() {
+  pruneAiCheckpoints(active).catch(error =>
+    winston.warn(`Could not clean up what AI runs kept: ${String(error?.message || error)}`)
+  );
+}
+
 export async function startAiRunner() {
+  pruneCheckpoints();
+  setInterval(pruneCheckpoints, 60 * 60 * 1000).unref();
   if (!config.aiRunnerSocket || !config.aiGeneratedDirectory) return;
   if (!Number.isInteger(config.aiRunnerGid) || config.aiRunnerGid <= 0) throw new Error("AI runner group is required");
   // The sandbox launcher prepared the output root (the judge's, in the backend's group) and listens on the socket
@@ -1469,6 +1784,8 @@ export async function startAiRunner() {
               recursive: true,
               force: true
             });
+            // And the job's builds and inputs
+            await discardJob(request.jobId);
             emit({ type: "complete", cleaned: true });
           } else await runGeneration(request, emit, () => socket.destroyed);
         } catch (error) {

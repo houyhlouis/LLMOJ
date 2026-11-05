@@ -36,7 +36,7 @@ function fixture(t, generation, options = {}) {
   fs.mkdirSync(store);
   const stored = { "aaaaaaaa-0000-4000-8000-000000000001": "5 6\n", "aaaaaaaa-0000-4000-8000-000000000002": "11\n" };
   for (const [uuid, data] of Object.entries(stored)) fs.writeFileSync(path.join(store, uuid), data);
-  const calls = { ensured: [], uploads: [], requested: [], progress: [], layouts: [] };
+  const calls = { ensured: [], uploads: [], requested: [], progress: [], layouts: [], downloads: [] };
   let canceled = false;
   const onAiExecution = load({
     winston: { __esModule: true, default: { error: () => {}, warn: () => {} } },
@@ -72,7 +72,11 @@ function fixture(t, generation, options = {}) {
     },
     "../../utils": {
       safelyJoinPath: (...parts) => path.join(...parts),
-      uploadWithForm: async (form, data) => calls.uploads.push([form.name, data.toString()])
+      uploadWithForm: async (form, data) => calls.uploads.push([form.name, data.toString()]),
+      download: async (url, destination) => {
+        calls.downloads.push(url);
+        fs.writeFileSync(destination, (options.stored || {})[url] ?? "");
+      }
     }
   });
   const run = async extraInfo =>
@@ -261,4 +265,49 @@ test("a canceled run uploads no evidence", async t => {
   await assert.rejects(run(extraInfo), CanceledError);
   assert.deepEqual(calls.requested, []);
   assert.deepEqual(calls.uploads, []);
+});
+
+test("a replay's kept files are downloaded from the links sent and checked before it runs", async t => {
+  const stored = { "https://storage/input": "3\n1 2 3\n", "https://storage/expected": "6\n" };
+  const request = {
+    operation: "replay",
+    jobId,
+    replay: { check: "compare", role: "std", against: "expected", files: { input: "replay.input", expected: "replay.expected" } }
+  };
+  const transfers = [
+    { name: "replay.input", url: "https://storage/input", size: 8, sha256: sha256("3\n1 2 3\n") },
+    { name: "replay.expected", url: "https://storage/expected", size: 2, sha256: sha256("6\n") }
+  ];
+  let seen = null;
+  const replay = async (_request, emit, layout) => {
+    seen = ["replay.input", "replay.expected"].map(name => fs.readFileSync(path.join(layout.sampleDirectory, name), "utf8"));
+    emit({ type: "complete", files: [], replay: { runs: [{ outcome: "failed", kind: "solver_disagreement", summary: "" }] } });
+  };
+  let { run, calls } = fixture(t, replay, { stored });
+  await run({ request, transfers });
+  assert.deepEqual(seen, ["3\n1 2 3\n", "6\n"]);
+  assert.deepEqual(calls.downloads, ["https://storage/input", "https://storage/expected"]);
+  assert.equal(calls.requested.length, 0, "a replay uploads nothing");
+  assert.deepEqual(calls.progress.at(-1), {
+    finished: true,
+    status: "Complete",
+    result: { replay: { runs: [{ outcome: "failed", kind: "solver_disagreement", summary: "" }] } },
+    files: []
+  });
+
+  // Not what the server recorded, a file the replay doesn't name, or a missing one: it doesn't run
+  for (const [sent, error] of [
+    [[{ ...transfers[0], sha256: sha256("other") }, transfers[1]], /replay.input isn't what the server recorded/],
+    [[{ ...transfers[0], size: 9 }, transfers[1]], /replay.input isn't what the server recorded/],
+    [[transfers[0], { ...transfers[1], name: "../escape" }], /kept files weren't sent/],
+    [[transfers[0]], /kept files weren't sent/],
+    [[transfers[0], { ...transfers[1], size: 17 * 1024 * 1024 }], /Invalid kept file/]
+  ]) {
+    seen = null;
+    ({ run, calls } = fixture(t, replay, { stored }));
+    await run({ request, transfers: sent });
+    assert.equal(seen, null);
+    assert.equal(calls.progress.at(-1).status, "Failed");
+    assert.match(calls.progress.at(-1).message, error);
+  }
 });

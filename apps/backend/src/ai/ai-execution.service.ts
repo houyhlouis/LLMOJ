@@ -7,11 +7,12 @@ import path from "path";
 import { forwardRef, Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 
-import { DataSource, In, LessThan, Not } from "typeorm";
+import { DataSource, In, IsNull, LessThan, Not } from "typeorm";
 
 import {
   AI_EVIDENCE_FILE,
   AI_EVIDENCE_LIMITS,
+  AI_EXECUTION_PROTOCOL_VERSION,
   AiExecutionProgress,
   AiFailureKind,
   AiRunFailure,
@@ -25,9 +26,15 @@ import { AiJobEntity } from "./ai.entity";
 import { AiError } from "./ai.types";
 import { aiCancellationError, currentAiRuntime } from "./ai-runtime";
 import { AiEvidenceService, EvidenceSource, RecordOptions } from "./ai-evidence.service";
+import { AI_RESULT_RETENTION, aiOperationKey, AiExecutionProvenance, currentExecution } from "./ai-operation";
 
 import { logger } from "../logger";
-import { FileService, TEMPORARY_OBJECT_PREFIX } from "../file/file.service";
+import {
+  FileService,
+  JUDGE_FILE_DOWNLOAD_EXPIRE_TIME,
+  MinioSignFor,
+  TEMPORARY_OBJECT_PREFIX
+} from "../file/file.service";
 import { JudgeQueueService, JudgeTask, JudgeTaskPriorityType } from "../judge/judge-queue.service";
 import { JudgeTaskCompletion, JudgeTaskService } from "../judge/judge-task-service.interface";
 import { JudgeGateway } from "../judge/judge.gateway";
@@ -44,7 +51,20 @@ type RunnerMessage = any;
 interface AiExecutionExtraInfo {
   request: RunnerRequest;
   sampleFiles: { name: string; uuid: string }[];
+  // A replay's kept files: links signed when the task is sent
+  transfers?: { name: string; url: string; size: number; sha256: string }[];
 }
+
+/** A kept file a replay sends: the stored object, and its content. */
+export interface AiReplayTransfer {
+  name: string;
+  object: string;
+  size: number;
+  sha256: string;
+}
+
+// How a job's result was come by: the operation, and where the result came from (see AiExecutionProvenance)
+type RunnerOperation = Pick<AiExecutionProvenance, "origin" | "result" | "task" | "judgeRuntimeId"> & { key: string };
 
 const localSocket = () => process.env.HYHOJ_AI_RUNNER_SOCKET || "/opt/LLMOJ/data/judge/ai-runner.sock";
 const OBJECT_PREFIX = `${TEMPORARY_OBJECT_PREFIX}ai-execution/`;
@@ -62,7 +82,8 @@ const JOB_CHECK_INTERVAL = 2000;
 // A run no judge machine has taken by then fails: none may be online that runs AI programs
 const QUEUE_WAIT_LIMIT = 15 * 60 * 1000;
 const SWEEP_INTERVAL = 10 * 60 * 1000;
-// Finished runs and their objects are deleted this much later; their AI job has collected them by then
+// Failed and canceled runs and their objects are deleted this much later; their AI job has collected them by then.
+// A completed run stays until its job acknowledges it, or for AI_RESULT_RETENTION.
 const FINISHED_RETENTION = 60 * 60 * 1000;
 // Longer than any run's execution budget (4 hours) and wait
 const ACTIVE_LIMIT = 5 * 60 * 60 * 1000;
@@ -71,6 +92,11 @@ const ACTIVE_STATES = [AiExecutionState.Queued, AiExecutionState.Running];
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const requestObject = (taskId: string) => `${OBJECT_PREFIX}${taskId}/request.json`;
+// A replay's kept files, as objects and their content (the judge gets links to them when it takes the task)
+const transfersObject = (taskId: string) => `${OBJECT_PREFIX}${taskId}/transfers.json`;
+// Runs of a job's own steps; a replay runs beside them
+const WORKFLOW_OPERATIONS = ["generate", "validate-reference"];
+const REPLAY_DIRECTORY = () => process.env.HYHOJ_AI_SAMPLE_INPUTS_DIR || "/opt/LLMOJ/data/ai-sample-inputs";
 const fileObject = (taskId: string, name: string) => `${OBJECT_PREFIX}${taskId}/files/${name}`;
 // A failed run's evidence, uploaded by the judge before it reports the failure
 const evidenceUploadObject = (taskId: string, name: string) => `${OBJECT_PREFIX}${taskId}/evidence/${name}`;
@@ -98,7 +124,9 @@ export function aiExecutionBudget(request: RunnerRequest): number {
         (request.quality
           ? (request.quality.fuzzCases.length + request.cases.length + request.quality.extraAttempts) *
             (3 + request.quality.alternatives.length + request.quality.challenges.length)
-          : 0)) *
+          : 0) +
+        // A replay's runs: its program, the one it's compared with, and the checker
+        (request.replay ? request.replay.repeat * 3 : 0)) *
         Math.max(20000, (request.stdTimeLimitMs || 5000) * (request.problemType === "Communication" ? 2 : 1) + 15000)
   );
 }
@@ -190,7 +218,9 @@ export class AiExecutionService
 
   /**
    * Runs a request as the local AI runner takes it. Sample files carry the stored files they are (`inputUuid`,
-   * `outputUuid`) when the job's mode is "judges". Resolves with the runner's "complete" message.
+   * `outputUuid`). Resolves with the runner's "complete" message, and `operation`: the logical operation it is (see
+   * ai-operation.ts) and where its result came from. A result of the same operation is collected again rather than
+   * made again, until the job acknowledges it.
    */
   async run(
     job: AiJobEntity,
@@ -203,13 +233,16 @@ export class AiExecutionService
       if (value?.phase) phase = String(value.phase);
       await progress(value);
     };
+    // Its key covers the stored files the sample files are; the runner gets their names
+    const key = aiOperationKey(job.id, request);
+    const keyed = { ...request, operationKey: key };
     try {
       if (this.mode(job.id) === "local") {
         await this.harvestLocal(job);
-        return await this.runLocal(
+        const { reused, ...message } = await this.runLocal(
           job,
           {
-            ...request,
+            ...keyed,
             ...(request.sampleFiles
               ? {
                   sampleFiles: request.sampleFiles.map(({ inputFile, outputFile }) => ({ inputFile, outputFile }))
@@ -219,8 +252,10 @@ export class AiExecutionService
           report,
           checkJob
         );
+        const operation: RunnerOperation = { key, origin: "local", result: reused ? "collected-again" : "new" };
+        return { ...message, operation };
       }
-      return await this.runQueued(job, request, report, checkJob);
+      return await this.runQueued(job, keyed, report, checkJob);
     } catch (error) {
       await this.observe(job, request, error, phase);
       throw error;
@@ -377,16 +412,59 @@ export class AiExecutionService
     return unrecorded;
   }
 
-  /** Deletes what a job's runs left: the local runner's output, or the downloaded files and unfinished runs. */
+  /**
+   * The job published its result, and its checkpoint says so: everything its runs left is deleted (the local runner's
+   * output, builds and inputs; or the runs on judge machines, their objects and the downloaded files).
+   */
+  async acknowledge(jobId: string): Promise<void> {
+    await this.finish(jobId, true);
+  }
+
+  /** The job was canceled: as when it acknowledges its result, nothing of its runs is kept. */
+  async discard(jobId: string): Promise<void> {
+    await this.finish(jobId, true);
+  }
+
+  /**
+   * The job stopped without publishing (it failed, or its run ended): its unfinished runs stop, and a completed one
+   * stays for a retry of the same operation to collect, for AI_RESULT_RETENTION.
+   */
+  async release(jobId: string): Promise<void> {
+    await this.finish(jobId, false);
+  }
+
+  /** As `discard` (before review Part III, W03, a job's runs left nothing to collect again). */
   async cleanup(jobId: string): Promise<void> {
+    await this.discard(jobId);
+  }
+
+  private async finish(jobId: string, removeResults: boolean) {
     const mode = this.mode(jobId);
     this.modes.delete(jobId);
     if (mode === "local") {
-      await this.cleanupLocal(jobId);
+      // The local runner keeps a completed result (and the job's builds and inputs) until it's asked to clean up
+      if (removeResults) await this.cleanupLocal(jobId);
       return;
     }
     await this.cancelJobExecutions(jobId);
+    if (removeResults)
+      for (const execution of await this.workflowRuns(jobId))
+        // eslint-disable-next-line no-await-in-loop -- Few
+        await this.retire(execution);
     await fs.rm(path.join(os.tmpdir(), "ai-execution", jobId), { recursive: true, force: true });
+  }
+
+  // The runs of a job's steps (not its replays), latest first
+  private async workflowRuns(jobId: string): Promise<AiExecutionEntity[]> {
+    const rows = await this.repository.find({ where: { jobId }, order: { createdAt: "DESC" } });
+    return rows.filter(row => WORKFLOW_OPERATIONS.includes(row.operation || "generate"));
+  }
+
+  // A run the job no longer collects: stopped if unfinished, its failure recorded if it can be, and removed
+  private async retire(execution: AiExecutionEntity) {
+    if (ACTIVE_STATES.includes(execution.state)) await this.cancelExecution(execution.taskId);
+    else if (execution.state === AiExecutionState.Failed) await this.harvestFailed({ taskId: execution.taskId });
+    else await this.removeExecution(execution.taskId);
   }
 
   // The local AI runner
@@ -531,29 +609,90 @@ export class AiExecutionService
     const serialized = Buffer.from(JSON.stringify(runnerRequest));
     if (serialized.length > MAX_REQUEST) throw new AiError("SAMPLES_TOO_LARGE");
 
-    // A run of this job from before (e.g. before the backend restarted) isn't waited for any more; a failed one's
-    // failure is recorded
-    await this.harvestFailed({ jobId: job.id }).catch(e => logger.error(`Failed to record earlier AI runs: ${e}`));
-    await this.cancelJobExecutions(job.id);
+    // The job's runs from before (e.g. before the backend restarted). A run of another operation is never attached
+    // to or collected: it's stopped, or recorded and removed.
+    const key: string = request.operationKey;
+    const runs = await this.workflowRuns(job.id);
+    for (const execution of runs.filter(row => row.operationKey !== key))
+      // eslint-disable-next-line no-await-in-loop -- Few
+      await this.retire(execution);
+    const same = runs.filter(row => row.operationKey === key);
+    // A completed run of this operation, made under the current contract: collected again
+    for (const execution of same.filter(row => row.state === AiExecutionState.Complete)) {
+      if (currentExecution(execution.result?.result))
+        // eslint-disable-next-line no-await-in-loop -- Once
+        return await this.collect(job, request, execution, "collected-again");
+      // eslint-disable-next-line no-await-in-loop -- At most a few
+      await this.removeExecution(execution.taskId);
+    }
+    // An unfinished one: waited for again (the judge queue runs it again if its judge machine restarted meanwhile)
+    let taskId = same.find(row => ACTIVE_STATES.includes(row.state))?.taskId;
+    let result: RunnerOperation["result"] = "resumed";
+    if (taskId) logger.log(`AI job ${job.id} waits again for its run on a judge machine (task ${taskId})`);
+    else {
+      // A failure of this operation that the job never took (its backend restarted after the run failed) is the
+      // operation's outcome, taken once. One it took is recorded already (or now), and a new attempt runs.
+      const failed = same.find(row => row.state === AiExecutionState.Failed && !row.collectedAt);
+      if (failed) await this.takeFailure(job, request, failed);
+      for (const execution of same.filter(row => row.state === AiExecutionState.Failed))
+        // eslint-disable-next-line no-await-in-loop -- Few
+        await this.harvestFailed({ taskId: execution.taskId });
+      taskId = await this.dispatch(job.id, key, request.operation || "generate", serialized, sampleFiles);
+      result = "new";
+    }
+    for (const execution of same.filter(row => ACTIVE_STATES.includes(row.state) && row.taskId !== taskId))
+      // eslint-disable-next-line no-await-in-loop -- Few
+      await this.cancelExecution(execution.taskId);
+    return await this.waitFor(taskId, request, signal, checkJob, progress, async execution => {
+      if (execution.state === AiExecutionState.Complete) return await this.collect(job, request, execution, result);
+      return await this.takeFailure(job, request, execution);
+    });
+  }
+
+  // Queues a new attempt of an operation; returns its task ID
+  private async dispatch(
+    jobId: string,
+    operationKey: string,
+    operation: string,
+    serialized: Buffer,
+    sampleFiles: AiExecutionEntity["sampleFiles"],
+    transfers?: AiReplayTransfer[]
+  ): Promise<string> {
     const taskId = randomUUID();
     await this.fileService.putTemporaryObject(requestObject(taskId), serialized);
+    if (transfers)
+      await this.fileService.putTemporaryObject(transfersObject(taskId), Buffer.from(JSON.stringify(transfers)));
     await this.connection.transaction("READ COMMITTED", async manager => {
       await manager.insert(AiExecutionEntity, {
         taskId,
-        jobId: job.id,
+        jobId,
         state: AiExecutionState.Queued,
         sampleFiles,
         progress: null,
         result: null,
         uploads: null,
         createdAt: new Date(),
-        finishedAt: null
+        finishedAt: null,
+        operationKey,
+        operation,
+        collectedAt: null
       });
       await this.judgeQueueService.enqueue(taskId, JudgeTaskType.AiExecution, JudgeTaskPriorityType.Lowest, manager);
     });
     this.judgeQueueService.notifyJobsAvailable();
-    logger.log(`AI job ${job.id} runs its programs on a judge machine (task ${taskId})`);
+    logger.log(`AI job ${jobId} runs its programs on a judge machine (task ${taskId}, ${operation})`);
+    return taskId;
+  }
 
+  // Waits for a run to finish, reporting its progress; `finished` takes its result or failure
+  private async waitFor(
+    taskId: string,
+    request: RunnerRequest,
+    signal: AbortSignal,
+    checkJob: () => Promise<unknown>,
+    progress: (value: RunnerMessage) => Promise<void>,
+    finished: (execution: AiExecutionEntity) => Promise<RunnerMessage>
+  ): Promise<RunnerMessage> {
     const started = Date.now();
     const deadline = started + QUEUE_WAIT_LIMIT + aiExecutionBudget(request);
     let checked = Date.now();
@@ -574,56 +713,58 @@ export class AiExecutionService
           // eslint-disable-next-line no-await-in-loop -- Reported in order
           await progress({ type: "progress", ...execution.progress });
         }
-        if (execution.state === AiExecutionState.Complete)
+        if (execution.state === AiExecutionState.Complete || execution.state === AiExecutionState.Failed)
           // eslint-disable-next-line no-await-in-loop -- Once
-          return await this.collect(job, request, execution);
-        if (execution.state === AiExecutionState.Failed) {
-          const error = new AiError(
-            "SANDBOX_GENERATION_FAILED",
-            String(execution.result?.message || "").slice(0, 2000)
-          );
-          error.candidateFailure = execution.result?.candidateFailure === true;
-          const failure = parseAiRunFailure(execution.result?.failure);
-          if (failure) {
-            this.reported.add(error);
-            [error.failure] = failure.observations;
-            // eslint-disable-next-line no-await-in-loop -- Once
-            error.observationId = await this.recordFailure(
-              job,
-              failure,
-              this.judgeEvidence(taskId),
-              this.recordOptions(job, request.operation, error.candidateFailure)
-            );
-            // Recorded: the run and its uploads can go
-            // eslint-disable-next-line no-await-in-loop -- Once
-            if (error.observationId) await this.removeExecution(taskId);
-          }
-          throw error;
-        }
+          return await finished(execution);
         if (execution.state === AiExecutionState.Canceled) throw new AiError("SANDBOX_DISCONNECTED");
         if (execution.state === AiExecutionState.Queued && Date.now() - started > QUEUE_WAIT_LIMIT)
           throw new AiError(
             "SANDBOX_UNAVAILABLE",
-            "No judge machine took the AI run within 15 minutes; one of protocol version 4 must be online"
+            `No judge machine took the AI run within 15 minutes; one of protocol version ${AI_EXECUTION_PROTOCOL_VERSION} must be online`
           );
         if (Date.now() > deadline) throw new AiError("SANDBOX_TIMEOUT");
         // eslint-disable-next-line no-await-in-loop -- Polled in turn
         await sleep(POLL_INTERVAL);
       }
-    } finally {
-      // A no-op once it has finished
-      await this.cancelExecution(taskId).catch(e => logger.error(`Failed to cancel AI run ${taskId}: ${e}`));
+    } catch (error) {
+      // A job that lost its lease (another backend runs it now) attaches to the run again; otherwise nobody waits for
+      // it any more. A no-op once it has finished.
+      if (!(error instanceof AiError && error.code === "JOB_LEASE_LOST"))
+        await this.cancelExecution(taskId).catch(e => logger.error(`Failed to cancel AI run ${taskId}: ${e}`));
+      throw error;
     }
   }
 
-  // Downloads the files the judge generated and checks them against what it reported
+  // Takes a failed run's outcome: its failure is recorded with its evidence and the run removed, or else the run is
+  // marked taken (it's never taken again; the sweep records what it can and removes it)
+  private async takeFailure(job: AiJobEntity, request: RunnerRequest, execution: AiExecutionEntity): Promise<never> {
+    const error = new AiError("SANDBOX_GENERATION_FAILED", String(execution.result?.message || "").slice(0, 2000));
+    error.candidateFailure = execution.result?.candidateFailure === true;
+    const failure = parseAiRunFailure(execution.result?.failure);
+    if (failure) {
+      this.reported.add(error);
+      [error.failure] = failure.observations;
+      error.observationId = await this.recordFailure(
+        job,
+        failure,
+        this.judgeEvidence(execution.taskId),
+        this.recordOptions(job, request.operation, error.candidateFailure)
+      );
+    }
+    if (error.observationId) await this.removeExecution(execution.taskId);
+    else await this.repository.update({ taskId: execution.taskId }, { collectedAt: new Date() });
+    throw error;
+  }
+
+  // Downloads the files the judge generated and checks them against what it reported. The run stays until the job
+  // acknowledges it: a job that stops before (a restart, a failed publication) collects it again.
   private async collect(
     job: AiJobEntity,
     request: RunnerRequest,
-    execution: AiExecutionEntity
+    execution: AiExecutionEntity,
+    result: RunnerOperation["result"]
   ): Promise<RunnerMessage> {
-    const { result } = execution;
-    const files = result.files || [];
+    const files = execution.result.files || [];
     const allowed = new Map((execution.uploads || []).map(file => [file.name, file.size]));
     const names = new Set<string>();
     let total = 0;
@@ -651,22 +792,98 @@ export class AiExecutionService
       if ((await fs.stat(target)).size !== file.size || (await hashLocalFile(target)) !== file.sha256)
         throw new AiError("INVALID_SANDBOX_FILE");
     }
-    await this.removeExecution(execution.taskId);
+    if (!execution.collectedAt)
+      await this.repository.update({ taskId: execution.taskId, collectedAt: IsNull() }, { collectedAt: new Date() });
+    const operation: RunnerOperation = {
+      key: execution.operationKey,
+      origin: "judge",
+      result,
+      task: execution.taskId,
+      ...(Number.isSafeInteger(execution.result.judgeRuntimeId)
+        ? { judgeRuntimeId: execution.result.judgeRuntimeId }
+        : {})
+    };
     return {
-      ...result.result,
+      ...execution.result.result,
       type: "complete",
       ...(request.operation === "validate-reference" ? {} : { directory }),
-      files: files.map(file => file.name)
+      files: files.map(file => file.name),
+      operation
     };
   }
 
   private async cancelJobExecutions(jobId: string): Promise<void> {
-    const active = await this.repository.find({
-      select: ["taskId"],
-      where: { jobId, state: In(ACTIVE_STATES) }
+    for (const { taskId, state } of await this.workflowRuns(jobId))
+      // eslint-disable-next-line no-await-in-loop -- Few
+      if (ACTIVE_STATES.includes(state)) await this.cancelExecution(taskId);
+  }
+
+  /**
+   * Runs a replay of a kept failure (operation "replay") where the job's programs run: the kept files go to the local
+   * runner as sample files, or to a judge machine as links it downloads. Resolves with the runner's "complete"
+   * message, and `operation` (where it ran). A replay runs beside the job's own runs and never replaces them.
+   */
+  async replay(job: AiJobEntity, request: RunnerRequest, transfers: AiReplayTransfer[]): Promise<RunnerMessage> {
+    const key = aiOperationKey(job.id, {
+      ...request,
+      transfers: transfers.map(({ name, sha256 }) => ({ name, sha256 }))
     });
-    // eslint-disable-next-line no-await-in-loop -- Few
-    for (const { taskId } of active) await this.cancelExecution(taskId);
+    const keyed = { ...request, operationKey: key, cases: [] };
+    if (this.mode(job.id) === "local") {
+      const directory = path.join(REPLAY_DIRECTORY(), job.id);
+      await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+      try {
+        for (const transfer of transfers) {
+          const target = path.join(directory, transfer.name);
+          // eslint-disable-next-line no-await-in-loop -- At most three
+          await fs.rm(target, { force: true });
+          // eslint-disable-next-line no-await-in-loop -- At most three
+          await this.fileService.downloadFileToPath(transfer.object, target, transfer.size);
+          // eslint-disable-next-line no-await-in-loop -- At most three
+          if ((await hashLocalFile(target)) !== transfer.sha256) throw new AiError("EVIDENCE_UNAVAILABLE");
+        }
+        const message = await this.runLocal(
+          job,
+          keyed,
+          async () => undefined,
+          async () => undefined
+        );
+        const operation: RunnerOperation = { key, origin: "local", result: "new" };
+        return { ...message, operation };
+      } finally {
+        for (const transfer of transfers)
+          // eslint-disable-next-line no-await-in-loop -- At most three
+          await fs.rm(path.join(directory, transfer.name), { force: true });
+      }
+    }
+    const serialized = Buffer.from(JSON.stringify(keyed));
+    if (serialized.length > MAX_REQUEST) throw new AiError("SAMPLES_TOO_LARGE");
+    const taskId = await this.dispatch(job.id, key, "replay", serialized, [], transfers);
+    try {
+      return await this.waitFor(
+        taskId,
+        keyed,
+        undefined,
+        async () => undefined,
+        async () => undefined,
+        async execution => {
+          if (execution.state === AiExecutionState.Failed)
+            throw new AiError("SANDBOX_GENERATION_FAILED", String(execution.result?.message || "").slice(0, 2000));
+          const operation: RunnerOperation = {
+            key,
+            origin: "judge",
+            result: "new",
+            task: taskId,
+            ...(Number.isSafeInteger(execution.result.judgeRuntimeId)
+              ? { judgeRuntimeId: execution.result.judgeRuntimeId }
+              : {})
+          };
+          return { ...execution.result.result, type: "complete", operation };
+        }
+      );
+    } finally {
+      await this.removeExecution(taskId).catch(e => logger.error(`Failed to remove AI replay ${taskId}: ${e}`));
+    }
   }
 
   // Stops an unfinished run, also on the judge machine running it
@@ -690,6 +907,24 @@ export class AiExecutionService
     const execution = await this.repository.findOneBy({ taskId, state: In(ACTIVE_STATES) });
     if (!execution) return null;
     const request = JSON.parse((await this.fileService.readObject(requestObject(taskId), MAX_REQUEST)).toString());
+    // A replay's kept files: links for this judge, signed now
+    const transfers: AiExecutionExtraInfo["transfers"] = [];
+    if (execution.operation === "replay")
+      for (const transfer of JSON.parse(
+        (await this.fileService.readObject(transfersObject(taskId), 64 * 1024)).toString()
+      ) as AiReplayTransfer[])
+        transfers.push({
+          name: transfer.name,
+          size: transfer.size,
+          sha256: transfer.sha256,
+          // eslint-disable-next-line no-await-in-loop -- At most three
+          url: await this.fileService.signDownloadLink({
+            uuid: transfer.object,
+            downloadFilename: null,
+            expiresSeconds: JUDGE_FILE_DOWNLOAD_EXPIRE_TIME,
+            signFor: MinioSignFor.Judge
+          })
+        });
     await this.repository.update({ taskId, state: AiExecutionState.Queued }, { state: AiExecutionState.Running });
     return new JudgeTask<AiExecutionExtraInfo>(
       taskId,
@@ -698,7 +933,8 @@ export class AiExecutionService
       priority,
       {
         request,
-        sampleFiles: execution.sampleFiles
+        sampleFiles: execution.sampleFiles,
+        ...(transfers.length ? { transfers } : {})
       }
     );
   }
@@ -750,7 +986,11 @@ export class AiExecutionService
         { taskId, state: In(ACTIVE_STATES) },
         {
           state: result.status === "Complete" ? AiExecutionState.Complete : AiExecutionState.Failed,
-          result,
+          // With the runtime the backend recorded for the judge machine
+          result: {
+            ...result,
+            ...(Number.isSafeInteger(completion?.judgeRuntimeId) ? { judgeRuntimeId: completion.judgeRuntimeId } : {})
+          },
           finishedAt: new Date()
         }
       );
@@ -891,10 +1131,15 @@ export class AiExecutionService
           return [taskId];
         }))
       );
+    // A completed run stays for its job to collect again (it's deleted when the job acknowledges it), for a while
     await this.repository.delete({
-      state: Not(In(ACTIVE_STATES)),
+      state: In([AiExecutionState.Failed, AiExecutionState.Canceled]),
       finishedAt: LessThan(new Date(now - FINISHED_RETENTION)),
       ...(retried.length ? { taskId: Not(In(retried)) } : {})
+    });
+    await this.repository.delete({
+      state: AiExecutionState.Complete,
+      finishedAt: LessThan(new Date(now - AI_RESULT_RETENTION))
     });
     if (retried.length)
       await this.repository.delete({

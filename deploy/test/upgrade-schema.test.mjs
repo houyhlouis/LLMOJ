@@ -229,6 +229,34 @@ test('the AI execution table is added exactly once', async () => {
   assert.equal(AI_EXECUTION_SQL.length, 1);
 });
 
+test('the AI run columns of logical operations are added exactly once, with a table this upgrade creates or not', async () => {
+  const { validateAiOperationSchema, AI_OPERATION_SQL, AI_OPERATION_COLUMNS } = await import('../ai-operation-schema.mjs');
+  const { AI_EXECUTION_CREATE_SQL } = await import('../ai-execution-schema.mjs');
+  assert.deepEqual(validateQueries([...AI_OPERATION_SQL]), [...AI_OPERATION_SQL]);
+  assert.deepEqual(AI_OPERATION_COLUMNS, ['operationKey', 'operation', 'collectedAt']);
+  // A table created by this upgrade comes with them
+  for (const column of ['`operationKey` char(64) NULL', '`operation` varchar(20) NULL', '`collectedAt` datetime(3) NULL'])
+    assert(AI_EXECUTION_CREATE_SQL.includes(column), column);
+  const existing = { operationKey: 'char(64)', operation: 'varchar(20)', collectedAt: 'datetime(3)' };
+  const fixture = (table, columns, changed = {}) => ({
+    query: async sql => sql.includes('information_schema.TABLES') ? [{ count: table ? 1 : 0 }]
+      : columns.map(columnName => ({ columnName, columnType: existing[columnName], isNullable: 'YES', defaultValue: null,
+        extra: '', comment: '', ...changed }))
+  });
+  await validateAiOperationSchema(fixture(true, []), [...AI_OPERATION_SQL]);
+  await validateAiOperationSchema(fixture(true, Object.keys(existing)), []);
+  await validateAiOperationSchema(fixture(false, []), []);
+  await validateAiOperationSchema(fixture(true, ['operationKey']), AI_OPERATION_SQL.slice(1));
+  await assert.rejects(() => validateAiOperationSchema(fixture(true, []), []), /operationKey column addition/);
+  await assert.rejects(() => validateAiOperationSchema(fixture(false, []), [...AI_OPERATION_SQL]), /column addition/);
+  await assert.rejects(() => validateAiOperationSchema(fixture(true, Object.keys(existing)), [...AI_OPERATION_SQL]),
+    /column addition/);
+  for (const changed of [{ isNullable: 'NO' }, { defaultValue: "''" }, { columnType: 'varchar(64)' }, { extra: 'x' }, { comment: 'x' }])
+    await assert.rejects(() => validateAiOperationSchema(fixture(true, Object.keys(existing), changed), []),
+      /Unsupported existing ai_execution/);
+  assert.equal(AI_OPERATION_SQL.length, 3);
+});
+
 test('the AI failure evidence table is added exactly once', async () => {
   const { validateAiEvidenceSchema, AI_EVIDENCE_SQL, AI_OBSERVATION_CREATE_SQL } = await import('../ai-evidence-schema.mjs');
   assert.deepEqual(validateQueries([...AI_EVIDENCE_SQL]), [...AI_EVIDENCE_SQL]);

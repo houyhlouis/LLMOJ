@@ -122,6 +122,52 @@ export default function AiScoringReview({ review }: { review: AiJob["result"]["s
 }
 
 /** What a finished test-data job did with the problem's scoring and judging helpers. */
+/**
+ * Where a finished job's test data was made (review Part III, W03): on the local AI runner or a judge machine, made
+ * for the job or collected again after the job stopped, and what its run took from earlier attempts.
+ */
+export function AiRunSummary({ result }: { result: AiJob["result"] }) {
+  const { execution, corpus } = result;
+  if (!execution) return null;
+  const where =
+    execution.origin === "judge"
+      ? aiText("在评测机上生成", "Made on a judge machine")
+      : aiText("在本机生成", "Made on this server");
+  const how =
+    execution.result === "collected-again"
+      ? aiText(
+          "，任务中断后重新取回已完成的结果（未重新生成）",
+          ", and collected again after the job stopped (not made again)"
+        )
+      : execution.result === "resumed"
+        ? aiText("，任务中断后继续等待同一次运行", ", the job waiting again for the same run after it stopped")
+        : "";
+  const reused = [
+    execution.reuse.builds &&
+      aiText(
+        `复用 ${execution.reuse.builds} 个已编译程序`,
+        `${execution.reuse.builds} programs taken from earlier builds`
+      ),
+    execution.reuse.inputs &&
+      aiText(
+        `复用中断前生成的 ${execution.reuse.inputs} 个输入`,
+        `${execution.reuse.inputs} inputs from the interrupted attempt`
+      )
+  ].filter(Boolean);
+  return (
+    <p className={style.jobDetail} title={`${execution.operation} · ${execution.runtime.judgeProgram.slice(0, 12)}`}>
+      {where}
+      {how}
+      {reused.length > 0 && ` · ${reused.join(" · ")}`}
+      {corpus &&
+        aiText(
+          ` · ${corpus.cases} 个测试点${corpus.adversarial ? `（其中 ${corpus.adversarial} 个为对抗数据）` : ""}`,
+          ` · ${corpus.cases} cases${corpus.adversarial ? ` (${corpus.adversarial} adversarial)` : ""}`
+        )}
+    </p>
+  );
+}
+
 export function AiJudgingSummary({ result }: { result: AiJob["result"] }) {
   const { scoring, helpers } = result;
   if (!scoring && !helpers?.length) return null;

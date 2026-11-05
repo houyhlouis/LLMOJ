@@ -445,7 +445,8 @@ test("testdata publishes a uniquely named SPJ before switching and preserves old
       assert.match(uniqueChecker, /^ai-managed-[0-9a-f-]{36}-checker\.cpp$/);
       assert(events.indexOf(uniqueChecker) < events.indexOf("switch-config"));
       assert(!events.includes("checker.cpp"));
-      assert.equal(cleaned, true);
+      // The run's result stays until the job's checkpoint acknowledges it (review Part III, W03)
+      assert.equal(cleaned, false);
       for (const name of ["make.cpp", "std.cpp", "validator.cpp", "data.yaml"])
         assert(events.indexOf(name) < events.indexOf("switch-config"));
       assert.equal(judgeInfo.extraSourceFiles.cpp["helper.h"], "helper.h");
@@ -577,8 +578,8 @@ test("testdata requires proof for every generated input and sample before publis
         assert.deepEqual(published, [], "unverified input cannot publish any file");
         assert.equal(job.state.generated, undefined);
       }
-      assert.equal(cleaned, 1, "success and rejected proof both clean root-owned artifacts");
-      assert.equal(fs.existsSync(directory), false);
+      assert.equal(cleaned, 0, "the step cleans nothing up itself: the job acknowledges or releases its runs");
+      fs.rmSync(directory, { recursive: true, force: true });
     }
   } finally {
     if (oldDirectory === undefined) delete process.env.HYHOJ_AI_GENERATED_DIR;

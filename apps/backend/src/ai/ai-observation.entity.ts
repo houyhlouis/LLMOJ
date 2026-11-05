@@ -2,6 +2,8 @@ import { Column, Entity, Index, PrimaryColumn } from "typeorm";
 
 import type { AiArtifactRef, AiExecutionProfile, AiFailureKind, AiFailureObservation } from "@libreoj/judge-protocol";
 
+import type { AiReplayRecord } from "./ai-replay";
+
 import { JsonColumn } from "../database/json-column";
 
 /**
@@ -28,6 +30,8 @@ export interface StoredAiObservation extends Omit<AiFailureObservation, "artifac
   profile?: AiExecutionProfile;
   // A tutorial's solution that failed its sample check: the job went on with a model-written reference solution
   context?: "tutorial-reference";
+  // Its latest replays (review Part III, W03), latest last
+  replays?: AiReplayRecord[];
 }
 
 /**

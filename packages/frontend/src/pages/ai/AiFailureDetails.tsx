@@ -1,14 +1,16 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Button, Message } from "semantic-ui-react";
 import formatFileSize from "@/utils/formatFileSize";
 import formatDateTime from "@/utils/formatDateTime";
-import { aiCall, aiText, actionName, AiArtifact, AiJob, AiObservation } from "./api";
+import { aiCall, aiError, aiText, actionName, AiArtifact, AiJob, AiObservation, AiReplayRecord } from "./api";
 import style from "./Ai.module.less";
 
 // A part of an artifact shown at a time, and at most this much of it
 const SHOWN_LIMIT = 1024 * 1024;
 // Characters of a failure's message shown
 const SUMMARY_LIMIT = 400;
+// How often a running replay is looked at
+const REPLAY_POLL = 2000;
 
 export const failureKindName = (kind: string) =>
   ({
@@ -189,7 +191,146 @@ function evidenceNote(observation: AiObservation) {
   }
 }
 
-export function ObservationView({ job, observation }: { job: AiJob; observation: AiObservation }) {
+const replayStatusName = (status: AiReplayRecord["status"]) =>
+  ({
+    running: aiText("正在重放……", "Replaying…"),
+    reproduced: aiText("已复现：每次运行都以同样方式失败", "Reproduced: every run failed the same way"),
+    not_reproduced: aiText("未复现：没有一次运行失败", "Not reproduced: no run failed"),
+    unstable: aiText("不稳定：各次运行的结果不一致", "Unstable: the runs didn't all end the same way"),
+    different: aiText(
+      "以另一种方式失败：每次运行都失败，但不是原来的失败",
+      "Failed another way: every run failed, but not as before"
+    ),
+    failed: aiText("重放本身失败", "The replay itself failed")
+  })[status] || status;
+
+const replayCheckName = (check: AiReplayRecord["check"]) =>
+  ({
+    compile: aiText("重新编译", "compiled again"),
+    validate: aiText("用输入校验器重新检查保存的输入", "the kept input validated again"),
+    generate: aiText("重新运行生成器（每次使用新的随机数）", "the generator run again (with fresh randomness)"),
+    run: aiText("用保存的输入重新运行程序", "the program run again on the kept input"),
+    compare: aiText("用保存的输入重新运行并比较输出", "run again on the kept input, outputs compared"),
+    checker: aiText("用保存的文件重新运行 SPJ", "the checker run again on the kept files")
+  })[check] || check;
+
+// Why a failure can't be replayed now, if it's worth saying
+const replayReasonName = (reason: string) =>
+  ({
+    EVIDENCE_MISSING: aiText(
+      "无法重放：所需的证据未完整保存或已过期。",
+      "Can't be replayed: the evidence it needs wasn't kept in full, or has expired."
+    ),
+    PROGRAM_MISSING: aiText(
+      "无法重放：任务已没有所需的程序（例如重试后尚未重新生成）。",
+      "Can't be replayed: the job no longer has a program it needs (e.g. a retry replaced it)."
+    ),
+    PROTOCOL: aiText(
+      "交互题和通信题目前只重放编译和输入校验。",
+      "For interactive and communication problems, only compilations and input validation are replayed."
+    ),
+    JOB_ACTIVE: aiText("任务结束后可以重放。", "Can be replayed once the job stops.")
+  })[reason] || "";
+
+const replayRunName = (run: AiReplayRecord["runs"][number]) =>
+  run.outcome === "passed"
+    ? aiText("通过", "passed")
+    : [
+        failureKindName(run.kind || "unclassified"),
+        run.verdict,
+        run.execution?.timeMs != null && `${Math.round(run.execution.timeMs)} ms`
+      ]
+        .filter(Boolean)
+        .join(", ");
+
+/** The replays of a failure, and a button to replay it: its kept input, run again with the same check. */
+export function ReplayPanel({
+  job,
+  observation,
+  onStarted
+}: {
+  job: AiJob;
+  observation: AiObservation;
+  onStarted: () => void;
+}) {
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  const replays = [...(observation.replays || [])].reverse();
+  const running = replays.some(replay => replay.status === "running");
+  const availability = observation.replay;
+  if (!availability) return null;
+  const reason = availability.available === false ? replayReasonName(availability.reason) : "";
+  if (!availability.available && !reason && !replays.length) return null;
+  const replay = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await aiCall("replayFailure", { jobId: job.id, id: observation.id });
+      onStarted();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className={style.replays}>
+      {availability.available && (
+        <Button size="mini" type="button" basic disabled={busy || running} loading={busy} onClick={replay}>
+          {aiText("重放（用保存的输入再运行一次检查）", "Replay (run the check again on the kept input)")}
+        </Button>
+      )}
+      {reason && <p className={style.notes}>{reason}</p>}
+      {error && <Message negative size="small" content={error} />}
+      {replays.map(record => (
+        <div key={record.id} className={style.replay}>
+          <p className={style.observationHeading}>
+            <strong>{replayStatusName(record.status)}</strong>
+            {` · ${replayCheckName(record.check)}`}
+            {` · ${formatDateTime(record.startedAt)[1]}`}
+            {record.origin === "judge" && aiText(" · 在评测机上运行", " · on a judge machine")}
+          </p>
+          {(record.revision === "changed" || record.profiles === "changed") && (
+            <p className={style.notes}>
+              {record.revision === "changed"
+                ? aiText(
+                    "使用的是任务现在的程序：与失败时的程序不同，结果说明的是现在的程序。",
+                    "It ran the job's programs as they are now, which differ from the ones that failed: it says how the programs do now."
+                  )
+                : aiText(
+                    "程序与失败时相同，但题目的评测设置（限制或编译选项）已改变。",
+                    "The programs are the ones that failed, but the problem's judging settings (limits or options) changed since."
+                  )}
+            </p>
+          )}
+          {record.runs && (
+            <p className={style.jobDetail}>
+              {aiText("各次运行：", "Runs: ")}
+              {record.runs.map(replayRunName).join(" · ")}
+            </p>
+          )}
+          {record.status === "failed" && record.error && (
+            <p className={style.notes}>
+              {record.error === "REPLAY_INTERRUPTED"
+                ? aiText("重放被中断（服务器重启）。", "The replay was interrupted (the server restarted).")
+                : aiError(record.error)}
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function ObservationView({
+  job,
+  observation,
+  onReplayed
+}: {
+  job: AiJob;
+  observation: AiObservation;
+  onReplayed?: () => void;
+}) {
   const { execution, difference, search } = observation;
   const program = programName(observation.role, observation.candidate);
   return (
@@ -276,6 +417,7 @@ export function ObservationView({ job, observation }: { job: AiJob; observation:
       {observation.artifacts.map(artifact => (
         <ArtifactView key={artifact.role} job={job} observation={observation} artifact={artifact} />
       ))}
+      {onReplayed && <ReplayPanel job={job} observation={observation} onStarted={onReplayed} />}
     </div>
   );
 }
@@ -287,6 +429,17 @@ export default function AiFailureDetails({ job }: { job: AiJob }) {
     [loading, setLoading] = useState(false),
     [error, setError] = useState("");
   const count = job.result.observationCount || 0;
+  const load = async () => {
+    const result = await aiCall<{ failures: AiObservation[] }>("failures", { jobId: job.id });
+    setFailures(result.failures);
+  };
+  // A running replay is looked at until it's done
+  const replaying = open && failures?.some(failure => failure.replays?.some(replay => replay.status === "running"));
+  useEffect(() => {
+    if (!replaying) return undefined;
+    const timer = setInterval(() => load().catch(() => undefined), REPLAY_POLL);
+    return () => clearInterval(timer);
+  }, [replaying]);
   if (!count) return null;
   const toggle = async () => {
     if (open) {
@@ -297,8 +450,7 @@ export default function AiFailureDetails({ job }: { job: AiJob }) {
     setLoading(true);
     setError("");
     try {
-      const result = await aiCall<{ failures: AiObservation[] }>("failures", { jobId: job.id });
-      setFailures(result.failures);
+      await load();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -315,7 +467,14 @@ export default function AiFailureDetails({ job }: { job: AiJob }) {
       {open && error && <Message negative size="small" content={error} />}
       {open &&
         failures &&
-        failures.map(observation => <ObservationView key={observation.id} job={job} observation={observation} />)}
+        failures.map(observation => (
+          <ObservationView
+            key={observation.id}
+            job={job}
+            observation={observation}
+            onReplayed={() => load().catch(e => setError(e.message))}
+          />
+        ))}
     </div>
   );
 }

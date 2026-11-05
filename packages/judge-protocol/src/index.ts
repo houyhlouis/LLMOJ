@@ -4,6 +4,8 @@ import type { AiRunFailure } from "./ai-observation";
 export * from "./ai-observation";
 // How an AI run's programs are compiled and run, by role
 export * from "./ai-profile";
+// How a completed AI run was made (its contract, runtime and reuse) and its cases; replays of kept failures
+export * from "./ai-operation";
 
 export enum JudgeTaskType {
   Submission = "Submission",
@@ -24,8 +26,11 @@ export enum JudgeTaskType {
 // Version 7 runs each program of an AiExecution task with its role's execution profile ("profiles": compile options,
 // limits, CPU class), seeing only its own binary, and reports the profiles' digest with the result. Only judges of this
 // version are sent AiExecution tasks.
-export const JUDGE_PROTOCOL_VERSION = 7;
-export const AI_EXECUTION_PROTOCOL_VERSION = 7;
+// Version 8 reports how a completed AiExecution task was made ("execution": contract, runtime, builds and inputs
+// reused from earlier attempts) and its cases' hashes ("corpus"), and runs replays of kept failures (operation
+// "replay", with the kept files sent as "transfers"). Only judges of this version are sent AiExecution tasks.
+export const JUDGE_PROTOCOL_VERSION = 8;
+export const AI_EXECUTION_PROTOCOL_VERSION = 8;
 
 /** What a judge judges with, as recorded with each result. */
 export interface JudgeRuntimeInfo {

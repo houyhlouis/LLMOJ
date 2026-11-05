@@ -11,13 +11,15 @@ import rpc from "../../rpc";
 import { CanceledError } from "../../error";
 import { ensureFiles, getFile, hashFileAtPath } from "../../file";
 import { Request, runGeneration, validate } from "../../aiRunner";
-import { safelyJoinPath, uploadWithForm } from "../../utils";
+import { download, safelyJoinPath, uploadWithForm } from "../../utils";
 
 export interface AiExecutionExtraInfo {
   // As the local AI runner gets it
   request: Request;
   // The stored files the request's sample files are, by name
   sampleFiles?: { name: string; uuid: string }[];
+  // A replay's kept files (judge protocol version 8): where to download each, signed for this task, and its content
+  transfers?: { name: string; url: string; size: number; sha256: string }[];
 }
 
 // What a generation writes, as the AI runner names its files: the test data (1.in, 1.out, …) and the sources it
@@ -25,6 +27,7 @@ export interface AiExecutionExtraInfo {
 const isGeneratedFile = (name: unknown) =>
   typeof name === "string" && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(name) && name !== "result.json";
 const UPLOAD_CONCURRENCY = 2;
+const MAX_TRANSFER = 16 * 1024 * 1024;
 
 /**
  * Uploads a failed run's evidence (see aiEvidence.ts) to where the server says, before the failure is reported and
@@ -105,6 +108,33 @@ export default async function onAiExecution(task: Task<AiExecutionExtraInfo, AiE
       rpc.ensureNotCanceled(task.taskId);
       // eslint-disable-next-line no-await-in-loop -- One at a time
       await fs.promises.copyFile(getFile(stored.get(name)), path.join(samples, name));
+    }
+
+    // A replay's kept files, each checked against its size and SHA-256
+    const transfers = task.extraInfo.transfers || [];
+    const kept = request.operation === "replay" ? Object.values(request.replay.files) : [];
+    if (kept.length !== transfers.length || kept.some(name => !transfers.some(transfer => transfer?.name === name)))
+      throw new Error("The replay's kept files weren't sent");
+    for (const transfer of transfers) {
+      if (
+        !kept.includes(transfer.name) ||
+        !Number.isSafeInteger(transfer.size) ||
+        transfer.size < 0 ||
+        transfer.size > MAX_TRANSFER ||
+        typeof transfer.sha256 !== "string" ||
+        !/^[0-9a-f]{64}$/.test(transfer.sha256) ||
+        typeof transfer.url !== "string"
+      )
+        throw new Error("Invalid kept file");
+      rpc.ensureNotCanceled(task.taskId);
+      const target = path.join(samples, transfer.name);
+      // eslint-disable-next-line no-await-in-loop -- One at a time
+      await download(transfer.url, target, `kept file ${transfer.name}`);
+      // eslint-disable-next-line no-await-in-loop -- One at a time
+      const stat = await fs.promises.lstat(target);
+      // eslint-disable-next-line no-await-in-loop -- One at a time
+      if (!stat.isFile() || stat.size !== transfer.size || (await hashFileAtPath(target)) !== transfer.sha256)
+        throw new Error(`The kept file ${transfer.name} isn't what the server recorded`);
     }
 
     let complete: Record<string, unknown> = null;

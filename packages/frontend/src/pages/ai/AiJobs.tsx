@@ -4,7 +4,7 @@ import { observer } from "mobx-react";
 import { Link } from "@/utils/hooks";
 import { aiCall, aiText, aiError, actionName, AiJob, AiRetryFrom } from "./api";
 import AiFailureDetails, { failureKindName, programName } from "./AiFailureDetails";
-import AiScoringReview, { AiJudgingSummary } from "./AiScoringReview";
+import AiScoringReview, { AiJudgingSummary, AiRunSummary } from "./AiScoringReview";
 import style from "./Ai.module.less";
 
 export default observer(function AiJobs({
@@ -246,6 +246,7 @@ export default observer(function AiJobs({
                   </>
                 )}
                 <AiJudgingSummary result={job.result} />
+                <AiRunSummary result={job.result} />
                 {(job.result.warnings || [])
                   .filter(warning =>
                     [

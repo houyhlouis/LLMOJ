@@ -78,6 +78,8 @@ const uuid = n => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 function fixture() {
   // Tasks to lease next (an Error makes the claim fail once)
   const queue = [];
+  // The judge clients whose leases through earlier connections were released when they connected
+  const releasedEarlier = [];
   const progress = [];
   const signed = [];
   const released = [];
@@ -126,6 +128,7 @@ function fixture() {
       },
       notifyJobsAvailable: () => notified++,
       release: async (...args) => released.push(args),
+      releaseEarlierLeases: async (...args) => releasedEarlier.push(args),
       renewLeases: async leases => renewed.push(leases),
       cancel: async taskId => canceled.push(taskId),
       onTaskProgress: async (taskMeta, lease, value) => {
@@ -187,6 +190,7 @@ function fixture() {
     progress,
     signed,
     released,
+    releasedEarlier,
     renewed,
     canceled,
     claims,
@@ -219,9 +223,14 @@ test("judge clients learn that the server acknowledges processed progress", asyn
 });
 
 test("progress is only accepted from the client the task was leased to, with that lease", async () => {
-  const { gateway, queue, progress, connect } = fixture();
+  const { gateway, queue, progress, connect, releasedEarlier } = fixture();
   const a = await connect(1);
   const b = await connect(2);
+  // What each one leased through an earlier connection ended with it (review Part III, W03)
+  assert.deepEqual(releasedEarlier, [
+    [1, a.client.id],
+    [2, b.client.id]
+  ]);
   queue.push(submissionTask("task-a", [uuid(1)]));
   await gateway.onConsumeTask(a.client, 0);
   assert(a.emitted.some(([event, , task]) => event === "task" && task.taskId === "task-a"));
@@ -470,7 +479,7 @@ test("generated files are only signed for a task assigned to the requesting judg
   const b = await connect(2);
   await gateway.onCapabilities(
     a.client,
-    capabilities({ protocolVersion: 7, taskTypes: ["Submission", "AiExecution"] })
+    capabilities({ protocolVersion: 8, taskTypes: ["Submission", "AiExecution"] })
   );
   queue.push(aiTask("ai-1"));
   await gateway.onConsumeTask(a.client, 0);
@@ -501,7 +510,7 @@ test("AI runs leave a judge client's other threads to other work", async () => {
   await gateway.onCapabilities(
     a.client,
     capabilities({
-      protocolVersion: 7,
+      protocolVersion: 8,
       taskTypes: ["Submission", "AiExecution"],
       consumerThreads: 3,
       aiExecutionSlots: 6
@@ -534,16 +543,18 @@ test("AI runs leave a judge client's other threads to other work", async () => {
 test("judge clients that can't run AI programs with their execution profiles are sent no AI runs", async () => {
   const { gateway, queue, claims, connect } = fixture();
   const a = await connect(1);
-  // Protocol version 6 runs AiExecution tasks, but every program with the same settings and seeing the others' binaries
+  // Protocol version 6 runs AiExecution tasks, but every program with the same settings and seeing the others' binaries;
+  // version 7 doesn't report how it made a result or run replays (review Part III, W03)
   await gateway.onCapabilities(
     a.client,
-    capabilities({ protocolVersion: 6, taskTypes: ["Submission", "AiExecution"], consumerThreads: 8 })
+    capabilities({ protocolVersion: 7, taskTypes: ["Submission", "AiExecution"], consumerThreads: 8 })
   );
   queue.push(aiTask("ai-0"));
   await gateway.onConsumeTask(a.client, 0);
   assert.deepEqual(claims.at(-1)[1], ["Submission"]);
   assert.equal(aiExecutionLimit(capabilities({ protocolVersion: 6, consumerThreads: 8 })), 0);
-  assert.equal(aiExecutionLimit(capabilities({ protocolVersion: 7, consumerThreads: 8 })), 6);
+  assert.equal(aiExecutionLimit(capabilities({ protocolVersion: 7, consumerThreads: 8 })), 0);
+  assert.equal(aiExecutionLimit(capabilities({ protocolVersion: 8, consumerThreads: 8 })), 6);
 });
 
 test("while a contest runs, judge machines keep the policy's task threads for its submissions", async () => {

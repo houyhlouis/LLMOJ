@@ -104,6 +104,11 @@ export class AiFailureArtifactDto extends AiFailuresDto {
   @IsOptional() @IsInt() @Min(0) @Max(2147483647) offset?: number;
 }
 
+export class AiReplayFailureDto extends AiFailuresDto {
+  // The observation
+  @IsString() @Length(36, 36) id: string;
+}
+
 export class AiPrepareAttachmentDto {
   @IsString() @Length(1, 256) filename: string;
 

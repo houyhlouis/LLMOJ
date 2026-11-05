@@ -34,6 +34,7 @@ const { AiExecutionEntity } = require("./ai-execution.entity.ts");
 const { AiObservationEntity } = require("./ai-observation.entity.ts");
 const { AiJobEntity } = require("./ai.entity.ts");
 const { AiExecutionService } = require("./ai-execution.service.ts");
+const { AiError } = require("./ai.types.ts");
 const { AiEvidenceService, observationId, EVIDENCE_RETENTION } = require("./ai-evidence.service.ts");
 const { textPreview } = require("@libreoj/judge-protocol");
 
@@ -285,42 +286,58 @@ test("a judge machine's failure keeps its exact evidence after the run is cleane
 });
 
 test(
-  "a failure reported while the backend was down is recorded when the job runs again, or by the cleanup",
+  "a failure reported while the backend was down is the outcome its job takes when it runs again, or the cleanup records it",
   { skip },
   async t => {
     const { files, queue, backend, job, observations, ds } = await fixture(t);
     const owner = await job();
     const before = backend();
+    // The backend stops waiting: another one runs the job now (it restarted), and the run goes on for it
+    let restarted = false;
     const first = before.run(
       owner,
       request(owner.id),
       async () => {},
-      async () => {}
+      async () => {
+        if (restarted) throw new AiError("JOB_LEASE_LOST");
+      }
     );
     const { taskId } = await until(() => queue.enqueued[0], "the task");
     await before.getTaskToBeSentToJudgeByTaskId(taskId, 1);
-    // The backend stops waiting (it restarts); the judge then reports its failure
-    first.catch(() => {});
+    restarted = true;
+    await assert.rejects(first, /JOB_LEASE_LOST/);
+    assert.equal((await ds.getRepository(AiExecutionEntity).findOneBy({ taskId })).state, "Running", "not canceled");
+    // The judge then reports its failure, which nobody waits for
     const after = backend();
-    await ds.getRepository(AiExecutionEntity).update({ taskId }, { state: "Running" });
     await judgeFails(after, files, taskId, runFailure(taskId));
-    // The job is run again by the new backend: the old failure is recorded before the new run starts
+    // The job runs again: the failure of the same operation, which it never took, is its outcome (review Part III,
+    // W03), recorded with its evidence; no new run starts
     const rerun = { ...owner, runToken: crypto.randomUUID() };
-    const second = after.run(
-      rerun,
+    await assert.rejects(
+      after.run(
+        rerun,
+        request(owner.id),
+        async () => {},
+        async () => {}
+      ),
+      error => error.code === "SANDBOX_GENERATION_FAILED" && error.observationId === observationId(taskId, 0)
+    );
+    assert.equal(queue.enqueued.length, 1);
+    assert.deepEqual(
+      (await observations(owner.id)).map(row => [row.id, row.runToken, row.evidence]),
+      [[observationId(taskId, 0), rerun.runToken, "stored"]]
+    );
+    assert.equal(await ds.getRepository(AiExecutionEntity).findOneBy({ taskId }), null);
+    // A retry of the same operation runs it again: the failure was taken once
+    const retried = after.run(
+      { ...owner, runToken: crypto.randomUUID() },
       request(owner.id),
       async () => {},
       async () => {}
     );
     const next = await until(() => queue.enqueued[1], "the new task");
-    const rows = await observations(owner.id);
-    assert.deepEqual(
-      rows.map(row => [row.id, row.runToken, row.evidence]),
-      [[observationId(taskId, 0), null, "stored"]]
-    );
-    assert.equal(await ds.getRepository(AiExecutionEntity).findOneBy({ taskId }), null);
     await after.onTaskProgress(next.taskId, { finished: true, status: "Failed", message: "again" });
-    await second.catch(() => {});
+    await retried.catch(() => {});
 
     // A job that never runs again: the cleanup records it before removing the old run
     const other = await job();

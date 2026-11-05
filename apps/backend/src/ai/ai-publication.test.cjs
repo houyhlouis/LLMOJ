@@ -331,7 +331,8 @@ test("all case, checker, source and YAML uploads precede the single activation",
     const activation = state.events.indexOf("activate");
     assert(activation > 0);
     for (const { name } of state.writes) assert(state.events.indexOf(name) < activation);
-    assert.deepEqual(state.events.slice(activation + 1), ["cleanup"]);
+    // The run's result stays until the job's checkpoint acknowledges it (review Part III, W03)
+    assert.deepEqual(state.events.slice(activation + 1), []);
     assert.equal(job.state.generated.count, 5);
     assert(activePairs().every(pair => pair.input === "1\n" && pair.output === "1\n"));
     assert.equal(state.files.get("old-checker.cpp"), "original checker");
@@ -459,8 +460,9 @@ for (const scenario of [
       assert.equal(state.writes.length, 0, "failed quality proof must prevent every putFile call");
       assert.equal(state.activations, 0);
       assert.deepEqual(state.active, original);
-      assert.deepEqual(state.events, ["cleanup"]);
-      assert.equal(fs.existsSync(generatedDirectory), false);
+      // The step cleans nothing up itself: the job releases its runs (see ai-execution.service.ts)
+      assert.deepEqual(state.events, []);
+      assert.equal(fs.existsSync(generatedDirectory), true);
       assert.equal(job.state.generated, undefined);
       assert.equal(job.state.qualityValidation, undefined);
     });
@@ -495,13 +497,13 @@ test("successful publication stores the quality receipt and YAML verification so
       alternatives: request.quality.alternatives.map(item => ({ id: item.id, sha256: digest(item.code) })),
       challenges: request.quality.challenges.map(item => ({ id: item.id, sha256: digest(item.code) }))
     });
-    assert.equal(state.events.at(-1), "cleanup");
+    assert.equal(state.events.at(-1), "activate", "nothing cleaned up before the job's checkpoint");
   });
 });
 
 // Review Part III, W02: the judging contract a regeneration works within
 const { existingScoring } = require("./ai-judging-contract.ts");
-const { aiContractDigest } = require("@libreoj/judge-protocol");
+const { aiContractDigest, AI_EXECUTION_PROTOCOL_VERSION } = require("@libreoj/judge-protocol");
 
 // A run's requests, as the runner gets them
 function recordRequests(service) {
@@ -657,6 +659,99 @@ test("an approval is of the change it was shown: another plan is reviewed again"
   });
 });
 
+test("published test data records where its run was made and the exact bytes of its cases", async () => {
+  await fixture(async ({ state, job, service, run }) => {
+    const sandbox = service.runSandbox;
+    let reported;
+    service.runSandbox = async (...args) => {
+      reported = await sandbox(...args);
+      reported.operation = { key: "k".repeat(64), origin: "judge", result: "collected-again", task: "t", judgeRuntimeId: 4 };
+      return reported;
+    };
+    await run();
+    const generation = require("js-yaml").load(state.files.get("data.yaml")).generation;
+    assert.deepEqual(generation.execution, {
+      operation: "k".repeat(64),
+      origin: "judge",
+      task: "t",
+      judgeRuntimeId: 4,
+      result: "collected-again",
+      attempt: reported.execution.attemptId,
+      runtime: reported.execution.runtime,
+      startedAt: reported.execution.startedAt,
+      finishedAt: reported.execution.finishedAt,
+      reuse: reported.execution.reuse
+    });
+    assert.deepEqual(generation.corpus.cases, reported.corpus);
+    assert.equal(generation.corpus.digest, aiContractDigest(reported.corpus));
+    assert.deepEqual(job.state.generated.execution, generation.execution);
+    assert.deepEqual(job.state.generated.corpus, { digest: generation.corpus.digest, cases: 5, adversarial: 0 });
+  });
+  // Files that aren't the cases the run reported publish nothing
+  for (const tamper of [
+    result => (result.corpus[2].output.sha256 = "0".repeat(64)),
+    result => result.corpus.pop(),
+    // A runner of protocol version 7 reports none
+    result => (result.corpus = null)
+  ])
+    await fixture(async ({ state, service, run }) => {
+      const sandbox = service.runSandbox;
+      service.runSandbox = async (...args) => {
+        const result = await sandbox(...args);
+        tamper(result);
+        return result;
+      };
+      await assert.rejects(run(), /INVALID_SANDBOX_RESPONSE: The generated files aren't the cases the run reported/);
+      assert.equal(state.writes.length, 0);
+      assert.equal(state.activations, 0);
+    });
+});
+
+test("the job's test data step acknowledges its run only after its checkpoint, and stops it when it fails", async () => {
+  const run = async (testdata, signal) => {
+    const service = bareAiServices();
+    const events = [];
+    const job = { id: "job", action: "testdata", ownerId: 1, problemId: 1, state: { completed: [] } };
+    Object.assign(service, {
+      config: async () => ({}),
+      assertJob: async () => ({ id: 1 }),
+      recordAiAudit: async () => {},
+      editable: async () => ({ id: 1, type: "Traditional" }),
+      snapshot: async () => ({}),
+      checkpoint: async (_job, step, progress) => events.push(`checkpoint ${step} ${progress}`),
+      testdata,
+      execution: {
+        acknowledge: async id => events.push(`acknowledge ${id}`),
+        release: async id => events.push(`release ${id}`),
+        discard: async id => events.push(`discard ${id}`)
+      }
+    });
+    const running = Promise.resolve().then(() => service.execute(job));
+    return { running, events, service };
+  };
+  let f = await run(async () => {});
+  await f.running;
+  assert.deepEqual(f.events, ["checkpoint testdata 0", "checkpoint testdata 100", "acknowledge job"]);
+  // Published and checkpointed, the job completes even if its runs can't be cleaned up now
+  f = await run(async () => {});
+  f.service.execution.acknowledge = async () => {
+    throw new Error("storage is unavailable");
+  };
+  await f.running;
+  for (const [error, expected] of [
+    [new AiError("AI_PROFILE_MISMATCH"), ["checkpoint testdata 0", "release job"]],
+    [new AiError("JOB_CANCELLED"), ["checkpoint testdata 0", "discard job"]],
+    // Another backend runs the job now: its runs are left to it
+    [new AiError("JOB_LEASE_LOST"), ["checkpoint testdata 0"]]
+  ]) {
+    f = await run(async () => {
+      throw error;
+    });
+    await assert.rejects(f.running, error);
+    assert.deepEqual(f.events, expected, error.code);
+  }
+});
+
 test("a runner that doesn't report the profiles it was sent qualifies nothing", async () => {
   const service = bareAiServices();
   service.coordinator = { assertJob: async () => ({ id: 1 }) };
@@ -665,8 +760,31 @@ test("a runner that doesn't report the profiles it was sent qualifies nothing", 
     service.execution = { run: async () => ({ validation: { profiles: reported } }) };
     await assert.rejects(service.runSandbox({ id: "job" }, { profiles }, async () => {}), /INVALID_SANDBOX_RESPONSE/);
   }
-  service.execution = { run: async () => ({ validation: { profiles: aiContractDigest(profiles) } }) };
+  // Nor one that doesn't say how it made its result, under the current contract (review Part III, W03)
+  const execution = {
+    contract: AI_EXECUTION_PROTOCOL_VERSION,
+    attemptId: "0f6c1d2e-3b4a-4c5d-8e9f-0a1b2c3d4e5f",
+    runtime: { judgeProgram: "a".repeat(64), sandboxImage: "bbe9c69b2027", arch: "x64" },
+    startedAt: "2026-11-04T10:00:00.000Z",
+    finishedAt: "2026-11-04T10:01:00.000Z",
+    reuse: { builds: 0, inputs: 0 }
+  };
+  const operation = { key: "k".repeat(64), origin: "local", result: "new" };
+  for (const reported of [
+    {},
+    { execution },
+    { operation },
+    { execution: { ...execution, contract: AI_EXECUTION_PROTOCOL_VERSION - 1 }, operation }
+  ]) {
+    service.execution = { run: async () => ({ validation: { profiles: aiContractDigest(profiles) }, ...reported }) };
+    await assert.rejects(service.runSandbox({ id: "job" }, { profiles }, async () => {}), /how it made its result/);
+  }
+  service.execution = {
+    run: async () => ({ validation: { profiles: aiContractDigest(profiles) }, execution, operation })
+  };
   assert.deepEqual(await service.runSandbox({ id: "job" }, { profiles }, async () => {}), {
-    validation: { profiles: aiContractDigest(profiles) }
+    validation: { profiles: aiContractDigest(profiles) },
+    execution,
+    operation
   });
 });

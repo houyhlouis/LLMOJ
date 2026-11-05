@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { auditSchema, applySchema, COMMUNITY_TABLES, LEGACY_SUBMISSION_STATUSES, LEGACY_PRIVILEGES, HACK_STANDARD_CONTENT_SQL,
   FILE_SIZE_BIGINT_SQL, TEAM_FILE_SIZE_BIGINT_SQL, TEAM_QUOTA_DEFAULT_SQL, TWO_FACTOR_SQL, TWO_FACTOR_TABLES, JUDGE_QUEUE_SQL, JUDGE_QUEUE_TABLES, JUDGE_CLIENT_DRAINING_SQL, DATA_VERSION_SQL, DATA_VERSION_TABLES, AI_BUDGET_SQL, AI_BUDGET_TABLES,
   RUNTIME_IDENTITY_SQL, RUNTIME_IDENTITY_TABLES, RUNTIME_IDENTITY_COLUMNS, AI_EXECUTION_SQL, AI_EXECUTION_TABLES, DATA_RETENTION_SQL,
-  DATA_RETENTION_TABLES, AI_EVIDENCE_SQL, AI_EVIDENCE_TABLES } from '../upgrade-schema.mjs';
+  DATA_RETENTION_TABLES, AI_EVIDENCE_SQL, AI_EVIDENCE_TABLES, AI_OPERATION_SQL, AI_OPERATION_COLUMNS } from '../upgrade-schema.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(path.join(root, 'apps/backend/package.json'));
 const configPath = process.env.HYHOJ_COMMUNITY_SCHEMA_TEST_DB_CONFIG;
@@ -118,6 +118,19 @@ test('real metadata: mature legacy upgrade, new-schema no-op, preserved data, re
     await assert.rejects(() => auditSchema(ds), /Unsupported schema change|submission judgeRuntimeId/);
     await ds.query('ALTER TABLE `submission` CHANGE `judgeRuntimeId` `judgeRuntimeId` int NULL');
     await ds.query('DELETE FROM file WHERE id = 800');
+    assert.deepEqual((await auditSchema(ds)).queries, []);
+    // From the release before logical AI operations: only their columns are added to AI runs, and every run is kept
+    await ds.query("INSERT INTO ai_execution(taskId,jobId,state,sampleFiles,createdAt) VALUES ('00000000-0000-4000-8000-000000000802','job','Complete','[]','2026-11-03')");
+    for (const column of AI_OPERATION_COLUMNS) await ds.query('ALTER TABLE `ai_execution` DROP COLUMN `' + column + '`');
+    const runsBefore = await ds.query('SELECT * FROM ai_execution');
+    assert.deepEqual((await auditSchema(ds)).queries, [...AI_OPERATION_SQL]);
+    assert.deepEqual((await applySchema(ds)).queries, [...AI_OPERATION_SQL]);
+    assert.deepEqual(await ds.query('SELECT * FROM ai_execution'),
+      runsBefore.map(row => ({ ...row, operationKey: null, operation: null, collectedAt: null })));
+    await ds.query('ALTER TABLE `ai_execution` CHANGE `operation` `operation` varchar(40) NULL');
+    await assert.rejects(() => auditSchema(ds), /Unsupported schema change|ai_execution operation/);
+    await ds.query('ALTER TABLE `ai_execution` CHANGE `operation` `operation` varchar(20) NULL');
+    await ds.query('DELETE FROM ai_execution');
     assert.deepEqual((await auditSchema(ds)).queries, []);
     // Upgrade the already-deployed reference-ID schema without changing its data.
     await ds.query('ALTER TABLE `hack_problem` DROP COLUMN `standardContent`');

@@ -13,7 +13,8 @@ import {
   AiPrepareAttachmentDto,
   AiRetryJobDto,
   AiFailuresDto,
-  AiFailureArtifactDto
+  AiFailureArtifactDto,
+  AiReplayFailureDto
 } from "./ai.dto";
 
 import { UserEntity } from "../user/user.entity";
@@ -95,5 +96,10 @@ export class AiController {
     @Body() body: AiFailureArtifactDto
   ) {
     return this.call(() => this.ai.downloadFailureArtifact(user, body));
+  }
+
+  // Runs a failure's kept input again with the same check (owner only); the replay is kept with the failure
+  @Post("replayFailure") replayFailure(@CurrentUser() user: UserEntity, @Body() body: AiReplayFailureDto) {
+    return this.call(() => this.ai.replayFailure(user, body));
   }
 }

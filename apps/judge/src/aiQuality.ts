@@ -1,4 +1,6 @@
 /** Independent small-case differential testing and adversarial full-case validation. */
+import { AI_MALFORMED_OUTPUT } from "@libreoj/judge-protocol";
+
 import { describe, detailsOf, FailureDetails, reclassify, within } from "./aiFailure";
 
 export interface QualityCase {
@@ -227,7 +229,7 @@ export class AiQuality {
       }
     );
     if (this.environment.customChecker && !checkedCheckerSubtasks.has(subtask)) {
-      const malformed = Buffer.from("\0LLMOJ_INVALID_OUTPUT_!@#\xff\n");
+      const malformed = Buffer.from(AI_MALFORMED_OUTPUT);
       try {
         await this.environment.compare(input, malformed, expected, `malformed checker probe for subtask ${subtask}`);
         throw describe(new Error(`Checker accepted malformed output for subtask ${subtask}`), {

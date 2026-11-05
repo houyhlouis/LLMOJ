@@ -15,6 +15,7 @@ import { AiExecutionEntity } from "./ai-execution.entity";
 import { AiExecutionService } from "./ai-execution.service";
 import { AiObservationEntity } from "./ai-observation.entity";
 import { AiEvidenceService } from "./ai-evidence.service";
+import { AiReplayService } from "./ai-replay.service";
 import { AiController } from "./ai.controller";
 
 import { AuditModule } from "../audit/audit.module";
@@ -57,7 +58,8 @@ import { RedisModule } from "../redis/redis.module";
     AiUsageService,
     AiAdmissionService,
     AiExecutionService,
-    AiEvidenceService
+    AiEvidenceService,
+    AiReplayService
   ],
   controllers: [AiController],
   exports: [AiService]

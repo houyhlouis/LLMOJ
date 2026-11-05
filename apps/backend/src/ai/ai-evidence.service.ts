@@ -19,6 +19,7 @@ import {
 import { AiEvidenceState, AiObservationEntity, StoredAiArtifact, StoredAiObservation } from "./ai-observation.entity";
 import { AiJobEntity } from "./ai.entity";
 import { AiError } from "./ai.types";
+import type { AiReplayRecord } from "./ai-replay";
 
 import { logger } from "../logger";
 import { FileService, MinioSignFor, TEMPORARY_OBJECT_PREFIX } from "../file/file.service";
@@ -38,6 +39,8 @@ const RANGE_BYTES = 64 * 1024;
 const UNRECORDED_GRACE = 60 * 60 * 1000;
 const SWEEP_BATCH = 500;
 const STORE_ATTEMPTS = 3;
+// Replays kept with an observation
+const REPLAYS = 5;
 
 const sha256Of = (data: Buffer) => createHash("sha256").update(data).digest("hex");
 
@@ -244,6 +247,37 @@ export class AiEvidenceService {
     } finally {
       await local?.done?.().catch(() => undefined);
     }
+  }
+
+  /** A job's observation as it's kept. */
+  async observation(job: Pick<AiJobEntity, "id">, id: string): Promise<AiObservationEntity> {
+    const row = await this.repository.findOneBy({ id, jobId: job.id });
+    if (!row) throw new AiError("NO_SUCH_OBSERVATION");
+    return row;
+  }
+
+  /** Adds a replay to an observation; its REPLAYS latest are kept. */
+  async addReplay(id: string, replay: AiReplayRecord): Promise<void> {
+    await this.changeReplays(id, replays => [...replays, replay].slice(-REPLAYS));
+  }
+
+  /** Records how a replay went. */
+  async updateReplay(id: string, replayId: string, changes: Partial<AiReplayRecord>): Promise<void> {
+    await this.changeReplays(id, replays =>
+      replays.map(replay => (replay.id === replayId ? { ...replay, ...changes } : replay))
+    );
+  }
+
+  private async changeReplays(id: string, change: (replays: AiReplayRecord[]) => AiReplayRecord[]) {
+    await this.connection.transaction(async manager => {
+      const row = await manager.findOne(AiObservationEntity, { where: { id }, lock: { mode: "pessimistic_write" } });
+      if (!row) return;
+      await manager.update(
+        AiObservationEntity,
+        { id },
+        { observation: { ...row.observation, replays: change(row.observation.replays || []) } }
+      );
+    });
   }
 
   /** A job's observations, latest first, as its owner sees them. */

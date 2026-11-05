@@ -26,6 +26,7 @@ import { AiConfigurationService } from "./ai-configuration.service";
 import { AiJobCoordinator } from "./ai-job-coordinator.service";
 import { AiWorkflowService } from "./ai-workflow.service";
 import { AiEvidenceService, AiFailureSummary } from "./ai-evidence.service";
+import { AiReplayService } from "./ai-replay.service";
 
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeType } from "../user/user-privilege.service";
@@ -72,6 +73,8 @@ export class AiService {
   @Optional() @Inject(AiEndpointPolicyService) private readonly endpointPolicies?: AiEndpointPolicyService;
 
   @Optional() @Inject(AiEvidenceService) private readonly evidence?: AiEvidenceService;
+
+  @Optional() @Inject(AiReplayService) private readonly replays?: AiReplayService;
 
   constructor(
     @InjectRepository(AiJobEntity) private readonly jobs: Repository<AiJobEntity>,
@@ -374,6 +377,9 @@ export class AiService {
         // How the published data awards points and runs its helpers (see ai-judging-contract.ts)
         scoring: job.state.generated?.scoring,
         helpers: job.state.generated?.helpers,
+        // Where its test data was made, and its cases' digest (review Part III, W03)
+        execution: job.state.generated?.execution,
+        corpus: job.state.generated?.corpus,
         // A scoring change that waits for the owner's approval
         scoringReview: job.status === "failed" ? job.state.scoringReview : undefined
       }
@@ -441,10 +447,24 @@ export class AiService {
     return job;
   }
 
-  /** A job's failed runs, latest first: what failed, how, and previews of the evidence kept. */
+  /**
+   * A job's failed runs, latest first: what failed, how, and previews of the evidence kept; and their replays, and
+   * whether each can be replayed now.
+   */
   async failures(user: UserEntity, jobId: string) {
     const job = await this.evidenceJob(user, jobId);
-    return { failures: await this.evidence.list(job) };
+    const failures = await this.evidence.list(job);
+    if (!this.replays) return { failures };
+    const problem = job.problemId ? await this.coordinator.editable(user, job.problemId) : null;
+    return { failures: this.replays.annotate(job, problem?.type || null, failures) };
+  }
+
+  /** Replays a failure: its kept input, run again with the same check and the job's programs (see AiReplayService). */
+  async replayFailure(user: UserEntity, value: { jobId: string; id: string }) {
+    const job = await this.evidenceJob(user, value.jobId);
+    if (!this.replays) throw new AiError("EVIDENCE_UNAVAILABLE");
+    const problem = job.problemId ? await this.coordinator.editable(user, job.problemId) : null;
+    return { replay: await this.replays.start(user, job, problem, value.id) };
   }
 
   /** A part of an artifact of a failed run, from `offset`. */
@@ -475,6 +495,8 @@ export class AiService {
     if (job.problemId) await this.coordinator.editable(user, job.problemId);
     if (["testdata", "all", "import"].includes(job.action))
       await this.coordinator.requirePrivilege(user, UserPrivilegeType.GenerateTestdata);
+    // A replay runs where the job's programs run, and the local AI runner runs one of a job at a time
+    if (await this.replays?.running(job.id)) throw new AiError("AI_REPLAY_BUSY");
     // An approved scoring change is recorded with what was approved
     const review = retryFrom === "replace-scoring" ? job.state.scoringReview : undefined;
     await this.coordinator.requeue(user, job, () => this.workflow.retryState(job, retryFrom));
