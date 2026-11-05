@@ -34,6 +34,20 @@ The oracle, small-input generator, alternative solution and challenge programs a
 
 The final report records differential counts and each rejected candidate's final case index and verdict (WA, RE, TLE or MLE). This provides evidence against the chosen candidate programs, not a proof that every possible incorrect implementation is rejected. Cases use fresh randomness, so reported final inputs are the reproducible counterexamples; a case index is not a random seed. The number of inputs, models and adversarial attempts is bounded to protect the shared judging queue.
 
+Selection is coverage-aware (review Part III, W05):
+
+- **Capacity.** `allocateAiTestcases` (`ai-case-allocation.ts`) shares cases out by subtask points, then, once the quality plan is known and before any program is written, gives every target a constructible slot. A target has one when one of its subtasks has at least 3 cases (indices 1 and 2 are the minimum and maximum). For each target without one, its applicable subtask with the most cases is raised to 2 plus the number of slot-less targets assigned to it. Cases carry no points of their own, so subtask points are unchanged and only the per-case share differs. The changes are recorded as `allocation.capacity` (`{ subtask, from, to, targets }`, warning `CASE_CAPACITY_ADJUSTED`); `pointsPerCase` is kept only when every subtask's share is the same. The total stays within 1,000.
+- **Search and replacement** (`apps/judge/src/aiQuality.ts`). Extra search runs for a surviving target whenever one of its subtasks has a non-boundary case, witness or not. Each candidate (a search input, or a promoted small counterexample) is validated, answered by the reference solution, cross-checked by the alternatives and run against every applicable challenge, including rejected ones: its complete row. It replaces, in its subtask, a non-boundary case that witnesses nothing, or else a witness case whose witnessed targets the candidate rejects too (the witnesses move to it); otherwise it's unplaced. `stoppedBy: "capacity"` now means no non-boundary case at all.
+- **Promotion.** A wrong challenge's first small differential failure is kept whole (up to 1 MiB). It is legal for its subtask, and the reference solution and every alternative agreed with the oracle on it. If the challenge survives the final cases, it's tried as a candidate before any generated search input.
+- **Receipt.** `validation.quality` (version 1) adds optional fields; receipts of older judges have none of them, and the job shows nothing new for them:
+  - `fuzzDistinct`: distinct differential inputs, by SHA-256;
+  - `challengeResults[].tested` and `.kills`: final cases each challenge was run on, and how many rejected it;
+  - `replacements`: `{ case, source: "search" | "small_counterexample", kills, moved }`;
+  - `search`: `{ attempts, budget, found, unplaced, promoted }`;
+  - `matrix`: per final case with any challenge run, the ids it `killed` and those that `passed`. A challenge isn't run on cases after its first rejection, so those cells stay unknown.
+
+  The backend checks these fields against the request and the cases, counts distinct final inputs from the corpus (`corpus.distinct`), and warns about repeats (`DIFFERENTIAL_INPUTS_REPEATED`, `FINAL_CASES_REPEATED`); repeats are reported, not refused. `data.yaml` records all of it under `generation`.
+
 Interactive and communication problems keep their existing hidden-state and protocol validation. Their jobs explicitly report that the independent brute-force and wrong-algorithm quality gate currently applies only to traditional problems.
 
 ## Judging contract

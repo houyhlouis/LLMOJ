@@ -130,6 +130,18 @@ const errors: Record<string, [string, string]> = {
     "已增加测试点数量，使每个测试点分值相同并符合子任务分值比例。",
     "The test count was increased to preserve equal points per test and the subtask score ratios."
   ],
+  CASE_CAPACITY_ADJUSTED: [
+    "部分子任务的测试点数量已增加，以便为其中的错误或低效算法构造反例；这些子任务的分值不变，由其测试点平分。",
+    "Some subtasks got more test cases so that counterexamples to their wrong or slow algorithms can be built. Their points don't change; their test cases share them."
+  ],
+  DIFFERENTIAL_INPUTS_REPEATED: [
+    "对拍中有重复的输入：检查次数多于不同输入的数量，重复的输入不会增加覆盖。合法输入很少时这是正常的。",
+    "Some differential inputs were repeated: there were more checks than distinct inputs, and a repeated input adds no coverage. This is expected when few legal inputs exist."
+  ],
+  FINAL_CASES_REPEATED: [
+    "部分测试点的输入完全相同：重复的测试点不会增加覆盖。",
+    "Some test cases have exactly the same input: a repeated test case adds no coverage."
+  ],
   INVALID_TEST_COUNT: ["测试数据组数必须为 5 到 1000。", "The number of test cases must be between 5 and 1000."],
   INVALID_TEST_PLAN: ["AI 返回的子任务和数据范围规划无效。", "The AI returned an invalid subtask/constraint plan."],
   INVALID_AI_QUALITY_PLAN: [
@@ -672,6 +684,25 @@ export interface AiRepairReview {
   at: string;
 }
 
+/** A subtask given more test cases than its share of points, so that counterexamples can be built in it. */
+export interface AiCaseCapacity {
+  subtask: number;
+  from: number;
+  to: number;
+  // The targets that had no test case to be built in
+  targets: string[];
+}
+
+/** A final test case replaced by a counterexample: one the extra search found, or a small one from differential tests. */
+export interface AiCaseReplacement {
+  // The test case's number, from 1
+  case: number;
+  source: "search" | "small_counterexample";
+  // The targets the new case rejects, and those whose witness the replaced case was
+  kills: string[];
+  moved: string[];
+}
+
 /** How a problem awards points, as an AI job keeps or replaces it. */
 export interface AiScoringPolicy {
   runSamples: boolean;
@@ -725,7 +756,11 @@ export interface AiJob {
       finishedAt: string;
       reuse: { builds: number; inputs: number };
     };
-    corpus?: { digest: string; cases: number; adversarial: number };
+    // `distinct`: distinct inputs among the cases (absent before review Part III, W05)
+    corpus?: { digest: string; cases: number; adversarial: number; distinct?: number };
+    // Subtasks given more test cases than their share of points, so that their targets can be built (review Part III,
+    // W05)
+    caseCapacity?: AiCaseCapacity[];
     // The programs the job replaced, and why it stopped for its owner (review Part III, W04)
     repair?: {
       automatic: number;
@@ -762,12 +797,21 @@ export interface AiJob {
       challengeCount: number;
       challengesKilled: number;
       extraAttemptsUsed: number;
+      // Distinct inputs among the differential cases (absent from older judges' receipts)
+      fuzzDistinct?: number;
       challengeResults: Array<{
         id: string;
         kind: "wrong" | "slow";
         killedBy: number;
         verdict: "WA" | "RE" | "TLE" | "MLE";
+        // Final cases it was run on, and how many of those rejected it
+        tested?: number;
+        kills?: number;
       }>;
+      replacements?: AiCaseReplacement[];
+      search?: { attempts: number; budget: number; found: number; unplaced: number; promoted: number };
+      // The final cases challenges were run on: which rejected each one, and which passed it
+      matrix?: Array<{ case: number; killed: string[]; passed: string[] }>;
     };
   };
 }

@@ -129,6 +129,8 @@ export default function AiScoringReview({ review }: { review: AiJob["result"]["s
 export function AiRunSummary({ result }: { result: AiJob["result"] }) {
   const { execution, corpus } = result;
   if (!execution) return null;
+  // Cases with the same input as another (absent before review Part III, W05)
+  const repeated = corpus?.distinct != null && corpus.distinct < corpus.cases;
   const where =
     execution.origin === "judge"
       ? aiText("在评测机上生成", "Made on a judge machine")
@@ -166,8 +168,26 @@ export function AiRunSummary({ result }: { result: AiJob["result"] }) {
       {reused.length > 0 && ` · ${reused.join(" · ")}`}
       {corpus &&
         aiText(
-          ` · ${corpus.cases} 个测试点${corpus.adversarial ? `（其中 ${corpus.adversarial} 个为对抗数据）` : ""}`,
-          ` · ${corpus.cases} cases${corpus.adversarial ? ` (${corpus.adversarial} adversarial)` : ""}`
+          ` · ${corpus.cases} 个测试点${
+            corpus.adversarial || repeated
+              ? `（${[
+                  corpus.adversarial && `其中 ${corpus.adversarial} 个为对抗数据`,
+                  repeated && `${corpus.distinct} 个不同的输入`
+                ]
+                  .filter(Boolean)
+                  .join("，")}）`
+              : ""
+          }`,
+          ` · ${corpus.cases} cases${
+            corpus.adversarial || repeated
+              ? ` (${[
+                  corpus.adversarial && `${corpus.adversarial} adversarial`,
+                  repeated && `${corpus.distinct} distinct ${corpus.distinct === 1 ? "input" : "inputs"}`
+                ]
+                  .filter(Boolean)
+                  .join(", ")})`
+              : ""
+          }`
         )}
     </p>
   );
@@ -188,14 +208,17 @@ export function AiJudgingSummary({ result }: { result: AiJob["result"] }) {
         (scoring.status === "kept"
           ? aiText(
               `保留题目的计分设置（${scoring.subtasks} 个子任务）`,
-              `Scoring settings kept (${scoring.subtasks} subtasks)`
+              `Scoring settings kept (${scoring.subtasks} ${scoring.subtasks === 1 ? "subtask" : "subtasks"})`
             )
           : scoring.status === "replaced"
             ? aiText(
                 `已按确认替换计分设置（${scoring.subtasks} 个子任务）`,
-                `Scoring settings replaced as approved (${scoring.subtasks} subtasks)`
+                `Scoring settings replaced as approved (${scoring.subtasks} ${scoring.subtasks === 1 ? "subtask" : "subtasks"})`
               )
-            : aiText(`按题面设置 ${scoring.subtasks} 个子任务`, `${scoring.subtasks} subtasks from the statement`))}
+            : aiText(
+                `按题面设置 ${scoring.subtasks} 个子任务`,
+                `${scoring.subtasks} ${scoring.subtasks === 1 ? "subtask" : "subtasks"} from the statement`
+              ))}
       {(helpers || []).map(helper => (
         <React.Fragment key={helper.role}>
           {" · "}

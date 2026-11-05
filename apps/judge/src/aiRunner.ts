@@ -1399,11 +1399,11 @@ async function generateWithSamples(
           });
         return output;
       });
-      const kills = quality
+      const row = quality
         ? await within({ ...details, data: { input, expected: answer } }, () =>
             quality.findKills(input, answer, subtask)
           )
-        : [];
+        : null;
       checkCanceled();
       await publish(`${index + 1}.in`, input);
       await publish(`${index + 1}.out`, answer);
@@ -1415,50 +1415,52 @@ async function generateWithSamples(
         input: fileHash(input),
         output: fileHash(answer)
       };
-      if (quality) quality.recordCase(index, kills);
+      if (quality) quality.recordCase(index, row);
       emit({ type: "progress", phase: "generate", completed: index + 1, total: request.cases.length });
     }
     if (quality) {
-      let next = quality.nextSearchCase(finalCases);
+      // Replacement candidates (see AiQuality.nextCandidate): each is checked as a final case is, and run against every
+      // challenge of its subtask before it's placed; one that can't be placed is left out
+      let next = quality.nextCandidate(finalCases);
       while (next) {
         checkCanceled();
-        const { subtask, seed } = next;
+        const candidate = next;
+        const { subtask, seed } = candidate;
+        const promoted = candidate.promoted != null;
         const details = {
           phase: "quality-search",
-          subject: `adversarial search (subtask ${subtask}, case index ${seed})`,
+          subject: promoted
+            ? `small counterexample of ${request.quality.challenges[candidate.promoted].id} (subtask ${subtask}, differential case index ${seed})`
+            : `adversarial search (subtask ${subtask}, case index ${seed})`,
           subtask,
           scenarioIndex: seed,
           classification: "hidden-test" as const
         };
-        const input = await within(details, async () => await generated("make", subtask, seed));
+        const input = promoted
+          ? candidate.input
+          : await within(details, async () => await generated("make", subtask, seed));
         // eslint-disable-next-line no-loop-func -- Awaited before the loop goes on
         await within({ ...details, data: { input } }, async () => {
-          await validateInput(input, subtask, seed, `adversarial search (subtask ${subtask}, seed ${seed})`);
+          await validateInput(input, subtask, seed, details.subject);
           const answer = await execute(binaryDirectory, "std", request, input);
-          await quality.checkCorrect(input, answer, subtask, `adversarial search seed ${seed}`);
-          const kills = await quality.findKills(input, answer, subtask);
-          if (kills.length) {
-            const index = quality.replacementIndex(finalCases, subtask);
-            if (index < 0)
-              throw describe(new Error("No unprotected case available for an adversarial replacement"), {
-                kind: "insufficient_case_capacity",
-                data: { input, expected: answer }
-              });
-            checkCanceled();
-            await replaceCase(index, input, answer);
-            finalCases[index] = next;
-            corpus[index] = {
-              index: index + 1,
-              subtask,
-              scenarioIndex: seed,
-              origin: "adversarial",
-              input: fileHash(input),
-              output: fileHash(answer)
-            };
-            quality.recordReplacement(index, kills);
-          }
+          await quality.checkCorrect(input, answer, subtask, details.subject);
+          const row = await quality.findKills(input, answer, subtask, true);
+          const index = quality.placement(finalCases, candidate, row);
+          if (index < 0) return;
+          checkCanceled();
+          await replaceCase(index, input, answer);
+          finalCases[index] = { subtask, seed };
+          corpus[index] = {
+            index: index + 1,
+            subtask,
+            scenarioIndex: seed,
+            origin: "adversarial",
+            input: fileHash(input),
+            output: fileHash(answer)
+          };
+          quality.recordReplacement(index, candidate, row);
         });
-        next = quality.nextSearchCase(finalCases);
+        next = quality.nextCandidate(finalCases);
       }
     }
     const qualityResult = quality?.result();

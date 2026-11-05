@@ -72,7 +72,9 @@ test("each subtask's points, scoring, dependencies and own limits are listed", (
   const body = h.all(node => node.type?.name === "Table.Body")[0];
   const rows = h.all(node => node.type?.name === "Table.Row", body);
   assert.deepEqual(
-    rows.map(row => h.all(node => node.type?.name === "Table.Cell", row).map(cell => text(cell).replace(/\s+/g, " ").trim())),
+    rows.map(row =>
+      h.all(node => node.type?.name === "Table.Cell", row).map(cell => text(cell).replace(/\s+/g, " ").trim())
+    ),
     [
       ["1 (2000 ms)", "40", "Lowest test case (all or nothing)", "—"],
       ["2", "60", "Product of test cases", "1"]
@@ -81,21 +83,36 @@ test("each subtask's points, scoring, dependencies and own limits are listed", (
 });
 
 test("a finished job says whether it kept, set or replaced the scoring, and how its helpers ran", () => {
-  const summary = result => text(componentHarness(page, { component: "AiJudgingSummary", props: { result }, deps }).all(() => true)[0]);
+  const summary = result =>
+    text(componentHarness(page, { component: "AiJudgingSummary", props: { result }, deps }).all(() => true)[0]);
   assert.equal(summary({}), "");
-  assert.equal(summary({ scoring: { status: "kept", subtasks: 3, digest: "x" } }), "Scoring settings kept (3 subtasks)");
+  assert.equal(
+    summary({ scoring: { status: "kept", subtasks: 3, digest: "x" } }),
+    "Scoring settings kept (3 subtasks)"
+  );
   assert.equal(summary({ scoring: { status: "new", subtasks: 2, digest: "x" } }), "2 subtasks from the statement");
+  assert.equal(summary({ scoring: { status: "new", subtasks: 1, digest: "x" } }), "1 subtask from the statement");
   assert.equal(
     summary({
       scoring: { status: "replaced", subtasks: 2, digest: "x", previousDigest: "y" },
       helpers: [
-        { role: "checker", origin: "problem", options: "clang++ -std=c++20 -O3", timeLimitMs: 2000, memoryLimitMiB: 300 }
+        {
+          role: "checker",
+          origin: "problem",
+          options: "clang++ -std=c++20 -O3",
+          timeLimitMs: 2000,
+          memoryLimitMiB: 300
+        }
       ]
     }),
     "Scoring settings replaced as approved (2 subtasks) · Checker (the problem's): clang++ -std=c++20 -O3, 2000 ms, 300 MiB"
   );
   assert.equal(
-    summary({ helpers: [{ role: "interactor", origin: "ai", options: "g++ -std=c++17 -O2", timeLimitMs: 5000, memoryLimitMiB: 256 }] }),
+    summary({
+      helpers: [
+        { role: "interactor", origin: "ai", options: "g++ -std=c++17 -O2", timeLimitMs: 5000, memoryLimitMiB: 256 }
+      ]
+    }),
     " · Interactor (AI-written): g++ -std=c++17 -O2, 5000 ms, 256 MiB"
   );
 });

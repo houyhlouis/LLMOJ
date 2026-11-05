@@ -397,6 +397,8 @@ export class AiService {
         // Where its test data was made, and its cases' digest (review Part III, W03)
         execution: job.state.generated?.execution,
         corpus: job.state.generated?.corpus,
+        // Subtasks given more cases than their points' share, so that their targets get one built (W05)
+        caseCapacity: job.state.caseAllocation?.capacity?.length ? job.state.caseAllocation.capacity : undefined,
         // A scoring change that waits for the owner's approval
         scoringReview: job.status === "failed" ? job.state.scoringReview : undefined,
         // The programs the job replaced, and why it stopped for its owner (review Part III, W04)

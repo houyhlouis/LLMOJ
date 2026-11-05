@@ -84,7 +84,11 @@ async function fixture(work, initial = originalJudgeInfo()) {
       const recipe = state.active.selfEval;
       for (const role of ["generator", "standard", "validator"]) {
         const source = state.files.get(recipe[role + "File"]);
-        assert.notEqual(source, undefined, "a committed self-evaluation recipe must reference an existing immutable program");
+        assert.notEqual(
+          source,
+          undefined,
+          "a committed self-evaluation recipe must reference an existing immutable program"
+        );
         assert.equal(crypto.createHash("sha256").update(source).digest("hex"), recipe[role + "Sha256"]);
       }
     }
@@ -127,13 +131,22 @@ async function fixture(work, initial = originalJudgeInfo()) {
     fs.mkdirSync(directory, { recursive: true });
     const files = [];
     // Every run independently generates a different, valid identity-task dataset.
-    for (let i = 1; i <= 5; i++)
+    for (let i = 1; i <= request.cases.length; i++)
       for (const extension of ["in", "out"]) {
         const name = `${i}.${extension}`;
         fs.writeFileSync(path.join(directory, name), `${state.attempts}\n`);
         files.push(name);
       }
-    return { directory, files, validation: { samplesPassed: 0, inputsPassed: 5, sampleInputsPassed: 0, quality: qualityReceipt(request) } };
+    return {
+      directory,
+      files,
+      validation: {
+        samplesPassed: 0,
+        inputsPassed: request.cases.length,
+        sampleInputsPassed: 0,
+        quality: qualityReceipt(request)
+      }
+    };
   };
   service.cleanupSandbox = async () => {
     state.events.push("cleanup");
@@ -210,48 +223,101 @@ test("formal generation freezes all three exact programs before activating the s
     const recipe = state.active.selfEval;
     assert(recipe);
     const activation = state.events.indexOf("activate");
-    for (const [role, sourceKey, artifact] of [["generator", "makeCode", "make.cpp"], ["standard", "stdCode", "std.cpp"], ["validator", "validatorCode", "validator.cpp"]]) {
-      assert.match(recipe[role + "File"], new RegExp("^ai-managed-[0-9a-f-]{36}-" + artifact.replace(".", "\\.") + "$"));
+    for (const [role, sourceKey, artifact] of [
+      ["generator", "makeCode", "make.cpp"],
+      ["standard", "stdCode", "std.cpp"],
+      ["validator", "validatorCode", "validator.cpp"]
+    ]) {
+      assert.match(
+        recipe[role + "File"],
+        new RegExp("^ai-managed-[0-9a-f-]{36}-" + artifact.replace(".", "\\.") + "$")
+      );
       assert.equal(state.files.get(recipe[role + "File"]), job.state[sourceKey]);
       assert.equal(recipe[role + "Sha256"], crypto.createHash("sha256").update(job.state[sourceKey]).digest("hex"));
       assert(state.events.indexOf(recipe[role + "File"]) < activation);
       state.files.set(artifact, "changed mutable download artifact");
     }
     assertActiveConsistent();
-    assert.deepEqual(recipe.subtaskIds, job.state.plan.subtasks.map(subtask => subtask.id));
+    assert.deepEqual(
+      recipe.subtaskIds,
+      job.state.plan.subtasks.map(subtask => subtask.id)
+    );
   });
 });
 
 test("an immutable recipe source upload failure or cancellation never activates partial formal data", async () => {
-  for (const scenario of ["failure", "cancel"]) await fixture(async ({ state, run }) => {
-    const original = structuredClone(state.active);
-    if (scenario === "failure") state.beforeWrite = async name => {
-      if (/^ai-managed-.*-validator\.cpp$/.test(name)) throw uploadFailure();
-    };
-    else state.afterWrite = async name => {
-      if (/^ai-managed-.*-make\.cpp$/.test(name)) state.cancelled = true;
-    };
-    await assert.rejects(run(), scenario === "failure" ? /UPLOAD_GENERATED_FILE_FAILED/ : /JOB_CANCELLED/);
-    assert.equal(state.activations, 0);
-    assert.deepEqual(state.active, original);
-  });
+  for (const scenario of ["failure", "cancel"])
+    await fixture(async ({ state, run }) => {
+      const original = structuredClone(state.active);
+      if (scenario === "failure")
+        state.beforeWrite = async name => {
+          if (/^ai-managed-.*-validator\.cpp$/.test(name)) throw uploadFailure();
+        };
+      else
+        state.afterWrite = async name => {
+          if (/^ai-managed-.*-make\.cpp$/.test(name)) state.cancelled = true;
+        };
+      await assert.rejects(run(), scenario === "failure" ? /UPLOAD_GENERATED_FILE_FAILED/ : /JOB_CANCELLED/);
+      assert.equal(state.activations, 0);
+      assert.deepEqual(state.active, original);
+    });
 });
 
 test("formal self-evaluation recipes reject missing sources, malformed hashes and unsafe standard filenames", async () => {
   await fixture(async ({ state, run }) => {
     await run();
-    const problemType = new ProblemTypeTraditionalService({ config: { resourceLimit: {} } }, { validateCompileAndRunOptions: () => [] });
+    const problemType = new ProblemTypeTraditionalService(
+      { config: { resourceLimit: {} } },
+      { validateCompileAndRunOptions: () => [] }
+    );
     const files = [...state.files.keys()].map(filename => ({ filename }));
-    for (const mutation of [recipe => { recipe.generatorFile = "missing.cpp"; }, recipe => { recipe.standardSha256 = "bad"; },
-      recipe => { recipe.subtaskIds = [1, 1]; }, recipe => { recipe.standardFileIo = { inputFilename: "../secret", outputFilename: "out" }; },
-      recipe => { recipe.standardFileIo = { inputFilename: "same", outputFilename: "same" }; },
-      recipe => { delete recipe.validatorFile; }, recipe => { recipe.validatorSha256 = "bad"; },
-      recipe => { recipe.subtaskIds = [99]; }, recipe => { recipe.limits = { generator: { timeLimit: 0, memoryLimit: 512 } }; },
-      recipe => { recipe.limits = { generator: { timeLimit: 5000 } }; }, recipe => { recipe.limits = { checker: { timeLimit: 1, memoryLimit: 1 } }; },
-      recipe => { recipe.limits = { validator: { timeLimit: 60001, memoryLimit: 512 } }; }, recipe => { recipe.limits = []; }]) {
+    for (const mutation of [
+      recipe => {
+        recipe.generatorFile = "missing.cpp";
+      },
+      recipe => {
+        recipe.standardSha256 = "bad";
+      },
+      recipe => {
+        recipe.subtaskIds = [1, 1];
+      },
+      recipe => {
+        recipe.standardFileIo = { inputFilename: "../secret", outputFilename: "out" };
+      },
+      recipe => {
+        recipe.standardFileIo = { inputFilename: "same", outputFilename: "same" };
+      },
+      recipe => {
+        delete recipe.validatorFile;
+      },
+      recipe => {
+        recipe.validatorSha256 = "bad";
+      },
+      recipe => {
+        recipe.subtaskIds = [99];
+      },
+      recipe => {
+        recipe.limits = { generator: { timeLimit: 0, memoryLimit: 512 } };
+      },
+      recipe => {
+        recipe.limits = { generator: { timeLimit: 5000 } };
+      },
+      recipe => {
+        recipe.limits = { checker: { timeLimit: 1, memoryLimit: 1 } };
+      },
+      recipe => {
+        recipe.limits = { validator: { timeLimit: 60001, memoryLimit: 512 } };
+      },
+      recipe => {
+        recipe.limits = [];
+      }
+    ]) {
       const info = structuredClone(state.active);
       mutation(info.selfEval);
-      assert.throws(() => problemType.validateAndFilterJudgeInfo(info, files, true), error => Array.isArray(error) && error.includes("INVALID_SELF_EVAL_RECIPE"));
+      assert.throws(
+        () => problemType.validateAndFilterJudgeInfo(info, files, true),
+        error => Array.isArray(error) && error.includes("INVALID_SELF_EVAL_RECIPE")
+      );
     }
     const manual = structuredClone(state.active);
     delete manual.selfEval.validatorFile;
@@ -428,19 +494,51 @@ test("the explicit published configuration validates and selects managed .in/.ou
 
 function addQualityTarget(job, id, kind) {
   const base = job.state.qualityPlan.targets[0];
-  const target = { ...base, id, kind, algorithm: kind === "slow" ? "Naturally quadratic fixture algorithm" : "Second boundary-assumption fixture algorithm" };
+  const target = {
+    ...base,
+    id,
+    kind,
+    algorithm:
+      kind === "slow" ? "Naturally quadratic fixture algorithm" : "Second boundary-assumption fixture algorithm"
+  };
   job.state.qualityPlan.targets.push(target);
-  job.state.qualityArtifacts.challenges.push({ id, kind, code: "int main(){return 0;}",
-    subtasks: [...target.subtasks], reason: target.reason });
+  job.state.qualityArtifacts.challenges.push({
+    id,
+    kind,
+    code: "int main(){return 0;}",
+    subtasks: [...target.subtasks],
+    reason: target.reason
+  });
 }
 
 for (const scenario of [
-  { name: "missing quality receipt", mutate: result => { delete result.validation.quality; } },
-  { name: "unsupported quality receipt version", mutate: result => { result.validation.quality.version = 2; } },
-  { name: "a surviving candidate after another candidate is killed", prepare: job => addQualityTarget(job, "second_boundary", "wrong"),
-    mutate: result => { result.validation.quality.challengesKilled = 1; result.validation.quality.challengeResults[1].verdict = "AC"; } },
-  { name: "a slow candidate rejected only for a wrong answer", prepare: job => addQualityTarget(job, "quadratic", "slow"),
-    mutate: result => { result.validation.quality.challengeResults.find(item => item.kind === "slow").verdict = "WA"; } }
+  {
+    name: "missing quality receipt",
+    mutate: result => {
+      delete result.validation.quality;
+    }
+  },
+  {
+    name: "unsupported quality receipt version",
+    mutate: result => {
+      result.validation.quality.version = 2;
+    }
+  },
+  {
+    name: "a surviving candidate after another candidate is killed",
+    prepare: job => addQualityTarget(job, "second_boundary", "wrong"),
+    mutate: result => {
+      result.validation.quality.challengesKilled = 1;
+      result.validation.quality.challengeResults[1].verdict = "AC";
+    }
+  },
+  {
+    name: "a slow candidate rejected only for a wrong answer",
+    prepare: job => addQualityTarget(job, "quadratic", "slow"),
+    mutate: result => {
+      result.validation.quality.challengeResults.find(item => item.kind === "slow").verdict = "WA";
+    }
+  }
 ]) {
   test(`valid generated files cannot publish with ${scenario.name}`, async () => {
     await fixture(async ({ state, job, service, run }) => {
@@ -489,10 +587,15 @@ test("successful publication stores the quality receipt and YAML verification so
     const generation = require("js-yaml").load(state.files.get("data.yaml")).generation;
     assert.deepEqual(generation.qualityValidation, receipt);
     assert.deepEqual(generation.qualityPlan, job.state.qualityPlan);
-    assert.deepEqual(generation.finalCaseIndices, finalCases, "record search replacements rather than original indices");
+    assert.deepEqual(
+      generation.finalCaseIndices,
+      finalCases,
+      "record search replacements rather than original indices"
+    );
     const digest = source => crypto.createHash("sha256").update(source).digest("hex");
     assert.deepEqual(generation.verificationSources, {
-      standard: digest(job.state.stdCode), oracle: digest(request.quality.oracleCode),
+      standard: digest(job.state.stdCode),
+      oracle: digest(request.quality.oracleCode),
       smallGenerator: digest(request.quality.smallMakeCode),
       alternatives: request.quality.alternatives.map(item => ({ id: item.id, sha256: digest(item.code) })),
       challenges: request.quality.challenges.map(item => ({ id: item.id, sha256: digest(item.code) }))
@@ -555,7 +658,11 @@ test("regenerated data keeps the problem's scoring and its own checker's setting
       state.active.subtasks.map(({ testcases, ...settings }) => settings),
       initial.subtasks.map(({ testcases, ...settings }) => settings)
     );
-    assert.deepEqual(state.active.subtasks.map(subtask => subtask.testcases.length), [1, 2, 2]);
+    // The fixture's one target is of the first subtask: it gets cases built for it (review Part III, W05)
+    assert.deepEqual(
+      state.active.subtasks.map(subtask => subtask.testcases.length),
+      [3, 2, 2]
+    );
     assert.equal(state.active.runSamples, false);
     assert.equal(existingScoring(state.active).digest, existingScoring(initial).digest);
     assert.deepEqual(job.state.generated.scoring, {
@@ -613,13 +720,17 @@ test("subtasks that differ from the problem's stop for review before any program
     assert.equal(plain.testdataSnapshotHash, undefined);
     // Approved: the job goes on with exactly the reviewed change
     job.state = service.retryState(job, "replace-scoring");
-    assert.deepEqual(job.state.scoringApproval, { currentDigest: review.currentDigest, proposedDigest: review.proposedDigest });
+    assert.deepEqual(job.state.scoringApproval, {
+      currentDigest: review.currentDigest,
+      proposedDigest: review.proposedDigest
+    });
     await run();
     assert.equal(state.activations, 1);
     assert.deepEqual(
       state.active.subtasks.map(subtask => [subtask.points, subtask.scoringType, subtask.testcases.length]),
+      // The fixture's one target is of the first subtask: it gets a case built for it (review Part III, W05)
       [
-        [40, "Sum", 2],
+        [40, "Sum", 3],
         [60, "Sum", 3]
       ]
     );
@@ -632,7 +743,10 @@ test("subtasks that differ from the problem's stop for review before any program
     });
     // The checker the job wrote is published with the limits it was checked with
     const request = requests.at(-1);
-    assert.deepEqual([request.profiles.roles.checker.timeLimitMs, request.profiles.roles.checker.memoryLimitMiB], [5000, 256]);
+    assert.deepEqual(
+      [request.profiles.roles.checker.timeLimitMs, request.profiles.roles.checker.memoryLimitMiB],
+      [5000, 256]
+    );
     assert.deepEqual([state.active.checker.timeLimit, state.active.checker.memoryLimit], [5000, 256]);
     assert.deepEqual(state.active.checker.compileAndRunOptions, { compiler: "g++", std: "c++17", O: "2", m: "64" });
   });
@@ -665,7 +779,13 @@ test("published test data records where its run was made and the exact bytes of 
     let reported;
     service.runSandbox = async (...args) => {
       reported = await sandbox(...args);
-      reported.operation = { key: "k".repeat(64), origin: "judge", result: "collected-again", task: "t", judgeRuntimeId: 4 };
+      reported.operation = {
+        key: "k".repeat(64),
+        origin: "judge",
+        result: "collected-again",
+        task: "t",
+        judgeRuntimeId: 4
+      };
       return reported;
     };
     await run();
@@ -685,7 +805,15 @@ test("published test data records where its run was made and the exact bytes of 
     assert.deepEqual(generation.corpus.cases, reported.corpus);
     assert.equal(generation.corpus.digest, aiContractDigest(reported.corpus));
     assert.deepEqual(job.state.generated.execution, generation.execution);
-    assert.deepEqual(job.state.generated.corpus, { digest: generation.corpus.digest, cases: 5, adversarial: 0 });
+    // The fixture's runner writes the same input for every case: reported, not refused (review Part III, W05)
+    assert.deepEqual(job.state.generated.corpus, {
+      digest: generation.corpus.digest,
+      cases: 5,
+      adversarial: 0,
+      distinct: 1
+    });
+    assert.equal(generation.corpus.distinct, 1);
+    assert(job.state.warnings.includes("FINAL_CASES_REPEATED"));
   });
   // Files that aren't the cases the run reported publish nothing
   for (const tamper of [
@@ -758,7 +886,10 @@ test("a runner that doesn't report the profiles it was sent qualifies nothing", 
   const profiles = { version: 1, roles: {} };
   for (const reported of [undefined, "0".repeat(64)]) {
     service.execution = { run: async () => ({ validation: { profiles: reported } }) };
-    await assert.rejects(service.runSandbox({ id: "job" }, { profiles }, async () => {}), /INVALID_SANDBOX_RESPONSE/);
+    await assert.rejects(
+      service.runSandbox({ id: "job" }, { profiles }, async () => {}),
+      /INVALID_SANDBOX_RESPONSE/
+    );
   }
   // Nor one that doesn't say how it made its result, under the current contract (review Part III, W03)
   const execution = {
@@ -777,7 +908,10 @@ test("a runner that doesn't report the profiles it was sent qualifies nothing", 
     { execution: { ...execution, contract: AI_EXECUTION_PROTOCOL_VERSION - 1 }, operation }
   ]) {
     service.execution = { run: async () => ({ validation: { profiles: aiContractDigest(profiles) }, ...reported }) };
-    await assert.rejects(service.runSandbox({ id: "job" }, { profiles }, async () => {}), /how it made its result/);
+    await assert.rejects(
+      service.runSandbox({ id: "job" }, { profiles }, async () => {}),
+      /how it made its result/
+    );
   }
   service.execution = {
     run: async () => ({ validation: { profiles: aiContractDigest(profiles) }, execution, operation })
@@ -786,5 +920,71 @@ test("a runner that doesn't report the profiles it was sent qualifies nothing", 
     validation: { profiles: aiContractDigest(profiles) },
     execution,
     operation
+  });
+});
+
+// Review Part III, W05: coverage-aware selection
+test("a target whose subtasks have no case to build for it gets one, before any program is written", async () => {
+  await fixture(
+    async ({ job, service, run }) => {
+      job.state.plan.subtasks = [
+        { id: 1, points: 98 },
+        { id: 2, points: 2 }
+      ];
+      Object.assign(job.state, qualityState([2]));
+      let request;
+      service.runSandbox = async (_job, current) => {
+        request = current;
+        throw new AiError("JOB_CANCELLED");
+      };
+      await assert.rejects(run(), /JOB_CANCELLED/);
+      assert.deepEqual(job.state.caseAllocation.capacity, [
+        { subtask: 2, from: 1, to: 3, targets: ["misses_boundary"] }
+      ]);
+      assert.equal(request.cases.filter(item => item.subtask === 2).length, 3);
+      assert.equal(request.cases.length, 52);
+      assert(job.state.warnings.includes("CASE_CAPACITY_ADJUSTED"));
+      assert(job.state.warnings.includes("TEST_COUNT_ADJUSTED"));
+    },
+    { ...originalJudgeInfo(), subtasks: null, checker: { type: "lines", caseSensitive: false } }
+  );
+});
+
+test("the selection report is published with the data; repeated differential inputs are reported", async () => {
+  await fixture(async ({ state, job, service, run }) => {
+    const sandbox = service.runSandbox;
+    let receipt;
+    service.runSandbox = async (...args) => {
+      const result = await sandbox(...args);
+      receipt = result.validation.quality;
+      Object.assign(receipt, {
+        fuzzDistinct: 3,
+        extraAttemptsUsed: 1,
+        replacements: [{ case: 3, source: "search", kills: ["misses_boundary"], moved: [] }],
+        search: { attempts: 1, budget: receipt.extraAttemptsUsed, found: 1, unplaced: 0, promoted: 0 },
+        matrix: [{ case: 1, killed: ["misses_boundary"], passed: [] }]
+      });
+      receipt.search.budget = args[1].quality.extraAttempts;
+      receipt.challengeResults[0] = { ...receipt.challengeResults[0], tested: 1, kills: 1 };
+      return result;
+    };
+    await run();
+    assert.equal(state.activations, 1);
+    const generation = require("js-yaml").load(state.files.get("data.yaml")).generation;
+    assert.deepEqual(generation.qualityValidation, receipt);
+    assert.deepEqual(job.state.generated.qualityValidation, receipt);
+    assert(job.state.warnings.includes("DIFFERENTIAL_INPUTS_REPEATED"));
+  });
+  // A report that doesn't agree with its witnesses publishes nothing
+  await fixture(async ({ state, service, run }) => {
+    const sandbox = service.runSandbox;
+    service.runSandbox = async (...args) => {
+      const result = await sandbox(...args);
+      result.validation.quality.matrix = [{ case: 1, killed: [], passed: ["misses_boundary"] }];
+      return result;
+    };
+    await assert.rejects(run(), /TESTDATA_QUALITY_GATE_FAILED: Invalid test selection report/);
+    assert.equal(state.writes.length, 0);
+    assert.equal(state.activations, 0);
   });
 });

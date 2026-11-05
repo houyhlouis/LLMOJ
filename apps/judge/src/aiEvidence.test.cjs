@@ -205,15 +205,17 @@ test("a challenge that fails only an unexported small case survives with that co
   environment.execute = async (name, input, parameters) =>
     name === "quality-challenge-0" && input.toString() === "1" ? Buffer.from("5") : execute(name, input, parameters);
   const quality = new AiQuality(request(), environment);
-  // The preflight stops at a subtask's first passing case: this one fails the first case and passes the second
   await quality.runDifferential();
   const cases = Array.from({ length: 5 }, (_, index) => ({ subtask: 1, seed: index + 1 }));
   for (const [index] of cases.entries()) {
     const input = Buffer.from(String(100 + index));
     quality.recordCase(index, await quality.findKills(input, Buffer.from(String((100 + index) * 2)), 1));
   }
-  // The budget runs out: each search input passes too
-  for (let next = quality.nextSearchCase(cases); next; next = quality.nextSearchCase(cases));
+  // Its small counterexample can't be placed here (it isn't evaluated), and the budget runs out: each search input
+  // passes too
+  const first = quality.nextCandidate(cases);
+  assert.equal(first.promoted, 0, "the small counterexample is tried first");
+  for (let next = quality.nextCandidate(cases); next; next = quality.nextCandidate(cases));
   const error = (() => {
     try {
       quality.result();
@@ -241,7 +243,7 @@ test("a survivor with no replaceable case says the search couldn't run, not that
   // E01 of the review: the low-weight subtask has one boundary case, so no extra search is possible
   const quality = new AiQuality(request({ challenges: [{ id: "low", code: "c", kind: "wrong", subtasks: [2], reason: "r" }], fuzzCases: [...request().fuzzCases, { subtask: 2, seed: 0 }] }), fake());
   const cases = [{ subtask: 1, seed: 1 }, { subtask: 1, seed: 2 }, { subtask: 1, seed: 3 }, { subtask: 1, seed: 4 }, { subtask: 2, seed: 1 }];
-  assert.equal(quality.nextSearchCase(cases), null);
+  assert.equal(quality.nextCandidate(cases), null);
   const details = detailsOf((() => { try { quality.result(); } catch (e) { return e; } })());
   assert.deepEqual(details.search, { attempts: 0, budget: 16, stoppedBy: "capacity" });
 });

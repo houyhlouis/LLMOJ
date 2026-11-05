@@ -1613,11 +1613,8 @@ export class AiWorkflowService implements AiWorkflowRunner {
       plan.subtasks.forEach((item, index) => {
         item.points = scoringDecision.policy.subtasks[index].points;
       });
-    const allocation = allocateAiTestcases(plan.subtasks, job.input.count);
-    count = allocation.count;
-    job.state.caseAllocation = allocation;
-    if (count !== job.input.count)
-      job.state.warnings = [...new Set([...(job.state.warnings || []), "TEST_COUNT_ADJUSTED"])];
+    // Checked before any paid request; the quality plan's targets can add cases (see below)
+    let allocation = allocateAiTestcases(plan.subtasks, job.input.count);
     // Older checkpoints may predate file-I/O extraction; revalidate before any sandbox work.
     const planFileIo = effectiveFileIo;
     plan.fileIo = planFileIo;
@@ -1662,9 +1659,18 @@ export class AiWorkflowService implements AiWorkflowRunner {
         delete job.state.qualityValidation;
         await this.coordinator.checkpoint(job, "testdata.quality-plan", base + share * 0.15);
       } else job.state.qualityPlan = normalizeAiQualityPlan(job.state.qualityPlan, plan.subtasks);
+      // Before any program is written: every target gets a case built for it, and a case the search could replace
+      // (review Part III, H06/W05)
+      allocation = allocateAiTestcases(plan.subtasks, job.input.count, job.state.qualityPlan.targets);
+      if (allocation.capacity.length)
+        job.state.warnings = [...new Set([...(job.state.warnings || []), "CASE_CAPACITY_ADJUSTED"])];
     } else {
       job.state.warnings = [...new Set([...(job.state.warnings || []), "TESTDATA_QUALITY_PROTOCOL_UNSUPPORTED"])];
     }
+    count = allocation.count;
+    job.state.caseAllocation = allocation;
+    if (count !== job.input.count)
+      job.state.warnings = [...new Set([...(job.state.warnings || []), "TEST_COUNT_ADJUSTED"])];
     const adversarialInstructions = protocolProblem
       ? ""
       : `\nMandatory quality targets: ${JSON.stringify(
@@ -2020,6 +2026,12 @@ export class AiWorkflowService implements AiWorkflowRunner {
       if (!corpus)
         throw new AiError("INVALID_SANDBOX_RESPONSE", "The generated files aren't the cases the run reported");
       const execution = executionProvenance(currentExecution(result), result.operation);
+      // Repeats are reported, not refused: a tiny domain has few legal inputs (review Part III, W05)
+      const distinctInputs = new Set(corpus.map(item => item.input.sha256)).size;
+      if (distinctInputs < corpus.length)
+        job.state.warnings = [...new Set([...(job.state.warnings || []), "FINAL_CASES_REPEATED"])];
+      if (qualityRequest && result.validation.quality.fuzzDistinct < result.validation.quality.fuzzPassed)
+        job.state.warnings = [...new Set([...(job.state.warnings || []), "DIFFERENTIAL_INPUTS_REPEATED"])];
       const revision = generationRevision(runnerRequest, job.state);
       // Each attempt gets immutable names, including retries after a committed configuration
       // whose job checkpoint was interrupted. Never overwrite files an earlier attempt activated.
@@ -2175,8 +2187,11 @@ export class AiWorkflowService implements AiWorkflowRunner {
           allocation: {
             requested: job.input.count,
             count,
-            pointsPerCase: allocation.pointsPerCase,
-            subtasks: allocation.allocations
+            // Each case's share of the points, when they all have the same
+            ...(allocation.pointsPerCase != null ? { pointsPerCase: allocation.pointsPerCase } : {}),
+            subtasks: allocation.allocations.map(item => ({ id: item.id, points: item.points, count: item.count })),
+            // Subtasks given more cases so that their targets get one built (review Part III, W05)
+            ...(allocation.capacity.length ? { capacity: allocation.capacity } : {})
           },
           sampleValidation: result.validation || "runner",
           scoring: {
@@ -2187,7 +2202,7 @@ export class AiWorkflowService implements AiWorkflowRunner {
           executionProfiles: { digest: aiContractDigest(run.profiles), ...run.profiles },
           // Where and how the run was made, and the exact bytes of its cases
           execution,
-          corpus: { digest: corpusDigest(corpus), cases: corpus },
+          corpus: { digest: corpusDigest(corpus), distinct: distinctInputs, cases: corpus },
           // The exact programs it was made and checked with, and the repairs that made them (review Part III, W04)
           revision,
           ...(qualityRequest
@@ -2253,7 +2268,8 @@ export class AiWorkflowService implements AiWorkflowRunner {
         corpus: {
           digest: corpusDigest(corpus),
           cases: corpus.length,
-          adversarial: corpus.filter(item => item.origin === "adversarial").length
+          adversarial: corpus.filter(item => item.origin === "adversarial").length,
+          distinct: distinctInputs
         },
         revision: { digest: revision.digest, repairs: revision.repairs.length },
         ...(qualityRequest ? { qualityValidation: result.validation.quality } : {})

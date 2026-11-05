@@ -158,9 +158,31 @@ A challenge program must pass every official sample. A wrong program must pass a
 
 The generator builds specific legal inputs for each target rather than relying on large random ones. For example, SPFA on a shortest-path problem is a "slow" target only if the limits allow a graph that really makes it time out; programs are never rejected by algorithm name, and valid alternative algorithms are accepted by the real checker.
 
-If a target survives the first final tests, up to 16 further counterexamples are tried. A useful one replaces an ordinary case in the same subtask; the minimum and maximum boundary cases and every existing counterexample are kept, and the number of cases and subtask scores don't change. If a target still survives, generation fails and the data isn't published.
+**Room for counterexamples.** Test cases are shared out by subtask points, so a subtask worth little can get only one or two cases: for example, subtasks worth 98 and 2 points with 5 cases requested get 49 cases and 1. The first two cases of a subtask are its minimum and maximum, so a target that applies only to such a subtask would never get an input built for it. Once the quality plan is known, before any program is written, each such subtask gets enough cases for its targets: in the example, 3 instead of 1 (52 in all). The subtask's points don't change; its cases share them, so each of its cases is worth less than the others. The job says which subtasks it changed and why (`CASE_CAPACITY_ADJUSTED`).
 
-The job shows the differential counts, the second solution's checks, each target's verdict and the test cases that defeated it; `result.testdataQuality.extraAttemptsUsed` records extra attempts. `data.yaml` records the plan (`qualityPlan`), results (`qualityValidation`), final case indices (`finalCaseIndices`) and SHA-256 hashes of the auxiliary programs (`verificationSources`). `seed` is a scenario number, not a random seed: the exported input is the evidence. The auxiliary programs stay private to the job and aren't published with the data.
+**Counterexamples found later.** If a target survives the first final tests, up to 16 further counterexamples are tried. Each one is checked like any final case (input validator, reference solution, second solution) and run against every applicable wrong or slow program, including those already defeated. It then replaces a case in the same subtask, never the minimum or maximum:
+
+- a case that is no target's counterexample, if there is one;
+- otherwise a case that is the counterexample of other targets, only if the new input defeats all of those targets too. Their counterexample moves to it, so no target loses its counterexample.
+
+A counterexample that fits neither isn't placed, and the search goes on. The number of cases and subtask scores never change.
+
+**Small counterexamples.** When a wrong program fails one of the small differential inputs but survives the final tests, that small input is tried first, before any new search. It's used only if it's legal for its subtask, the oracle, the reference solution and the second solution all agreed on it, and it defeats the program. It then replaces a case of its subtask by the same rules.
+
+If a target still survives, generation fails and the data isn't published. The job says whether the search ran out of attempts or found no case it could replace.
+
+**What the counts mean.** The job shows the differential counts and how many **distinct** inputs they were, the second solution's checks, each target's verdict, the test case that defeated it, and on how many of the final cases it was run. A target already defeated isn't run on later cases, so those outcomes stay unknown rather than counted. Repeated inputs are reported, not refused: a problem with few legal small inputs repeats them. The job warns when differential inputs or final cases repeat (`DIFFERENTIAL_INPUTS_REPEATED`, `FINAL_CASES_REPEATED`), since a repeat adds no coverage. Replaced cases say whether their counterexample came from the search or from differential testing, and which targets' counterexample moved to them.
+
+`data.yaml` records:
+
+- the plan (`qualityPlan`);
+- the results (`qualityValidation`): distinct differential inputs (`fuzzDistinct`); which final cases each target was run on and which defeated it (`matrix`); the replacements and the search (`replacements`, `search`);
+- the cases per subtask and any added for counterexamples (`allocation`);
+- the number of distinct final inputs (`corpus.distinct`);
+- the final case indices (`finalCaseIndices`);
+- the SHA-256 hashes of the auxiliary programs (`verificationSources`).
+
+`seed` is a scenario number, not a random seed: the exported input is the evidence. The auxiliary programs stay private to the job and aren't published with the data.
 
 Interactive and communication problems keep their protocol simulation and checks but can't use this independent testing; they get a `TESTDATA_QUALITY_PROTOCOL_UNSUPPORTED` warning. However many tests pass, they can't prove that every wrong or slow program fails, or that the reference solution is correct. All this takes more model calls, money and time; see [AI environment](AI-Environment.md).
 

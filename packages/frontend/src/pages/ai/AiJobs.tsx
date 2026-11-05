@@ -6,6 +6,7 @@ import { aiCall, aiText, aiError, actionName, AiJob, AiRetryFrom } from "./api";
 import AiFailureDetails, { failureKindName, programName } from "./AiFailureDetails";
 import AiScoringReview, { AiJudgingSummary, AiRunSummary } from "./AiScoringReview";
 import AiRepairs from "./AiRepairs";
+import AiCoverage from "./AiCoverage";
 import style from "./Ai.module.less";
 
 export default observer(function AiJobs({
@@ -230,26 +231,7 @@ export default observer(function AiJobs({
                       : aiText("尚未通过样例校验", "Not yet sample-validated")}
                   </p>
                 )}
-                {job.result.testdataQuality?.version === 1 && (
-                  <>
-                    <p className={style.jobDetail}>
-                      {aiText(
-                        `对拍通过 ${job.result.testdataQuality.fuzzPassed} 组 · ${job.result.testdataQuality.alternativeCount} 种额外正解通过 ${job.result.testdataQuality.alternativesPassed} 次数据检验 · 已拦截 ${job.result.testdataQuality.challengesKilled}/${job.result.testdataQuality.challengeCount} 个错误或低效算法`,
-                        `${job.result.testdataQuality.fuzzPassed} differential checks passed · ${job.result.testdataQuality.alternativeCount} alternative correct solution(s) passed ${job.result.testdataQuality.alternativesPassed} data checks · ${job.result.testdataQuality.challengesKilled}/${job.result.testdataQuality.challengeCount} wrong or slow algorithms rejected`
-                      )}
-                    </p>
-                    {job.result.testdataQuality.challengeResults.map(target => (
-                      <p className={style.jobDetail} key={target.id}>
-                        {target.id}
-                        {" · "}
-                        {aiText(
-                          `第 ${target.killedBy} 个测试点：${target.verdict}`,
-                          `Test case ${target.killedBy}: ${target.verdict}`
-                        )}
-                      </p>
-                    ))}
-                  </>
-                )}
+                <AiCoverage result={job.result} />
                 <AiJudgingSummary result={job.result} />
                 <AiRunSummary result={job.result} />
                 {(job.result.warnings || [])
@@ -259,7 +241,10 @@ export default observer(function AiJobs({
                       "REFERENCE_SAMPLES_UNAVAILABLE",
                       "TUTORIAL_REFERENCE_REJECTED",
                       "PROTOCOL_ATTACHMENT_SAMPLES_NOT_APPLICABLE",
-                      "TESTDATA_QUALITY_PROTOCOL_UNSUPPORTED"
+                      "TESTDATA_QUALITY_PROTOCOL_UNSUPPORTED",
+                      "CASE_CAPACITY_ADJUSTED",
+                      "DIFFERENTIAL_INPUTS_REPEATED",
+                      "FINAL_CASES_REPEATED"
                     ].includes(warning)
                   )
                   .map(warning => (

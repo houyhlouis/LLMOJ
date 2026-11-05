@@ -106,6 +106,74 @@ export function allocateAiFuzzCases(subtasks: { id: number }[], requested = 64) 
   }));
 }
 
+const count = (value: unknown, max: number, min = 0) =>
+  Number.isSafeInteger(value) && (value as number) >= min && (value as number) <= max;
+
+/**
+ * The selection a runner reports with its receipt (review Part III, W05), when it reports one (judges before it
+ * don't): distinct differential inputs, each challenge's tested and rejecting cases, the replacements and the search,
+ * and the tested outcome matrix, consistent with each other and with the witnesses.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- The runner's untrusted JSON receipt
+function assertAiCoverage(result: any, request: AiQualityRequest, cases: { subtask: number }[]): void {
+  const fail = () => {
+    throw new AiError("TESTDATA_QUALITY_GATE_FAILED", "Invalid test selection report");
+  };
+  const challenges = new Map(request.challenges.map(challenge => [challenge.id, challenge]));
+  const targetIds = (value: unknown, subtask?: number) =>
+    Array.isArray(value) &&
+    new Set(value).size === value.length &&
+    value.every(id => challenges.has(id) && (subtask == null || challenges.get(id).subtasks.includes(subtask)));
+  if (result.fuzzDistinct !== undefined && !count(result.fuzzDistinct, result.fuzzPassed, 1)) fail();
+  for (const item of result.challengeResults) {
+    if (item.tested === undefined && item.kills === undefined) continue;
+    if (!count(item.tested, cases.length, 1) || !count(item.kills, item.tested, 1)) fail();
+  }
+  if (result.matrix !== undefined) {
+    if (!Array.isArray(result.matrix) || result.matrix.length > cases.length) fail();
+    const rows = new Map<number, { killed: string[]; passed: string[] }>();
+    for (const row of result.matrix) {
+      if (!row || !count(row.case, cases.length, 1) || rows.has(row.case)) fail();
+      const { subtask } = cases[row.case - 1];
+      if (!targetIds(row.killed, subtask) || !targetIds(row.passed, subtask)) fail();
+      if (row.killed.some((id: string) => row.passed.includes(id))) fail();
+      rows.set(row.case, row);
+    }
+    // Each witness is a case whose row says it rejected the challenge
+    for (const item of result.challengeResults) if (!rows.get(item.killedBy)?.killed.includes(item.id)) fail();
+  }
+  if (result.replacements !== undefined) {
+    if (!Array.isArray(result.replacements) || result.replacements.length > cases.length * 2) fail();
+    for (const item of result.replacements) {
+      if (
+        !item ||
+        !count(item.case, cases.length, 1) ||
+        !["search", "small_counterexample"].includes(item.source) ||
+        !targetIds(item.kills, cases[item.case - 1].subtask) ||
+        !item.kills.length ||
+        !targetIds(item.moved) ||
+        item.moved.some((id: string) => !item.kills.includes(id))
+      )
+        fail();
+    }
+  }
+  if (result.search !== undefined) {
+    const { search } = result;
+    if (
+      !search ||
+      search.attempts !== result.extraAttemptsUsed ||
+      search.budget !== request.extraAttempts ||
+      !count(search.found, 1000000) ||
+      !count(search.unplaced, search.found) ||
+      !count(search.promoted, request.challenges.length) ||
+      (Array.isArray(result.replacements) &&
+        result.replacements.filter((item: { source: string }) => item.source === "small_counterexample").length !==
+          search.promoted)
+    )
+      fail();
+  }
+}
+
 /** Reject old/partial runner receipts before uploading or activating any generated data. */
 export function assertAiQualityResult(value: unknown, request: AiQualityRequest, cases: { subtask: number }[]): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Validate the runner's untrusted JSON receipt here.
@@ -141,4 +209,5 @@ export function assertAiQualityResult(value: unknown, request: AiQualityRequest,
       throw new AiError("TESTDATA_QUALITY_GATE_FAILED", "Invalid adversarial witness");
     ids.add(item.id);
   }
+  assertAiCoverage(result, request, cases);
 }
