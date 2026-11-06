@@ -28,6 +28,7 @@ LLMOJ 是基于 LibreOJ 的在线评测系统，提供 AI 辅助出题功能。�
 | [提交记录](Submissions.zh-CN.md) | 提交预览、测试数据版本与此前的评测结果 |
 | [Hack](Hacks.zh-CN.md) | 发起 Hack、题目 STD 与 Hack 记录 |
 | [自测](Self-Evaluation.zh-CN.md) | NOI / OI 比赛中的隐藏预测试与额度 |
+| [下载题面](Statement-Downloads.zh-CN.md) | 以 Markdown 下载题面；以 ZIP（PDF、样例与附件）下载比赛题目 |
 | [Fake 处罚](Submission-Moderation.zh-CN.md) | 作废作弊提交并保留证据 |
 | [注册审核](Registration-Approval.zh-CN.md) | 注册设置与委派审核 |
 | [两步验证](Two-Factor-Sign-In.zh-CN.md) | 验证器应用、通行密钥、恢复码与敏感操作确认 |

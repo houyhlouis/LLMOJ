@@ -54,6 +54,10 @@ export const downloadProblemFiles = createPostApi<
   ApiTypes.DownloadProblemFilesRequestDto,
   ApiTypes.DownloadProblemFilesResponseDto
 >("problem/downloadProblemFiles", {});
+export const downloadProblemStatement = createPostApi<
+  ApiTypes.DownloadProblemStatementRequestDto,
+  ApiTypes.DownloadProblemStatementResponseDto
+>("problem/downloadProblemStatement", {});
 export const renameProblemFile = createPostApi<
   ApiTypes.RenameProblemFileRequestDto,
   ApiTypes.RenameProblemFileResponseDto

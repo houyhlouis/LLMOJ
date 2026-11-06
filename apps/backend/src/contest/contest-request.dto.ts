@@ -32,6 +32,8 @@ export interface ContestRequestData {
   problemId?: number;
   userId?: number;
   locale?: Locale;
+  /** The viewer's time zone (IANA), for times in downloaded statements */
+  timeZone?: string;
   problems?: Array<{ contestProblemId: number; content: string; minutes: number }>;
 }
 

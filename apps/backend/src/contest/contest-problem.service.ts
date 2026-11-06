@@ -214,6 +214,24 @@ export class ContestProblemService {
     }
   }
 
+  /**
+   * The files the contest problem page lists: the contest's attachments, and the public headers of a communication
+   * problem for participants and managers. Downloading them also needs the privilege to download attachments.
+   */
+  async visibleAttachments(
+    user: UserEntity,
+    manager: boolean,
+    row: ContestProblemEntity,
+    problem: ProblemEntity,
+    judgeInfo: unknown
+  ): Promise<{ filename: string; uuid: string; size: number; derived?: true }[]> {
+    const attachments = row.attachments || [];
+    const derived = (await this.access.canReadPublicHeaders(user, manager))
+      ? await this.publicHeaderAttachments(problem, judgeInfo as Partial<ProblemJudgeInfoCommunication>, attachments)
+      : [];
+    return [...attachments, ...derived];
+  }
+
   async problem(user: UserEntity, id: number, problemId: number, locale: string) {
     const { contest, manager } = await this.access.get(user, id, true);
     const row = await this.db.getRepository(ContestProblemEntity).findOneBy({ id: problemId, contestId: id });
@@ -221,14 +239,13 @@ export class ContestProblemService {
     const problem = await row.problem;
     const selected = problem.locales.includes(locale as Locale) ? (locale as Locale) : problem.locales[0];
     const [judgeInfo, submittable] = await this.problems.getProblemJudgeInfo(problem);
-    const attachments = row.attachments || [];
-    const derived = (await this.access.canReadPublicHeaders(user, manager))
-      ? await this.publicHeaderAttachments(problem, judgeInfo, attachments)
-      : [];
     return {
       contest,
       manager,
-      problem: { ...this.problemMeta(row), attachments: [...attachments, ...derived] },
+      problem: {
+        ...this.problemMeta(row),
+        attachments: await this.visibleAttachments(user, manager, row, problem, judgeInfo)
+      },
       type: problem.type,
       // Public submission capability only; helper names and judge data stay private.
       hasGrader:

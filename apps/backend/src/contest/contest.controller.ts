@@ -4,6 +4,7 @@ import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { ContestService } from "./contest.service";
 import { ContestProblemService } from "./contest-problem.service";
 import { ContestSubmissionService } from "./contest-submission.service";
+import { ContestStatementService } from "./contest-statement.service";
 import { ContestRequestDto } from "./contest-request.dto";
 
 import { CurrentUser } from "../common/user.decorator";
@@ -18,7 +19,8 @@ export class ContestController {
   constructor(
     private readonly service: ContestService,
     private readonly contestProblems: ContestProblemService,
-    private readonly contestSubmissions: ContestSubmissionService
+    private readonly contestSubmissions: ContestSubmissionService,
+    private readonly statements: ContestStatementService
   ) {}
 
   @Post("list") list(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
@@ -47,6 +49,16 @@ export class ContestController {
 
   @Post("problem") problem(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
     return this.contestProblems.problem(u, r.id, r.problemId, r.data?.locale);
+  }
+
+  /** One contest problem's statement as Markdown */
+  @Post("statement") statement(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
+    return this.statements.markdown(u, r.id, r.problemId, r.data?.locale);
+  }
+
+  /** The contest's statements PDF and what goes in each problem's folder of its archive */
+  @Post("archive") archive(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
+    return this.statements.archive(u, r.id, r.data?.locale, r.data?.timeZone);
   }
 
   @Post("attachment") attachment(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {

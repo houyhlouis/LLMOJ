@@ -35,6 +35,8 @@ export * from "./remove-problem-files-response.dto";
 
 export * from "./download-problem-files-request.dto";
 export * from "./download-problem-files-response.dto";
+export * from "./download-problem-statement-request.dto";
+export * from "./download-problem-statement-response.dto";
 
 export * from "./rename-problem-file-request.dto";
 export * from "./rename-problem-file-response.dto";

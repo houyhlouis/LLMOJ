@@ -29,6 +29,8 @@ return {
     statistics: "统计",
     discussion: "讨论",
     files: "文件",
+    download_statement: "下载题面（.md）",
+    download_statement_title: "以 Markdown 文件（.md）下载题面",
     edit: "编辑",
     judge_settings: "评测设置",
     permission_manage: "权限管理",

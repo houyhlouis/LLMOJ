@@ -375,6 +375,15 @@ declare namespace ApiTypes {
     error?: "NO_SUCH_PROBLEM" | "PERMISSION_DENIED";
     downloadInfo?: ApiTypes.ProblemFileDownloadInfoDto[];
   }
+  export interface DownloadProblemStatementRequestDto {
+    problemId: number;
+    locale: "en_US" | "zh_CN";
+  }
+  export interface DownloadProblemStatementResponseDto {
+    error?: "NO_SUCH_PROBLEM" | "PERMISSION_DENIED";
+    filename?: string;
+    markdown?: string;
+  }
   export interface DownloadSubmissionFileRequestDto {
     submissionId: number;
     filename: string;

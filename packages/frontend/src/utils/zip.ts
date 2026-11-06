@@ -2,7 +2,8 @@ import "streamsaver/examples/zip-stream";
 
 interface FileLike {
   name: string;
-  stream(): ReadableStream;
+  // Not for directories
+  stream?(): ReadableStream;
   lastModified?: number;
   directory?: boolean;
   comment?: string;

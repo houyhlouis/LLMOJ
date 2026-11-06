@@ -16,18 +16,27 @@ export async function callContest(action: string, request: any = {}) {
     const message =
       code === "CONTEST_NOT_STARTED"
         ? tr("比赛尚未开始，题目将在开始后公开。", "Problems will become available when the contest starts.")
-        : code === "LOGIN_REQUIRED" || result.requestErrorStatus === 401
-          ? tr("请先登录。", "Please sign in.")
-          : code === "PERMISSION_DENIED" || result.requestErrorStatus === 403
-            ? tr(
-                "没有访问此内容或执行此操作的权限。",
-                "You do not have permission to access this content or perform this action."
-              )
-            : result.requestErrorStatus === 404
-              ? tr("内容不存在或无权访问。", "Not found or unavailable.")
-              : result.requestErrorStatus === 400
-                ? tr("输入不合法，请检查内容后重试。", "Invalid input. Check the form and try again.")
-                : tr("请求失败，请稍后重试。", "Request failed. Please try again later.");
+        : code === "STATEMENTS_BUSY"
+          ? tr(
+              "正在为很多人准备题面，请稍后再试。",
+              "Statements are being prepared for many people. Try again in a minute."
+            )
+          : code === "STATEMENTS_TIMEOUT" || code === "STATEMENTS_FAILED"
+            ? tr("题面 PDF 生成失败，请稍后重试。", "The statements PDF couldn't be made. Try again later.")
+            : code === "NO_PROBLEMS"
+              ? tr("比赛中还没有题目。", "The contest has no problems yet.")
+              : code === "LOGIN_REQUIRED" || result.requestErrorStatus === 401
+                ? tr("请先登录。", "Please sign in.")
+                : code === "PERMISSION_DENIED" || result.requestErrorStatus === 403
+                  ? tr(
+                      "没有访问此内容或执行此操作的权限。",
+                      "You do not have permission to access this content or perform this action."
+                    )
+                  : result.requestErrorStatus === 404
+                    ? tr("内容不存在或无权访问。", "Not found or unavailable.")
+                    : result.requestErrorStatus === 400
+                      ? tr("输入不合法，请检查内容后重试。", "Invalid input. Check the form and try again.")
+                      : tr("请求失败，请稍后重试。", "Request failed. Please try again later.");
     throw new RouteError(message, { showRefresh: true, showBack: true });
   }
   return result.response;

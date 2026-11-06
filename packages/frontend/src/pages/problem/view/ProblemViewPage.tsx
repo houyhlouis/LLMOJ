@@ -61,6 +61,7 @@ import { EmojiRenderer } from "@/components/EmojiRenderer";
 import { actsAsButton, keyboardMenu } from "@/utils/keyboard";
 import { problemSetPreferences } from "../problem-set/problemSetPreferences";
 import ProblemSolutions from "./ProblemSolutions";
+import { saveBlob } from "@/utils/downloadFile";
 
 export function useProblemViewMarkdownContentPatcher(problemId: number): MarkdownContentPatcher {
   const _ = useLocalizer();
@@ -359,6 +360,18 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
     )
   );
   // End delete
+
+  // Begin download statement
+  const [downloadStatementPending, onDownloadStatement] = useAsyncCallbackPending(async () => {
+    const { requestError, response } = await api.problem.downloadProblemStatement({
+      problemId: props.problem.meta.id,
+      locale: props.problem.localizedContentsOfLocale.locale as Locale
+    });
+    if (requestError) toast.error(requestError(_));
+    else if (response.error) toast.error(_(`.error.${response.error}`));
+    else saveBlob(new Blob([response.markdown], { type: "text/markdown;charset=utf-8" }), response.filename);
+  });
+  // End download statement
 
   const ProblemTypeView = props.ProblemTypeView;
 
@@ -825,6 +838,11 @@ let ProblemViewPage: React.FC<ProblemViewPageProps> = props => {
                 as={Link}
                 href={getProblemUrl(props.problem.meta, { subRoute: "files" })}
               />
+              <Menu.Item {...actsAsButton} onClick={onDownloadStatement} title={_(".action.download_statement_title")}>
+                <Icon name="download" />
+                {_(".action.download_statement")}
+                <Loader size="tiny" active={downloadStatementPending} />
+              </Menu.Item>
             </Menu>
             <Menu pointing secondary vertical className={`${style.actionMenu} ${style.secondActionMenu}`}>
               {props.problem.meta.type === ProblemType.Traditional &&

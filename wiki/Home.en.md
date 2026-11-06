@@ -28,6 +28,7 @@ LLMOJ is an online judge based on LibreOJ, with AI tools for problem setting. Ne
 | [Submissions](Submissions.md) | Submission previews, test data versions and earlier results |
 | [Hacks](Hacks.md) | Hacking submissions, the problem STD and hack results |
 | [Self Eval](Self-Evaluation.md) | Hidden pretests in NOI / OI contests and their quota |
+| [Statement downloads](Statement-Downloads.md) | A statement as Markdown; a contest's problems as a ZIP (PDF, samples and attachments) |
 | [Fake moderation](Submission-Moderation.md) | Voiding cheating submissions while keeping the evidence |
 | [Registration approval](Registration-Approval.md) | Registration settings and delegated reviews |
 | [Two-factor sign-in](Two-Factor-Sign-In.md) | Authenticator apps, passkeys, recovery codes and confirming sensitive changes |

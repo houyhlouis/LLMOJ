@@ -16,6 +16,7 @@ import { callContest, contestRequest, submitContest, prepareContestUpload, tr } 
 import ContestFrame from "./ContestFrame";
 import style from "./ContestPages.module.less";
 import SelfEvalButton from "@/pages/self-eval/SelfEvalButton";
+import { saveBlob } from "@/utils/downloadFile";
 
 function initialOptions(value: string) {
   const [language, variant] = value.split(":");
@@ -125,6 +126,18 @@ function ContestProblemPage({ detail, initial }: { detail: any; initial: any }) 
       setProgress(null);
     }
   }
+  const [statementPending, setStatementPending] = useState(false);
+  async function downloadStatement() {
+    setStatementPending(true);
+    try {
+      const result = await callContest("statement", { id, problemId, data: { locale: data.locale } });
+      saveBlob(new Blob([result.markdown], { type: "text/markdown;charset=utf-8" }), result.filename);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setStatementPending(false);
+    }
+  }
   async function download(filename: string) {
     try {
       const r = await callContest("download", { id, problemId, data: { filename } });
@@ -135,7 +148,20 @@ function ContestProblemPage({ detail, initial }: { detail: any; initial: any }) 
   }
   return (
     <ContestFrame detail={detail} tab="overview">
-      <Header as="h2">{data.title}</Header>
+      <div className={style.sectionToolbar}>
+        <Header as="h2">{data.title}</Header>
+        <div className={style.headerRightControls}>
+          <Button
+            basic
+            className="labeled icon"
+            icon="download"
+            loading={statementPending}
+            disabled={statementPending}
+            onClick={downloadStatement}
+            content={tr("下载题面（Markdown）", "Download statement (Markdown)")}
+          />
+        </div>
+      </div>
       <Form>
         <Form.Select
           label={tr("题面语言", "Statement language")}

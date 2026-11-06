@@ -29,6 +29,8 @@ return {
     statistics: "Statistics",
     discussion: "Discussion",
     files: "Files",
+    download_statement: "Download statement (.md)",
+    download_statement_title: "The statement as a Markdown file (.md)",
     edit: "Edit",
     judge_settings: "Judge Settings",
     permission_manage: "Permissions",

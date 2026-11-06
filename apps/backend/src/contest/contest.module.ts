@@ -9,12 +9,14 @@ import { ContestAccessService } from "./contest-access.service";
 import { ContestScoreService } from "./contest-score.service";
 import { ContestProblemService } from "./contest-problem.service";
 import { ContestSubmissionService } from "./contest-submission.service";
+import { ContestStatementService } from "./contest-statement.service";
 import { ContestController } from "./contest.controller";
 
 import { ProblemModule } from "../problem/problem.module";
 import { SubmissionModule } from "../submission/submission.module";
 import { UserModule } from "../user/user.module";
 import { FileModule } from "../file/file.module";
+import { StatementExportModule } from "../statement-export/statement-export.module";
 
 @Module({
   imports: [
@@ -22,13 +24,15 @@ import { FileModule } from "../file/file.module";
     forwardRef(() => ProblemModule),
     forwardRef(() => SubmissionModule),
     forwardRef(() => UserModule),
-    forwardRef(() => FileModule)
+    forwardRef(() => FileModule),
+    StatementExportModule
   ],
   providers: [
     ContestAccessService,
     ContestScoreService,
     ContestProblemService,
     ContestSubmissionService,
+    ContestStatementService,
     ContestService
   ],
   controllers: [ContestController],

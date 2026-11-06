@@ -47,6 +47,9 @@ import {
   RemoveProblemFilesResponseDto,
   RemoveProblemFilesResponseError,
   DownloadProblemFilesRequestDto,
+  DownloadProblemStatementRequestDto,
+  DownloadProblemStatementResponseDto,
+  DownloadProblemStatementResponseError,
   DownloadProblemFilesResponseDto,
   DownloadProblemFilesResponseError,
   RenameProblemFileRequestDto,
@@ -98,6 +101,9 @@ import { SubmissionService } from "../submission/submission.service";
 import { AuditLogObjectType, AuditService } from "../audit/audit.service";
 import { DiscussionService } from "../discussion/discussion.service";
 import { DiscussionType } from "../discussion/discussion-type.enum";
+import { buildStatement, statementLabels } from "../statement-export/statement";
+import { statementMarkdown } from "../statement-export/statement-markdown";
+import { safeFileName } from "../statement-export/export-names";
 
 @ApiTags("Problem")
 @Controller("problem")
@@ -895,6 +901,53 @@ export class ProblemController {
           })
         }))
       )
+    };
+  }
+
+  @Post("downloadProblemStatement")
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: "Download a problem's statement as Markdown.",
+    description:
+      "The title, limits, input and output, every statement section with its samples, and the names of the problem's additional files (with the privilege to download them), as the problem page shows them."
+  })
+  async downloadProblemStatement(
+    @CurrentUser() currentUser: UserEntity,
+    @Body() request: DownloadProblemStatementRequestDto
+  ): Promise<DownloadProblemStatementResponseDto> {
+    const problem = await this.problemService.findProblemById(request.problemId);
+    if (!problem) return { error: DownloadProblemStatementResponseError.NO_SUCH_PROBLEM };
+    if (!(await this.problemAccess.userHasPermission(currentUser, problem, ProblemPermissionType.View)))
+      return { error: DownloadProblemStatementResponseError.PERMISSION_DENIED };
+
+    const locale = problem.locales.includes(request.locale) ? request.locale : problem.locales[0];
+    const files = (await this.userPrivilegeService.userHasPrivilege(
+      currentUser,
+      UserPrivilegeType.DownloadProblemAttachments
+    ))
+      ? (await this.problemFiles.listProblemFiles(problem, ProblemFileType.AdditionalFile)).map(file => file.filename)
+      : [];
+    const [title, sections, samples, [judgeInfo]] = await Promise.all([
+      this.problemService.getProblemLocalizedTitle(problem, locale),
+      this.problemService.getProblemLocalizedContent(problem, locale),
+      this.problemService.getProblemSamples(problem),
+      this.problemService.getProblemPreprocessedJudgeInfo(problem)
+    ]);
+    const statement = buildStatement({
+      locale: request.locale,
+      contentLocale: locale,
+      label: problem.displayId ? `#${problem.displayId}` : `P${problem.id}`,
+      title,
+      type: problem.type,
+      judgeInfo: judgeInfo as Parameters<typeof buildStatement>[0]["judgeInfo"],
+      source: problem.originalProblem,
+      sections,
+      samples,
+      files
+    });
+    return {
+      filename: `${safeFileName(statement.title, statementLabels(request.locale).untitled)}.md`,
+      markdown: statementMarkdown(statement)
     };
   }
 

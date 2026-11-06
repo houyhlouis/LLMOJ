@@ -19,7 +19,6 @@ import {
 } from "semantic-ui-react";
 import { v4 as uuid } from "uuid";
 import isEqual from "lodash/isEqual";
-import streamsaver from "streamsaver";
 import pAll from "p-all";
 import { useDebounce } from "use-debounce";
 
@@ -34,7 +33,7 @@ import getFileIcon from "@/utils/getFileIcon";
 import formatFileSize from "@/utils/formatFileSize";
 import downloadFile from "@/utils/downloadFile";
 import openUploadDialog from "@/utils/openUploadDialog";
-import pipeStream from "@/utils/pipeStream";
+import { saveStream } from "@/utils/saveStream";
 import { observer } from "mobx-react";
 import { defineRoute, RouteError } from "@/AppRouter";
 import { callApiWithFileUpload } from "@/utils/callApiWithFileUpload";
@@ -45,14 +44,6 @@ import { isValidFilename } from "@/utils/validators";
 import { Localizer, makeToBeLocalizedText } from "@/locales";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
 import { actsAsButton, keyboardMenu } from "@/utils/keyboard";
-
-// Firefox have no WritableStream
-if (!window.WritableStream || true) {
-  (streamsaver as any).WritableStream = (await import("web-streams-polyfill")).WritableStream;
-}
-// Keep StreamSaver same-origin; HTTP intranet clients use a Blob below because
-// service workers are unavailable in an insecure context.
-(streamsaver as any).mitm = new URL(`${window.apiEndpoint}api/cors/streamsaver/mitm.html`, location.href).href;
 
 export async function downloadProblemFile(
   problemId: number,
@@ -122,46 +113,11 @@ export async function downloadProblemFilesAsArchive(
     }
   });
 
-  if (!window.isSecureContext) {
-    try {
-      const blob = await new Response(zipStream).blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch (error) {
-      toast.error(String(error));
-    }
-    return;
+  try {
+    await saveStream(zipStream, filename);
+  } catch (error) {
+    toast.error(String(error));
   }
-
-  const fileStream = streamsaver.createWriteStream(filename);
-  const abortCallbackReceiver: { abort?: () => void } = {};
-
-  function stopDownload() {
-    abortCallbackReceiver.abort?.();
-  }
-
-  // If we are on an insecure context, StreamSaver will use a MITM page to download the file
-  // a beforeunload event is triggered by the library (not a user), so ignore it
-  let isBeforeUnloadTriggeredByLibrary = !window.isSecureContext;
-  function onBeforeUnload(e: BeforeUnloadEvent) {
-    if (isBeforeUnloadTriggeredByLibrary) {
-      isBeforeUnloadTriggeredByLibrary = false;
-      return;
-    }
-    e.returnValue = "";
-  }
-
-  window.addEventListener("unload", stopDownload);
-  window.addEventListener("beforeunload", onBeforeUnload);
-
-  await pipeStream(zipStream, fileStream, abortCallbackReceiver);
-
-  window.removeEventListener("unload", stopDownload);
-  window.removeEventListener("beforeunload", onBeforeUnload);
 }
 
 const MAX_UPLOAD_CONCURRENCY = 5;

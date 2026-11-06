@@ -17,6 +17,7 @@ import style from "./ContestPages.module.less";
 import { appState } from "@/appState";
 import { ruleDescription } from "./contest-rules";
 import { SubmissionPreviewLink, SubmissionPreviewProvider } from "@/pages/submission/SubmissionPreview";
+import { ArchiveManifest, ArchiveProgress, downloadContestArchive } from "./contestArchive";
 
 function ContestPage({ initial, tab }: { initial: any; tab: string }) {
   const localizeLanguage = useLocalizer("code_language");
@@ -76,6 +77,20 @@ function ContestPage({ initial, tab }: { initial: any; tab: string }) {
       setError(e.message);
     }
   }
+  const [archive, setArchive] = useState<{ progress?: ArchiveProgress; result?: ArchiveManifest }>({});
+  async function downloadArchive() {
+    if (archive.progress) return;
+    setError("");
+    try {
+      const result = await downloadContestArchive(id, progress => setArchive({ progress }));
+      setArchive({ result });
+    } catch (e) {
+      setArchive({});
+      setError(e.message || String(e));
+    }
+  }
+  const archiveProgress = archive.progress;
+  const archiveResult = archive.result;
   return (
     <ContestFrame detail={detail} tab={tab}>
       {error && <Message negative>{error}</Message>}
@@ -83,6 +98,63 @@ function ContestPage({ initial, tab }: { initial: any; tab: string }) {
         <>
           <MarkdownContent content={detail.contest.description} />
           <p className={style.description}>{ruleDescription(detail.contest.rule)}</p>
+          {(detail.started || detail.manager) && detail.problems.length > 0 && (
+            <div className={style.sectionToolbar}>
+              <Button
+                className="labeled icon"
+                icon="download"
+                loading={!!archiveProgress}
+                disabled={!!archiveProgress}
+                onClick={downloadArchive}
+                content={tr("下载题目包（ZIP）", "Download problems (ZIP)")}
+              />
+              <span className={style.archiveNote} role="status">
+                {archiveProgress?.stage === "preparing"
+                  ? tr("正在生成题面 PDF……", "Making the statements PDF…")
+                  : archiveProgress?.stage === "downloading"
+                    ? archiveProgress.total
+                      ? tr(
+                          `正在下载附件（${archiveProgress.done} / ${archiveProgress.total}）……`,
+                          `Downloading attachments (${archiveProgress.done} / ${archiveProgress.total})…`
+                        )
+                      : tr("正在保存……", "Saving…")
+                    : tr(
+                        "包含所有题面（statements.pdf）、每道题的样例和附件。",
+                        "Every statement (statements.pdf), and each problem's samples and attachments."
+                      )}
+              </span>
+            </div>
+          )}
+          {archiveResult && (archiveResult.warnings.length > 0 || archiveResult.attachmentsWithheld) && (
+            <Message warning onDismiss={() => setArchive({})}>
+              {archiveResult.attachmentsWithheld && (
+                <p>
+                  {tr(
+                    "你没有下载附件的权限，题目包中不含附件。",
+                    "You don't have the privilege to download attachments, so the archive has none."
+                  )}
+                </p>
+              )}
+              {archiveResult.warnings.length > 0 && (
+                <>
+                  <p>
+                    {tr(
+                      "以下内容未能放入 PDF，题面中以文字代替：",
+                      "These couldn't be put in the PDF; the statements show a note instead:"
+                    )}
+                  </p>
+                  <ul className={style.archiveWarnings}>
+                    {archiveResult.warnings.map((warning, index) => (
+                      <li key={index}>
+                        {warning.kind === "image" ? tr("图片", "Image") : tr("公式", "Formula")}{" "}
+                        <code>{warning.source}</code>: {warning.message}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </Message>
+          )}
           {!detail.started && !detail.manager ? (
             <Message>
               {tr("比赛尚未开始，题目将在开始后公开。", "Problems will become available when the contest starts.")}
