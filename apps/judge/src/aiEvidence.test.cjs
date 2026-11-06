@@ -283,6 +283,10 @@ test("the backend accepts only well-formed failures within the limits", () => {
     ]
   };
   assert.deepEqual(parseAiRunFailure(valid), valid);
+  // An input outside the oracle's small domain is a kind of its own, blamed on the small-case generator
+  const outside = JSON.parse(JSON.stringify(valid));
+  Object.assign(outside.observations[0], { kind: "oracle_domain_exceeded", role: "quality-small-make", phase: "quality-differential" });
+  assert.deepEqual(parseAiRunFailure(outside), outside);
   const variants = [
     v => (v.observations[0].artifacts[0].name = "../etc/passwd"),
     v => (v.observations[0].artifacts[0].name = "1.input"),

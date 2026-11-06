@@ -163,6 +163,29 @@ export function validateQuality(quality: QualityRequest, cases: QualityCase[], s
   }
 }
 
+/**
+ * The largest input the differential test gives the oracle. Differential inputs are small cases for an exhaustive or
+ * direct exact method, never full-size data (make.cpp's job, which the oracle never sees); the oracle's own limits
+ * (5 s, 512 MiB) are the other bound.
+ */
+export const DIFFERENTIAL_INPUT_BYTES = 1024 * 1024;
+
+/**
+ * A differential input outside the oracle's domain: an invalid test configuration made by the small-case generator,
+ * not a wrong or slow solution. Nothing is judged on it.
+ */
+function outsideOracleDomain(message: string, cause: unknown, subtask: number, seed: number, input: Buffer) {
+  return reclassify(new Error(message), cause, {
+    kind: "oracle_domain_exceeded",
+    role: "quality-small-make",
+    phase: "quality-differential",
+    subject: `differential input of subtask ${subtask}, case index ${seed} (${input.length} bytes)`,
+    subtask,
+    scenarioIndex: seed,
+    data: { input }
+  });
+}
+
 function verdictOf(error: unknown): QualityVerdict | null {
   const verdict = (error as { qualityVerdict?: QualityVerdict })?.qualityVerdict;
   return ["WA", "RE", "TLE", "MLE"].includes(verdict) ? verdict : null;
@@ -287,13 +310,39 @@ export class AiQuality {
       String(subtask),
       String(seed)
     ]);
+    // Small cases only: an input too large for an exact brute force is refused before anything runs on it
+    if (input.length > DIFFERENTIAL_INPUT_BYTES)
+      throw outsideOracleDomain(
+        `small-make.cpp wrote a differential input of ${input.length} bytes, more than the ${DIFFERENTIAL_INPUT_BYTES} bytes a small case may have`,
+        null,
+        subtask,
+        seed,
+        input
+      );
     await this.environment.validate(input, subtask, seed, subject);
     this.fuzzInputs.add(sha256(input));
     this.environment.checkCanceled();
     const expected = await within(
       { role: "quality-oracle", expectedBasis: "candidate_oracle", data: { input } },
       async () => {
-        const output = await this.environment.execute("quality-oracle", input);
+        let output: Buffer;
+        try {
+          output = await this.environment.execute("quality-oracle", input);
+        } catch (error) {
+          // The oracle ran out of time or memory: the input is outside its small domain. The generator made a case
+          // the oracle can't solve; no solution is judged on it, and the oracle isn't rewritten for it
+          const verdict = verdictOf(error);
+          const kind = detailsOf(error)?.kind ?? { TLE: "time_limit", MLE: "memory_limit" }[verdict];
+          if (kind === "time_limit" || kind === "memory_limit")
+            throw outsideOracleDomain(
+              `The oracle exceeded its ${kind === "time_limit" ? "time" : "memory"} limit on a differential input of ${input.length} bytes: the input is outside the oracle's small domain`,
+              error,
+              subtask,
+              seed,
+              input
+            );
+          throw error;
+        }
         await this.environment.compare(input, output, output, `oracle differential case ${caseIndex + 1}`);
         return output;
       }

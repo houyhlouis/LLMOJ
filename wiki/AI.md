@@ -231,6 +231,7 @@ When a program of a test data job fails, the job decides what to do from what fa
   - a compilation error: the program that didn't compile;
   - the input validator rejects a statement sample: the validator (samples are legal);
   - the input validator rejects a generated input: the generator that made it (the validator is never loosened to accept it);
+  - a differential input the oracle can't solve (more than 1 MiB, or the oracle runs out of its 5 seconds or 512 MiB on it): the small-case generator, `small-make.cpp`. The differential test compares the solutions with an exact brute force on **small** cases only (full-size data is `make.cpp`'s, and the oracle never sees it), so such an input is an invalid test, not evidence that a solution is wrong or slow. Nothing is judged on it, and the oracle isn't rewritten for it. If repairing the generator doesn't help, the job stops and you choose between the generator and the oracle;
   - a program crashes, goes over a limit or writes too much: that program;
   - the reference solution's output differs from an official sample's, compared by a built-in checker: the reference solution;
   - a checker crashes or accepts malformed output: the checker;

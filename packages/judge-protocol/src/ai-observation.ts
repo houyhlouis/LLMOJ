@@ -26,6 +26,9 @@ export const AI_FAILURE_KINDS = [
   "challenge_survived",
   // An adversarial input was found but no case could be replaced with it
   "insufficient_case_capacity",
+  // A differential input is outside the brute-force oracle's small domain: larger than the small-case limit, or the
+  // oracle ran out of time or memory on it. The small-case generator's fault, never evidence against a solution
+  "oracle_domain_exceeded",
   // The run used its whole execution budget
   "budget_exhausted",
   // Storage, disk space, the sandbox itself or the connection: not the programs

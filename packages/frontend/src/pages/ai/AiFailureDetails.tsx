@@ -25,6 +25,10 @@ export const failureKindName = (kind: string) =>
     invalid_challenge: aiText("对抗程序无效", "An invalid challenge program"),
     challenge_survived: aiText("错误或低效算法未被拦截", "A wrong or slow algorithm wasn't rejected"),
     insufficient_case_capacity: aiText("没有可替换的测试点", "No test case could be replaced"),
+    oracle_domain_exceeded: aiText(
+      "对拍输入超出暴力解法的适用范围（小数据生成器的问题，不是解法错误）",
+      "A differential input too large for the oracle (the small-case generator's fault, not a wrong solution)"
+    ),
     budget_exhausted: aiText("超出执行时间预算", "The execution budget ran out"),
     infrastructure_error: aiText("评测环境故障（非程序问题）", "Infrastructure failure (not the programs)"),
     canceled: aiText("已取消", "Canceled"),

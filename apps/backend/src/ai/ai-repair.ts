@@ -227,6 +227,11 @@ export function routeAiFailure(failure: AiRoutedFailure, context: AiRepairContex
       return { action: "review", reason: "BUDGET", roles: [] };
     case "insufficient_case_capacity":
       return { action: "review", reason: "CAPACITY", roles: [] };
+    case "oracle_domain_exceeded":
+      // A differential input the oracle can't solve in its limits is an invalid test configuration: small-make.cpp
+      // made a case outside the oracle's small domain. It's repaired (no replay: the oracle's limits are fixed, the
+      // input is what's wrong); the oracle isn't rewritten for it and no solution is judged on it
+      return repair("quality-small-make");
     case "compile_error":
       if (!role) break;
       // A compiler that was killed or crashed left no diagnostic to repair from
@@ -289,6 +294,8 @@ export function decideAiRepair(
     ...new Set([
       decision.role,
       ...(failure.kind === "validator_rejection" ? ["validator"] : []),
+      // An oracle that can't solve even the smallest legal inputs is the other possibility, for the owner
+      ...(failure.kind === "oracle_domain_exceeded" ? ["quality-oracle"] : []),
       ...(failure.kind === "challenge_survived" && failure.role ? [failure.role] : [])
     ])
   ].filter(role => context.aiWritten(role));
@@ -421,7 +428,7 @@ export function generationRevision(request: any, state: Record<string, unknown>)
 const CONTRACTS: Record<string, string> = {
   make: 'make.cpp, the test input generator. argv[1] is the subtask id and argv[2] a positive case index (also on stdin as "subtask caseIndex"); the case index selects a coverage scenario and is not a seed. It writes exactly ONE legal complete input to stdout and nothing else, obeying that subtask\'s bounds and every global constraint, within 5 seconds and 512 MiB; it exits nonzero rather than weaken a constraint. Random choices use std::random_device rd; const auto seed = rd(); std::mt19937_64 rnd(seed); with fresh entropy, never a fixed seed, time() or a fallback.',
   "quality-small-make":
-    "small-make.cpp, the small-case input generator of the differential test. Same arguments as make.cpp; it writes ONE legal small input to stdout that the exact oracle solves within 5 seconds, obeying that subtask and every global constraint, never below the required minimum sizes. Random choices use std::random_device as make.cpp does.",
+    "small-make.cpp, the small-case input generator of the differential test. Same arguments as make.cpp; it writes ONE legal SMALL input to stdout, never a full-size one: the exact oracle (exhaustive or direct, often exponential) must solve every input it writes within 5 seconds and 512 MiB, so sizes follow the oracle's complexity (for example at most 8 to 10 elements for an exponential search), and an input is at most 1 MiB. It obeys that subtask and every global constraint and never goes below the required minimum sizes; large numeric VALUES are fine where legal, large SIZES are not. Random choices use std::random_device as make.cpp does.",
   std: "std.cpp, the reference solution: correct and efficient within the problem's time and memory limits, reading stdin and writing stdout (no files, no freopen).",
   validator:
     "validator.cpp, the input validator. It reads ONE input from stdin; argv[1] is the subtask id (0 means the whole problem's constraints, used for statement samples) and argv[2] the case index. It exits 0 only for a legal input, and nonzero with a short reason on stderr otherwise. It checks every constraint of the statement and of the subtask exactly: it never invents a constraint and never weakens one.",

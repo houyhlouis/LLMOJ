@@ -301,3 +301,33 @@ test("the model is never sent the bytes of the problem's own sample files", () =
   assert.deepEqual(shown.artifacts[0], { role: "input", size: 8, preview: "3\n1 2 3\n", truncated: false });
   assert.equal(shown.difference.actual, "secret-actual");
 });
+
+// An input outside the oracle's small domain is small-make.cpp's: repaired at once (no replay, the oracle isn't
+// rewritten, no solution is blamed); if that repair doesn't help, the owner chooses between it and the oracle
+test("an input too large for the oracle repairs the small-case generator, then asks the owner", () => {
+  const jobState = state();
+  const failure = {
+    kind: "oracle_domain_exceeded",
+    role: "quality-small-make",
+    phase: "quality-differential",
+    subtask: 1,
+    scenarioIndex: 3,
+    subject: "differential input of subtask 1, case index 3 (40000 bytes)"
+  };
+  assert.deepEqual(route(failure, jobState), { action: "repair", role: "quality-small-make" });
+  const repairs = repairState(jobState);
+  assert.deepEqual(decideAiRepair(failure, context(jobState), repairs), { action: "repair", role: "quality-small-make" });
+  repairs.revisions.push({ role: "quality-small-make", signature: failureSignature(failure), failure: {} });
+  assert.deepEqual(decideAiRepair(failure, context(jobState), repairs), {
+    action: "review",
+    reason: "UNCHANGED",
+    roles: ["quality-small-make", "quality-oracle"]
+  });
+  // An oracle that crashes on a small input is still the oracle's, confirmed by a replay first when it's too slow
+  assert.deepEqual(route({ kind: "runtime_error", role: "quality-oracle", phase: "quality-differential", subtask: 1 }, jobState), {
+    action: "repair",
+    role: "quality-oracle"
+  });
+  // The small-case generator of a problem whose helpers aren't the job's: the owner decides
+  assert.deepEqual(route(failure, state({ qualityArtifacts: { ...state().qualityArtifacts, smallMakeCode: "" } })).action, "review");
+});

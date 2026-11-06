@@ -406,3 +406,86 @@ test("additional case indices stay distinct even when the original plan occupies
   assert.equal(quality.nextCandidate(reserved).seed, 1000000001);
   assert.equal(quality.nextCandidate(reserved).seed, 1000000002);
 });
+
+// A differential input outside the brute-force oracle's small domain is an invalid test configuration made by
+// small-make.cpp: the oracle's timeout (or memory limit) and an oversized input are reported as such, and no solution
+// is judged on that input
+const { detailsOf } = require("./aiFailure.ts");
+const { DIFFERENTIAL_INPUT_BYTES } = require("./aiQuality.ts");
+const sandboxFailure = (kind, message) => {
+  const error = new Error(message);
+  const { describe } = require("./aiFailure.ts");
+  return describe(error, { kind, execution: { status: kind === "time_limit" ? "TimeLimitExceeded" : "MemoryLimitExceeded", timeMs: 5001 } });
+};
+
+for (const [kind, label] of [["time_limit", "time"], ["memory_limit", "memory"]])
+  test(`the oracle's ${label} limit on a differential input blames the small-case generator, and nothing is judged on it`, async () => {
+    const ran = [];
+    const environment = fake();
+    const execute = environment.execute;
+    environment.execute = async (name, input, parameters) => {
+      ran.push(name);
+      // The fourth case index makes an input the exponential oracle can't solve in time
+      if (name === "quality-oracle" && input.toString() === "4") throw sandboxFailure(kind, "oracle stopped");
+      return execute(name, input, parameters);
+    };
+    const quality = new AiQuality(request(), environment);
+    const error = await quality.runDifferential().then(() => null, failure => failure);
+    assert.ok(error, "the differential test stops");
+    assert.match(error.message, new RegExp(`oracle exceeded its ${label} limit on a differential input of 1 bytes`));
+    const details = detailsOf(error);
+    assert.equal(details.kind, "oracle_domain_exceeded");
+    assert.equal(details.role, "quality-small-make");
+    assert.equal(details.phase, "quality-differential");
+    assert.equal(details.subtask, 1);
+    assert.equal(details.scenarioIndex, 3);
+    assert.equal(details.data.input.toString(), "4");
+    // The oracle's measurement stays as evidence
+    assert.equal(details.execution.timeMs, 5001);
+    // Neither the reference solution nor any other program ran on the input the oracle couldn't solve
+    const last = ran.lastIndexOf("quality-oracle");
+    assert.deepEqual(ran.slice(last + 1), []);
+  });
+
+test("a differential input larger than a small case is refused before the oracle or the validator run", async () => {
+  const ran = [];
+  const environment = fake();
+  const execute = environment.execute;
+  let validated = 0;
+  environment.validate = async () => {
+    validated++;
+  };
+  environment.execute = async (name, input, parameters) => {
+    ran.push(name);
+    if (name === "quality-small-make" && parameters[1] === "2") return Buffer.alloc(DIFFERENTIAL_INPUT_BYTES + 1, 0x31);
+    return execute(name, input, parameters);
+  };
+  const quality = new AiQuality(request(), environment);
+  const error = await quality.runDifferential().then(() => null, failure => failure);
+  assert.match(error.message, new RegExp(`differential input of ${DIFFERENTIAL_INPUT_BYTES + 1} bytes, more than`));
+  assert.equal(detailsOf(error).kind, "oracle_domain_exceeded");
+  assert.equal(detailsOf(error).role, "quality-small-make");
+  assert.deepEqual(ran.slice(ran.lastIndexOf("quality-small-make") + 1), []);
+  assert.equal(validated, 2, "only the cases before it were validated");
+  // Exactly the limit is still a small case
+  const fits = fake();
+  const fitsExecute = fits.execute;
+  fits.execute = async (name, input, parameters) =>
+    name === "quality-small-make" && parameters[1] === "1"
+      ? Buffer.alloc(DIFFERENTIAL_INPUT_BYTES, 0x31)
+      : fitsExecute(name, input, parameters);
+  const outcome = await new AiQuality(request(), fits).runDifferential().then(() => null, failure => failure);
+  assert.notEqual(detailsOf(outcome)?.kind, "oracle_domain_exceeded");
+});
+
+test("an oracle that crashes or disagrees is still the oracle's failure", async () => {
+  const crashing = fake();
+  const execute = crashing.execute;
+  crashing.execute = async (name, input, parameters) => {
+    if (name === "quality-oracle") throw sandboxFailure("runtime_error", "oracle crashed");
+    return execute(name, input, parameters);
+  };
+  const error = await new AiQuality(request(), crashing).runDifferential().then(() => null, failure => failure);
+  assert.equal(detailsOf(error).kind, "runtime_error");
+  assert.equal(detailsOf(error).role, "quality-oracle");
+});
