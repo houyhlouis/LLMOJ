@@ -1594,6 +1594,7 @@ declare namespace ApiTypes {
     filterByOwner?: boolean;
     filterNonpublic?: boolean;
   }
+  export interface QueryStudyListsRequestDto {}
   export interface QuerySubmissionRequestDto {
     locale: "en_US" | "zh_CN";
     problemId: number;

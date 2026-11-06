@@ -129,9 +129,34 @@ test("study lists: owner only, saved on top of the loaded version, notes kept (r
       error: "INVALID"
     });
 
-    // Listing: starred first, then the most recently changed
+    // Listing: in ID order, smallest first, as the problem set lists problems (a starred list keeps its place)
     await service.save(owner, keeps.id, 1, { ...changes("Kept", [item(1)]), starred: true });
-    assert.equal((await service.listOwned(owner))[0].id, keeps.id);
+    const ids = (await service.listOwned(owner)).map(x => x.id);
+    assert.deepEqual(ids, [...ids].sort((a, b) => a - b));
+    assert.deepEqual(ids, [id, keeps.id, old.id]);
+
+    // A page of lists: ID order, the page size asked for, the number that match and of all lists; titles searched
+    // without regard to letter case and with % and _ as themselves; archived lists only when asked for
+    const more = [];
+    for (const title of ["Trees", "DP 100%", "dp basics", "Strings_2", "Archived DP"])
+      more.push((await service.save(owner, undefined, undefined, changes(title, []))).id);
+    await service.save(owner, more[4], 1, { ...changes("Archived DP", []), archived: true });
+    const page = async query => {
+      const result = await service.queryOwned(owner, { skipCount: 0, takeCount: 3, ...query });
+      return { ids: result.lists.map(x => x.id), count: result.count, total: result.total };
+    };
+    assert.deepEqual(await page({}), { ids: [id, keeps.id, old.id], count: 7, total: 8 });
+    assert.deepEqual(await page({ skipCount: 3 }), { ids: more.slice(0, 3), count: 7, total: 8 });
+    assert.deepEqual(await page({ skipCount: 6 }), { ids: [more[3]], count: 7, total: 8 });
+    assert.deepEqual(await page({ skipCount: 9 }), { ids: [], count: 7, total: 8 });
+    assert.deepEqual(await page({ archived: true, skipCount: 6 }), { ids: [more[3], more[4]], count: 8, total: 8 });
+    assert.deepEqual(await page({ keyword: "DP" }), { ids: [more[1], more[2]], count: 2, total: 8 });
+    assert.deepEqual(await page({ keyword: "dp", archived: true }), { ids: [more[1], more[2], more[4]], count: 3, total: 8 });
+    assert.deepEqual(await page({ keyword: "100%" }), { ids: [more[1]], count: 1, total: 8 });
+    assert.deepEqual(await page({ keyword: "%" }), { ids: [more[1]], count: 1, total: 8 });
+    assert.deepEqual(await page({ keyword: "s_2" }), { ids: [more[3]], count: 1, total: 8 });
+    assert.deepEqual(await page({ keyword: "_" }), { ids: [more[3]], count: 1, total: 8 });
+    assert.deepEqual(await service.queryOwned(other, { skipCount: 0, takeCount: 3 }), { lists: [], count: 0, total: 0 });
     assert.equal(await service.remove(owner, id), true);
     assert.equal(await service.findOwned(owner, id), null);
   } finally {

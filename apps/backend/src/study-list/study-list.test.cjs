@@ -94,3 +94,32 @@ test("problems are shown, or marked unavailable, as each one's access allows", a
   ]);
   await assert.rejects(controller.get({ id: 8 }, { id: 5 }), /Not Found/);
 });
+
+// Study lists are paged as the problem set is: at most the problem set's own limit on one request
+test("a page of study lists is no larger than a page of the problem set may be", async () => {
+  const asked = [];
+  const controller = new StudyListController(
+    {
+      queryOwned: async (user, query) => (
+        asked.push(query),
+        {
+          lists: [{ id: 3, title: "T", items: [{}, {}], starred: true, archived: false, updatedAt: new Date(0), ownerId: 9 }],
+          count: 1,
+          total: 2
+        }
+      )
+    },
+    { userHasPrivilege: async () => true },
+    { config: { queryLimit: { problemSet: 100 } } }
+  );
+  const user = { id: 9 };
+  assert.deepEqual(await controller.query(user, { skipCount: 0, takeCount: 50, keyword: "t" }), {
+    lists: [{ id: 3, title: "T", count: 2, starred: true, archived: false, updatedAt: new Date(0) }],
+    count: 1,
+    total: 2
+  });
+  await assert.rejects(controller.query(user, { skipCount: 0, takeCount: 101 }), /Bad Request/);
+  assert.equal(asked.length, 1);
+  const refused = new StudyListController({}, { userHasPrivilege: async () => false }, { config: {} });
+  await assert.rejects(refused.query(user, { skipCount: 0, takeCount: 1 }), /Forbidden/);
+});

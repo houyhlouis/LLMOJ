@@ -34,11 +34,33 @@ export class StudyListService {
     private readonly submissions: SubmissionService
   ) {}
 
-  /** The user's lists, starred first, then the most recently changed. */
+  /** The user's lists in ID order, as the problem set lists problems. */
   async listOwned(user: UserEntity): Promise<StudyListEntity[]> {
-    return await this.db
+    return await this.db.getRepository(StudyListEntity).find({ where: { ownerId: user.id }, order: { id: "ASC" } });
+  }
+
+  /**
+   * One page of the user's lists, as the problem set pages its problems: in ID order (smallest first), `takeCount`
+   * after `skipCount`, with the number of lists that match (and of all the user's lists). `keyword` matches titles (letter case aside), and archived
+   * lists are included only when asked for.
+   */
+  async queryOwned(
+    user: UserEntity,
+    query: { keyword?: string; archived?: boolean; skipCount: number; takeCount: number }
+  ): Promise<{ lists: StudyListEntity[]; count: number; total: number }> {
+    const builder = this.db
       .getRepository(StudyListEntity)
-      .find({ where: { ownerId: user.id }, order: { starred: "DESC", updatedAt: "DESC" } });
+      .createQueryBuilder("list")
+      .where("list.ownerId = :ownerId", { ownerId: user.id });
+    if (!query.archived) builder.andWhere("list.archived = :archived", { archived: false });
+    const keyword = query.keyword?.trim();
+    if (keyword) builder.andWhere("list.title LIKE :keyword", { keyword: `%${keyword.replace(/[\\%_]/g, "\\$&")}%` });
+    const [[lists, count], total] = await Promise.all([
+      builder.orderBy("list.id", "ASC").skip(query.skipCount).take(query.takeCount).getManyAndCount(),
+      // All of the user's lists, so an empty page can say whether only the search found none
+      this.db.getRepository(StudyListEntity).countBy({ ownerId: user.id })
+    ]);
+    return { lists, count, total };
   }
 
   async findOwned(user: UserEntity, id: number): Promise<StudyListEntity> {

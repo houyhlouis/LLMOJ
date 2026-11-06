@@ -27,33 +27,70 @@ import DifficultyRating from "@/components/DifficultyRating";
 import { StatusIcon } from "@/components/StatusText";
 import { EmojiRenderer } from "@/components/EmojiRenderer";
 import { getProblemDisplayName, getProblemIdString, getProblemUrl } from "@/pages/problem/utils";
+import { Pagination } from "@/components/Pagination";
 import problemSetStyle from "@/pages/problem/problem-set/ProblemSetPage.module.less";
 import style from "./StudyListPage.module.less";
 
 const empty = () => ({ title: "", description: "", items: [], starred: false, archived: false });
-const StudyLists = observer(({ id }: { id?: number | "new" }) => {
+
+// As many lists on a page as the problem set has problems, in the same order (smallest ID first)
+const LISTS_PER_PAGE = appState.serverPreference.pagination.problemSet;
+
+/** The list page's search, from its URL (as the problem set keeps its own) */
+interface StudyListQuery {
+  page: number;
+  keyword: string;
+  archived: boolean;
+}
+
+function queryString(query: Partial<StudyListQuery>) {
+  return {
+    ...(query.keyword ? { keyword: query.keyword } : {}),
+    ...(query.archived ? { archived: "" } : {}),
+    ...(query.page > 1 ? { page: String(query.page) } : {})
+  };
+}
+
+const StudyLists = observer(({ id, query }: { id?: number | "new"; query?: StudyListQuery }) => {
   const zh = appState.locale === "zh_CN",
     t = (a: string, b: string) => (zh ? a : b);
   const nav = useNavigationChecked();
   const _ = useLocalizer("problem_set");
   const isMobileOrPad = useScreenWidthWithin(0, 1024);
   const privateDescription = t("所有题单仅对创建者本人可见。", "Every study list is visible only to its owner.");
+  const page = query?.page || 1,
+    keyword = query?.keyword || "",
+    showArchived = !!query?.archived;
   const [lists, setLists] = useState<any[]>([]),
+    [count, setCount] = useState(0),
+    [total, setTotal] = useState(0),
     [list, setList] = useState<any>(empty),
     [details, setDetails] = useState<any[]>([]);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [editing, setEditing] = useState(id === "new"),
     [preview, setPreview] = useState(false);
-  const [filter, setFilter] = useState(""),
-    [showArchived, setShowArchived] = useState(false),
+  const [filter, setFilter] = useState(keyword),
     [confirmDelete, setConfirmDelete] = useState(false);
+  useEffect(() => setFilter(keyword), [keyword]);
+  // A change of the search goes into the URL, from the first page
+  const search = (change: Partial<StudyListQuery>) =>
+    nav.navigate({ query: queryString({ keyword, archived: showArchived, ...change, page: 1 }) });
   async function load() {
     setError("");
     setBusy(true);
     try {
-      if (!id) setLists((await extensionApi("studyList/list")).lists);
-      else if (id === "new") {
+      if (!id) {
+        const result = await extensionApi("studyList/query", {
+          keyword,
+          archived: showArchived,
+          skipCount: LISTS_PER_PAGE * (page - 1),
+          takeCount: LISTS_PER_PAGE
+        });
+        setLists(result.lists);
+        setCount(result.count);
+        setTotal(result.total);
+      } else if (id === "new") {
         setList(empty());
         setDetails([]);
         setEditing(true);
@@ -71,7 +108,7 @@ const StudyLists = observer(({ id }: { id?: number | "new" }) => {
   useEffect(() => {
     appState.enterNewPage(t("题单", "Study Lists"), "study_lists");
     load();
-  }, [id, appState.locale]);
+  }, [id, appState.locale, page, keyword, showArchived]);
   const modify = (key: string, value: any) => setList({ ...list, [key]: value });
   const changeItem = (index: number, value: any) =>
     modify(
@@ -102,9 +139,19 @@ const StudyLists = observer(({ id }: { id?: number | "new" }) => {
     }
   }
   const completed = details.filter(x => x.accepted).length;
-  const visibleLists = lists.filter(
-    x => (showArchived || !x.archived) && x.title.toLowerCase().includes(filter.toLowerCase())
-  );
+  // The server searched and paged them
+  const visibleLists = lists;
+  const pagination = (className: string) =>
+    count <= LISTS_PER_PAGE ? null : (
+      <div className={className}>
+        <Pagination
+          totalCount={count}
+          currentPage={page}
+          itemsPerPage={LISTS_PER_PAGE}
+          pageUrl={newPage => ({ query: queryString({ keyword, archived: showArchived, page: newPage }) })}
+        />
+      </div>
+    );
   const headerSearch = (
     <Search
       className={problemSetStyle.search}
@@ -114,6 +161,12 @@ const StudyLists = observer(({ id }: { id?: number | "new" }) => {
       showNoResults={false}
       input={{ fluid: isMobileOrPad, "aria-label": t("搜索题单", "Search lists") }}
       onSearchChange={(_, x) => setFilter(x.value)}
+      onKeyDown={(event: React.KeyboardEvent) => {
+        if (event.key === "Enter") search({ keyword: filter.trim().slice(0, 160) });
+      }}
+      onBlur={() => {
+        if (filter.trim() !== keyword) search({ keyword: filter.trim().slice(0, 160) });
+      }}
     />
   );
   const headerArchive = (
@@ -121,7 +174,7 @@ const StudyLists = observer(({ id }: { id?: number | "new" }) => {
       toggle
       label={t("显示已归档", "Show archived")}
       checked={showArchived}
-      onChange={(_, x) => setShowArchived(x.checked)}
+      onChange={(_, x) => search({ archived: x.checked })}
     />
   );
   const headerButtons = (
@@ -162,6 +215,7 @@ const StudyLists = observer(({ id }: { id?: number | "new" }) => {
               </div>
             </div>
           )}
+          {!busy && pagination(`${problemSetStyle.topPagination} ${problemSetStyle.pagination}`)}
           {busy ? (
             <Loader active inline="centered" />
           ) : visibleLists.length ? (
@@ -208,21 +262,17 @@ const StudyLists = observer(({ id }: { id?: number | "new" }) => {
                   ))}
                 </Table.Body>
               </Table>
+              {pagination(problemSetStyle.pagination)}
             </div>
           ) : (
             <Segment placeholder>
               <Header icon>
-                <Icon name={lists.length ? "search" : "list alternate outline"} />
-                {lists.length ? t("找不到符合条件的题单", "No matching study lists") : t("暂无题单", "No study lists")}
+                <Icon name={total ? "search" : "list alternate outline"} />
+                {total ? t("找不到符合条件的题单", "No matching study lists") : t("暂无题单", "No study lists")}
               </Header>
               <Segment.Inline>
-                {lists.length ? (
-                  <Button
-                    onClick={() => {
-                      setFilter("");
-                      setShowArchived(true);
-                    }}
-                  >
+                {total ? (
+                  <Button onClick={() => nav.navigate({ query: queryString({ archived: true }) })}>
                     {t("清除搜索条件", "Clear Query")}
                   </Button>
                 ) : (
@@ -521,7 +571,16 @@ const StudyLists = observer(({ id }: { id?: number | "new" }) => {
   );
 });
 export default mount({
-  "/": defineRoute(async () => <StudyLists key="list" />),
+  "/": defineRoute(async request => (
+    <StudyLists
+      key="list"
+      query={{
+        page: Math.max(1, parseInt(request.query.page) || 1),
+        keyword: String(request.query.keyword || "").slice(0, 160),
+        archived: request.query.archived != null
+      }}
+    />
+  )),
   "/new": defineRoute(async () => <StudyLists key="new" id="new" />),
   "/:id": defineRoute(async req => {
     const id = Number(req.params.id);

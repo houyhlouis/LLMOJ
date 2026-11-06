@@ -22,12 +22,24 @@ import {
 } from "class-validator";
 import { Type } from "class-transformer";
 
+import { StudyListEntity } from "./study-list.entity";
 import { StudyListService } from "./study-list.service";
 
 import { CurrentUser } from "../common/user.decorator";
+import { ConfigService } from "../config/config.service";
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
 
+/** A page of the user's lists, as the problem set pages its problems (and within the same limit) */
+class QueryStudyListsRequestDto {
+  @IsOptional() @IsString() @Length(0, 160) keyword?: string;
+
+  @IsOptional() @IsBoolean() archived?: boolean;
+
+  @IsInt() @Min(0) skipCount: number;
+
+  @IsInt() @Min(1) takeCount: number;
+}
 class StudyListIdDto {
   @IsInt() @Min(1) id: number;
 }
@@ -57,8 +69,20 @@ class SaveDto {
 export class StudyListController {
   constructor(
     private readonly studyLists: StudyListService,
-    private readonly privileges: UserPrivilegeService
+    private readonly privileges: UserPrivilegeService,
+    private readonly configService: ConfigService
   ) {}
+
+  private static summary(list: StudyListEntity) {
+    return {
+      id: list.id,
+      title: list.title,
+      count: list.items.length,
+      starred: list.starred,
+      archived: list.archived,
+      updatedAt: list.updatedAt
+    };
+  }
 
   private async authorized(user: UserEntity) {
     if (!user || !(await this.privileges.userHasPrivilege(user, UserPrivilegeType.ManageStudyLists)))
@@ -69,16 +93,16 @@ export class StudyListController {
   async list(@CurrentUser() user: UserEntity) {
     await this.authorized(user);
     const lists = await this.studyLists.listOwned(user);
-    return {
-      lists: lists.map(x => ({
-        id: x.id,
-        title: x.title,
-        count: x.items.length,
-        starred: x.starred,
-        archived: x.archived,
-        updatedAt: x.updatedAt
-      }))
-    };
+    return { lists: lists.map(StudyListController.summary) };
+  }
+
+  /** One page of the user's lists, in ID order, with as many lists on a page as the problem set has problems */
+  @Post("query")
+  async query(@CurrentUser() user: UserEntity, @Body() body: QueryStudyListsRequestDto) {
+    await this.authorized(user);
+    if (body.takeCount > this.configService.config.queryLimit.problemSet) throw new BadRequestException();
+    const { lists, count, total } = await this.studyLists.queryOwned(user, body);
+    return { lists: lists.map(StudyListController.summary), count, total };
   }
 
   @Post("get")
