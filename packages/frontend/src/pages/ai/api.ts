@@ -273,6 +273,7 @@ const errors: Record<string, [string, string]> = {
     "已有一次重放在运行（每个任务、每位用户同时只能运行一次重放），请等它结束。",
     "A replay is already running (one at a time for each job and each user). Wait for it to finish."
   ],
+  NO_SUCH_REPAIR: ["这次修复不存在，或没有保存它的修改。", "This repair doesn't exist, or its change wasn't kept."],
   INVALID_RETRY_MODE: [
     "这个任务不能以所选方式重试（例如所选程序不能修复）。请刷新后重新选择。",
     "The job can't be retried that way (e.g. the chosen program can't be repaired). Refresh and choose again."
@@ -309,6 +310,12 @@ const errors: Record<string, [string, string]> = {
     "没有适用样例，当前标程尚未通过样例校验。",
     "No applicable samples are available; the reference solution has not passed sample validation."
   ],
+  TUTORIAL_CORRECTION_UNAVAILABLE: [
+    "现在无法用标程替换题解中的代码。",
+    "The tutorials' code can't be replaced by the reference solution now."
+  ],
+  NO_SUCH_DISCUSSION: ["题解不存在。", "The tutorial doesn't exist."],
+  JOB_NOT_COMPLETED: ["任务尚未完成。", "The job hasn't completed."],
   TUTORIAL_REFERENCE_REJECTED: [
     "现有题解代码未通过编译或样例校验，已回退为独立生成标程。",
     "Existing tutorial code failed compilation or sample validation; an independent reference solution was generated instead."
@@ -342,6 +349,18 @@ export function aiError(value: string) {
       `These wrong or slow algorithms still pass: ${surviving[1]}. The new data was not activated. Retry generation.`
     );
   const [code, detail = ""] = String(value || "INTERNAL_ERROR").split(/:\s*/, 2);
+  if (code === "TUTORIAL_CORRECTION_UNAVAILABLE" && detail === "FILE_IO")
+    return aiText(
+      "题目要求读写指定文件，而标程使用标准输入输出，不能直接作为题解代码。",
+      "The problem reads and writes named files, and the reference solution uses standard input and output: it can't be the tutorials' code as it is."
+    );
+  if (code === "TUTORIAL_CORRECTION_UNAVAILABLE" && detail === "NOTHING_TO_CORRECT")
+    return aiText("题解中的代码已经是标程，无需替换。", "The tutorials' code is already the reference solution.");
+  if (code === "INVALID_AI_TUTORIAL" && detail === "CODE_NOT_REFERENCE")
+    return aiText(
+      "改写后的题解没有准确包含标程，题解未被修改。请重试。",
+      "The corrected tutorial didn't show exactly the reference solution, so the tutorial wasn't changed. Retry."
+    );
   if (code === "INVALID_AI_TUTORIAL") {
     if (detail === "UNSUPPORTED_NO_PARTIAL_SCORE_CLAIM")
       return aiText(
@@ -657,6 +676,31 @@ export interface AiRepairRevision {
   rejected?: "IDENTICAL" | "INVALID";
   test?: "passed" | "failed" | "unstable" | "untested";
   result?: string;
+  // The size of its change; the change itself is read with ai/repairChange
+  diff?: { added: number; removed: number; truncated: boolean };
+}
+
+/** A run of an AI job's programs, as the job kept it (review Part III, §8.4). */
+export interface AiRunRecord {
+  at: string;
+  operation: "generate" | "replay";
+  seconds: number;
+  // "passed", the kind of its failure, or a replay's outcome
+  result: string;
+  origin?: "local" | "judge";
+  reuse?: { builds: number; inputs: number };
+  // The repair whose program it ran first, or the repair a replay tested
+  repair?: number;
+}
+
+/** An AI job's model requests for one purpose, as it counted them; tokens are those providers reported. */
+export interface AiSpending {
+  requests: number;
+  failed: number;
+  searches: number;
+  inputTokens: number;
+  outputTokens: number;
+  unreported: number;
 }
 
 /** Why an AI job stopped for its owner instead of repairing a program by itself. */
@@ -721,6 +765,20 @@ export type AiScoringReason =
   | { code: "SUBTASK_ORDER" }
   | { code: "SUBTASK_LIMITS" | "CASE_LIMITS" | "CASE_POINTS"; subtask: number };
 
+/** An AI tutorial the job published, and what its code passed (review Part III, H08). */
+export interface AiTutorialView {
+  discussionId: number;
+  locale: "zh_CN" | "en_US";
+  status: "no-code" | "unchecked" | "passed-samples" | "rejected" | "qualified" | "superseded";
+  samplesPassed?: number;
+  // Why rejected code was rejected
+  kind?: string;
+  subject?: string;
+  reason?: string;
+  observationId?: string;
+  corrected?: string;
+}
+
 export interface AiJob {
   id: string;
   problemId?: number;
@@ -761,6 +819,9 @@ export interface AiJob {
     // Subtasks given more test cases than their share of points, so that their targets can be built (review Part III,
     // W05)
     caseCapacity?: AiCaseCapacity[];
+    // Its tutorials and what their code passed; whether their code can be replaced by the reference solution
+    tutorials?: AiTutorialView[];
+    tutorialCorrection?: "available" | "pending" | "NO_REFERENCE" | "FILE_IO";
     // The programs the job replaced, and why it stopped for its owner (review Part III, W04)
     repair?: {
       automatic: number;
@@ -771,6 +832,8 @@ export interface AiJob {
     };
     // The programs the published test data was made and checked with
     revision?: { digest: string; repairs: number };
+    // Its runs, and its model requests by purpose and as recorded (review Part III, §8.4)
+    evidence?: { runs: AiRunRecord[]; spending: Record<string, AiSpending>; usage?: AiSpending };
     helpers?: Array<{
       role: "checker" | "interactor" | "manager";
       origin: "problem" | "ai";

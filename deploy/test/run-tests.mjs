@@ -42,7 +42,7 @@ const BACKEND_SUITES = [
 
 const JUDGE_SUITES = [
   'apps/judge/src/aiQuality.test.cjs', 'apps/judge/src/aiEvidence.test.cjs', 'apps/judge/src/aiProfile.test.cjs',
-  'apps/judge/src/aiCheckpoint.test.cjs',
+  'apps/judge/src/aiCheckpoint.test.cjs', 'apps/judge/src/cancelScope.test.cjs',
   'apps/judge/src/task/hack/hack.test.cjs',
   'apps/judge/src/task/self-eval/self-eval.test.cjs',
   'apps/judge/src/rpc.test.cjs', 'apps/judge/src/executionScheduler.test.cjs', 'apps/judge/src/selfTestConfig.test.cjs',

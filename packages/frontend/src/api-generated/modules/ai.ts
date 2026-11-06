@@ -21,4 +21,7 @@ export const downloadFailureArtifact = createPostApi<ApiTypes.AiFailureArtifactD
   "ai/downloadFailureArtifact",
   {}
 );
+export const correctTutorial = createPostApi<ApiTypes.AiJobIdDto, void>("ai/correctTutorial", {});
+export const tutorialStatus = createPostApi<ApiTypes.AiTutorialStatusDto, void>("ai/tutorialStatus", {});
 export const replayFailure = createPostApi<ApiTypes.AiReplayFailureDto, void>("ai/replayFailure", {});
+export const repairChange = createPostApi<ApiTypes.AiRepairChangeDto, void>("ai/repairChange", {});

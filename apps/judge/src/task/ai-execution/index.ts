@@ -150,7 +150,8 @@ export default async function onAiExecution(task: Task<AiExecutionExtraInfo, AiE
             total: Number(event.total) || 0
           });
       },
-      () => rpc.isCanceled(task.taskId),
+      // The task's cancellation stops the program running at that moment (review Part III, H09)
+      { isCanceled: () => rpc.isCanceled(task.taskId), onCancel: callback => rpc.onCancel(task.taskId, callback) },
       { sampleDirectory: samples, outputRoot: output, evidenceDirectory: evidence, attemptId: task.taskId },
       task.taskId
     );

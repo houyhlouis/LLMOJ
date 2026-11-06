@@ -1,6 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
 import { Button, Message } from "semantic-ui-react";
-import { aiText, AiJob, AiRepairRevision, AiRepairReview } from "./api";
+import { aiCall, aiText, AiJob, AiRepairRevision, AiRepairReview } from "./api";
 import { failureKindName, programName } from "./AiFailureDetails";
 import style from "./Ai.module.less";
 
@@ -104,6 +104,49 @@ const resultText = (result?: string) =>
       ? aiText("之后的完整运行通过", "the run after it passed")
       : aiText(`之后的运行：${failureKindName(result)}`, `the run after it: ${failureKindName(result)}`);
 
+/** What a repair changed in its program, read when the owner asks for it (review Part III, §8.1). */
+export function RepairChange({ jobId, revision }: { jobId: string; revision: AiRepairRevision }) {
+  const [change, setChange] = useState<{ text: string; truncated: boolean }>(null),
+    [open, setOpen] = useState(false),
+    [error, setError] = useState("");
+  const toggle = async () => {
+    if (!open && !change)
+      try {
+        setChange(await aiCall("repairChange", { jobId, round: revision.round }));
+        setError("");
+      } catch (e) {
+        setError(e.message);
+        return;
+      }
+    setOpen(!open);
+  };
+  const { added, removed } = revision.diff;
+  return (
+    <>
+      {" "}
+      <Button size="mini" type="button" basic onClick={toggle}>
+        {open
+          ? aiText("隐藏修改", "Hide change")
+          : aiText(`查看修改（+${added} −${removed}）`, `Show change (+${added} −${removed})`)}
+      </Button>
+      {error && <span className={style.jobError}> {error}</span>}
+      {open && change && (
+        <pre className={style.repairDiff}>
+          {change.text.split("\n").map((line, index) => (
+            <span
+              key={index}
+              className={line.startsWith("+") ? style.diffAdded : line.startsWith("-") ? style.diffRemoved : undefined}
+            >
+              {`${line}\n`}
+            </span>
+          ))}
+          {change.truncated && aiText("……（修改过长，只显示开头）", "… (a long change: only its start is shown)")}
+        </pre>
+      )}
+    </>
+  );
+}
+
 /**
  * A job's repairs (review Part III, W04): the programs it replaced, each tested against the failure it repaired, and,
  * when it stopped for its owner, why and the programs they may have repaired.
@@ -177,6 +220,7 @@ export default function AiRepairs({
                   : aiText("任务自动修复", "made by the job")}
                 {` · ${testText(revision)}`}
                 {revision.result && ` · ${resultText(revision.result)}`}
+                {revision.diff && <RepairChange jobId={job.id} revision={revision} />}
               </li>
             ))}
           </ol>

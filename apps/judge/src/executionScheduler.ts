@@ -1,5 +1,7 @@
 import os from "os";
 
+import type { CancelScope } from "./cancelScope";
+
 export interface ExecutionReservation {
   /** The most memory (MiB) this work's sandboxes use at the same time. */
   memory?: number;
@@ -65,11 +67,35 @@ export class ExecutionScheduler {
     this.freeMemory = this.memoryBudget;
   }
 
-  /** Resolves with the function that releases the slot once it is admitted. */
-  async acquire({ memory = DEFAULT_RESERVATION, ai = false }: ExecutionReservation = {}): Promise<() => void> {
+  /**
+   * Resolves with the function that releases the slot once it is admitted. Work of a canceled `scope` leaves the queue
+   * at once and rejects with its error (review Part III, H09).
+   */
+  async acquire(
+    { memory = DEFAULT_RESERVATION, ai = false }: ExecutionReservation = {},
+    scope?: CancelScope
+  ): Promise<() => void> {
     const reserved = Math.min(Math.max(0, Math.ceil(Number(memory) || 0)), this.memoryBudget);
-    await new Promise<void>(start => {
-      this.waiting.push({ memory: reserved, ai, start });
+    await new Promise<void>((start, reject) => {
+      let off = () => undefined;
+      const entry: Waiting = {
+        memory: reserved,
+        ai,
+        start: () => {
+          off();
+          start();
+        }
+      };
+      this.waiting.push(entry);
+      if (scope)
+        off = scope.onCancel(() => {
+          const index = this.waiting.indexOf(entry);
+          if (index < 0) return;
+          this.waiting.splice(index, 1);
+          reject(scope.error());
+          // What waited behind it may go now
+          this.admit();
+        });
       this.admit();
     });
     let released = false;

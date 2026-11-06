@@ -94,6 +94,10 @@ declare namespace ApiTypes {
     filename: string;
     size: number;
   }
+  export interface AiRepairChangeDto {
+    jobId: string;
+    round: number;
+  }
   export interface AiReplayFailureDto {
     jobId: string;
     id: string;
@@ -105,6 +109,9 @@ declare namespace ApiTypes {
   }
   export interface AiTestDto {
     target: "llm" | "search";
+  }
+  export interface AiTutorialStatusDto {
+    discussionId: number;
   }
   export interface AiUsageQueryDto {
     days?: number;

@@ -111,3 +111,67 @@ test("defaults: undeclared work reserves the old per-slot estimate; budgets leav
   assert.deepEqual([defaultAiSlots(1), defaultAiSlots(2), defaultAiSlots(7)], [1, 1, 6]);
   assert.equal(new ExecutionScheduler(3, 1000, 10).aiSlots, 3);
 });
+
+// Review Part III, H09: an AI run's canceled work leaves the queue
+function scope() {
+  let canceled = false;
+  const callbacks = new Set();
+  return {
+    isCanceled: () => canceled,
+    onCancel(callback) {
+      if (canceled) {
+        callback();
+        return () => undefined;
+      }
+      callbacks.add(callback);
+      return () => callbacks.delete(callback);
+    },
+    error: () => Object.assign(new Error("Generation canceled"), { canceled: true }),
+    cancel() {
+      canceled = true;
+      for (const callback of [...callbacks]) callback();
+      callbacks.clear();
+    },
+    listening: () => callbacks.size
+  };
+}
+
+test("canceled work leaves the queue at once, and what waited behind it goes", async () => {
+  const scheduler = new ExecutionScheduler(1, 1000, 1);
+  const log = [];
+  const running = request(scheduler, { memory: 100, ai: true }, log, "running");
+  await flush();
+  const run = scope();
+  let rejected = null;
+  scheduler.acquire({ memory: 100, ai: true }, run).then(
+    () => log.push("canceled one admitted"),
+    error => (rejected = error)
+  );
+  request(scheduler, { memory: 100, ai: true }, log, "next");
+  await flush();
+  assert.equal(scheduler.status.waiting, 2);
+  run.cancel();
+  await flush();
+  assert.equal(rejected?.canceled, true);
+  assert.equal(scheduler.status.waiting, 1, "out of the queue before any slot is free");
+  running.release();
+  await flush();
+  assert.deepEqual(log, ["running", "next"]);
+});
+
+test("an already canceled scope is never admitted; admitted work stops listening", async () => {
+  const scheduler = new ExecutionScheduler(2, 1000, 2);
+  const canceled = scope();
+  canceled.cancel();
+  await assert.rejects(scheduler.acquire({ memory: 100 }, canceled), error => error.canceled);
+  assert.equal(scheduler.status.freeSlots, 2);
+  assert.equal(scheduler.status.waiting, 0);
+  const live = scope();
+  const release = await scheduler.acquire({ memory: 100 }, live);
+  assert.equal(live.listening(), 0, "the queue no longer listens once it's admitted");
+  // Canceling afterwards changes nothing here: the caller releases its slot
+  live.cancel();
+  assert.equal(scheduler.status.freeSlots, 1);
+  release();
+  assert.equal(scheduler.status.freeSlots, 2);
+});

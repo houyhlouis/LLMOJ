@@ -40,6 +40,16 @@ function normalize(row: Record<string, unknown>) {
           : Number(row[field]);
   return result;
 }
+/** A job's provider requests: model requests, searches, failed ones, reported tokens, and those without usage. */
+export interface AiJobUsage {
+  requests: number;
+  searches: number;
+  failed: number;
+  inputTokens: number;
+  outputTokens: number;
+  unreported: number;
+}
+
 @Injectable()
 export class AiUsageService {
   @Inject(AiAdmissionService) private readonly admission?: AiAdmissionService;
@@ -102,6 +112,32 @@ export class AiUsageService {
       await repository.insert({ id: randomUUID(), ownerId, jobId: jobId || null, ...metadata, responseHash });
       await this.admission?.settle(manager, ownerId, jobId, record, reservationId, confirmed, responseHash);
     });
+  }
+
+  /** What each of the owner's jobs used, as the requests were recorded (review Part III, §8.4). */
+  // `since`: when the oldest of the jobs was created (no request of a job is older), so that the query reads only the
+  // owner's recent requests, by the (ownerId, createdAt) index
+  async jobTotals(ownerId: number, jobIds: string[], since?: Date): Promise<Map<string, AiJobUsage>> {
+    const totals = new Map<string, AiJobUsage>();
+    if (!jobIds.length) return totals;
+    const rows: Record<string, unknown>[] = await this.db.query(
+      `SELECT jobId, SUM(target = 'llm') AS requests, SUM(target = 'search') AS searches, SUM(success = 0) AS failed,
+        SUM(inputTokens) AS inputTokens, SUM(outputTokens) AS outputTokens,
+        SUM(target = 'llm' AND operation = 'generate' AND usageReported = 0) AS unreported
+       FROM ai_usage WHERE ownerId = ?${since ? " AND createdAt >= ?" : ""} AND jobId IN (?) GROUP BY jobId`,
+      // A minute earlier, for clock rounding
+      since ? [ownerId, new Date(since.getTime() - 60000), jobIds] : [ownerId, jobIds]
+    );
+    for (const row of rows)
+      totals.set(String(row.jobId), {
+        requests: Number(row.requests || 0),
+        searches: Number(row.searches || 0),
+        failed: Number(row.failed || 0),
+        inputTokens: Number(row.inputTokens || 0),
+        outputTokens: Number(row.outputTokens || 0),
+        unreported: Number(row.unreported || 0)
+      });
+    return totals;
   }
 
   async report(ownerId: number, days = 30) {

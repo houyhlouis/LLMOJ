@@ -20,7 +20,7 @@ import { SaveAiConfigurationDto, StartAiJobDto } from "./ai.dto";
 import { normalizeLlmConfiguration } from "./ai-validation";
 import { resolveAiImportType } from "./ai-import-type";
 
-import { AiUsageService } from "./ai-usage.service";
+import { AiJobUsage, AiUsageService } from "./ai-usage.service";
 import { AiAdmissionService } from "./ai-admission.service";
 import { AiConfigurationService } from "./ai-configuration.service";
 import { AiJobCoordinator } from "./ai-job-coordinator.service";
@@ -28,6 +28,8 @@ import { AiWorkflowService } from "./ai-workflow.service";
 import { AiEvidenceService, AiFailureSummary } from "./ai-evidence.service";
 import { AiReplayService } from "./ai-replay.service";
 import { AI_REPAIR_LIMITS, AiRepairState } from "./ai-repair";
+import { AiPurpose, AiRunRecord, AiSpending } from "./ai-session";
+import { tutorialCorrectionRefusal, tutorialViews } from "./ai-tutorial-binding";
 
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeType } from "../user/user-privilege.service";
@@ -61,6 +63,14 @@ async function boundedDiagnosticCall<T>(userId: number, work: () => Promise<T>):
   }
 }
 
+/** Whether a job's tutorials can have their code replaced by its reference solution: "available", or why not. */
+function tutorialCorrection(job: AiJobEntity) {
+  if (job.state.tutorialCorrection) return ["queued", "running"].includes(job.status) ? "pending" : undefined;
+  if (job.status !== "completed") return undefined;
+  const refusal = tutorialCorrectionRefusal(job.state, job.state.plan?.fileIo || null);
+  return refusal === "NOTHING_TO_CORRECT" ? undefined : refusal || "available";
+}
+
 /** A job's repairs as its owner sees them. */
 function repairView(job: AiJobEntity) {
   const repairs = job.state.repair as AiRepairState;
@@ -68,11 +78,26 @@ function repairView(job: AiJobEntity) {
   return {
     automatic: repairs.automatic,
     limits: { automatic: AI_REPAIR_LIMITS.automatic, total: AI_REPAIR_LIMITS.total },
-    // Without the failures' signatures, which only the job compares
-    revisions: repairs.revisions.map(revision => ({ ...revision, signature: undefined })),
+    // Without the failures' signatures, which only the job compares, and with only the size of each change (its text
+    // is read with repairChange)
+    revisions: repairs.revisions.map(revision => ({
+      ...revision,
+      signature: undefined,
+      diff: revision.diff
+        ? { added: revision.diff.added, removed: revision.diff.removed, truncated: revision.diff.truncated }
+        : undefined
+    })),
     review: job.status === "failed" ? repairs.review : undefined,
     pending: repairs.pending
   };
+}
+
+/** A job's runs and requests as its owner sees them; the totals are the recorded requests (see AiUsageService). */
+function evidenceView(job: AiJobEntity, usage?: AiJobUsage) {
+  const runs = (job.state.runs as AiRunRecord[]) || [];
+  const spending = job.state.spending as Partial<Record<AiPurpose, AiSpending>>;
+  if (!runs.length && !spending && !usage) return undefined;
+  return { runs, spending: spending || {}, ...(usage ? { usage } : {}) };
 }
 
 /**
@@ -356,7 +381,11 @@ export class AiService {
     return { paused, userDailyTokens, userDailyRequests, jobRequests };
   }
 
-  private serialize(job: AiJobEntity, observations?: { count: number; failure?: AiFailureSummary }) {
+  private serialize(
+    job: AiJobEntity,
+    observations?: { count: number; failure?: AiFailureSummary },
+    usage?: AiJobUsage
+  ) {
     return {
       id: job.id,
       problemId: job.problemId,
@@ -401,9 +430,15 @@ export class AiService {
         caseCapacity: job.state.caseAllocation?.capacity?.length ? job.state.caseAllocation.capacity : undefined,
         // A scoring change that waits for the owner's approval
         scoringReview: job.status === "failed" ? job.state.scoringReview : undefined,
+        // The job's tutorials and what their code passed (review Part III, H08), and whether their code can be
+        // replaced by the reference solution now (correctTutorial)
+        tutorials: tutorialViews(job.state),
+        tutorialCorrection: tutorialCorrection(job),
         // The programs the job replaced, and why it stopped for its owner (review Part III, W04)
         repair: repairView(job),
-        revision: job.state.generated?.revision
+        revision: job.state.generated?.revision,
+        // Its runs, and what its model requests were for and used (review Part III, §8.4)
+        evidence: evidenceView(job, usage)
       }
     };
   }
@@ -416,8 +451,13 @@ export class AiService {
       take: 50
     });
     const observations = await this.evidence?.summaries(jobs);
+    const usage = await this.usage?.jobTotals(
+      user.id,
+      jobs.map(job => job.id),
+      jobs.length ? jobs[jobs.length - 1].createdAt : undefined
+    );
     return {
-      jobs: jobs.map(job => this.serialize(job, observations?.get(job.id))),
+      jobs: jobs.map(job => this.serialize(job, observations?.get(job.id), usage?.get(job.id))),
       paused: (await this.coordinator.policy()).paused
     };
   }
@@ -489,6 +529,14 @@ export class AiService {
     return { replay: await this.replays.start(user, job, problem, value.id) };
   }
 
+  /** What a repair changed in its program (review Part III, §8.1): a unified diff, its start if it's long. */
+  async repairChange(user: UserEntity, value: { jobId: string; round: number }) {
+    const job = await this.evidenceJob(user, value.jobId);
+    const revision = ((job.state.repair as AiRepairState)?.revisions || []).find(item => item.round === value.round);
+    if (!revision?.diff) throw new AiError("NO_SUCH_REPAIR");
+    return { round: revision.round, role: revision.role, from: revision.from, to: revision.to, ...revision.diff };
+  }
+
   /** A part of an artifact of a failed run, from `offset`. */
   async failureArtifact(
     user: UserEntity,
@@ -507,6 +555,30 @@ export class AiService {
     const url = await this.evidence.downloadLink(job, value.id, value.role);
     await this.coordinator.recordAiAudit(user, "evidence.download", job, { observationId: value.id, role: value.role });
     return { url };
+  }
+
+  /**
+   * Reopens a completed job's tutorial step to replace its tutorials' code with the reference solution its test data
+   * was made and checked with (review Part III, H08); nothing else of the job runs again. (A failed job hasn't
+   * finished its test data step: its tutorials are corrected after a retry.)
+   */
+  async correctTutorial(user: UserEntity, id: string) {
+    await this.coordinator.requirePrivilege(user, UserPrivilegeType.UseAi);
+    const job = await this.jobs.findOneBy({ id, ownerId: user.id });
+    if (!job) throw new AiError("NO_SUCH_JOB");
+    if (job.status !== "completed" || !job.problemId) throw new AiError("JOB_NOT_COMPLETED");
+    const problem = await this.coordinator.editable(user, job.problemId);
+    const snapshot = await this.workflow.problemSnapshot(problem);
+    const state = this.workflow.tutorialCorrectionState(job, problem, snapshot);
+    await this.coordinator.requeue(user, job, () => state, ["completed"]);
+    await this.coordinator.recordAiAudit(user, "job.correct-tutorial", job);
+    this.coordinator.wake();
+    return {};
+  }
+
+  /** What an AI tutorial's code passed, for anyone who may read the tutorial (null when no AI job published it). */
+  async tutorialStatus(user: UserEntity, discussionId: number) {
+    return { tutorial: await this.workflow.tutorialStatus(user, discussionId) };
   }
 
   async retry(user: UserEntity, id: string, retryFrom?: AiRetryFrom, role?: string) {

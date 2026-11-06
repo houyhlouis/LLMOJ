@@ -12,7 +12,7 @@ import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 
 import { DataSource, EntityManager, In, Repository } from "typeorm";
 
-import { AiJobEntity } from "./ai.entity";
+import { AiJobEntity, AiJobStatus } from "./ai.entity";
 import { AiError } from "./ai.types";
 import { isAllowedPrivateHost } from "./ai-provider";
 import { StartAiJobDto } from "./ai.dto";
@@ -23,7 +23,8 @@ import { AiUsageService } from "./ai-usage.service";
 import { AiAdmissionService } from "./ai-admission.service";
 import { AiConfigurationService } from "./ai-configuration.service";
 
-import { withAiRuntime, aiWorkerLockName } from "./ai-runtime";
+import { withAiRuntime, aiWorkerLockName, AiUsageRecord } from "./ai-runtime";
+import { tallyUsage } from "./ai-session";
 
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
@@ -165,8 +166,16 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Queues the user's failed job again, with the state it resumes from. */
-  async requeue(user: UserEntity, job: AiJobEntity, retryState: () => AiJobEntity["state"]) {
+  /**
+   * Queues the user's failed job again (or one in `statuses`: a completed job reopened for one step), with the state
+   * it resumes from.
+   */
+  async requeue(
+    user: UserEntity,
+    job: AiJobEntity,
+    retryState: () => AiJobEntity["state"],
+    statuses: AiJobStatus[] = ["failed"]
+  ) {
     await this.db.transaction(async manager => {
       await manager.findOne(UserEntity, { where: { id: user.id }, lock: { mode: "pessimistic_write" } });
       const repository = manager.getRepository(AiJobEntity);
@@ -182,10 +191,10 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
       if (!job.error?.startsWith("RESPONSE_RECOVERY_INTERRUPTED"))
         await manager.delete(AiResponseCheckpointEntity, { ownerId: user.id, jobId: job.id });
       const updated = await repository.update(
-        { id: job.id, ownerId: user.id, status: "failed" },
+        { id: job.id, ownerId: user.id, status: In(statuses) },
         { status: "queued", error: null, state: retryState() }
       );
-      if (!updated.affected) throw new AiError("JOB_NOT_FAILED");
+      if (!updated.affected) throw new AiError(statuses.includes("completed") ? "JOB_NOT_COMPLETED" : "JOB_NOT_FAILED");
     });
   }
 
@@ -317,6 +326,15 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
     return withAiRuntime(
       {
         ...context,
+        // A job's requests are also counted by what they were for, with the job (see ai-session.ts)
+        ...(job
+          ? {
+              record: async (record: AiUsageRecord, reservationId?: string) => {
+                tallyUsage(job.state, job.step, record);
+                await context.record(record, reservationId);
+              }
+            }
+          : {}),
         signal,
         allowPrivateNetwork: async () => await this.isSiteAdministrator(ownerId),
         ...(this.endpointPolicies

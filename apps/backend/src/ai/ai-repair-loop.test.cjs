@@ -273,9 +273,27 @@ test("an alternative that doesn't compile is repaired alone; every other program
       signature: undefined,
       observationId: undefined,
       test: "passed",
-      result: "passed"
+      result: "passed",
+      // What it changed (review Part III, section 8.1)
+      diff: {
+        text: "@@ -1,2 +1,2 @@\n #include <cstdio>\n-int main(){/* alt */return 0;}\n+int main(){/* alt fixed */return 0;}\n",
+        added: 1,
+        removed: 1,
+        truncated: false
+      }
     }
   );
+  // Each run of the programs is kept with the job: the failed one, the replay that tested the repair, the one after
+  assert.deepEqual(
+    f.job.state.runs.map(run => [run.operation, run.result, run.repair ?? null]),
+    [
+      ["generate", "compile_error", null],
+      ["replay", "not_reproduced", 1],
+      ["generate", "passed", 1]
+    ]
+  );
+  assert(f.job.state.runs.every(run => run.seconds >= 0 && !Number.isNaN(Date.parse(run.at))));
+  assert.deepEqual(f.job.state.runs[2].reuse, { builds: 0, inputs: 0 });
   // The budget was persisted before the model was asked, and the repair audited
   const spent = f.log.checkpoints.findIndex(item => item.step === "testdata.repair");
   assert.equal(f.log.checkpoints[spent].state.repair.automatic, 1);

@@ -110,6 +110,15 @@ export class AiFailureArtifactDto extends AiFailuresDto {
   @IsOptional() @IsInt() @Min(0) @Max(2147483647) offset?: number;
 }
 
+export class AiRepairChangeDto extends AiFailuresDto {
+  // The repair's round (1, 2, …)
+  @IsInt() @Min(1) @Max(1000) round: number;
+}
+
+export class AiTutorialStatusDto {
+  @IsInt() @Min(1) discussionId: number;
+}
+
 export class AiReplayFailureDto extends AiFailuresDto {
   // The observation
   @IsString() @Length(36, 36) id: string;

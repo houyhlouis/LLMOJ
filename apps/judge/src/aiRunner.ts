@@ -38,6 +38,8 @@ import { Disposer } from "./posixUtils";
 import { CompileResultSuccess } from "./compile";
 import { AiQuality, QualityRequest, QualityVerdict, qualitySources, validateQuality } from "./aiQuality";
 import { describe, detailsOf, reclassify, within } from "./aiFailure";
+import { CancelScope, runInTurn } from "./cancelScope";
+import { CanceledError } from "./error";
 import { keepFailure, pinEvidence, profileOf, sourceHashesOf } from "./aiEvidence";
 import { legacyProfiles, programDirectory, programSandbox, PROGRAM_FILE, roleProfile } from "./aiProfile";
 import {
@@ -1647,17 +1649,35 @@ async function replayFailure(
 }
 
 /**
+ * How an AI run's requester cancels it: whether it has, and a notification when it does (the local runner's socket
+ * closes, or the queued task is canceled). With a notification, the program running at that moment stops at once
+ * (review Part III, H09); a bare predicate is only checked between steps.
+ */
+export type AiRunCancel = (() => boolean) | Pick<CancelScope, "isCanceled" | "onCancel">;
+
+// A canceled run's error: its failure is "canceled", never a program's verdict
+const canceledRun = () => describe(new CanceledError("Generation canceled"), { kind: "canceled" });
+
+function runScope(cancel: AiRunCancel): CancelScope {
+  const { isCanceled, onCancel } =
+    typeof cancel === "function" ? { isCanceled: cancel, onCancel: (): (() => void) => () => undefined } : cancel;
+  return { isCanceled, onCancel, error: canceledRun };
+}
+
+/**
  * Runs a generation within the runner's limits: at most 8 are admitted at once, 3 run while the others wait, and each
  * has an execution budget from its number of program runs. `key` names it among the admitted ones (the job ID for the
- * local runner, the task ID for a queued task).
+ * local runner, the task ID for a queued task). Its programs run in the run's cancellation scope (see cancelScope.ts).
  */
 export async function runGeneration(
   request: Request,
   emit: Emit,
-  isCanceled: () => boolean,
+  cancel: AiRunCancel,
   layout?: GenerationLayout,
   key = request.jobId
 ) {
+  const scope = runScope(cancel);
+  const { isCanceled } = scope;
   for (const since = Date.now(); active.get(key)?.() && Date.now() - since < STOPPING_WAIT_MS;)
     // eslint-disable-next-line no-await-in-loop -- Polled until it has stopped
     await new Promise(resolve => {
@@ -1690,22 +1710,26 @@ export async function runGeneration(
     );
     const deadline = Date.now() + executionBudgetMs;
     emit({ type: "progress", phase: "queued", completed: 0, total: request.cases.length });
-    await generationQueue.add(() =>
-      // The job's builds and inputs stay while it runs
-      holdingJob(request.jobId, () =>
-        generate(
-          request,
-          emit,
-          () => {
-            if (isCanceled()) throw new Error("Generation canceled");
-            if (Date.now() > deadline)
-              throw new Error(
-                `Generation exceeded its ${Math.ceil(executionBudgetMs / 60000)}-minute execution budget`
-              );
-          },
-          layout
+    // A run canceled while it waits for its turn leaves the queue at once (review Part III, H09)
+    await runInTurn(
+      run => generationQueue.add(run),
+      scope,
+      () =>
+        // The job's builds and inputs stay while it runs
+        holdingJob(request.jobId, () =>
+          generate(
+            request,
+            emit,
+            () => {
+              if (isCanceled()) throw canceledRun();
+              if (Date.now() > deadline)
+                throw new Error(
+                  `Generation exceeded its ${Math.ceil(executionBudgetMs / 60000)}-minute execution budget`
+                );
+            },
+            layout
+          )
         )
-      )
     );
   } finally {
     active.delete(key);
@@ -1794,7 +1818,19 @@ export async function startAiRunner() {
             // And the job's builds and inputs
             await discardJob(request.jobId);
             emit({ type: "complete", cleaned: true });
-          } else await runGeneration(request, emit, () => socket.destroyed);
+          } else
+            // The backend closes the connection to cancel the run
+            await runGeneration(request, emit, {
+              isCanceled: () => socket.destroyed,
+              onCancel: callback => {
+                if (socket.destroyed) {
+                  callback();
+                  return () => undefined;
+                }
+                socket.once("close", callback);
+                return () => socket.off("close", callback);
+              }
+            });
         } catch (error) {
           emit({
             type: "error",

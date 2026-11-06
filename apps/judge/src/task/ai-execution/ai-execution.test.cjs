@@ -38,6 +38,7 @@ function fixture(t, generation, options = {}) {
   for (const [uuid, data] of Object.entries(stored)) fs.writeFileSync(path.join(store, uuid), data);
   const calls = { ensured: [], uploads: [], requested: [], progress: [], layouts: [], downloads: [] };
   let canceled = false;
+  const listeners = new Set();
   const onAiExecution = load({
     winston: { __esModule: true, default: { error: () => {}, warn: () => {} } },
     "../../config": { __esModule: true, default: { dataStore: path.join(root, "data") } },
@@ -45,6 +46,15 @@ function fixture(t, generation, options = {}) {
       __esModule: true,
       default: {
         isCanceled: () => canceled,
+        onCancel: (taskId, callback) => {
+          assert.equal(taskId, "bbbbbbbb-0000-4000-8000-000000000003");
+          if (canceled) {
+            callback();
+            return () => undefined;
+          }
+          listeners.add(callback);
+          return () => listeners.delete(callback);
+        },
         ensureNotCanceled: () => {
           if (canceled) throw new CanceledError();
         },
@@ -87,7 +97,13 @@ function fixture(t, generation, options = {}) {
       extraInfo,
       reportProgressRaw: progress => calls.progress.push(progress)
     });
-  return { run, calls, root };
+  // The server cancels the task (rpc.cancelTask)
+  const cancel = () => {
+    canceled = true;
+    for (const callback of [...listeners]) callback();
+    listeners.clear();
+  };
+  return { run, calls, root, cancel, listeners };
 }
 
 const jobId = "cccccccc-0000-4000-8000-000000000004";
@@ -200,6 +216,26 @@ test("a canceled run reports nothing more", async t => {
   await assert.rejects(run(extraInfo), CanceledError);
   assert.deepEqual(calls.uploads, []);
   assert.equal(calls.progress.some(progress => progress.finished), false);
+});
+
+// Review Part III, H09: the run hears of the task's cancellation at once, so that the program running then stops
+test("the task's cancellation reaches the run while its programs run", async t => {
+  const heard = [];
+  const task = fixture(t, async (request, emit, layout, cancel) => {
+    assert.equal(cancel.isCanceled(), false);
+    // As a sandbox does while its program runs
+    const off = cancel.onCancel(() => heard.push("stop the program"));
+    task.cancel();
+    assert.deepEqual(heard, ["stop the program"], "told at once, not at its next step");
+    assert.equal(cancel.isCanceled(), true);
+    off();
+    // The stopped program's error, as the runner throws it
+    throw new Error("Generation canceled");
+  });
+  await assert.rejects(task.run(extraInfo), CanceledError);
+  assert.equal(task.listeners.size, 0, "nothing listens any more");
+  assert.equal(task.calls.progress.some(progress => progress.finished), false, "a canceled run reports nothing more");
+  assert.deepEqual(task.calls.uploads, []);
 });
 
 // A failed run's evidence (review Part III, W01): uploaded before the failure is reported and the workspace removed

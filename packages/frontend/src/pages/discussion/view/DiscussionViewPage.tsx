@@ -35,6 +35,7 @@ import {
   Link
 } from "@/utils/hooks";
 import { getDiscussionDisplayTitle } from "../utils";
+import { AiTutorialStatus } from "@/pages/ai/AiTutorialBinding";
 import toast from "@/utils/toast";
 import UserLink from "@/components/UserLink";
 import formatDateTime from "@/utils/formatDateTime";
@@ -1051,6 +1052,10 @@ let DiscussionViewPage: React.FC<DiscussionViewPageProps> = props => {
         </div>
         {!isMobile && <div className={style.actions}>{actions}</div>}
       </div>
+      {/* What an AI tutorial's code passed (review Part III, H08) */}
+      {discussion.meta.type === "Solution" && discussion.problem && (
+        <AiTutorialStatus discussionId={discussion.meta.id} />
+      )}
       <div className={style.items + (isMobile ? " " + style.mobile : "")}>
         <DiscussionItem
           type="Discussion"

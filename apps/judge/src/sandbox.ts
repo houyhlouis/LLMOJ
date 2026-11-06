@@ -7,6 +7,7 @@ import config from "./config";
 import { MappedPath, safelyJoinPath, OverridableRecord, merge } from "./utils";
 import rpc from "./rpc";
 import { CanceledError } from "./error";
+import { currentCancelScope } from "./cancelScope";
 import { FileDescriptor } from "./posixUtils";
 import * as fsNative from "./fsNative";
 import { launcher, LauncherSandbox } from "./launcherClient";
@@ -154,10 +155,16 @@ function openStandardFile(
 }
 
 /**
- * @param taskId If not null, it is used to determine if and be notified when the current is canceled.
+ * @param taskId If not null, it is used to determine if and be notified when the current is canceled. If null, the
+ * current cancellation scope (an AI run's, see cancelScope.ts) is, if there's one.
  */
 export async function startSandbox(taskId: string, sandboxConfig: SandboxConfig) {
-  if (taskId) rpc.ensureNotCanceled(taskId);
+  const scope = taskId ? null : currentCancelScope();
+  const ensureNotCanceled = () => {
+    if (taskId) rpc.ensureNotCanceled(taskId);
+    else if (scope?.isCanceled()) throw scope.error();
+  };
+  ensureNotCanceled();
 
   if (sandboxConfig.runtimeInitialization) {
     const initialized = await runSandbox(taskId, {
@@ -203,7 +210,7 @@ export async function startSandbox(taskId: string, sandboxConfig: SandboxConfig)
       })
     );
 
-  if (taskId) rpc.ensureNotCanceled(taskId);
+  ensureNotCanceled();
 
   // Descriptors go to the launcher with the request; the program gets them at the same numbers as here.
   const passed: number[] = [];
@@ -262,24 +269,30 @@ export async function startSandbox(taskId: string, sandboxConfig: SandboxConfig)
     for (const fd of opened) fs.closeSync(fd);
   }
 
-  const resultPromise = taskId
-    ? // eslint-disable-next-line no-async-promise-executor
-      new Promise<Sandbox.SandboxResult>(async (resolve, reject) => {
-        const off = rpc.onCancel(taskId, () => {
-          sandbox.stop();
-        });
+  const resultPromise =
+    taskId || scope
+      ? // eslint-disable-next-line no-async-promise-executor
+        new Promise<Sandbox.SandboxResult>(async (resolve, reject) => {
+          const stop = () => {
+            sandbox.stop();
+          };
+          const off = taskId ? rpc.onCancel(taskId, stop) : scope.onCancel(stop);
 
-        try {
-          const result = await sandbox.waitForStop();
-          off();
-          if (rpc.isCanceled(taskId)) reject(new CanceledError());
-          else resolve(result);
-        } catch (e) {
-          off();
-          reject(e);
-        }
-      })
-    : sandbox.waitForStop();
+          try {
+            const result = await sandbox.waitForStop();
+            off();
+            if (taskId ? rpc.isCanceled(taskId) : scope.isCanceled())
+              reject(taskId ? new CanceledError() : scope.error());
+            else resolve(result);
+          } catch (e) {
+            off();
+            reject(e);
+          }
+        })
+      : sandbox.waitForStop();
+  // Canceled before its caller waits for it (an interaction waits for the other program first): not an unhandled
+  // rejection, which would end the judge. The caller still gets it from waitForStop.
+  resultPromise.catch(() => undefined);
 
   return {
     waitForStop: () => resultPromise,

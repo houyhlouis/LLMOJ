@@ -90,7 +90,18 @@ const ACTIVE_LIMIT = 5 * 60 * 60 * 1000;
 const REDIS_KEY_SWEEP_TURN = "ai-execution:sweep-turn";
 const ACTIVE_STATES = [AiExecutionState.Queued, AiExecutionState.Running];
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+// Ends when `signal` aborts: a cancelled job's run is cancelled at once, not at the next poll (review Part III, H09)
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>(resolve => {
+    let timer: ReturnType<typeof setTimeout> = null;
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
+  });
 const requestObject = (taskId: string) => `${OBJECT_PREFIX}${taskId}/request.json`;
 // A replay's kept files, as objects and their content (the judge gets links to them when it takes the task)
 const transfersObject = (taskId: string) => `${OBJECT_PREFIX}${taskId}/transfers.json`;
@@ -724,7 +735,7 @@ export class AiExecutionService
           );
         if (Date.now() > deadline) throw new AiError("SANDBOX_TIMEOUT");
         // eslint-disable-next-line no-await-in-loop -- Polled in turn
-        await sleep(POLL_INTERVAL);
+        await sleep(POLL_INTERVAL, signal);
       }
     } catch (error) {
       // A job that lost its lease (another backend runs it now) attaches to the run again; otherwise nobody waits for
@@ -858,12 +869,16 @@ export class AiExecutionService
     }
     const serialized = Buffer.from(JSON.stringify(keyed));
     if (serialized.length > MAX_REQUEST) throw new AiError("SAMPLES_TOO_LARGE");
+    // A job's own replay (testing a repair, confirming a time limit) ends with the job: its cancellation cancels the
+    // replay on the judge machine at once (review Part III, H09)
+    const signal = currentAiRuntime()?.signal;
+    if (signal?.aborted) throw aiCancellationError(signal);
     const taskId = await this.dispatch(job.id, key, "replay", serialized, [], transfers);
     try {
       return await this.waitFor(
         taskId,
         keyed,
-        undefined,
+        signal,
         async () => undefined,
         async () => undefined,
         async execution => {

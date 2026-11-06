@@ -17,6 +17,7 @@ import {
 
 import { AiError } from "./ai.types";
 import { jobProgram } from "./ai-replay";
+import type { AiProgramChange } from "./ai-session";
 import type { StoredAiArtifact, StoredAiObservation } from "./ai-observation.entity";
 
 export const AI_REPAIR_LIMITS = Object.freeze({
@@ -106,6 +107,8 @@ export interface AiRepairRevision {
   test?: "passed" | "failed" | "unstable" | "untested";
   // How the next run of all the programs ended: it passed, or the kind of its failure
   result?: string;
+  // What it changed in the program (see ai-session.ts); not kept for a rejected proposal
+  diff?: AiProgramChange;
 }
 
 /** A job's repairs, kept in its state. */

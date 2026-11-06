@@ -2,6 +2,7 @@ import config from "./config";
 import { ensureDirectoryEmpty } from "./utils";
 import { Disposer } from "./posixUtils";
 import { ExecutionScheduler, ExecutionReservation } from "./executionScheduler";
+import { currentCancelScope } from "./cancelScope";
 
 const availableWorkingDirectories = config.taskWorkingDirectories;
 
@@ -24,7 +25,13 @@ export async function runTaskQueued<T>(
   reservation: ExecutionReservation,
   task: (taskWorkingDirectory: string, disposer?: Disposer) => Promise<T>
 ) {
-  const release = await executionScheduler.acquire(reservation);
+  // Work of a canceled AI run leaves the queue, and never starts once admitted (review Part III, H09)
+  const scope = currentCancelScope();
+  const release = await executionScheduler.acquire(reservation, scope);
+  if (scope?.isCanceled()) {
+    release();
+    throw scope.error();
+  }
   const taskWorkingDirectory = availableWorkingDirectories.pop();
   const disposer = new Disposer();
   try {

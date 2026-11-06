@@ -6,7 +6,9 @@ import { aiCall, aiText, aiError, actionName, AiJob, AiRetryFrom } from "./api";
 import AiFailureDetails, { failureKindName, programName } from "./AiFailureDetails";
 import AiScoringReview, { AiJudgingSummary, AiRunSummary } from "./AiScoringReview";
 import AiRepairs from "./AiRepairs";
+import AiTutorialBinding from "./AiTutorialBinding";
 import AiCoverage from "./AiCoverage";
+import AiEvidence from "./AiEvidence";
 import style from "./Ai.module.less";
 
 export default observer(function AiJobs({
@@ -24,6 +26,11 @@ export default observer(function AiJobs({
     [paused, setPaused] = useState(false),
     [error, setError] = useState("");
   const running = useRef(new Set<string>());
+  // The Failure Inbox (review Part III, §8.1): jobs that stopped for their owner's decision
+  const [onlyWaiting, setOnlyWaiting] = useState(false);
+  const waiting = jobs.filter(
+    job => job.status === "failed" && (job.result.repair?.review || job.result.scoringReview)
+  );
   useEffect(() => {
     let mounted = true;
     const refresh = async () => {
@@ -79,9 +86,20 @@ export default observer(function AiJobs({
           {heading}
         </Header>
       )}
+      {!problemId && waiting.length > 0 && (
+        <Message info size="small" className={style.inbox}>
+          {aiText(
+            `${waiting.length} 个任务在等待你的决定。`,
+            `${waiting.length} ${waiting.length === 1 ? "job is" : "jobs are"} waiting for your decision.`
+          )}{" "}
+          <Button size="mini" type="button" basic onClick={() => setOnlyWaiting(!onlyWaiting)}>
+            {onlyWaiting ? aiText("显示全部任务", "Show all jobs") : aiText("只显示这些任务", "Show only these")}
+          </Button>
+        </Message>
+      )}
       {jobs.length > 0 && (
         <div className={style.jobs}>
-          {jobs.slice(0, problemId ? 3 : 20).map(job => {
+          {(onlyWaiting && !problemId && waiting.length ? waiting : jobs).slice(0, problemId ? 3 : 20).map(job => {
             const active = ["queued", "running"].includes(job.status);
             return (
               <div className={style.job} key={job.id}>
@@ -252,7 +270,7 @@ export default observer(function AiJobs({
                       {aiError(warning)}
                     </p>
                   ))}
-                {job.result.discussionIds && (
+                {job.result.discussionIds && !job.result.tutorials?.length && (
                   <p className={style.jobDetail}>
                     {Object.entries(job.result.discussionIds).map(([locale, id], index) => (
                       <React.Fragment key={locale}>
@@ -262,6 +280,11 @@ export default observer(function AiJobs({
                     ))}
                   </p>
                 )}
+                <AiTutorialBinding
+                  job={job}
+                  busy={changing === job.id}
+                  onCorrect={() => change("correctTutorial", job.id)}
+                />
                 {job.status === "failed" && (
                   <p className={style.jobError} role="alert">
                     {aiError(job.error || "INTERNAL_ERROR")}
@@ -283,6 +306,7 @@ export default observer(function AiJobs({
                     {job.result.failure.subject && ` · ${job.result.failure.subject}`}
                   </p>
                 )}
+                <AiEvidence job={job} />
                 <AiFailureDetails job={job} />
               </div>
             );

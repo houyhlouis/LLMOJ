@@ -148,12 +148,12 @@ export function AiRunSummary({ result }: { result: AiJob["result"] }) {
     execution.reuse.builds &&
       aiText(
         `复用 ${execution.reuse.builds} 个已编译程序`,
-        `${execution.reuse.builds} programs taken from earlier builds`
+        `${execution.reuse.builds} ${execution.reuse.builds === 1 ? "program" : "programs"} taken from earlier builds`
       ),
     execution.reuse.inputs &&
       aiText(
         `复用同一生成器此前生成的 ${execution.reuse.inputs} 个输入`,
-        `${execution.reuse.inputs} inputs the same generator made in an earlier run`
+        `${execution.reuse.inputs} ${execution.reuse.inputs === 1 ? "input" : "inputs"} the same generator made in an earlier run`
       ),
     result.revision?.repairs &&
       aiText(

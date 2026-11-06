@@ -201,6 +201,7 @@ AI 测试数据的程序只在协议版本 8 的评测机上运行；见[分布�
 
 - 文件上传成功后才会创建任务。**取消上传** 可以停止准备或上传，离开页面也会取消它们。服务器接受任务之后，关闭页面不会停止任务：请在 **我的 AI 任务** 中取消。如果启动任务超时，请先在 **我的 AI 任务** 中查看，再决定是否重新导入。
 - 取消无法撤销服务商已经收取的费用，也无法撤销任务已经发布的内容。
+- 取消正在生成测试数据的任务，会立即停止它正在运行的程序（编译器、解答，或交互题中一起运行的解答和交互器），无论程序在本服务器还是判题机上运行；此后它的程序都不会再启动，包括正在排队等待的程序。被取消的运行不算失败：其中的内容既不会作为失败证据保留，也不会发布。
 - 生成测试数据时有程序失败，任务会修复出错的那个由它编写的程序、用同样的程序重新运行，或者暂停等待你的决定：见[生成失败时](#生成失败时)。上传的 checker、交互器、manager 和 grader 永远不会被改写，并保留各自的编译选项和限制。
 - 题解在发布前会检查其中关于出处和计分的说法；这不能代替你自己审阅其中的算法。
 - 如果浏览器无法读取文件（例如以 Snap 安装的 Firefox 读取 root 拥有的文件），请把文件复制到桌面用户拥有的文件夹。不要关闭浏览器的沙箱。
@@ -269,6 +270,17 @@ AI 任务运行程序失败时，会在删除这次运行的工作文件之前�
 
 证据与站点的文件存放在一起，是 `temporary/ai-evidence/` 下的临时对象，过期后由后端删除；失败记录保存在 `ai_observation` 表中。在 `web` 站点上，评测机会先上传失败运行的证据，再报告失败；后端重启期间报告的失败，会成为任务再次运行时的结果（不会重新运行），或由每 10 分钟一次的清理记录下来。
 
+## 任务的证据与开销
+
+**我的 AI 任务** 中的每个测试数据任务都有一行 **证据与开销**：
+
+- **模型请求**，按发出时的记录：共几次、失败几次、各用于什么（计划、编写程序、修复、题解、翻译、原题检索等）、服务商报告的 token 数、搜索次数，以及服务商未报告用量的请求数。任务失败前刚发出的请求计为“其他”。这些是次数，不是价格：LLMOJ 不知道服务商如何收费。
+- **程序运行**：共几次，总共用时多少。**显示运行记录** 会列出每一次：结果如何（全部程序通过，或失败的原因）、是否为某次修复之后的运行、或检验某次修复的重放、用时多少、在哪里运行，以及复用了多少已编译程序和输入。任务保留最近 20 次运行。
+
+在 **修复记录** 中，**查看修改** 以 diff 的形式显示一次修复对程序的修改：先列出删除的行，再列出新增的行，前后各附 3 行上下文。超过 64 KiB 的修改只显示开头部分。
+
+有任务暂停等待你的决定时，**我的 AI 任务** 顶部会显示有几个，**只显示这些任务** 会只列出它们，每个都附有需要你做的决定。
+
 ## AI 在哪里运行，密钥保存在哪里
 
 模型和搜索请求由后端发出。编译和运行生成的程序使用**同一台服务器**上的评测机，通过本机 socket 进行（`all` 模式）；在 `web` 站点上则通过评测队列使用远程评测机，结果相同。见[分布式评测](Distributed-Judging.zh-CN.md#ai)。
@@ -281,8 +293,20 @@ AI 配置保存在 `ai_configuration` 表中，每份都用站点主密钥以 AE
 
 AI 撰写的题解显示在题目的 **题解** 标签和作者的 **我的讨论** 中；见[题解](Solutions.zh-CN.md)。
 
+任务会先发布题解，再生成测试数据。生成测试数据时，任务把题解中的 C++ 代码作为标程在官方样例上运行；未通过的代码不会使用，改由模型另外编写标程，之后的修复也可能再次替换标程。任务卡片对每篇题解（题解-AI 和 Tutorial-AI）说明其代码当前的状态：
+
+- **题解中的代码尚未检查**（或 **题解中没有可运行的 C++ 程序**）；
+- **题解中的代码通过了全部 N 组官方样例；尚未发布测试数据**；
+- **题解中的代码未通过官方样例（……）**，附样例与信息，失败记录见 **失败详情**；
+- **题解中的代码就是生成并检验已发布测试数据的标程**；
+- **已发布的测试数据使用了另一份标程，题解中的代码没有作为标程检验**。
+
+题解页面也会向读者显示相同状态的简短说明，例如 **这篇 AI 题解中的代码未通过官方样例，因此不是本题的标程。** 说明只陈述代码通过了哪些检查，从不声称思路或证明已经验证。
+
+如果题解中的代码未通过或未被采用，而任务已完成并发布了测试数据，**在题解中改用标程的代码** 会围绕标程改写两篇题解：任务把标程原样放入每篇题解，在讲解描述的是另一种算法时改写讲解，并原地更新同一组讨论（链接、标题和可见性不变）。任务的其他步骤不会重新运行；改写结果若没有准确包含标程，则不做任何修改。若题目要求读写指定文件而标程使用标准输入输出，则不能进行这项改写。
+
 为传统题发布正式数据时，还会保存生成这些数据的 make.cpp、std.cpp 和输入校验器，供之后开启[自测](Self-Evaluation.zh-CN.md)的 NOI / OI 比赛使用。在 **配置 Self Eval** 中，**AI 生成正式数据与 Self Eval 程序** 会运行测试数据操作，并使用该管理员自己的 AI 配置和权限。自测会以任务检验这些程序时的时间和内存限制运行该数据生成器和输入校验器。
 
 ## 来源
 
-[ai.dto.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.dto.ts)、[ai.types.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.types.ts)、[ai-provider.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-provider.ts)、[ai-admission.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-admission.service.ts)、[ai-responses.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-responses.ts)、[ai.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.service.ts)、[ai-workflow.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-workflow.service.ts)、[ai-job-coordinator.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-job-coordinator.service.ts)、[ai-artifact-publisher.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-artifact-publisher.service.ts)、[ai-crypto.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-crypto.ts)、[ai-testdata-quality.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-testdata-quality.ts)、[aiQuality.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiQuality.ts)、[aiRunner.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiRunner.ts)、[aiEvidence.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiEvidence.ts)、[ai-evidence.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-evidence.service.ts)、[ai-observation.ts](https://github.com/houyhlouis/LLMOJ/blob/main/packages/judge-protocol/src/ai-observation.ts)。
+[ai.dto.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.dto.ts)、[ai.types.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.types.ts)、[ai-provider.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-provider.ts)、[ai-admission.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-admission.service.ts)、[ai-responses.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-responses.ts)、[ai.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai.service.ts)、[ai-workflow.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-workflow.service.ts)、[ai-job-coordinator.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-job-coordinator.service.ts)、[ai-artifact-publisher.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-artifact-publisher.service.ts)、[ai-crypto.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-crypto.ts)、[ai-testdata-quality.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-testdata-quality.ts)、[aiQuality.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiQuality.ts)、[aiRunner.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiRunner.ts)、[aiEvidence.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/aiEvidence.ts)、[ai-evidence.service.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-evidence.service.ts)、[ai-observation.ts](https://github.com/houyhlouis/LLMOJ/blob/main/packages/judge-protocol/src/ai-observation.ts)、[ai-session.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-session.ts)、[ai-tutorial-binding.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/backend/src/ai/ai-tutorial-binding.ts)、[cancelScope.ts](https://github.com/houyhlouis/LLMOJ/blob/main/apps/judge/src/cancelScope.ts)。

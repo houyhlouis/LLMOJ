@@ -33,6 +33,7 @@ const { AiExecutionEntity } = require("./ai-execution.entity.ts");
 const { AiExecutionService, aiExecutionBudget } = require("./ai-execution.service.ts");
 const { aiOperationKey } = require("./ai-operation.ts");
 const { AiError } = require("./ai.types.ts");
+const { withAiRuntime } = require("./ai-runtime.ts");
 const { AI_EXECUTION_PROTOCOL_VERSION } = require("@libreoj/judge-protocol");
 
 const configPath = process.env.LLMOJ_OPERATIONS_TEST_DB_CONFIG;
@@ -283,6 +284,25 @@ test("failures, cancellation, restarts and obsolete leases", { skip }, async t =
   assert.equal(await service.getTaskToBeSentToJudgeByTaskId(taskId, 4), null, "not sent any more");
   assert.equal(await service.onTaskProgress(taskId, { finished: false, phase: "generate" }), false);
 
+  // Review Part III, H09: the job's cancellation (its AbortSignal) cancels its run on the judge machine at once, not at
+  // the next poll of the run
+  job = { id: crypto.randomUUID() };
+  const controller = new AbortController();
+  const index = queue.enqueued.length;
+  const aborted = withAiRuntime({ ownerId: 1, jobId: job.id, signal: controller.signal, record: async () => {} }, () =>
+    service.run(job, request(job.id), async () => {}, async () => {})
+  );
+  aborted.catch(() => null);
+  ({ taskId } = await until(() => queue.enqueued[index], "the task"));
+  // Waiting between polls
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const abortedAt = Date.now();
+  controller.abort();
+  await assert.rejects(aborted, /JOB_CANCELLED/);
+  assert(gateway.canceled.includes(taskId), "canceled on the judge machine");
+  assert(Date.now() - abortedAt < 400, `within a poll interval (${Date.now() - abortedAt} ms)`);
+  assert.equal((await row(taskId)).state, "Canceled");
+
   // A job that stops waiting because another backend runs it now leaves its run to it
   job = { id: crypto.randomUUID() };
   let lost = false;
@@ -449,7 +469,7 @@ test("a result made under an older contract, or a run from before logical operat
 });
 
 test("a replay runs on a judge machine beside the job's runs, with links to the kept files signed when it's sent", { skip }, async t => {
-  const { service, queue, row, objects } = await fixture(t);
+  const { service, queue, row, objects, gateway } = await fixture(t);
   const job = { id: crypto.randomUUID() };
   const transfers = [
     { name: "replay.input", object: "temporary/ai-evidence/x/input", size: 4, sha256: "a".repeat(64) },
@@ -506,6 +526,20 @@ test("a replay runs on a judge machine beside the job's runs, with links to the 
   await service.onTaskFailed(failed.taskId, "Judging was interrupted 5 times");
   await assert.rejects(failing, /Judging was interrupted 5 times/);
   assert.equal(await row(failed.taskId), null);
+  // Review Part III, H09: the job's own replay (testing a repair) is cancelled with the job, at once
+  const controller = new AbortController();
+  const cancelled = withAiRuntime({ ownerId: 1, jobId: job.id, signal: controller.signal, record: async () => {} }, () =>
+    service.replay(job, replayRequest, transfers)
+  );
+  cancelled.catch(() => null);
+  const waiting = await until(() => queue.enqueued[3], "the job's replay");
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const abortedAt = Date.now();
+  controller.abort();
+  await assert.rejects(cancelled, /JOB_CANCELLED/);
+  assert(gateway.canceled.includes(waiting.taskId), "canceled on the judge machine");
+  assert(Date.now() - abortedAt < 400, `within a poll interval (${Date.now() - abortedAt} ms)`);
+  assert.equal(await row(waiting.taskId), null, "and removed");
   await service.discard(job.id);
 });
 

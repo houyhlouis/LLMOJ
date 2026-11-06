@@ -14,7 +14,9 @@ import {
   AiRetryJobDto,
   AiFailuresDto,
   AiFailureArtifactDto,
-  AiReplayFailureDto
+  AiReplayFailureDto,
+  AiRepairChangeDto,
+  AiTutorialStatusDto
 } from "./ai.dto";
 
 import { UserEntity } from "../user/user.entity";
@@ -98,8 +100,23 @@ export class AiController {
     return this.call(() => this.ai.downloadFailureArtifact(user, body));
   }
 
+  // Replaces a finished job's tutorials' code with its reference solution (owner only)
+  @Post("correctTutorial") correctTutorial(@CurrentUser() user: UserEntity, @Body() body: AiJobIdDto) {
+    return this.call(() => this.ai.correctTutorial(user, body.id));
+  }
+
+  // What an AI tutorial's code passed, for anyone who may read the tutorial
+  @Post("tutorialStatus") tutorialStatus(@CurrentUser() user: UserEntity, @Body() body: AiTutorialStatusDto) {
+    return this.call(() => this.ai.tutorialStatus(user, body.discussionId));
+  }
+
   // Runs a failure's kept input again with the same check (owner only); the replay is kept with the failure
   @Post("replayFailure") replayFailure(@CurrentUser() user: UserEntity, @Body() body: AiReplayFailureDto) {
     return this.call(() => this.ai.replayFailure(user, body));
+  }
+
+  // What a repair changed in its program (owner only, as the failures)
+  @Post("repairChange") repairChange(@CurrentUser() user: UserEntity, @Body() body: AiRepairChangeDto) {
+    return this.call(() => this.ai.repairChange(user, body));
   }
 }
