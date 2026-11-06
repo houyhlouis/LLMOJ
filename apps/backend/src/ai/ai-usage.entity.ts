@@ -40,6 +40,12 @@ export class AiUsageEntity {
 
   @Column({ type: "varchar", length: 64, nullable: true }) responseHash: string;
 
+  /** What the request was for when it was sent (review Part IV, W01); null on requests recorded before */
+  @Column({ type: "varchar", length: 20, nullable: true }) purpose: string;
+
+  /** The logical generation: a generation and the polls recovering its response share it; null for searches */
+  @Column({ type: "varchar", length: 36, nullable: true }) generationId: string;
+
   @CreateDateColumn() createdAt: Date;
 }
 

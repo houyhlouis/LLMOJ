@@ -49,6 +49,13 @@
       "decision": "not-reachable",
       "reason": "Reached only through proxy-agent's PAC support, to fetch a PAC file from an ftp: URL; the event report proxy is a configured http(s) or socks URL. get-uri accepts no basic-ftp with the fix (it requires ^5.3.1).",
       "reviewBy": "2027-01-31"
+    },
+    {
+      "advisory": "GHSA-qr28-fpjm-wq7f",
+      "package": "decode-uri-component",
+      "decision": "not-reachable",
+      "reason": "Reached only through minio's query-string 7, and minio only calls query-string's stringify, which encodes; decode-uri-component runs in parse. The fixed release (0.5.1) is an ES module that query-string 7 can't require.",
+      "reviewBy": "2027-01-31"
     }
   ]
 }

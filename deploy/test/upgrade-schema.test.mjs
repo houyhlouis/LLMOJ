@@ -257,6 +257,32 @@ test('the AI run columns of logical operations are added exactly once, with a ta
   assert.equal(AI_OPERATION_SQL.length, 3);
 });
 
+test('the AI request identity columns of ai_usage are added exactly once', async () => {
+  const { validateAiUsageIdentitySchema, AI_USAGE_IDENTITY_SQL, AI_USAGE_IDENTITY_COLUMNS } = await import('../ai-usage-identity-schema.mjs');
+  assert.deepEqual(validateQueries([...AI_USAGE_IDENTITY_SQL]), [...AI_USAGE_IDENTITY_SQL]);
+  assert.deepEqual(AI_USAGE_IDENTITY_COLUMNS, ['purpose', 'generationId']);
+  assert.deepEqual([...AI_USAGE_IDENTITY_SQL], [
+    'ALTER TABLE `ai_usage` ADD `purpose` varchar(20) NULL',
+    'ALTER TABLE `ai_usage` ADD `generationId` varchar(36) NULL'
+  ]);
+  const existing = { purpose: 'varchar(20)', generationId: 'varchar(36)' };
+  const fixture = (table, columns, changed = {}) => ({
+    query: async sql => sql.includes('information_schema.TABLES') ? [{ count: table ? 1 : 0 }]
+      : columns.map(columnName => ({ columnName, columnType: existing[columnName], isNullable: 'YES', defaultValue: null,
+        extra: '', comment: '', ...changed }))
+  });
+  await validateAiUsageIdentitySchema(fixture(true, []), [...AI_USAGE_IDENTITY_SQL]);
+  await validateAiUsageIdentitySchema(fixture(true, Object.keys(existing)), []);
+  await validateAiUsageIdentitySchema(fixture(false, []), []);
+  await validateAiUsageIdentitySchema(fixture(true, ['purpose']), AI_USAGE_IDENTITY_SQL.slice(1));
+  await assert.rejects(() => validateAiUsageIdentitySchema(fixture(true, []), []), /purpose column addition/);
+  await assert.rejects(() => validateAiUsageIdentitySchema(fixture(true, Object.keys(existing)), [...AI_USAGE_IDENTITY_SQL]),
+    /column addition/);
+  for (const changed of [{ isNullable: 'NO' }, { defaultValue: "''" }, { columnType: 'varchar(64)' }, { extra: 'x' }, { comment: 'x' }])
+    await assert.rejects(() => validateAiUsageIdentitySchema(fixture(true, Object.keys(existing), changed), []),
+      /Unsupported existing ai_usage/);
+});
+
 test('the AI failure evidence table is added exactly once', async () => {
   const { validateAiEvidenceSchema, AI_EVIDENCE_SQL, AI_OBSERVATION_CREATE_SQL } = await import('../ai-evidence-schema.mjs');
   assert.deepEqual(validateQueries([...AI_EVIDENCE_SQL]), [...AI_EVIDENCE_SQL]);

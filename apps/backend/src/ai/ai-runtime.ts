@@ -18,6 +18,10 @@ export interface AiRequestMetadata {
   operation: string;
   /** The most tokens a billable request can use: its output limit plus an upper estimate of its input. */
   reserveTokens?: number;
+  /** What the request is for, fixed when it is sent (review Part IV, W01) */
+  purpose?: string;
+  /** The logical generation it belongs to: a generation and its recovery polls share it */
+  generationId?: string;
 }
 /** Model generations and searches; polls, model listings and MCP handshakes aren't billed by providers. */
 export function isBillableRequest(metadata: Pick<AiRequestMetadata, "target" | "operation">): boolean {
@@ -75,6 +79,8 @@ export interface AiRuntimeContext {
   /** Site pause, budgets and concurrency, checked before every provider request; see AiAdmissionService. */
   admit?: (metadata: AiRequestMetadata) => Promise<AiAdmission>;
   record: (record: AiUsageRecord, reservationId?: string) => Promise<void>;
+  /** What a request sent now is for, unless withAiPurpose says (a job: its current step's purpose) */
+  purpose?: () => string | undefined;
   checkActive?: () => Promise<void>;
   loadResponse?: (requestHash: string) => Promise<AiResponseCheckpoint | null>;
   saveResponse?: (requestHash: string, value: AiResponseCheckpoint) => Promise<void>;
@@ -82,6 +88,18 @@ export interface AiRuntimeContext {
 const runtime = new AsyncLocalStorage<AiRuntimeContext>();
 export function withAiRuntime<T>(context: AiRuntimeContext, work: () => Promise<T>): Promise<T> {
   return runtime.run(context, work);
+}
+/**
+ * What the model requests made inside `work` are for (review Part IV, W01): fixed when each request is sent, so two
+ * requests running at once, or a request recorded just before its job fails, are attributed to what they were for, not
+ * to the job's step when they are recorded.
+ */
+const purposes = new AsyncLocalStorage<string>();
+export function withAiPurpose<T>(purpose: string, work: () => Promise<T>): Promise<T> {
+  return purposes.run(purpose, work);
+}
+export function currentAiPurpose(): string | undefined {
+  return purposes.getStore() ?? runtime.getStore()?.purpose?.();
 }
 export function currentAiRuntime() {
   return runtime.getStore();
@@ -175,6 +193,7 @@ export async function meterProviderRequest<T extends { data: ProviderResponse }>
   try {
     const request = { ...metadata };
     delete request.reserveTokens;
+    request.purpose = (metadata.purpose ?? currentAiPurpose())?.slice(0, 20);
     const start = Date.now();
     let result: T;
     let failure: unknown;

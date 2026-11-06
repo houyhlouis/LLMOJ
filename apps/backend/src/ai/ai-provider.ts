@@ -2,12 +2,15 @@ import http from "http";
 import https from "https";
 import { promises as dns } from "dns";
 import { isIP } from "net";
+import { randomUUID } from "crypto";
 
 import { AiError, LlmConfiguration, SearchConfiguration } from "./ai.types";
+
 import {
   meterProviderRequest,
   AiRequestMetadata,
   currentAiRuntime,
+  currentAiPurpose,
   awaitAiActive,
   aiCancellationError,
   estimateTokens,
@@ -353,6 +356,10 @@ export async function generateText(
   // High-effort generations can run beyond the old five-minute deadline. Search/model discovery keep their shorter limits.
   const reserveTokens =
     maxTokens + estimateTokens(system) + estimateTokens(prompt) + (image ? IMAGE_TOKEN_ESTIMATE : 0);
+  // The generation and the polls recovering its response are one logical generation, for one purpose fixed now
+  // (review Part IV, W01)
+  const generationId = randomUUID();
+  const purpose = currentAiPurpose();
   const request = async (suffix: string, payload: unknown, operation: string) => {
     const result = await providerRequest(
       endpoint(config.baseUrl, path) + suffix,
@@ -365,6 +372,8 @@ export async function generateText(
         host: new URL(config.baseUrl).hostname,
         model: config.model,
         operation,
+        generationId,
+        ...(purpose ? { purpose } : {}),
         ...(operation === "generate" ? { reserveTokens } : {})
       }
     );

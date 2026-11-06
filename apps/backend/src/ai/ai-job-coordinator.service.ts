@@ -24,7 +24,7 @@ import { AiAdmissionService } from "./ai-admission.service";
 import { AiConfigurationService } from "./ai-configuration.service";
 
 import { withAiRuntime, aiWorkerLockName, AiUsageRecord } from "./ai-runtime";
-import { tallyUsage } from "./ai-session";
+import { purposeOfStep, tallyUsage } from "./ai-session";
 
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
@@ -332,7 +332,9 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
               record: async (record: AiUsageRecord, reservationId?: string) => {
                 tallyUsage(job.state, job.step, record);
                 await context.record(record, reservationId);
-              }
+              },
+              // Fixed when each request is sent (review Part IV, W01)
+              purpose: () => purposeOfStep(job.step)
             }
           : {}),
         signal,

@@ -39,22 +39,34 @@ export function purposeOfStep(step: string): AiPurpose {
   return "programs";
 }
 
-/** A purpose's requests, as the job counted them. Tokens are those providers reported. */
+/**
+ * A purpose's requests, as the job counted them (review Part IV, IV-08): `generations` are the paid model generations
+ * it started; `requests` every model request sent, polls that recover a background response included (transport,
+ * not work). Tokens are those providers reported. `unreported` are generations whose usage no response reported
+ * (yet: a background generation's usage arrives with the poll that completes it).
+ */
 export interface AiSpending {
+  generations?: number;
   requests: number;
   failed: number;
   searches: number;
   inputTokens: number;
   outputTokens: number;
-  // Requests whose provider reported no usage
   unreported: number;
+  // Generations started without usage, waiting for the poll that reports it (bounded)
+  pending?: string[];
 }
 
-/** Counts a provider request of the job by what it was for (its step). */
+export function asPurpose(value: string | undefined): AiPurpose | undefined {
+  return (AI_PURPOSES as readonly string[]).includes(value as string) ? (value as AiPurpose) : undefined;
+}
+
+/** Counts a provider request of the job by what it was for: as sent, else (older callers) the job's step. */
 export function tallyUsage(state: Record<string, unknown>, step: string, record: AiUsageRecord) {
   const spending = (state.spending || {}) as Partial<Record<AiPurpose, AiSpending>>;
-  const purpose = purposeOfStep(step);
+  const purpose = asPurpose(record.purpose) ?? purposeOfStep(step);
   const item = spending[purpose] || {
+    generations: 0,
     requests: 0,
     failed: 0,
     searches: 0,
@@ -62,12 +74,26 @@ export function tallyUsage(state: Record<string, unknown>, step: string, record:
     outputTokens: 0,
     unreported: 0
   };
+  item.generations ??= 0;
   if (record.target === "search") item.searches++;
   else item.requests++;
   if (!record.success) item.failed++;
   item.inputTokens += record.inputTokens || 0;
   item.outputTokens += record.outputTokens || 0;
-  if (record.target !== "search" && !record.usageReported) item.unreported++;
+  if (record.target !== "search") {
+    const generation = record.operation === "generate";
+    if (generation) item.generations++;
+    const id = record.generationId;
+    if (generation && !record.usageReported) {
+      item.unreported++;
+      if (id && record.pendingResponseId) item.pending = [...(item.pending || []), id].slice(-50);
+    } else if (!generation && record.usageReported && id && item.pending?.includes(id)) {
+      // The poll that completed a background generation reported its usage
+      item.unreported = Math.max(0, item.unreported - 1);
+      item.pending = item.pending.filter(pending => pending !== id);
+    }
+    if (item.pending && !item.pending.length) delete item.pending;
+  }
   spending[purpose] = item;
   state.spending = spending;
 }

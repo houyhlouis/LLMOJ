@@ -9,6 +9,7 @@ import AiRepairs from "./AiRepairs";
 import AiTutorialBinding from "./AiTutorialBinding";
 import AiCoverage from "./AiCoverage";
 import AiEvidence from "./AiEvidence";
+import AiPlanIssues from "./AiPlanIssues";
 import style from "./Ai.module.less";
 
 export default observer(function AiJobs({
@@ -289,6 +290,9 @@ export default observer(function AiJobs({
                   <p className={style.jobError} role="alert">
                     {aiError(job.error || "INTERNAL_ERROR")}
                   </p>
+                )}
+                {job.status === "failed" && job.error?.startsWith("INVALID_AI_QUALITY_PLAN") && (
+                  <AiPlanIssues issues={job.result.planIssues} rejections={job.result.planRejections} />
                 )}
                 {job.status === "failed" && job.result.scoringReview && (
                   <AiScoringReview review={job.result.scoringReview} />

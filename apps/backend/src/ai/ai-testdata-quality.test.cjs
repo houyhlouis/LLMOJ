@@ -234,3 +234,82 @@ test("slow candidates require actual time or memory degeneration rather than wro
     invalidReceipt(result);
   }
 });
+
+// Review Part IV, IV-01/W01: complete JSON that breaks a rule is reported field by field, with a stable path and rule
+// (the report's probes P01-P10 and controls C01-C03). The rules themselves are unchanged in this work package.
+const { validateAiQualityPlan, describeAiPlanIssues, AiPlanError, aiPlanProposal } = require("./ai-testdata-quality.ts");
+const probe = edit => {
+  const value = quality();
+  edit(value);
+  const { plan, issues } = validateAiQualityPlan(JSON.parse(JSON.stringify(value)), subtasks);
+  assert.equal(plan, null, "rejected");
+  return issues.map(item => [item.path, item.rule, item.expected, item.actual, item.repairClass]);
+};
+
+test("every rejected field has its path and rule (probes P01-P10)", () => {
+  assert.deepEqual(probe(v => (v.targets[1].reason = "x".repeat(2001))), [["targets[1].reason", "maxLength", 2000, 2001, "restatement"]]);
+  assert.deepEqual(probe(v => (v.oracleMethod = "x".repeat(4001))), [["oracleMethod", "maxLength", 4000, 4001, "restatement"]]);
+  assert.deepEqual(probe(v => (v.targets[0].id = "a".repeat(49))), [["targets[0].id", "maxLength", 48, 49, "restatement"]]);
+  assert.deepEqual(probe(v => (v.targets[0].id = "Boundary")), [["targets[0].id", "pattern", "^[a-z][a-z0-9_-]*$", "Boundary", "format"]]);
+  assert.deepEqual(probe(v => (v.targets[0].subtasks = ["1", 3])), [["targets[0].subtasks[0]", "type", "integer", "string", "format"]]);
+  assert.deepEqual(probe(v => (v.targets[0].kind = "wrong or slow")), [
+    ["targets", "wrongTarget", 'a target of kind "wrong"', undefined, "content"],
+    ["targets[0].kind", "enum", "wrong|slow", "wrong or slow", "format"]
+  ]);
+  assert.deepEqual(probe(v => delete v.version), [["version", "required", 1, undefined, "format"]]);
+  assert.deepEqual(probe(v => (v.correctAlgorithms = ["a", "b", "c", "d", "e"])), [["correctAlgorithms", "maxItems", 4, 5, "restatement"]]);
+  assert.deepEqual(probe(v => (v.targets[1].subtasks = [3, 3])), [["targets[1].subtasks", "unique", undefined, undefined, "restatement"]]);
+  // P10: within the limit after trimming, over it before: still rejected, as before (trimming first is W02's change)
+  assert.deepEqual(probe(v => (v.targets[1].reason = `${"x".repeat(1999)}  `)), [["targets[1].reason", "maxLength", 2000, 2001, "restatement"]]);
+});
+
+test("controls: a complete plan is accepted; an unknown subtask and a plan without a wrong target stay rejected", () => {
+  assert.deepEqual(validateAiQualityPlan(quality(), subtasks).issues, []);
+  assert.deepEqual(probe(v => (v.targets[1].subtasks = [2])), [["targets[1].subtasks[0]", "reference", "1|3", 2, "reference"]]);
+  assert.deepEqual(probe(v => (v.targets = v.targets.filter(target => target.kind !== "wrong"))), [
+    ["targets", "wrongTarget", 'a target of kind "wrong"', undefined, "content"]
+  ]);
+});
+
+test("every issue is reported at once, and the error names them (sizes only, never the text)", () => {
+  const value = quality();
+  value.version = 2;
+  value.correctAlgorithms = ["same", " Same "];
+  value.targets[0].id = "independent";
+  value.targets[1].id = "independent";
+  value.targets[1].construction = "secret construction ".repeat(300);
+  const { issues } = validateAiQualityPlan(value, subtasks);
+  assert.deepEqual(
+    issues.map(item => `${item.path} ${item.rule}`),
+    [
+      "version const",
+      "correctAlgorithms unique",
+      "targets[0].id reserved",
+      "targets[1].id reserved",
+      "targets[1].construction maxLength"
+    ]
+  );
+  const error = new AiPlanError(issues);
+  assert.equal(error.code, "INVALID_AI_QUALITY_PLAN");
+  assert.equal(
+    error.message,
+    "INVALID_AI_QUALITY_PLAN: 5 invalid fields: version const 1, got 2; correctAlgorithms unique; targets[0].id reserved, got independent; targets[1].id reserved, got independent; targets[1].construction maxLength 4000, got 6000"
+  );
+  assert.doesNotMatch(error.message, /secret construction/);
+  assert.throws(() => normalizeAiQualityPlan(value, subtasks), error => error instanceof AiPlanError && error.issues.length === 5);
+  // A plan that isn't an object, and a long issue list is bounded
+  assert.deepEqual(validateAiQualityPlan([], subtasks).issues, [{ path: "", rule: "type", expected: "object", actual: "array", repairClass: "format" }]);
+  const many = quality();
+  many.correctAlgorithms = Array.from({ length: 60 }, () => 7);
+  assert.equal(validateAiQualityPlan(many, subtasks).issues.length, 40);
+  assert.match(describeAiPlanIssues(validateAiQualityPlan(many, subtasks).issues), /^40 invalid fields: .*and 34 more$/);
+});
+
+test("a rejected proposal is kept bounded: its issues and digest, its text only when small", () => {
+  const issues = [{ path: "version", rule: "required", expected: 1, repairClass: "format" }];
+  const small = aiPlanProposal({ a: 1 }, issues, 2);
+  assert.deepEqual([small.issues, small.candidate, small.rejected, small.hash.length], [issues, { a: 1 }, 2, 32]);
+  const large = aiPlanProposal({ text: "x".repeat(70000) }, issues, 1);
+  assert.equal(large.candidate, undefined);
+  assert.equal(large.hash.length, 32);
+});

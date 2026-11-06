@@ -409,8 +409,10 @@ export class ImageLoader {
         this.deadline ??= Date.now() + IMAGE_LIMITS.deadline;
         data = await this.slot(() => this.download(source.trim(), this.deadline));
       } else fail("Only images with a full http(s) address or a data URI can be included");
+      // An image that doesn't fit leaves the budget to the others
+      if (this.totalBytes + data.length > IMAGE_LIMITS.totalBytes)
+        fail("The statements' images are too large together");
       this.totalBytes += data.length;
-      if (this.totalBytes > IMAGE_LIMITS.totalBytes) fail("The statements' images are too large together");
       return identifyImage(data);
     } catch (error) {
       return { error: error instanceof ImageError ? error.message : "The image couldn't be downloaded" };

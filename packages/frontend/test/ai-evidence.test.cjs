@@ -71,6 +71,7 @@ const runs = [
   }
 ];
 
+// Jobs from before review Part IV's W01 counted requests only: each is shown as a generation
 test("a job's requests by purpose, the tokens reported, and its runs with how long they took", async () => {
   const h = componentHarness("pages/ai/AiEvidence.tsx", {
     props: {
@@ -91,7 +92,7 @@ test("a job's requests by purpose, the tokens reported, and its runs with how lo
   const line = text(h.all(node => node.type === "p"));
   assert.equal(
     line,
-    "Evidence and cost · 11 model requests (1 failed): plans 2, programs 7, repairs 1, other 1 · 27,500 tokens in, 10,300 out (the provider reported no usage for 1) · 2 searches · 3 runs of the programs, 1 min 19 s in all Show runs"
+    "Evidence and cost · 11 model generations (1 failed request): plans 2, programs 7, repairs 1, other 1 · 27,500 tokens in, 10,300 out (no usage reported for 1 generation) · 2 searches · 3 runs of the programs, 1 min 19 s in all Show runs"
   );
   await h.click("Button");
   assert.deepEqual(h.all(node => node.type === "li").map(text), [
@@ -134,7 +135,7 @@ test("without recorded totals the job's own counts are shown; a job without evid
   });
   assert.equal(
     text(counted.all(node => node.type === "p")),
-    "Evidence and cost · 1 model request: tutorial 1 · 100 tokens in, 50 out"
+    "Evidence and cost · 1 model generation: tutorial 1 · 100 tokens in, 50 out"
   );
   const none = componentHarness("pages/ai/AiEvidence.tsx", { props: { job: job(undefined) }, deps: aiApi({}, []) });
   assert.equal(text(none.all(() => true)[0]), "");
@@ -193,4 +194,77 @@ test("My AI jobs counts the jobs waiting for a decision and can show only them",
   assert.match(source, /jobs are"\} waiting for your decision\./);
   assert.match(source, /"Show only these"/);
   assert.match(source, /<AiEvidence job=\{job\} \/>/);
+});
+
+// Review Part IV, W01: generations apart from the polls that recover background answers, rejected plans, and the
+// cached and reasoning tokens providers reported
+test("generations are counted apart from polling requests, and rejected plans are shown", () => {
+  const failed = job({
+    runs: [],
+    spending: {
+      plan: spending(1, 1000, 400, { generations: 2, requests: 52 }),
+      programs: spending(1, 2000, 800, { generations: 1, requests: 52 })
+    },
+    usage: {
+      generations: 3,
+      requests: 104,
+      searches: 0,
+      failed: 0,
+      inputTokens: 3000,
+      outputTokens: 1200,
+      cachedTokens: 512,
+      reasoningTokens: 700,
+      unreported: 0
+    }
+  });
+  failed.result.planRejections = 1;
+  const h = componentHarness("pages/ai/AiEvidence.tsx", { props: { job: failed }, deps: aiApi({}, []) });
+  assert.equal(
+    text(h.all(node => node.type === "p")),
+    "Evidence and cost · 3 model generations: plans 2, programs 1; 101 more requests polled for background answers (not new generations) · 1 testing plan rejected for breaking the plan's rules · 3,000 tokens in, 1,200 out (of which 512 cached input, 700 reasoning output)"
+  );
+});
+
+test("a rejected plan's fields are listed in words, with sizes and the rule each broke", () => {
+  const issues = [
+    { path: "targets[1].reason", rule: "maxLength", expected: 2000, actual: 2438, repairClass: "restatement" },
+    { path: "targets[0].kind", rule: "enum", expected: "wrong|slow", actual: "wrong or slow", repairClass: "format" },
+    { path: "targets[0].subtasks[0]", rule: "type", expected: "integer", actual: "string", repairClass: "format" },
+    { path: "version", rule: "required", expected: 1, repairClass: "format" },
+    { path: "targets", rule: "wrongTarget", expected: 'a target of kind "wrong"', repairClass: "content" }
+  ];
+  const h = componentHarness("pages/ai/AiPlanIssues.tsx", { props: { issues, rejections: 2 }, deps: aiApi({}, []) });
+  assert.equal(
+    text(h.all(node => node.type === "p")),
+    "The AI returned a complete plan, but 5 fields break the plan's rules (2 plans of this job were rejected):"
+  );
+  assert.deepEqual(h.all(node => node.type === "li").map(text), [
+    "target 2 · reason: 2,438 characters, at most 2,000",
+    "target 1 · kind: must be one of wrong|slow, was wrong or slow",
+    "target 1 · subtask 1: should be integer, was string",
+    "version: missing",
+    "targets: needs at least one target of kind wrong"
+  ]);
+  const none = componentHarness("pages/ai/AiPlanIssues.tsx", { props: { issues: [] }, deps: aiApi({}, []) });
+  assert.equal(text(none.all(() => true)[0]), "");
+});
+
+test("purposes come from the usage records when they have them, so the last request before a failure isn't 'other'", () => {
+  const failed = job({
+    runs: [],
+    // The job's own count missed its last generation (it failed right after)
+    spending: { plan: spending(1, 1000, 400, { generations: 1, requests: 1 }) },
+    usage: {
+      generations: 2,
+      requests: 2,
+      searches: 0,
+      failed: 0,
+      inputTokens: 2000,
+      outputTokens: 800,
+      unreported: 0,
+      purposes: { plan: { generations: 2, requests: 2 } }
+    }
+  });
+  const h = componentHarness("pages/ai/AiEvidence.tsx", { props: { job: failed }, deps: aiApi({}, []) });
+  assert.equal(text(h.all(node => node.type === "p")), "Evidence and cost · 2 model generations: plans 2 · 2,000 tokens in, 800 out");
 });

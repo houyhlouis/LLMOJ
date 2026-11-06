@@ -37,7 +37,7 @@ const BACKEND_SUITES = [
   'apps/backend/src/common/*.test.cjs', 'apps/backend/src/metrics/*.test.cjs', 'apps/backend/src/redis/*.test.cjs',
   'apps/backend/src/file/file-maintenance.test.cjs', 'apps/backend/src/file/file-content-hash.test.cjs',
   'apps/backend/src/file/file-sealing.minio.test.cjs',
-  'apps/backend/src/archive/*.test.cjs'
+  'apps/backend/src/archive/*.test.cjs', 'apps/backend/src/statement-export/*.test.cjs'
 ];
 
 const JUDGE_SUITES = [

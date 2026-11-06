@@ -17,6 +17,7 @@ import { SEALED_UPLOAD_SQL, validateSealedUploadSchema } from './sealed-upload-s
 import { DATA_RETENTION_SQL, validateDataRetentionSchema } from './data-retention-schema.mjs';
 import { AI_EVIDENCE_SQL, validateAiEvidenceSchema } from './ai-evidence-schema.mjs';
 import { AI_OPERATION_SQL, validateAiOperationSchema } from './ai-operation-schema.mjs';
+import { AI_USAGE_IDENTITY_SQL, validateAiUsageIdentitySchema } from './ai-usage-identity-schema.mjs';
 export { FILE_SIZE_BIGINT_SQL, TEAM_FILE_SIZE_BIGINT_SQL, TEAM_QUOTA_DEFAULT_SQL } from './team-storage.mjs';
 export { TWO_FACTOR_SQL, TWO_FACTOR_TABLES } from './two-factor-schema.mjs';
 export { JUDGE_QUEUE_SQL, JUDGE_QUEUE_TABLES, JUDGE_CLIENT_DRAINING_SQL } from './judge-queue-schema.mjs';
@@ -28,6 +29,7 @@ export { SEALED_UPLOAD_SQL } from './sealed-upload-schema.mjs';
 export { DATA_RETENTION_SQL, DATA_RETENTION_TABLES } from './data-retention-schema.mjs';
 export { AI_EVIDENCE_SQL, AI_EVIDENCE_TABLES } from './ai-evidence-schema.mjs';
 export { AI_OPERATION_SQL, AI_OPERATION_COLUMNS } from './ai-operation-schema.mjs';
+export { AI_USAGE_IDENTITY_SQL, AI_USAGE_IDENTITY_COLUMNS } from './ai-usage-identity-schema.mjs';
 
 export class SchemaCompatibilityError extends Error {}
 
@@ -210,7 +212,7 @@ export function validateQueries(queries) {
         sql !== SUBMISSION_FAKE_EXPANSION_SQL && sql !== CONTEST_RULE_EXPANSION_SQL && sql !== CONTEST_RULE_OPTIONS_SQL && sql !== HACK_STANDARD_CONTENT_SQL && sql !== DISCUSSION_TYPE_ADD_SQL &&
         sql !== DISCUSSION_TYPE_INDEX_SQL && !TEAM_STORAGE_SQL.includes(sql) && !TWO_FACTOR_SQL.includes(sql) && !JUDGE_QUEUE_SQL.includes(sql) && sql !== JUDGE_CLIENT_DRAINING_SQL &&
         !DATA_VERSION_SQL.includes(sql) && !AI_BUDGET_SQL.includes(sql) && !RUNTIME_IDENTITY_SQL.includes(sql) && !AI_EXECUTION_SQL.includes(sql) && !SEALED_UPLOAD_SQL.includes(sql) &&
-        !DATA_RETENTION_SQL.includes(sql) && !AI_EVIDENCE_SQL.includes(sql) && !AI_OPERATION_SQL.includes(sql) &&
+        !DATA_RETENTION_SQL.includes(sql) && !AI_EVIDENCE_SQL.includes(sql) && !AI_OPERATION_SQL.includes(sql) && !AI_USAGE_IDENTITY_SQL.includes(sql) &&
         !communityCreateSql.has(normalizeGeneratedIndexes(sql))) {
       throw new SchemaCompatibilityError('Existing schema is outside this upgrader compatibility contract');
     }
@@ -277,6 +279,7 @@ export async function auditSchema(connection) {
   await validateDataRetentionSchema(connection, queries, SchemaCompatibilityError);
   await validateAiEvidenceSchema(connection, queries, SchemaCompatibilityError);
   await validateAiOperationSchema(connection, queries, SchemaCompatibilityError);
+  await validateAiUsageIdentitySchema(connection, queries, SchemaCompatibilityError);
   const migration = await inspectLegacyRegistration(connection);
   const solutions = await inspectVerifiedSolutions(connection);
   const teamStorage = await inspectTeamStorage(connection);
@@ -304,6 +307,7 @@ export async function applySchema(connection) {
   await validateDataRetentionSchema(connection, [], SchemaCompatibilityError);
   await validateAiEvidenceSchema(connection, [], SchemaCompatibilityError);
   await validateAiOperationSchema(connection, [], SchemaCompatibilityError);
+  await validateAiUsageIdentitySchema(connection, [], SchemaCompatibilityError);
   const migration = await migrateLegacyRegistration(connection);
   const remaining = await inspectLegacyRegistration(connection);
   if (remaining.pending || remaining.rejected || remaining.approvedHistory)

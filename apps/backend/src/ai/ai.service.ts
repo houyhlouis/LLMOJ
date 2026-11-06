@@ -428,6 +428,10 @@ export class AiService {
         corpus: job.state.generated?.corpus,
         // Subtasks given more cases than their points' share, so that their targets get one built (W05)
         caseCapacity: job.state.caseAllocation?.capacity?.length ? job.state.caseAllocation.capacity : undefined,
+        // The testing plan's rejected fields, while the job's latest proposal is rejected, and how many proposals
+        // the job had rejected: a completed request whose answer broke the plan's rules (review Part IV, W01)
+        planIssues: job.state.planProposal?.issues,
+        planRejections: job.state.planRejections || undefined,
         // A scoring change that waits for the owner's approval
         scoringReview: job.status === "failed" ? job.state.scoringReview : undefined,
         // The job's tutorials and what their code passed (review Part III, H08), and whether their code can be

@@ -437,6 +437,27 @@ test("tutorial fact errors are localized without rendering arbitrary backend det
   assert.match(api.actionName("repair-make"), /修复/);
 });
 
+// Review Part IV, W01: a rejected testing plan says how many fields broke the rules and that no program ran; the fields
+// themselves are listed with the job (AiPlanIssues), never the provider's text in the message
+test("a rejected testing plan is reported as invalid fields, not as an incomplete answer", () => {
+  const appState = { locale: "en_US", token: null };
+  const api = load("pages/ai/api.ts", {
+    axios: mockAxios(),
+    "@/utils/callApiWithFileUpload": {},
+    "@/appState": { appState }
+  });
+  const error = "INVALID_AI_QUALITY_PLAN: 2 invalid fields: targets[1].reason maxLength 2000, got 2438; version required 1";
+  assert.equal(
+    api.aiError(error),
+    "The testing plan has 2 invalid fields, so it was rejected. No programs have run. Retrying asks for a new plan."
+  );
+  assert.match(api.aiError("INVALID_AI_QUALITY_PLAN: 1 invalid field: version required 1"), /has 1 invalid field,/);
+  assert.doesNotMatch(api.aiError(error), /incomplete|targets\[1\]/);
+  assert.match(api.aiError("INVALID_AI_QUALITY_PLAN"), /breaks the plan's rules/);
+  appState.locale = "zh_CN";
+  assert.match(api.aiError(error), /测试方案有 2 处不符合规则/);
+});
+
 function teamUploadFixture({ size = 10 * 1024 ** 3, failPart, abortAfterPart } = {}) {
   const calls = [], chunks = [], controller = new AbortController();
   const partSize = 32 * 1024 ** 2;

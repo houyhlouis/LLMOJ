@@ -168,6 +168,50 @@ test("AI budgets (real MariaDB)", { skip: !configPath && "needs LLMOJ_AI_BUDGET_
       await call();
       await assert.rejects(call(), /AI_JOB_REQUEST_LIMIT/);
     });
+
+    // Review Part IV, W01: logical generations apart from transport requests, the purpose each request was sent for,
+    // and usage resolved per generation; a repeated retrieval still isn't counted twice
+    await t.test("a generation and its 100 polls: one generation, 101 requests, its usage once", async () => {
+      await policies.update(admin, { ...DEFAULT_AI_POLICY }, "127.0.0.1");
+      const job = "11111111-1111-4111-8111-111111111111";
+      const context = runtime(member.id, job);
+      const send = (metadata, data) =>
+        withAiRuntime(context, () => meterProviderRequest({ ...generate, ...metadata }, async () => ({ data })));
+      const identity = { generationId: "22222222-2222-4222-8222-222222222222", purpose: "plan" };
+      await send({ ...identity, reserveTokens: 400 }, { id: "resp_9", object: "response", status: "queued" });
+      for (let index = 0; index < 99; index++)
+        await send({ ...identity, operation: "responses.poll" }, { id: "resp_9", object: "response", status: "in_progress" });
+      const completed = { id: "resp_9", object: "response", status: "completed", usage: { input_tokens: 100, output_tokens: 200 } };
+      await send({ ...identity, operation: "responses.poll" }, completed);
+      // A later run of the job recovers the same response again: its usage is already counted
+      await send({ generationId: "33333333-3333-4333-8333-333333333333", purpose: "plan", operation: "responses.poll" }, completed);
+      // A generation whose provider never reports usage stays unresolved, in another purpose
+      await send({ generationId: "44444444-4444-4444-8444-444444444444", purpose: "programs" }, { choices: [{ message: { content: "x" } }] });
+      // A request recorded before generations had IDs counts by itself
+      await ds.query(
+        `INSERT INTO ai_usage (id, ownerId, jobId, target, provider, host, model, operation, success, errorCode, elapsedMs,
+          usageReported, createdAt) VALUES ('55555555-5555-4555-8555-555555555555', ?, ?, 'llm', 'chat', 'api.example.com',
+          'm', 'generate', 1, NULL, 1, 0, NOW(6))`,
+        [member.id, job]
+      );
+      const totals = (await usage.jobTotals(member.id, [job], new Date(Date.now() - 3600000))).get(job);
+      assert.deepEqual(totals, {
+        generations: 3,
+        requests: 104,
+        searches: 0,
+        failed: 0,
+        inputTokens: 100,
+        outputTokens: 200,
+        cachedTokens: null,
+        reasoningTokens: null,
+        unreported: 2,
+        // The request recorded before purposes isn't counted by one
+        purposes: { plan: { generations: 1, requests: 102 }, programs: { generations: 1, requests: 1 } }
+      });
+      const report = await usage.report(member.id, 1);
+      assert.equal(report.totals.generations >= 3, true);
+      assert.equal(report.totals.requests >= 104, true);
+    });
   } finally {
     await ds.dropDatabase();
     await ds.destroy();

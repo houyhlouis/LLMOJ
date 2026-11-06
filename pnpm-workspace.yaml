@@ -15,6 +15,10 @@ overrides:
   "@types/node": "catalog:"
   # urllib (of ali-oss, for apps/bootstrap-static) can use proxy-agent 5, whose PAC support runs vm2; it isn't needed
   "urllib>proxy-agent": "-"
+  # Releases with security fixes their parents' exact pins don't allow yet: Monaco's DOMPurify (GHSA-cg2g-xh64-v4q7,
+  # GHSA-mrv2-3pqr-j5jr) and NestJS 11's multer (GHSA-q7qp-rjg7-q26m)
+  "monaco-editor>dompurify": 3.4.17
+  "@nestjs/platform-express>multer": 2.5.0
   # What autotrack's command-line bundler needs; the pages import only its plugins (lib/, which need only dom-utils)
   "autotrack>chalk": "-"
   "autotrack>fs-extra": "-"

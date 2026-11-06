@@ -222,6 +222,8 @@ What a judge keeps for this (each job's compiled programs and each generator's i
 
 ## When generation fails
 
+**When the testing plan is rejected.** Before any program is written, the job asks the model for a differential and adversarial testing plan: correct methods, an oracle for small inputs and the wrong or slow solutions to catch. An answer that is complete JSON can still break the plan's rules, for example a reason over 2,000 characters, a target ID that isn't a lowercase identifier, a subtask written as `"1"` instead of `1`, or a kind that isn't exactly `wrong` or `slow`. The job then fails with **The testing plan has N invalid fields**, lists each field with the rule it broke (its path, the limit and the actual size, never the text), and keeps the rejected plan privately with the job. No program has run. **Retry** asks for a new plan. A provider that cut the answer short (*output truncated*) or an answer that isn't JSON at all are reported as such, not as an invalid plan.
+
 When a program of a test data job fails, the job decides what to do from what failed (see [Failure details](#failure-details)) instead of writing every program again:
 
 - **The infrastructure failed** (the connection to a judge machine, storage or the sandbox, not the programs): the job runs the same programs again, without asking the model, up to 2 times. A correct program (the reference solution, the oracle or the second solution) that went over its time or memory limit is first run again on the kept input; if it doesn't fail again, the job runs everything again instead of rewriting it.
@@ -274,7 +276,10 @@ The evidence is stored with the site's files, as temporary objects under `tempor
 
 Each test data job in **My AI jobs** has an **Evidence and cost** line:
 
-- **Model requests**, recorded as they were made: how many, how many failed, what they were for (plans, programs, repairs, tutorial, translation, source search…), the tokens the provider reported, the searches, and how many requests the provider reported no usage for. Requests made just before a job failed are counted as *other*. These are counts, not prices: LLMOJ doesn't know what a provider charges.
+- **Model generations**: how many answers the job asked a model for, what each was for (plans, programs, repairs, tutorial, translation, source search…), and how many requests failed. What a request is for is recorded when it's sent, so a request made just before a job failed is still counted under its purpose (jobs from before Part 35 count those as *other*).
+  - **Polling requests** are counted apart: with [connection recovery](#connection-recovery), one generation can be checked on many times while the provider works on it, and each check is a request but not a new generation, nor billed as one.
+  - **Rejected testing plans**: answers that arrived complete but broke the plan's rules (see [When generation fails](#when-generation-fails)). The provider request succeeded; the plan wasn't accepted.
+  - **Tokens** the provider reported, with the cached input and reasoning output tokens when it reports them, the searches, and the generations whose usage no response reported. A background generation's usage arrives with the poll that completes it, so it isn't counted as unreported once that poll reports it, and a response recovered twice is counted once. These are counts, not prices: LLMOJ doesn't know what a provider charges.
 - **Runs of the programs:** how many, and how long they took in all. **Show runs** lists each one: how it ended (all programs passed, or the failure), whether it was the run after a repair, or a replay that tested a repair, how long it took, where it ran, and how many compiled programs and inputs it reused. A job keeps its 20 latest runs.
 
 Under **Repairs**, **Show change** shows what a repair changed in its program, as a diff: removed lines, then added lines, with 3 lines around them. A change of more than 64 KiB shows its start only.

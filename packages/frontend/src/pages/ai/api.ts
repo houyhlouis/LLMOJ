@@ -145,8 +145,8 @@ const errors: Record<string, [string, string]> = {
   INVALID_TEST_COUNT: ["测试数据组数必须为 5 到 1000。", "The number of test cases must be between 5 and 1000."],
   INVALID_TEST_PLAN: ["AI 返回的子任务和数据范围规划无效。", "The AI returned an invalid subtask/constraint plan."],
   INVALID_AI_QUALITY_PLAN: [
-    "AI 返回的对拍或对抗测试方案不完整，请重试生成。",
-    "The AI returned an incomplete differential or adversarial testing plan. Retry generation."
+    "AI 返回的对拍和对抗测试方案不符合方案规则，已被拒绝，尚未运行任何程序。重试会重新生成方案。",
+    "The AI's differential and adversarial testing plan breaks the plan's rules, so it was rejected. No programs have run. Retrying asks for a new plan."
   ],
   TESTDATA_QUALITY_GATE_FAILED: [
     "数据未通过对拍、多种正解验证或错误算法拦截，未启用新数据。请查看任务中的验证失败原因并重试。",
@@ -349,6 +349,13 @@ export function aiError(value: string) {
       `These wrong or slow algorithms still pass: ${surviving[1]}. The new data was not activated. Retry generation.`
     );
   const [code, detail = ""] = String(value || "INTERNAL_ERROR").split(/:\s*/, 2);
+  // The plan's rejected fields are listed with the job (AiPlanIssues)
+  const invalidFields = code === "INVALID_AI_QUALITY_PLAN" ? /^(\d+) invalid fields?\b/.exec(detail) : null;
+  if (invalidFields)
+    return aiText(
+      `测试方案有 ${invalidFields[1]} 处不符合规则，已被拒绝，尚未运行任何程序。重试会重新生成方案。`,
+      `The testing plan has ${invalidFields[1]} invalid ${invalidFields[1] === "1" ? "field" : "fields"}, so it was rejected. No programs have run. Retrying asks for a new plan.`
+    );
   if (code === "TUTORIAL_CORRECTION_UNAVAILABLE" && detail === "FILE_IO")
     return aiText(
       "题目要求读写指定文件，而标程使用标准输入输出，不能直接作为题解代码。",
@@ -694,13 +701,50 @@ export interface AiRunRecord {
 }
 
 /** An AI job's model requests for one purpose, as it counted them; tokens are those providers reported. */
+/**
+ * A purpose's requests as the job counted them (review Part IV, W01): `generations` are paid model generations;
+ * `requests` every model request sent, polls recovering a background response included; `unreported` generations whose
+ * usage no response reported. Jobs from before count no generations.
+ */
 export interface AiSpending {
+  generations?: number;
   requests: number;
   failed: number;
   searches: number;
   inputTokens: number;
   outputTokens: number;
   unreported: number;
+}
+
+/** A job's requests as recorded (ai_usage): the same counts, and the cached and reasoning tokens providers reported */
+export interface AiJobUsage extends AiSpending {
+  generations: number;
+  cachedTokens?: number | null;
+  reasoningTokens?: number | null;
+  // By what each request was for when it was sent (requests recorded before Part 35 have no purpose)
+  purposes?: Record<string, { generations: number; requests: number }>;
+}
+
+/** A rule a rejected testing plan broke, at a field (review Part IV, W01) */
+export interface AiPlanIssue {
+  path: string;
+  rule:
+    | "required"
+    | "type"
+    | "const"
+    | "enum"
+    | "nonEmpty"
+    | "maxLength"
+    | "pattern"
+    | "minItems"
+    | "maxItems"
+    | "unique"
+    | "reserved"
+    | "reference"
+    | "wrongTarget";
+  expected?: string | number;
+  actual?: string | number;
+  repairClass: "format" | "restatement" | "reference" | "content";
 }
 
 /** Why an AI job stopped for its owner instead of repairing a program by itself. */
@@ -833,7 +877,10 @@ export interface AiJob {
     // The programs the published test data was made and checked with
     revision?: { digest: string; repairs: number };
     // Its runs, and its model requests by purpose and as recorded (review Part III, §8.4)
-    evidence?: { runs: AiRunRecord[]; spending: Record<string, AiSpending>; usage?: AiSpending };
+    evidence?: { runs: AiRunRecord[]; spending: Record<string, AiSpending>; usage?: AiJobUsage };
+    // The testing plan's rejected fields, and how many of the job's plans were rejected (review Part IV, W01)
+    planIssues?: AiPlanIssue[];
+    planRejections?: number;
     helpers?: Array<{
       role: "checker" | "interactor" | "manager";
       origin: "problem" | "ai";

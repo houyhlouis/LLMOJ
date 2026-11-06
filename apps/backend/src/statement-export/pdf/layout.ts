@@ -499,7 +499,17 @@ export class Layout {
     const inner = width - 2 * padding;
     const piece: TextPiece = { kind: "text", text: "", style: {}, size, role: "mono", shift: 0, color: COLORS.text };
     const visual: string[] = [];
-    for (const line of text.split("\n")) {
+    // Windows line ends (a sample's file keeps its bytes; the page shows lines) and tab stops every 4 columns
+    const lines = text.split(/\r?\n|\r/).map(line =>
+      line.includes("\t")
+        ? line.split("\t").reduce((expanded, part, index) => {
+            if (index === 0) return part;
+            const column = [...expanded].length;
+            return expanded + " ".repeat(4 - (column % 4)) + part;
+          }, "")
+        : line
+    );
+    for (const line of lines) {
       if (!line) {
         visual.push("");
         continue;

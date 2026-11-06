@@ -22,7 +22,7 @@ require.extensions[".ts"] = (module, filename) =>
   );
 const { AI_SESSION_LIMITS, purposeOfStep, recordRun, tallyUsage, unifiedDiff } = require("./ai-session.ts");
 const { aiServices } = require("./ai-test-services.cjs");
-const { currentAiRuntime } = require("./ai-runtime.ts");
+const { currentAiRuntime, currentAiPurpose, withAiPurpose } = require("./ai-runtime.ts");
 
 const lines = count => Array.from({ length: count }, (_, index) => `line ${index + 1}`);
 
@@ -123,10 +123,67 @@ test("requests are tallied by purpose; searches, failures and unreported usage a
   );
   tallyUsage(state, "source", record({ target: "search", inputTokens: null, outputTokens: null }));
   assert.deepEqual(state.spending, {
-    programs: { requests: 2, failed: 0, searches: 0, inputTokens: 150, outputTokens: 25, unreported: 0 },
-    repairs: { requests: 1, failed: 1, searches: 0, inputTokens: 0, outputTokens: 0, unreported: 1 },
-    source: { requests: 0, failed: 0, searches: 1, inputTokens: 0, outputTokens: 0, unreported: 0 }
+    programs: { generations: 2, requests: 2, failed: 0, searches: 0, inputTokens: 150, outputTokens: 25, unreported: 0 },
+    repairs: { generations: 1, requests: 1, failed: 1, searches: 0, inputTokens: 0, outputTokens: 0, unreported: 1 },
+    source: { generations: 0, requests: 0, failed: 0, searches: 1, inputTokens: 0, outputTokens: 0, unreported: 0 }
   });
+});
+
+// Review Part IV, W01: one generation recovered by polling is one generation and as many transport requests as were
+// sent; its usage, reported by the poll that completes it, is counted once and resolves the generation
+test("one background generation and 100 polls: one generation, 101 requests, usage once", () => {
+  const state = {};
+  const base = { target: "llm", success: true, inputTokens: null, outputTokens: null, usageReported: false };
+  tallyUsage(state, "testdata.make", {
+    ...base,
+    operation: "generate",
+    generationId: "g1",
+    purpose: "programs",
+    pendingResponseId: "resp_1"
+  });
+  for (let index = 0; index < 99; index++)
+    tallyUsage(state, "testdata.make", { ...base, operation: "responses.poll", generationId: "g1", purpose: "programs" });
+  // After the first poll, the job's step changed: the requests still belong to what they were sent for
+  tallyUsage(state, "testdata.validator", {
+    ...base,
+    operation: "responses.poll",
+    generationId: "g1",
+    purpose: "programs",
+    inputTokens: 100,
+    outputTokens: 200,
+    usageReported: true
+  });
+  assert.deepEqual(state.spending, {
+    programs: { generations: 1, requests: 101, failed: 0, searches: 0, inputTokens: 100, outputTokens: 200, unreported: 0 }
+  });
+  // A generation whose usage was never reported stays unresolved
+  tallyUsage(state, "testdata.validator", { ...base, operation: "generate", generationId: "g2", purpose: "programs" });
+  assert.equal(state.spending.programs.unreported, 1);
+  assert.equal(state.spending.programs.generations, 2);
+});
+
+test("a request is attributed to the purpose it was sent for, not the job's step when it's recorded", () => {
+  const state = {};
+  tallyUsage(state, "testdata.make", {
+    target: "llm",
+    operation: "generate",
+    purpose: "plan",
+    success: true,
+    inputTokens: 5,
+    outputTokens: 1,
+    usageReported: true
+  });
+  // An unknown purpose falls back to the step
+  tallyUsage(state, "testdata.make", {
+    target: "llm",
+    operation: "generate",
+    purpose: "x",
+    success: true,
+    inputTokens: 5,
+    outputTokens: 1,
+    usageReported: true
+  });
+  assert.deepEqual(Object.keys(state.spending).sort(), ["plan", "programs"]);
 });
 
 test("a job keeps its latest runs only", () => {
@@ -171,6 +228,23 @@ test("a job's provider requests are counted by its step as they're recorded", as
     await currentAiRuntime().record({ target: "llm", success: true, usageReported: false });
   });
   assert.equal(recorded.length, 3);
+});
+
+test("a job's requests carry the purpose of the step they were sent in", async () => {
+  const services = aiServices({}, {}, {}, {});
+  const recorded = [];
+  services.usage = {
+    context: (ownerId, jobId) => ({ ownerId, jobId, record: async record => recorded.push(record) })
+  };
+  const job = { id: "j", ownerId: 1, step: "testdata.quality-plan", state: {} };
+  const purposes = [];
+  await services.withRuntime(1, job, async () => {
+    purposes.push(currentAiPurpose());
+    job.step = "testdata.make";
+    purposes.push(currentAiPurpose());
+    purposes.push(await withAiPurpose("repairs", async () => currentAiPurpose()));
+  });
+  assert.deepEqual(purposes, ["plan", "programs", "repairs"]);
 });
 
 test("the job view shows runs and spending, each repair's size, and its change on request", async () => {

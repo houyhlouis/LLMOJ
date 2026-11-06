@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Button } from "semantic-ui-react";
-import { aiText, AiJob, AiRunRecord, AiSpending } from "./api";
+import { aiText, AiJob, AiJobUsage, AiRunRecord, AiSpending } from "./api";
 import { failureKindName } from "./AiFailureDetails";
 import style from "./Ai.module.less";
 
@@ -79,52 +79,89 @@ const runText = (run: AiRunRecord) =>
     .join(" · ");
 
 /**
- * A job's evidence and cost (review Part III, §8.4): its model requests, by what they were for, and the tokens
+ * A job's evidence and cost (review Part III, §8.4): its model generations, by what they were for, and the tokens
  * providers reported; and each run of its programs, how it ended and how long it took. Measured, never estimated.
+ * A generation is one paid answer; polls that recover a background answer are transport requests, counted apart
+ * (review Part IV, W01). A provider's success isn't the plan's acceptance: rejected plans are counted too.
  */
 export default function AiEvidence({ job }: { job: AiJob }) {
   const [open, setOpen] = useState(false);
   const evidence = job.result.evidence;
   if (!evidence) return null;
   const spending = Object.entries(evidence.spending || {}) as [string, AiSpending][];
-  const counted = spending.reduce((sum, [, item]) => sum + item.requests, 0);
-  const totals = evidence.usage || {
-    requests: counted,
-    searches: spending.reduce((sum, [, item]) => sum + item.searches, 0),
-    failed: spending.reduce((sum, [, item]) => sum + item.failed, 0),
-    inputTokens: spending.reduce((sum, [, item]) => sum + item.inputTokens, 0),
-    outputTokens: spending.reduce((sum, [, item]) => sum + item.outputTokens, 0),
-    unreported: spending.reduce((sum, [, item]) => sum + item.unreported, 0)
+  // Jobs from before counted requests only: each was a generation as far as they know
+  const generationsOf = (item: AiSpending) => item.generations ?? item.requests;
+  const sum = (pick: (item: AiSpending) => number) => spending.reduce((total, [, item]) => total + pick(item), 0);
+  const totals: AiJobUsage = evidence.usage || {
+    generations: sum(generationsOf),
+    requests: sum(item => item.requests),
+    searches: sum(item => item.searches),
+    failed: sum(item => item.failed),
+    inputTokens: sum(item => item.inputTokens),
+    outputTokens: sum(item => item.outputTokens),
+    unreported: sum(item => item.unreported)
   };
-  // Requests the job didn't count by purpose (e.g. the last one before it failed)
-  const other = Math.max(0, totals.requests - counted);
+  // Recorded before generations were told apart from polls: as many generations as requests
+  const generations = totals.generations ?? totals.requests;
+  // By purpose: as recorded when each request was sent, else as the job counted them (jobs from before)
+  const recorded = Object.entries(totals.purposes || {});
+  const byPurpose: [string, number][] = recorded.length
+    ? recorded.map(([purpose, item]) => [purpose, item.generations])
+    : spending.map(([purpose, item]) => [purpose, generationsOf(item)]);
+  // Generations not counted by purpose (recorded without one, or not counted by an older job before it failed)
+  const other = Math.max(0, generations - byPurpose.reduce((total, [, count]) => total + count, 0));
   const purposes = [
-    ...spending
-      .filter(([, item]) => item.requests > 0)
-      .map(([purpose, item]) => `${purposeName(purpose)} ${item.requests}`),
+    ...byPurpose.filter(([, count]) => count > 0).map(([purpose, count]) => `${purposeName(purpose)} ${count}`),
     ...(other ? [`${purposeName("other")} ${other}`] : [])
   ];
+  const transport = totals.requests - generations;
   const runs = evidence.runs || [];
-  const runSeconds = runs.reduce((sum, run) => sum + run.seconds, 0);
+  const runSeconds = runs.reduce((total, run) => total + run.seconds, 0);
+  const rejected = job.result.planRejections || 0;
   return (
     <div className={style.evidence}>
       <p className={style.jobDetail}>
         <strong>{aiText("证据与开销", "Evidence and cost")}</strong>
         {" · "}
         {aiText(
-          `${totals.requests} 次模型请求${totals.failed ? `（${totals.failed} 次失败）` : ""}`,
-          `${totals.requests} model ${totals.requests === 1 ? "request" : "requests"}${totals.failed ? ` (${totals.failed} failed)` : ""}`
+          `${generations} 次模型生成${totals.failed ? `（${totals.failed} 次请求失败）` : ""}`,
+          `${generations} model ${generations === 1 ? "generation" : "generations"}${totals.failed ? ` (${totals.failed} failed ${totals.failed === 1 ? "request" : "requests"})` : ""}`
         )}
         {purposes.length > 0 && aiText(`：${purposes.join("、")}`, `: ${purposes.join(", ")}`)}
+        {transport > 0 &&
+          aiText(
+            `；另有 ${transport} 次获取后台结果的轮询请求（不是新的生成）`,
+            `; ${transport} more ${transport === 1 ? "request" : "requests"} polled for background answers (not new generations)`
+          )}
+        {rejected > 0 &&
+          aiText(
+            ` · ${rejected} 个测试方案因不符合规则被拒绝`,
+            ` · ${rejected} testing ${rejected === 1 ? "plan" : "plans"} rejected for breaking the plan's rules`
+          )}
         {" · "}
         {aiText(
           `输入 ${number(totals.inputTokens)} 个 token，输出 ${number(totals.outputTokens)} 个`,
           `${number(totals.inputTokens)} tokens in, ${number(totals.outputTokens)} out`
         )}
+        {(totals.cachedTokens > 0 || totals.reasoningTokens > 0) &&
+          aiText(
+            `（其中${[
+              totals.cachedTokens > 0 ? `缓存输入 ${number(totals.cachedTokens)} 个` : "",
+              totals.reasoningTokens > 0 ? `推理输出 ${number(totals.reasoningTokens)} 个` : ""
+            ]
+              .filter(Boolean)
+              .join("，")}）`,
+            ` (of which ${[
+              totals.cachedTokens > 0 ? `${number(totals.cachedTokens)} cached input` : "",
+              totals.reasoningTokens > 0 ? `${number(totals.reasoningTokens)} reasoning output` : ""
+            ]
+              .filter(Boolean)
+              .join(", ")})`
+          )}
         {totals.unreported > 0 &&
           aiText(
-            `（${totals.unreported} 次请求服务商未报告用量）`,
-            ` (the provider reported no usage for ${totals.unreported})`
+            `（${totals.unreported} 次生成的用量服务商未报告）`,
+            ` (no usage reported for ${totals.unreported} ${totals.unreported === 1 ? "generation" : "generations"})`
           )}
         {totals.searches > 0 &&
           aiText(

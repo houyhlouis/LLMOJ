@@ -128,8 +128,8 @@ function problemBlocks(problem: PdfProblem, locale: string): Block[] {
     if (section.kind === "sample") {
       const files = problem.sampleFiles[section.sample.number - 1];
       blocks.push(
-        { kind: "code", text: section.sample.input.replace(/\n$/, ""), label: labels.input, note: files?.input },
-        { kind: "code", text: section.sample.output.replace(/\n$/, ""), label: labels.output, note: files?.output }
+        { kind: "code", text: section.sample.input.replace(/\r?\n$/, ""), label: labels.input, note: files?.input },
+        { kind: "code", text: section.sample.output.replace(/\r?\n$/, ""), label: labels.output, note: files?.output }
       );
     }
     if (section.text?.trim()) blocks.push(...markdownBlocks(section.text));
