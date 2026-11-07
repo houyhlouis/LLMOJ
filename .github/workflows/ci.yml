@@ -58,6 +58,7 @@ jobs:
       - name: Run judge data-validation regressions
         run: node deploy/test/run-tests.mjs --ci judge
       - name: Run community and moderation regressions
+        timeout-minutes: 15
         run: node deploy/test/run-tests.mjs --ci backend frontend deploy
       - name: Check Wiki export and navigation
         run: node deploy/test/run-tests.mjs --ci wiki

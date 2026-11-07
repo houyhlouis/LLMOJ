@@ -9,6 +9,7 @@ dump over user data.
 """
 import argparse
 import contextlib
+from collections import Counter
 import datetime
 import fcntl
 import hashlib
@@ -1572,7 +1573,9 @@ class Upgrade:
             self.schema_on_clone(self.backup/'database.sql')
             # Audit and apply before swapping stage paths; only additive compatible DDL.
             live_audit = self.schema('libreoj')
-            if live_audit['queries'] != self.manifest['schemaQueries'] or live_audit.get('migration', {}) != self.manifest['registrationMigration'] or live_audit.get('solutions', {}) != self.manifest.get('solutionMigration', {}) or live_audit.get('teamStorage', {}) != self.manifest.get('teamStorageMigration', {}):
+            # Catalog enumeration can differ after restore. Compare exact SQL strings and counts,
+            # without sorting or replacing the plan each database audits and applies for itself.
+            if Counter(live_audit['queries']) != Counter(self.manifest['schemaQueries']) or live_audit.get('migration', {}) != self.manifest['registrationMigration'] or live_audit.get('solutions', {}) != self.manifest.get('solutionMigration', {}) or live_audit.get('teamStorage', {}) != self.manifest.get('teamStorageMigration', {}):
                 fail('Database schema changed since the restored-copy audit')
         with self.progress.step('database'):
             # MariaDB DDL can commit before a later statement fails. Install and

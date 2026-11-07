@@ -101,7 +101,7 @@ const GROUPS = {
       'deploy/test/ai-lifecycle-schema.mariadb.test.mjs'),
     node('--test', 'deploy/test/backup-keys.test.mjs', 'deploy/test/dependency-audit.test.mjs'),
     // In Chrome or Chromium (LLMOJ_TEST_CHROME, or on PATH); skipped without one
-    node('--test', 'deploy/test/service-worker-retirement.test.mjs'),
+    { ...node('--test', 'deploy/test/service-worker-retirement.test.mjs'), timeout: 420000 },
     // The first administrator's creation, against a temporary database server
     ...(ci ? [] : [node('--test', 'deploy/test/bootstrap-admin.test.mjs')]),
     ...pythonSuites(ci)
@@ -147,7 +147,9 @@ for (const group of groups)
     console.log(`\n▶ ${label}`);
     const started = Date.now();
     const env = command.tmpdir ? { ...process.env, TMPDIR: command.tmpdir } : process.env;
-    const { status, signal } = spawnSync(program, args, { cwd: root, stdio: 'inherit', env });
+    const { status, signal, error } = spawnSync(program, args, { cwd: root, stdio: 'inherit', env,
+      ...(command.timeout ? { timeout: command.timeout, killSignal: 'SIGKILL' } : {}) });
+    if (error) console.error(`${label}: ${error.code === 'ETIMEDOUT' ? `exceeded ${command.timeout} ms` : error.message}`);
     results.push({ label, ok: status === 0, seconds: Math.round((Date.now() - started) / 1000), status: status ?? signal });
   }
 

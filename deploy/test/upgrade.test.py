@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Temporary fixtures only. No real service, configuration or database is changed."""
 import contextlib
+import copy
 import errno
 import grp
 import hashlib
@@ -19,7 +20,7 @@ import tarfile
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 MODULE = Path(__file__).resolve().parents[1]/'upgrade.py'
 spec = importlib.util.spec_from_file_location('upgrade', MODULE)
@@ -935,6 +936,115 @@ class UpgradeTests(unittest.TestCase):
             output=self.base/'extracted'
             with self.assertRaises(u.UpgradeError): u.extract_archive(data.getvalue(),output)
             self.assertFalse(output.exists())
+
+
+
+class SchemaActivationFixture(u.Upgrade):
+    """Exercise activate/schema_on_clone without root, services, files or a real database."""
+    def __init__(self, restored_audit, live_audit):
+        self.root = Path(tempfile.gettempdir())
+        self.backup = self.root/'unused-schema-audit-fixture'
+        self.database_bytes = 0
+        self.sandbox_changed = False
+        self.manifest = {}
+        self.progress = Mock()
+        self.progress.step.side_effect = lambda _name: contextlib.nullcontext()
+        self.host = Mock()
+        self.live_applied_queries = None
+        self.self_test_needed = Mock(return_value=False)
+        for method in ('assert_preserved', 'assert_drained', 'stop_apps', 'save', 'ensure_judge_account',
+                       'dump', 'sql', 'guard_install', 'switch', 'restore_states', 'discard_staged_dependencies'):
+            setattr(self, method, Mock())
+        cloned = False
+        def schema(database, action='audit'):
+            nonlocal cloned
+            if database == 'libreoj':
+                if action == 'apply':
+                    self.live_applied_queries = list(live_audit['queries'])
+                return copy.deepcopy(live_audit)
+            if action == 'apply':
+                cloned = True
+                return copy.deepcopy(restored_audit)
+            if cloned:
+                return {'compatible': True, 'queries': [], 'migration': {}, 'solutions': {}, 'teamStorage': {}}
+            return copy.deepcopy(restored_audit)
+        self.schema = Mock(side_effect=schema)
+
+    def run(self):
+        with patch.object(u.shutil, 'disk_usage', return_value=shutil._ntuple_diskusage(32*u.GIB, 8*u.GIB, 24*u.GIB)):
+            self.activate()
+
+
+class SchemaAuditComparisonTests(unittest.TestCase):
+    QUERIES = [
+        "ALTER TABLE `ai_usage` ADD `stageId` varchar(36) NULL",
+        "ALTER TABLE `ai_response_checkpoint` ADD `requestAttempts` int NOT NULL DEFAULT '0'",
+        "ALTER TABLE `ai_job` ADD `revision` int NOT NULL DEFAULT '1'",
+        "CREATE INDEX `IDX_ai_job_owner_status_created` ON `ai_job` (`ownerId`, `status`, `createdAt`, `id`)"
+    ]
+
+    def audit(self, queries=None):
+        return {'compatible': True, 'queries': list(self.QUERIES if queries is None else queries),
+                'migration': {'pending': 0, 'rejected': 0, 'approvedHistory': 0},
+                'solutions': {'pending': 0, 'schemaPending': False},
+                'teamStorage': {'pending': 0, 'schemaPending': False}}
+
+    def refused(self, restored, live):
+        fixture = SchemaActivationFixture(restored, live)
+        with self.assertRaisesRegex(u.UpgradeError, 'Database schema changed since the restored-copy audit'):
+            fixture.run()
+        self.assertIsNone(fixture.live_applied_queries)
+        fixture.guard_install.assert_not_called()
+        fixture.switch.assert_not_called()
+
+    def test_reordered_statements_pass_and_each_plan_keeps_its_original_order(self):
+        restored, live = self.audit(), self.audit(list(reversed(self.QUERIES)))
+        before = copy.deepcopy((restored, live))
+        fixture = SchemaActivationFixture(restored, live)
+        fixture.run()
+        self.assertEqual(fixture.manifest['status'], 'complete')
+        self.assertEqual(fixture.manifest['schemaQueries'], restored['queries'])
+        self.assertEqual(fixture.live_applied_queries, live['queries'])
+        self.assertEqual((restored, live), before)
+        fixture.guard_install.assert_called_once()
+        fixture.switch.assert_called_once()
+
+    def test_equal_multisets_with_duplicate_statements_pass(self):
+        a, b = self.QUERIES[:2]
+        fixture = SchemaActivationFixture(self.audit([a, a, b]), self.audit([b, a, a]))
+        fixture.run()
+        self.assertEqual(fixture.live_applied_queries, [b, a, a])
+
+    def test_missing_statement_or_duplicate_fails_before_live_apply(self):
+        self.refused(self.audit(), self.audit(self.QUERIES[1:]))
+        a, b = self.QUERIES[:2]
+        self.refused(self.audit([a, a, b]), self.audit([a, b]))
+
+    def test_extra_statement_or_duplicate_fails_before_live_apply(self):
+        self.refused(self.audit(), self.audit(self.QUERIES + ['ALTER TABLE `ai_job` ADD `unexpected` int NULL']))
+        self.refused(self.audit(), self.audit(self.QUERIES + [self.QUERIES[0]]))
+
+    def test_changed_statement_or_whitespace_is_not_normalized(self):
+        for changed in [self.QUERIES[0].replace('varchar(36)', 'varchar(35)'), self.QUERIES[0] + ' ']:
+            with self.subTest(statement=changed):
+                self.refused(self.audit(), self.audit([changed, *self.QUERIES[1:]]))
+
+    def test_same_length_and_set_with_different_multiplicities_fails(self):
+        a, b = self.QUERIES[:2]
+        self.refused(self.audit([a, a, b]), self.audit([a, b, b]))
+
+    def test_registration_solutions_and_storage_still_compare_exactly(self):
+        for field in ('migration', 'solutions', 'teamStorage'):
+            for change in ('value', 'missing', 'extra', 'nested_order'):
+                with self.subTest(field=field, change=change):
+                    restored, live = self.audit(), self.audit(list(reversed(self.QUERIES)))
+                    if change == 'value': live[field]['pending'] = 1
+                    elif change == 'missing': del live[field]
+                    elif change == 'extra': live[field]['unexpected'] = 0
+                    else:
+                        restored[field]['records'] = [1, 2]
+                        live[field]['records'] = [2, 1]
+                    self.refused(restored, live)
 
 
 class ProgressTests(unittest.TestCase):

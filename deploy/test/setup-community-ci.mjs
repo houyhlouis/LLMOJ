@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Provision only the disposable GitHub Actions MariaDB service on port 3307.
-// Each regression gets a distinct database and a user restricted to that database.
+// Each regression gets a distinct database and user. The schema user also owns the temporary upgrade namespace.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -55,6 +55,9 @@ async function main() {
       owned.push([database, username]);
       await connection.query('CREATE USER ?@\'%\' IDENTIFIED BY ?', [username, password]);
       await connection.query('GRANT ALL PRIVILEGES ON `' + database.replaceAll('_', '\\_') + '`.* TO ?@\'%\'', [username]);
+      // The lifecycle regressions create/drop only collision-resistant libreoj_upgrade_<16 hex> databases.
+      if (name === 'schema')
+        await connection.query('GRANT ALL PRIVILEGES ON `libreoj\\_upgrade\\_%`.* TO ?@\'%\'', [username]);
       const config = path.join(directory, name + '.json');
       fs.writeFileSync(config, JSON.stringify({ services: { database: {
         type: 'mariadb', host: '127.0.0.1', port: 3307, database, username, password, charset: 'utf8mb4'
@@ -70,6 +73,20 @@ async function main() {
       const limited = await mysql.createConnection({ host, port, user: username, password, database });
       try {
         await limited.query('SELECT 1');
+        if (name === 'schema') {
+          const upgradeDatabase = 'libreoj_upgrade_' + crypto.randomBytes(8).toString('hex');
+          let created = false;
+          try {
+            await limited.query('CREATE DATABASE `' + upgradeDatabase + '`');
+            created = true;
+            await limited.query('CREATE TABLE `' + upgradeDatabase + '`.`probe` (`id` int)');
+          } finally {
+            if (created) {
+              try { await limited.query('DROP DATABASE `' + upgradeDatabase + '`'); }
+              finally { await connection.query('DROP DATABASE IF EXISTS `' + upgradeDatabase + '`'); }
+            }
+          }
+        }
         const otherDatabase = fixtures[(index + 1) % fixtures.length][1];
         try {
           await limited.query('USE `' + otherDatabase + '`');
@@ -81,7 +98,7 @@ async function main() {
     }
     fs.appendFileSync(process.env.GITHUB_ENV, environment.join('\n') + '\n');
     complete = true;
-    process.stdout.write('Provisioned ten disposable, separately authorized regression databases.\n');
+    process.stdout.write('Provisioned disposable regression databases and the isolated schema-upgrade namespace.\n');
   } finally {
     if (!complete) {
       for (const [database, username] of owned.reverse()) {
