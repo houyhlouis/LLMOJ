@@ -253,14 +253,14 @@ test("every rejected field has its path and rule (probes P01-P10)", () => {
   assert.deepEqual(probe(v => (v.targets[0].id = "Boundary")), [["targets[0].id", "pattern", "^[a-z][a-z0-9_-]*$", "Boundary", "format"]]);
   assert.deepEqual(probe(v => (v.targets[0].subtasks = ["1", 3])), [["targets[0].subtasks[0]", "type", "integer", "string", "format"]]);
   assert.deepEqual(probe(v => (v.targets[0].kind = "wrong or slow")), [
-    ["targets", "wrongTarget", 'a target of kind "wrong"', undefined, "content"],
     ["targets[0].kind", "enum", "wrong|slow", "wrong or slow", "format"]
   ]);
   assert.deepEqual(probe(v => delete v.version), [["version", "required", 1, undefined, "format"]]);
   assert.deepEqual(probe(v => (v.correctAlgorithms = ["a", "b", "c", "d", "e"])), [["correctAlgorithms", "maxItems", 4, 5, "restatement"]]);
   assert.deepEqual(probe(v => (v.targets[1].subtasks = [3, 3])), [["targets[1].subtasks", "unique", undefined, undefined, "restatement"]]);
-  // P10: within the limit after trimming, over it before: still rejected, as before (trimming first is W02's change)
-  assert.deepEqual(probe(v => (v.targets[1].reason = `${"x".repeat(1999)}  `)), [["targets[1].reason", "maxLength", 2000, 2001, "restatement"]]);
+  // P10: normalization trims representation before measuring its length.
+  const padded = quality(); padded.targets[1].reason = `${"x".repeat(1999)}  `;
+  assert.deepEqual(validateAiQualityPlan(padded, subtasks).issues, []);
 });
 
 test("controls: a complete plan is accepted; an unknown subtask and a plan without a wrong target stay rejected", () => {
@@ -293,7 +293,7 @@ test("every issue is reported at once, and the error names them (sizes only, nev
   assert.equal(error.code, "INVALID_AI_QUALITY_PLAN");
   assert.equal(
     error.message,
-    "INVALID_AI_QUALITY_PLAN: 5 invalid fields: version const 1, got 2; correctAlgorithms unique; targets[0].id reserved, got independent; targets[1].id reserved, got independent; targets[1].construction maxLength 4000, got 6000"
+    "INVALID_AI_QUALITY_PLAN: 5 invalid fields: version const 1, got 2; correctAlgorithms unique; targets[0].id reserved, got independent; targets[1].id reserved, got independent; targets[1].construction maxLength 4000, got 5999"
   );
   assert.doesNotMatch(error.message, /secret construction/);
   assert.throws(() => normalizeAiQualityPlan(value, subtasks), error => error instanceof AiPlanError && error.issues.length === 5);

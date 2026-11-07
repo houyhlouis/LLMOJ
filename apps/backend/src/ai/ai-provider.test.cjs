@@ -571,7 +571,10 @@ test("testdata requires proof for every generated input and sample before publis
           assert.equal(publishedBytes.get(recipe[role + "File"]).toString(), job.state[stateKey]);
           assert.equal(publishedBytes.get(filename).toString(), job.state[stateKey], "downloadable review source still matches its immutable copy");
         }
-        assert.deepEqual(job.state.generated.sampleValidation, { ...expected, quality: job.state.qualityValidation });
+        const { boundariesPassed, boundaryDigest, ...sampleValidation } = job.state.generated.sampleValidation;
+        assert.equal(boundariesPassed, 3);
+        assert.match(boundaryDigest, /^[a-f0-9]{64}$/);
+        assert.deepEqual(sampleValidation, { ...expected, quality: job.state.qualityValidation });
       } else {
         await assert.rejects(execution, /INVALID_SANDBOX_RESPONSE/);
         assert.equal(switches, 0, "unverified input cannot change judging configuration");
@@ -863,7 +866,7 @@ test("HTTP save with the real controller and DTO accepts stale 1M settings on th
   svc.onModuleDestroy = () => {};
   svc.key = require("node:crypto").randomBytes(32);
   class FixtureModule {}
-  Module({ controllers: [AiController], providers: [{ provide: AiService, useValue: svc }] })(FixtureModule);
+  Module({ controllers: [AiController], providers: [{ provide: AiService, useValue: svc }, { provide: require("./ai-job-view.service.ts").AiJobViewService, useValue: {} }] })(FixtureModule);
   const app = await NestFactory.create(FixtureModule, { logger: false });
   app.setGlobalPrefix("api");
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }));

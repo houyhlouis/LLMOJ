@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from "crypto";
 
-import { promises as fs } from "fs";
+import { promises as fs, createReadStream } from "fs";
 
 import path from "path";
 
@@ -8,6 +8,8 @@ import { Injectable } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 
 import { DataSource, EntityManager } from "typeorm";
+
+import { automaticAllocationSnapshot } from "./ai-allocation-review";
 
 import { AiJobEntity } from "./ai.entity";
 import { AiError } from "./ai.types";
@@ -109,6 +111,25 @@ export class AiArtifactPublisher {
     problem: ProblemEntity
   ) {
     await this.authorizeProblemCommit(job, snapshot, manager, problem);
+    if (
+      (job.state.provenanceRequired || process.env.LLMOJ_AI_REQUIRE_VERIFIED_PROVENANCE === "1") &&
+      job.state.workflow?.provenance?.status !== "verified"
+    ) {
+      if (job.state.workflow)
+        job.state.workflow.blocking = {
+          kind: "provenance_policy",
+          status: job.state.workflow.provenance?.status || "not_attempted"
+        };
+      throw new AiError("AI_PROVENANCE_POLICY");
+    }
+    if (job.state.allocationBaseline && !Array.isArray(snapshot.judgeInfo.subtasks)) {
+      const current = automaticAllocationSnapshot(
+        snapshot.judgeInfo,
+        await this.problemFiles.getProblemFiles(problem, ProblemFileType.TestData, manager),
+        problem.type !== "Traditional"
+      );
+      if (current.digest !== job.state.allocationBaseline) throw new AiError("PROBLEM_CHANGED_DURING_AI");
+    }
   }
 
   async lockProblemCommit(job: AiJobEntity, snapshot: AiProblemSnapshot, manager: EntityManager) {
@@ -189,7 +210,7 @@ export class AiArtifactPublisher {
     await fs.mkdir(root, { recursive: true, mode: 0o700 });
     const directory = await fs.mkdtemp(path.join(root, ".public-headers-"));
     try {
-      const pending: Array<{ filename: string; path: string; size: number }> = [];
+      const pending: Array<{ filename: string; path: string; size: number; expectedSha256: string }> = [];
       for (const [filename, source] of selected) {
         const old = existing.find(file => file.filename.toLowerCase() === filename.toLowerCase());
         if (old) {
@@ -205,7 +226,12 @@ export class AiArtifactPublisher {
         const target = path.join(directory, filename);
         // eslint-disable-next-line no-await-in-loop -- Each step depends on prior results, cancellation checks, or retry state.
         await fs.writeFile(target, source, { mode: 0o600 });
-        pending.push({ filename, path: target, size: Buffer.byteLength(source) });
+        pending.push({
+          filename,
+          path: target,
+          size: Buffer.byteLength(source),
+          expectedSha256: createHash("sha256").update(source).digest("hex")
+        });
       }
       await authorize();
       if (pending.length)
@@ -230,13 +256,46 @@ export class AiArtifactPublisher {
     }
   }
 
-  async putFile(problem: ProblemEntity, filename: string, data: string | Buffer, size: number) {
+  async putFile(
+    problem: ProblemEntity,
+    filename: string,
+    data: string | Buffer,
+    size: number,
+    expectedSha256?: string
+  ) {
+    const started = Date.now();
+    if (!expectedSha256) {
+      const hash = createHash("sha256");
+      if (typeof data === "string") {
+        for await (const chunk of createReadStream(data)) hash.update(chunk);
+      } else hash.update(data);
+      expectedSha256 = hash.digest("hex");
+    }
+    if (!/^[a-f0-9]{64}$/.test(expectedSha256)) throw new AiError("INVALID_SANDBOX_FILE");
     const upload = await this.files.storeUpload(data);
     if (upload.size !== size) {
       await this.files.discardUploads([upload.uuid]);
       throw new AiError("UPLOAD_GENERATED_FILE_FAILED", "the file changed while it was stored");
     }
-    const result = await this.problemFiles.addProblemFile(problem, ProblemFileType.TestData, upload, filename, true);
+    const result = await (async () => {
+      try {
+        return await this.problemFiles.addProblemFile(
+          problem,
+          ProblemFileType.TestData,
+          upload,
+          filename,
+          true,
+          undefined,
+          expectedSha256
+        );
+      } catch (error) {
+        if (["FILE_HASH_MISMATCH", "FILE_SIZE_MISMATCH", "FILE_CHANGED_DURING_UPLOAD"].includes(error?.message)) {
+          await this.files.discardUploads([upload.uuid]).catch(() => undefined);
+          throw new AiError(error.message);
+        }
+        throw error;
+      }
+    })();
     if (result) {
       await this.files.discardUploads([upload.uuid]);
       throw new AiError(
@@ -244,5 +303,6 @@ export class AiArtifactPublisher {
         typeof result === "string" ? result : "unexpected upload response"
       );
     }
+    return { bytes: size, elapsedMs: Math.max(0, Date.now() - started) };
   }
 }

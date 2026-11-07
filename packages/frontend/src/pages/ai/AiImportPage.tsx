@@ -7,6 +7,7 @@ import { Link } from "@/utils/hooks";
 import { readBrowserFile } from "@/utils/readBrowserFile";
 import { aiCall, aiText, uploadAiAttachment } from "./api";
 import AiJobs from "./AiJobs";
+import AiStartOptions, { defaultStartOptions, startOptionFields } from "./AiStartOptions";
 import style from "./Ai.module.less";
 
 export const AiImportPage = observer(function AiImportPage() {
@@ -107,6 +108,7 @@ export const AiImportPage = observer(function AiImportPage() {
       }
     }
   };
+  const [startOptions, setStartOptions] = useState(defaultStartOptions);
   const start = async () => {
     // A ref also prevents a second click before React renders the loading state.
     if (activeImport.current || reads.current.statement || reads.current.attachment) return;
@@ -142,7 +144,8 @@ export const AiImportPage = observer(function AiImportPage() {
           count,
           ...(problemType !== "auto" ? { problemType } : {}),
           ...(problemType === "Communication" && communicationMode !== "auto" ? { communicationMode } : {}),
-          ...(token ? { attachmentToken: token } : {})
+          ...(token ? { attachmentToken: token } : {}),
+          ...startOptionFields(startOptions)
         },
         { signal: controller.signal, timeout: 30000 }
       );
@@ -292,6 +295,7 @@ export const AiImportPage = observer(function AiImportPage() {
             "May include official judging programs, interface headers and large samples. Applicable samples validate the reference solution and are used in submission sample tests; large samples are not expanded in the statement."
           )}
         </p>
+        <AiStartOptions value={startOptions} onChange={setStartOptions} disabled={pending} />
         <Form.Input
           className={style.importCount}
           type="number"

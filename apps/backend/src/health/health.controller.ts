@@ -21,6 +21,13 @@ export class HealthController {
     return { status: "ok" };
   }
 
+  /** Safe build identifiers for doctor; no deployment paths, credentials, or checkout metadata. */
+  @Get("identity")
+  async identity(@Res({ passthrough: true }) response: Response) {
+    response.setHeader("Cache-Control", "no-store");
+    return await this.healthService.identity();
+  }
+
   /** The process can serve requests: HTTP 200 when every dependency answers, 503 otherwise. */
   @Get("ready")
   async ready(@Res({ passthrough: true }) response: Response): Promise<Readiness> {

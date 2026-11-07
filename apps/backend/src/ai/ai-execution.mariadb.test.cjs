@@ -365,6 +365,8 @@ test("old runs and the objects nothing refers to are cleaned up", { skip }, asyn
 // How a run of judge protocol version 8 says it made its result
 const executionRecord = (overrides = {}) => ({
   contract: AI_EXECUTION_PROTOCOL_VERSION,
+  qualityPolicy: require("@libreoj/judge-protocol").AI_QUALITY_POLICY_VERSION,
+  receiptVersion: require("@libreoj/judge-protocol").AI_RECEIPT_VERSION,
   attemptId: crypto.randomUUID(),
   runtime: { judgeProgram: "a".repeat(64), sandboxImage: "bbe9c69b2027", arch: "x64" },
   startedAt: new Date().toISOString(),
@@ -558,6 +560,9 @@ test("the local runner is used where it is; each job keeps its mode until it's c
     { type: "complete", directory: "/opt/LLMOJ/data/ai-generated/b", files: ["1.in", "1.out"], requestHash: request.jobId }
   ];
   const server = net.createServer(socket => {
+      const protocol = require("@libreoj/judge-protocol");
+      socket.write(JSON.stringify({ type: "capabilities", protocolVersion: protocol.AI_EXECUTION_PROTOCOL_VERSION,
+        aiCapabilities: protocol.AI_RUNNER_CAPABILITIES, aiQualityPolicyVersions: [protocol.AI_QUALITY_POLICY_VERSION], aiReceiptVersions: [protocol.AI_RECEIPT_VERSION] }) + "\n");
     let buffer = "";
     socket.on("data", chunk => {
       buffer += chunk;

@@ -10,13 +10,17 @@ import {
 } from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 
-import { DataSource, EntityManager, In, Repository } from "typeorm";
+import { DataSource, EntityManager, In, Raw, Repository } from "typeorm";
+
+import { tallyWorkflowRequest } from "./ai-workflow-state";
+import { advanceStage, projectJob, stageKind, queueStage, syncWorkflowTimeline } from "./ai-job-view";
 
 import { AiJobEntity, AiJobStatus } from "./ai.entity";
 import { AiError } from "./ai.types";
 import { isAllowedPrivateHost } from "./ai-provider";
 import { StartAiJobDto } from "./ai.dto";
 import { importSourceCandidates } from "./ai-source-search";
+
 import { AiResponseCheckpointEntity } from "./ai-usage.entity";
 
 import { AiUsageService } from "./ai-usage.service";
@@ -136,8 +140,12 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
         status: "queued",
         step: "queued",
         progress: 0,
+        ...queueStage({ attempt: 0, timeline: { entries: [], omitted: 0, legacyHistoryUnavailable: false } }),
         input: {
           count: input.count || 20,
+          workflow: input.workflow || "default",
+          corpusPolicy: input.corpusPolicy || "private",
+          allocationMode: input.allocationMode || "coverage",
           markdown: input.markdown,
           image: input.image,
           attachmentToken: input.attachmentToken,
@@ -154,15 +162,44 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
   async cancel(user: UserEntity, id: string) {
     const job = await this.jobs.findOneBy({ id, ownerId: user.id });
     if (!job) throw new AiError("NO_SUCH_JOB");
-    if (["queued", "running"].includes(job.status)) {
+    if (job.status === "cancelled") await this.cancelProviderWork(job);
+    if (["queued", "running", "failed"].includes(job.status)) {
       const cancelled = await this.jobs.update(
-        { id, ownerId: user.id, status: In(["queued", "running"]) },
-        { status: "cancelled", step: "cancelled" }
+        { id, ownerId: user.id, status: In(["queued", "running", "failed"]) },
+        {
+          status: "cancelled",
+          step: "cancelled",
+          stageEndedAt: new Date(),
+          timeline: (() => {
+            advanceStage(job, job.step, "cancelled");
+            return job.timeline;
+          })()
+        }
       );
       if (cancelled.affected) {
         this.cancelRun(id);
         await this.recordAiAudit(user, "job.cancel", job);
+        await this.cancelProviderWork(job);
       }
+    }
+  }
+
+  private async cancelProviderWork(job: AiJobEntity) {
+    if (!this.usage) return;
+    try {
+      const config = await this.configuration.config(job.ownerId);
+      await this.usage.cancelResponses(job.ownerId, job.id, config.llm, {
+        allowPrivateNetwork: async () => await this.isSiteAdministrator(job.ownerId)
+      });
+    } catch (error) {
+      await this.usage
+        .markCancellationFailure?.(
+          job.ownerId,
+          job.id,
+          error instanceof AiError ? error.code : "PROVIDER_CANCELLATION_FAILED"
+        )
+        .catch(() => undefined);
+      this.workerFailed("job", error, job.id);
     }
   }
 
@@ -188,11 +225,40 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
       }
       // Recovery retries keep the same paid response; a deliberate semantic/expired retry must
       // permit a fresh generation rather than replaying an already rejected model result forever.
+      const state = retryState();
+      const repairGeneration =
+        !state.planNewMethod && state.planRepair?.status === "repairing"
+          ? state.planRepair.repairGenerationId
+          : undefined;
       if (!job.error?.startsWith("RESPONSE_RECOVERY_INTERRUPTED"))
-        await manager.delete(AiResponseCheckpointEntity, { ownerId: user.id, jobId: job.id });
+        await manager.update(
+          AiResponseCheckpointEntity,
+          {
+            ownerId: user.id,
+            jobId: job.id,
+            ...(repairGeneration
+              ? {
+                  generationId: Raw(alias => `(${alias} IS NULL OR ${alias} != :repairGeneration)`, {
+                    repairGeneration
+                  })
+                }
+              : {})
+          },
+          {
+            requestHash: () => "SHA2(CONCAT(requestHash, ':', COALESCE(generationId, responseId)), 256)"
+          }
+        );
+      if (!state.generated) delete state.caseProgress;
       const updated = await repository.update(
-        { id: job.id, ownerId: user.id, status: In(statuses) },
-        { status: "queued", error: null, state: retryState() }
+        { id: job.id, ownerId: user.id, status: In(statuses), ...(job.revision ? { revision: job.revision } : {}) },
+        {
+          status: "queued",
+          step: "queued",
+          error: null,
+          state,
+          projection: null,
+          ...queueStage(job)
+        }
       );
       if (!updated.affected) throw new AiError(statuses.includes("completed") ? "JOB_NOT_COMPLETED" : "JOB_NOT_FAILED");
     });
@@ -210,7 +276,7 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
     const saved = await manager.update(
       AiJobEntity,
       { id: job.id, status: "running", ...(job.runToken ? { runToken: job.runToken } : {}) },
-      changes
+      { ...changes, projection: projectJob({ ...job, ...changes }) }
     );
     if (saved.affected === 0) throw new AiError("JOB_LEASE_LOST");
   }
@@ -320,7 +386,8 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
             ? async () => {
                 await this.assertJob(job);
               }
-            : undefined
+            : undefined,
+          job?.runToken
         )
       : { ownerId, jobId: job?.id, record: async () => undefined };
     return withAiRuntime(
@@ -330,11 +397,17 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
         ...(job
           ? {
               record: async (record: AiUsageRecord, reservationId?: string) => {
-                tallyUsage(job.state, job.step, record);
                 await context.record(record, reservationId);
+                tallyUsage(job.state, job.step, record);
+                tallyWorkflowRequest(job.state, record);
               },
               // Fixed when each request is sent (review Part IV, W01)
-              purpose: () => purposeOfStep(job.step)
+              purpose: () => purposeOfStep(job.step),
+              stageId: () =>
+                job.timeline?.entries
+                  .slice()
+                  .reverse()
+                  .find(entry => entry.scope !== "dispatch")?.id
             }
           : {}),
         signal,
@@ -428,17 +501,47 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
     return user;
   }
 
-  async checkpoint(job: AiJobEntity, step: string, progress: number) {
+  async progress(job: AiJobEntity, step: string, progress: number) {
     await this.assertJob(job);
+    const last = job.timeline?.entries
+      .slice()
+      .reverse()
+      .find(entry => entry.scope !== "dispatch");
+    const sameStage = last && !last.endedAt && last.attempt === job.attempt && stageKind(job.step) === stageKind(step);
+    if (!sameStage) advanceStage(job, step);
     job.step = step;
     job.progress = Math.min(99, progress);
     const saved = await this.jobs.update(
-      { id: job.id, ...(job.runToken ? { runToken: job.runToken } : {}) },
+      { id: job.id, status: "running", ...(job.runToken ? { runToken: job.runToken } : {}) },
+      {
+        step,
+        progress: job.progress,
+        ...(!sameStage
+          ? { stageStartedAt: job.stageStartedAt, stageEndedAt: job.stageEndedAt, timeline: job.timeline }
+          : {}),
+        projection: projectJob(job)
+      }
+    );
+    if (!saved.affected) throw new AiError("JOB_LEASE_LOST");
+  }
+
+  async checkpoint(job: AiJobEntity, step: string, progress: number) {
+    await this.assertJob(job);
+    syncWorkflowTimeline(job);
+    advanceStage(job, step);
+    job.step = step;
+    job.progress = Math.min(99, progress);
+    const saved = await this.jobs.update(
+      { id: job.id, status: "running", ...(job.runToken ? { runToken: job.runToken } : {}) },
       {
         state: job.state,
         step: job.step,
         progress: job.progress,
-        problemId: job.problemId
+        problemId: job.problemId,
+        stageStartedAt: job.stageStartedAt,
+        stageEndedAt: job.stageEndedAt,
+        timeline: job.timeline,
+        projection: projectJob(job)
       }
     );
     if (saved.affected === 0) throw new AiError("JOB_LEASE_LOST");
@@ -467,9 +570,16 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
     }, 500);
     cancellationTimer.unref();
     try {
+      advanceStage(job, job.step);
+      const started = await this.jobs.update(
+        { id: job.id, status: "running", runToken: job.runToken },
+        { timeline: job.timeline, stageStartedAt: job.stageStartedAt, stageEndedAt: null }
+      );
+      if (started.affected === 0) throw new AiError("JOB_LEASE_LOST");
       await this.recordAiAudit(job.ownerId, "job.start", job);
       await this.withRuntime(job.ownerId, job, () => this.workflow.execute(job), controller.signal);
       await this.assertJob(job);
+      advanceStage(job, job.step, "completed");
       const completed = await this.jobs.update(
         { id: job.id, status: "running", runToken: job.runToken },
         {
@@ -477,7 +587,15 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
           progress: 100,
           step: "completed",
           state: job.state,
-          input: { count: job.input.count },
+          timeline: job.timeline,
+          stageEndedAt: job.stageEndedAt,
+          projection: projectJob(job),
+          input: {
+            count: job.input.count,
+            allocationMode: job.input.allocationMode,
+            workflow: job.input.workflow,
+            corpusPolicy: job.input.corpusPolicy
+          },
           error: null
         }
       );
@@ -485,9 +603,9 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
       await this.recordAiAudit(job.ownerId, "job.complete", job);
     } catch (error) {
       const code = error instanceof AiError ? error.message : "INTERNAL_ERROR";
-      const cancelled =
-        (error instanceof AiError && error.code === "JOB_CANCELLED") ||
-        (await this.jobs.findOneBy({ id: job.id }))?.status === "cancelled";
+      const current = await this.jobs.findOneBy({ id: job.id });
+      const cancelled = (error instanceof AiError && error.code === "JOB_CANCELLED") || current?.status === "cancelled";
+      if (cancelled) await this.cancelProviderWork(job);
       // A cancelled job's aborted requests aren't errors
       if (!(error instanceof AiError) && !cancelled) this.workerFailed("job", error, job.id);
       if (!cancelled && error instanceof AiError && error.code === "AI_PAUSED") {
@@ -499,11 +617,22 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
         if (requeued.affected) await this.recordAiAudit(job.ownerId, "job.pause", job);
         return;
       }
+      advanceStage(job, job.step, cancelled ? "cancelled" : "failed");
       const failed = await this.jobs.update(
         { id: job.id, status: In(["running", "cancelled"]), runToken: job.runToken },
         // Artifact transactions/checkpoints are authoritative. A post-commit exception must not
         // replace their newly committed state with this worker's older in-memory object.
-        { status: cancelled ? "cancelled" : "failed", error: cancelled ? null : code }
+        {
+          status: cancelled ? "cancelled" : "failed",
+          error: cancelled ? null : code,
+          projection: projectJob({
+            ...(current || job),
+            status: cancelled ? "cancelled" : "failed",
+            error: cancelled ? null : code
+          }),
+          timeline: job.timeline,
+          stageEndedAt: job.stageEndedAt
+        }
       );
       if (failed.affected && !cancelled)
         await this.recordAiAudit(job.ownerId, "job.fail", job, {
@@ -553,10 +682,14 @@ export class AiJobCoordinator implements OnModuleInit, OnModuleDestroy {
             if (job.problemId && active.some(item => item.job.problemId === job.problemId)) continue;
             const runToken = randomUUID();
             // eslint-disable-next-line no-await-in-loop -- Each step depends on prior results, cancellation checks, or retry state.
-            const claimed = await this.jobs.update({ id: job.id, status: "queued" }, { status: "running", runToken });
+            const claimed = await this.jobs.update(
+              { id: job.id, status: "queued" },
+              { status: "running", runToken, attempt: () => "attempt + 1" }
+            );
             if (!claimed.affected) continue;
             job.status = "running";
             job.runToken = runToken;
+            job.attempt = (job.attempt || 0) + 1;
             // Defer execution one microtask so its slot exists before any completion callback.
             const promise = Promise.resolve()
               .then(() => this.runJob(job))

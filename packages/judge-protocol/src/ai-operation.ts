@@ -31,6 +31,30 @@ export interface AiRuntimeIdentity {
   judgeProgram: string;
   sandboxImage: string;
   arch: string;
+  /** Hash of Node, OS, kernel and CPU identity; absent in legacy records. */
+  environment?: string;
+}
+
+export interface AiReceiptCounts {
+  executions: number;
+  comparisons: number;
+  legality: number;
+  fresh: number;
+  reusedTiming: number;
+}
+export function parseAiReceiptCounts(value: unknown): AiReceiptCounts | null {
+  if (
+    !isObject(value) ||
+    !["executions", "comparisons", "legality", "fresh", "reusedTiming"].every(key => isCount(value[key]))
+  )
+    return null;
+  return {
+    executions: value.executions as number,
+    comparisons: value.comparisons as number,
+    legality: value.legality as number,
+    fresh: value.fresh as number,
+    reusedTiming: value.reusedTiming as number
+  };
 }
 
 /** How a completed run was made, as its runner reports it (judge protocol version 8). */
@@ -38,6 +62,8 @@ export interface AiExecutionRecord {
   // The AI execution contract it was made under (AI_EXECUTION_PROTOCOL_VERSION): only a result of the current one is
   // reused
   contract: number;
+  qualityPolicy?: number;
+  receiptVersion?: number;
   // The physical attempt: new for each time the programs ran, also of the same judge task
   attemptId: string;
   runtime: AiRuntimeIdentity;
@@ -46,6 +72,7 @@ export interface AiExecutionRecord {
   // Programs taken from the job's earlier builds instead of compiled again (same source, options, headers and
   // runtime), and inputs taken from an interrupted attempt of the same operation instead of generated again
   reuse: { builds: number; inputs: number };
+  receipts?: AiReceiptCounts;
 }
 
 export function parseAiExecutionRecord(value: unknown): AiExecutionRecord | null {
@@ -56,6 +83,7 @@ export function parseAiExecutionRecord(value: unknown): AiExecutionRecord | null
     typeof value.attemptId !== "string" ||
     !UUID.test(value.attemptId) ||
     !SHA256.test(String(runtime.judgeProgram)) ||
+    (runtime.environment !== undefined && !SHA256.test(String(runtime.environment))) ||
     typeof runtime.sandboxImage !== "string" ||
     !/^[0-9a-zA-Z._-]{1,128}$/.test(runtime.sandboxImage) ||
     typeof runtime.arch !== "string" ||
@@ -66,17 +94,22 @@ export function parseAiExecutionRecord(value: unknown): AiExecutionRecord | null
     !isCount(reuse.inputs)
   )
     return null;
+  const receipts = parseAiReceiptCounts(value.receipts);
   return {
     contract: value.contract,
+    ...(isCount(value.qualityPolicy, 1000) ? { qualityPolicy: value.qualityPolicy } : {}),
+    ...(isCount(value.receiptVersion, 1000) ? { receiptVersion: value.receiptVersion } : {}),
     attemptId: value.attemptId.toLowerCase(),
     runtime: {
       judgeProgram: runtime.judgeProgram as string,
       sandboxImage: runtime.sandboxImage,
-      arch: runtime.arch
+      arch: runtime.arch,
+      ...(runtime.environment ? { environment: runtime.environment as string } : {})
     },
     startedAt: value.startedAt,
     finishedAt: value.finishedAt,
-    reuse: { builds: reuse.builds, inputs: reuse.inputs }
+    reuse: { builds: reuse.builds, inputs: reuse.inputs },
+    ...(receipts ? { receipts } : {})
   };
 }
 
@@ -259,6 +292,7 @@ export function aiReplayOutcome(kind: AiFailureKind, runs: AiReplayRun[]): AiRep
 function parseMeasure(value: unknown): AiExecutionMeasure | undefined {
   if (!isObject(value) || !(AI_EXECUTION_STATUSES as readonly unknown[]).includes(value.status)) return undefined;
   const measure: AiExecutionMeasure = { status: value.status as AiExecutionMeasure["status"] };
+  if (value.timing === "fresh" || value.timing === "reused") measure.timing = value.timing;
   if (Number.isSafeInteger(value.exitCode)) measure.exitCode = value.exitCode as number;
   if (value.termination === "exited" || value.termination === "signaled") measure.termination = value.termination;
   for (const key of ["timeMs", "memoryBytes", "timeLimitMs", "memoryLimitBytes"] as const)

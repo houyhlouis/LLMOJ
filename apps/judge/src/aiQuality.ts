@@ -17,6 +17,7 @@ export interface QualityCase {
 
 export interface QualityRequest {
   version: 1;
+  oracleDomain?: { maxBytes: number; method: string; description: string };
   fuzzCases: QualityCase[];
   smallMakeCode: string;
   oracleCode: string;
@@ -100,7 +101,7 @@ export function qualitySources(quality: QualityRequest): [string, string][] {
   ];
 }
 
-export function validateQuality(quality: QualityRequest, cases: QualityCase[], stdCode: string) {
+export function validateQuality(quality: QualityRequest, cases: QualityCase[], stdCode: string, preflight = false) {
   if (!quality || quality.version !== 1) throw new Error("Traditional generation requires quality verification v1");
   const subtasks = new Set(cases.map(testcase => testcase.subtask));
   if (!Array.isArray(quality.fuzzCases) || quality.fuzzCases.length < 64 || quality.fuzzCases.length > 1000)
@@ -148,7 +149,7 @@ export function validateQuality(quality: QualityRequest, cases: QualityCase[], s
     )
       throw new Error("Invalid quality challenge metadata");
   }
-  if (!quality.challenges.some(challenge => challenge.kind === "wrong"))
+  if (!preflight && !quality.challenges.some(challenge => challenge.kind === "wrong"))
     throw new Error("Quality verification requires at least one incorrect-solution challenge");
   if (!Number.isSafeInteger(quality.extraAttempts) || quality.extraAttempts < 0 || quality.extraAttempts > 32)
     throw new Error("Quality adversarial search is limited to 32 additional attempts");
@@ -240,7 +241,20 @@ export class AiQuality {
     private readonly environment: QualityEnvironment
   ) {}
 
-  async checkSample(input: QualityData, expected: QualityData, number: number) {
+  readonly baselines: {
+    id: string;
+    sample: number;
+    corpus: "public_example" | "author_validation";
+    verdict: QualityVerdict;
+  }[] = [];
+
+  async checkSample(
+    input: QualityData,
+    expected: QualityData,
+    number: number,
+    corpus: "public_example" | "author_validation" = "public_example",
+    preflight = false
+  ) {
     const verify = async (name: string, label: string, candidate: string) =>
       await within(
         { role: name, candidate, expectedBasis: "official_sample", subject: `sample ${number}` },
@@ -262,6 +276,10 @@ export class AiQuality {
         await verify(`quality-challenge-${index}`, `challenge ${challenge.id} sample ${number}`, challenge.id);
       } catch (error) {
         if (!verdictOf(error)) throw error;
+        if (preflight) {
+          this.baselines.push({ id: challenge.id, sample: number, corpus, verdict: verdictOf(error) });
+          continue;
+        }
         throw reclassify(
           new Error(`Challenge ${challenge.id} failed official sample ${number}; it is not a valid challenge`),
           error,
@@ -311,9 +329,13 @@ export class AiQuality {
       String(seed)
     ]);
     // Small cases only: an input too large for an exact brute force is refused before anything runs on it
-    if (input.length > DIFFERENTIAL_INPUT_BYTES)
+    const domainBytes = Math.min(
+      DIFFERENTIAL_INPUT_BYTES,
+      this.request.oracleDomain?.maxBytes || DIFFERENTIAL_INPUT_BYTES
+    );
+    if (input.length > domainBytes)
       throw outsideOracleDomain(
-        `small-make.cpp wrote a differential input of ${input.length} bytes, more than the ${DIFFERENTIAL_INPUT_BYTES} bytes a small case may have`,
+        `small-make.cpp wrote a differential input of ${input.length} bytes, more than the ${domainBytes} bytes the declared small domain allows`,
         null,
         subtask,
         seed,
@@ -325,24 +347,8 @@ export class AiQuality {
     const expected = await within(
       { role: "quality-oracle", expectedBasis: "candidate_oracle", data: { input } },
       async () => {
-        let output: Buffer;
-        try {
-          output = await this.environment.execute("quality-oracle", input);
-        } catch (error) {
-          // The oracle ran out of time or memory: the input is outside its small domain. The generator made a case
-          // the oracle can't solve; no solution is judged on it, and the oracle isn't rewritten for it
-          const verdict = verdictOf(error);
-          const kind = detailsOf(error)?.kind ?? { TLE: "time_limit", MLE: "memory_limit" }[verdict];
-          if (kind === "time_limit" || kind === "memory_limit")
-            throw outsideOracleDomain(
-              `The oracle exceeded its ${kind === "time_limit" ? "time" : "memory"} limit on a differential input of ${input.length} bytes: the input is outside the oracle's small domain`,
-              error,
-              subtask,
-              seed,
-              input
-            );
-          throw error;
-        }
+        // A timeout alone establishes no domain violation: retain oracle attribution for review/replay.
+        const output = await this.environment.execute("quality-oracle", input);
         await this.environment.compare(input, output, output, `oracle differential case ${caseIndex + 1}`);
         return output;
       }

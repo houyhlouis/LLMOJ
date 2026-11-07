@@ -94,6 +94,8 @@ export interface AiArtifactRef {
 
 /** How a program run ended, as the sandbox measured it. */
 export interface AiExecutionMeasure {
+  /** Missing on legacy evidence; a reused measurement is not a new timing confirmation. */
+  timing?: "fresh" | "reused";
   status: (typeof AI_EXECUTION_STATUSES)[number];
   exitCode?: number;
   termination?: "exited" | "signaled";
@@ -403,6 +405,7 @@ function parseExecution(value: unknown): AiExecutionMeasure {
   if (!isObject(value)) throw new Invalid();
   return {
     status: required(oneOf(value.status, AI_EXECUTION_STATUSES)),
+    ...optional(value, "timing", timing => oneOf(timing, ["fresh", "reused"] as const)),
     ...optional(value, "exitCode", code => (Number.isSafeInteger(code) ? (code as number) : null)),
     ...optional(value, "termination", termination => oneOf(termination, ["exited", "signaled"] as const)),
     ...optional(value, "timeMs", time => (isNumber(time, 1e9) ? time : null)),

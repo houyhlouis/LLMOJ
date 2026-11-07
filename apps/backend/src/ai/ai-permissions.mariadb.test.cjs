@@ -184,6 +184,13 @@ test(
         }
       ]
     ];
+    for (const [entity, , columns] of definitions) {
+      if (entity === AiJobEntity) Object.assign(columns, {
+        revision: { type: Number, version: true, default: 1 }, attempt: { type: Number, default: 0 },
+        projection: { type: "json", nullable: true }, timeline: { type: "json", nullable: true },
+        stageStartedAt: { type: Date, nullable: true }, stageEndedAt: { type: Date, nullable: true }
+      });
+    }
     const entities = definitions.map(
       ([target, name, columns]) => new EntitySchema({ name: target.name, target, tableName: prefix + name, columns })
     );

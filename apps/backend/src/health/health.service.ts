@@ -3,6 +3,11 @@ import { InjectDataSource } from "@nestjs/typeorm";
 
 import { DataSource } from "typeorm";
 
+import { deploymentBuildIdentity } from "./deployment-identity";
+
+import { JudgeRuntimeEntity } from "../judge/judge-runtime.entity";
+import { SettingsEntity } from "../settings/settings.entity";
+
 import { FileService } from "../file/file.service";
 import { RedisService } from "../redis/redis.service";
 
@@ -59,6 +64,23 @@ export class HealthService {
       if (!(await this.fileService.storageAvailable())) throw new Error("The bucket doesn't exist");
     }
   };
+
+  async identity() {
+    const schema = await this.connection.getRepository(SettingsEntity).findOneBy({ key: "deployment.schema" });
+    const recorded = await this.connection
+      .getRepository(JudgeRuntimeEntity)
+      .find({ order: { firstSeenAt: "DESC" }, take: 20 });
+    return {
+      ...deploymentBuildIdentity,
+      schema: schema?.value || { version: null, status: "unrecorded" },
+      recordedJudgeBuilds: recorded.map(row => ({
+        id: row.id,
+        sha256: row.judgeProgram,
+        firstSeenAt: row.firstSeenAt
+      })),
+      judgeBuildStatus: "recorded_history; live capabilities are in the admin deploymentIdentity API"
+    };
+  }
 
   async ready(): Promise<Readiness> {
     if (!this.readiness || Date.now() - this.readiness.at >= READINESS_CACHE_TIME)

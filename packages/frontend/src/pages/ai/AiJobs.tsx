@@ -1,17 +1,55 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Button, Header, Message, Progress } from "semantic-ui-react";
+import { Button, Header, Message } from "semantic-ui-react";
 import { observer } from "mobx-react";
 import { Link } from "@/utils/hooks";
-import { aiCall, aiText, aiError, actionName, AiJob, AiRetryFrom } from "./api";
-import AiFailureDetails, { failureKindName, programName } from "./AiFailureDetails";
-import AiScoringReview, { AiJudgingSummary, AiRunSummary } from "./AiScoringReview";
-import AiRepairs from "./AiRepairs";
-import AiTutorialBinding from "./AiTutorialBinding";
-import AiCoverage from "./AiCoverage";
-import AiEvidence from "./AiEvidence";
-import AiPlanIssues from "./AiPlanIssues";
+import {
+  aiCall,
+  aiText,
+  actionName,
+  attentionText,
+  AiJobSection,
+  AiJobSummary,
+  AiJobSummaryResponse,
+  stageKindName
+} from "./api";
+import { newestRevisions, useAiPoll } from "./useAiPoll";
 import style from "./Ai.module.less";
 
+const SECTIONS: AiJobSection[] = ["attention", "active", "history"];
+
+export const elapsedText = (ms: number | null) => {
+  if (ms == null || ms < 0) return "";
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return aiText(`${seconds} 秒`, `${seconds}s`);
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return aiText(`${minutes} 分 ${seconds % 60} 秒`, `${minutes}m ${seconds % 60}s`);
+  return aiText(`${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分`, `${Math.floor(minutes / 60)}h ${minutes % 60}m`);
+};
+
+export const stepText = (step: string) => step.split(".").map(actionName).join(" · ");
+
+export function problemLabel(problem: AiJobSummary["problem"]) {
+  if (!problem) return null;
+  const href = problem.displayId != null ? `/p/${problem.displayId}` : `/p/id/${problem.id}`;
+  const label =
+    problem.displayId != null
+      ? `#${problem.displayId}${problem.title ? ` ${problem.title}` : ""}`
+      : `${aiText("题目", "Problem")} P${problem.id}${problem.title ? ` ${problem.title}` : ""}`;
+  return <Link href={href}>{label}</Link>;
+}
+
+interface Section {
+  jobs: AiJobSummary[];
+  total: number;
+  receivedAt: number;
+}
+
+const emptySection = (): Section => ({ jobs: [], total: 0, receivedAt: 0 });
+
+/**
+ * Compact AI job rows (review Part V, R7): jobs that need their owner and running jobs are asked for separately from
+ * the job history, so a long history can't hide them. Each row links to its details page.
+ */
 export default observer(function AiJobs({
   problemId,
   refreshKey = 0,
@@ -23,58 +61,114 @@ export default observer(function AiJobs({
   onCompleted?: () => void;
   heading?: string;
 }) {
-  const [jobs, setJobs] = useState<AiJob[]>([]),
+  const [sections, setSections] = useState<Record<AiJobSection, Section>>(() => ({
+      attention: emptySection(),
+      active: emptySection(),
+      history: emptySection()
+    })),
     [paused, setPaused] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [historyLimit, setHistoryLimit] = useState(problemId ? 3 : 10),
+    [onlyAttention, setOnlyAttention] = useState(false),
+    [changing, setChanging] = useState<string>(null),
+    [now, setNow] = useState(Date.now());
+  const versions = useRef<Partial<Record<AiJobSection, string>>>({});
+  const known = useRef(new Map<string, AiJobSummary>());
   const running = useRef(new Set<string>());
-  // The Failure Inbox (review Part III, §8.1): jobs that stopped for their owner's decision
-  const [onlyWaiting, setOnlyWaiting] = useState(false);
-  const waiting = jobs.filter(
-    job => job.status === "failed" && (job.result.repair?.review || job.result.scoringReview)
-  );
-  useEffect(() => {
-    let mounted = true;
-    const refresh = async () => {
+  const onCompletedRef = useRef(onCompleted);
+  onCompletedRef.current = onCompleted;
+  const scope = `${problemId}:${historyLimit}`;
+  const scopeRef = useRef(scope);
+  if (scopeRef.current !== scope) {
+    // A new filter or page size starts again
+    scopeRef.current = scope;
+    versions.current = {};
+    known.current = new Map();
+  }
+
+  const poll = useAiPoll(
+    async signal => {
       try {
-        const result = await aiCall<{ jobs: AiJob[]; paused?: boolean }>("jobs", problemId ? { problemId } : {});
-        if (!mounted) return;
-        setJobs(result.jobs);
-        setPaused(result.paused === true);
+        const replies = await Promise.all(
+          SECTIONS.map(section =>
+            aiCall<AiJobSummaryResponse>(
+              "jobsSummary",
+              {
+                section,
+                limit: section === "history" ? historyLimit : 100,
+                ...(problemId ? { problemId } : {}),
+                ...(versions.current[section] ? { ifVersion: versions.current[section] } : {})
+              },
+              { signal }
+            )
+          )
+        );
+        if (signal.aborted) return;
+        const receivedAt = Date.now();
+        const changed: Partial<Record<AiJobSection, Section>> = {};
+        replies.forEach((reply, i) => {
+          versions.current[SECTIONS[i]] = reply.version;
+          if (reply.unchanged === true) return;
+          setPaused(reply.paused === true);
+          changed[SECTIONS[i]] = { jobs: newestRevisions(known.current, reply.jobs), total: reply.total, receivedAt };
+          for (const job of reply.jobs) {
+            if (job.state === "queued" || job.state === "running") running.current.add(job.id);
+            else if (job.state === "completed" && running.current.delete(job.id)) onCompletedRef.current?.();
+          }
+        });
+        if (Object.keys(changed).length) setSections(previous => ({ ...previous, ...changed }));
         setError("");
-        for (const job of result.jobs) {
-          if (["queued", "running"].includes(job.status)) running.current.add(job.id);
-          else if (job.status === "completed" && running.current.delete(job.id)) onCompleted?.();
-        }
       } catch (e) {
-        if (mounted) setError(e.message);
+        if (!signal.aborted) setError(e.message);
       }
-    };
-    void refresh();
-    const timer = setInterval(refresh, 2000);
-    return () => {
-      mounted = false;
-      clearInterval(timer);
-    };
-  }, [problemId, refreshKey]);
-  const [changing, setChanging] = useState<string>(null);
-  const change = async (method: string, id: string, retryFrom?: AiRetryFrom, role?: string) => {
+    },
+    [problemId, refreshKey, historyLimit]
+  );
+
+  const active = sections.active.jobs,
+    attention = sections.attention.jobs;
+  const attentionTotal = Math.max(sections.attention.total, attention.length);
+  // Elapsed stage time advances between unchanged replies
+  useEffect(() => {
+    if (!active.length) return undefined;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active.length > 0]);
+
+  const change = async (method: "cancel" | "retry", id: string) => {
     setChanging(id);
     setError("");
     try {
-      await aiCall(method, { id, ...(retryFrom ? { retryFrom } : {}), ...(role ? { role } : {}) });
-      const result = await aiCall<{ jobs: AiJob[]; paused?: boolean }>("jobs", problemId ? { problemId } : {});
-      setJobs(result.jobs);
-      setPaused(result.paused === true);
+      await aiCall(method, { id });
+      poll();
     } catch (e) {
       setError(e.message);
     } finally {
       setChanging(null);
     }
   };
+
+  // A running job that also needs attention is listed once, with its reason
+  const attentionIds = new Set(attention.map(job => job.id));
+  const rows: Array<[AiJobSummary, number]> = [
+    ...attention.map(job => [job, sections.attention.receivedAt] as [AiJobSummary, number]),
+    ...(onlyAttention
+      ? []
+      : [
+          ...active
+            .filter(job => !attentionIds.has(job.id))
+            .map(job => [job, sections.active.receivedAt] as [AiJobSummary, number]),
+          ...sections.history.jobs
+            .filter(job => !attentionIds.has(job.id))
+            .map(job => [job, sections.history.receivedAt] as [AiJobSummary, number])
+        ])
+  ];
+  const moreHistory = sections.history.total > sections.history.jobs.length;
+
   return (
     <>
       {error && <Message negative>{error}</Message>}
-      {paused && jobs.some(job => ["queued", "running"].includes(job.status)) && (
+      {paused && active.length > 0 && (
         <Message warning>
           {aiText(
             "站点管理员已暂停 AI。排队中的任务会在恢复后从中断处继续。",
@@ -82,80 +176,53 @@ export default observer(function AiJobs({
           )}
         </Message>
       )}
-      {heading && jobs.length > 0 && (
+      {heading && rows.length > 0 && (
         <Header as="h2" className={style.jobsHeading}>
           {heading}
         </Header>
       )}
-      {!problemId && waiting.length > 0 && (
+      {!problemId && attention.length > 0 && (
         <Message info size="small" className={style.inbox}>
           {aiText(
-            `${waiting.length} 个任务在等待你的决定。`,
-            `${waiting.length} ${waiting.length === 1 ? "job is" : "jobs are"} waiting for your decision.`
+            `${attentionTotal} 个任务需要你处理。`,
+            `${attentionTotal} ${attentionTotal === 1 ? "job needs" : "jobs need"} your attention.`
           )}{" "}
-          <Button size="mini" type="button" basic onClick={() => setOnlyWaiting(!onlyWaiting)}>
-            {onlyWaiting ? aiText("显示全部任务", "Show all jobs") : aiText("只显示这些任务", "Show only these")}
+          <Button size="mini" type="button" basic onClick={() => setOnlyAttention(!onlyAttention)}>
+            {onlyAttention ? aiText("显示全部任务", "Show all jobs") : aiText("只显示这些任务", "Show only these")}
           </Button>
         </Message>
       )}
-      {jobs.length > 0 && (
-        <div className={style.jobs}>
-          {(onlyWaiting && !problemId && waiting.length ? waiting : jobs).slice(0, problemId ? 3 : 20).map(job => {
-            const active = ["queued", "running"].includes(job.status);
+      {rows.length > 0 && (
+        <ul className={style.jobRows}>
+          {rows.map(([job, receivedAt]) => {
+            const isActive = job.state === "queued" || job.state === "running";
+            const elapsed =
+              job.stage.elapsedMs == null ? null : job.stage.elapsedMs + (isActive ? Math.max(0, now - receivedAt) : 0);
             return (
-              <div className={style.job} key={job.id}>
-                <div className={style.jobHeading}>
-                  <div>
+              <li className={style.jobRow} key={job.id}>
+                <div className={style.jobRowMain}>
+                  <Link href={`/ai/jobs/${job.id}`}>
                     <strong>{actionName(job.action)}</strong>
-                    {job.problemId && (
-                      <span>
-                        {" "}
-                        ·{" "}
-                        <Link href={`/p/id/${job.problemId}`}>
-                          {aiText("题目", "Problem")} P{job.problemId}
-                        </Link>
-                      </span>
-                    )}
-                    <span className={style.jobStatus}> · {actionName(job.status)}</span>
-                    {job.result.sourceSearch && (
-                      <span className={style.jobStatus}>
-                        {" · "}
-                        {job.result.sourceSearch.status === "verified"
-                          ? aiText("原题已核实", "Source verified")
-                          : job.result.sourceSearch.status === "not_found"
-                            ? aiText("未找到可核实原题", "No verified source found")
-                            : job.result.sourceSearch.status === "not_configured"
-                              ? aiText("未配置搜索服务", "Search not configured")
-                              : aiText("原题检索", "Source search")}
-                        {job.result.sourceSearch.searchCount > 0 &&
-                          aiText(
-                            `（${job.result.sourceSearch.searchCount} 次检索）`,
-                            ` (${job.result.sourceSearch.searchCount} ${
-                              job.result.sourceSearch.searchCount === 1 ? "search" : "searches"
-                            })`
-                          )}
-                      </span>
-                    )}
-                    {job.result.generatedCount != null && (
-                      <span className={style.jobStatus}>
-                        {" "}
-                        ·{" "}
-                        {aiText(
-                          `${job.result.generatedCount} 个测试点${
-                            job.result.requestedCount != null && job.result.requestedCount !== job.result.generatedCount
-                              ? `（请求 ${job.result.requestedCount} 个）`
-                              : ""
-                          }`,
-                          `${job.result.generatedCount} test ${job.result.generatedCount === 1 ? "case" : "cases"}${
-                            job.result.requestedCount != null && job.result.requestedCount !== job.result.generatedCount
-                              ? ` (${job.result.requestedCount} requested)`
-                              : ""
-                          }`
-                        )}
-                      </span>
-                    )}
+                  </Link>
+                  {job.problem && <span className={style.jobRowProblem}>{problemLabel(job.problem)}</span>}
+                  <span className={style.jobState} data-state={job.state}>
+                    {actionName(job.state)}
+                  </span>
+                </div>
+                {(isActive || job.state === "failed") && (
+                  <div className={style.jobRowStage}>
+                    {stageKindName(job.stage.kind)}
+                    {job.stage.step && job.stage.step !== job.stage.kind && ` · ${stepText(job.stage.step)}`}
+                    {elapsed != null && ` · ${elapsedText(elapsed)}`}
                   </div>
-                  {active && (
+                )}
+                {job.attention && (
+                  <div className={style.jobRowAttention} role="status">
+                    {attentionText(job.attention)}
+                  </div>
+                )}
+                <div className={style.jobRowActions}>
+                  {job.relevantAction.kind === "cancel" && (
                     <Button
                       size="mini"
                       type="button"
@@ -165,157 +232,37 @@ export default observer(function AiJobs({
                       {aiText("取消", "Cancel")}
                     </Button>
                   )}
-                  {job.status === "failed" &&
-                    (job.retryOptions?.includes("replace-scoring") ? (
-                      <>
-                        <Button
-                          size="mini"
-                          type="button"
-                          primary
-                          disabled={changing === job.id}
-                          onClick={() => change("retry", job.id, "replace-scoring")}
-                        >
-                          {aiText("确认新的计分设置并继续", "Approve the new scoring and continue")}
-                        </Button>
-                        <Button
-                          size="mini"
-                          type="button"
-                          disabled={changing === job.id}
-                          onClick={() => change("retry", job.id)}
-                        >
-                          {aiText("重试（已修改子任务）", "Retry (subtasks changed)")}
-                        </Button>
-                      </>
-                    ) : job.retryOptions?.some(option => ["validate-samples", "std"].includes(option)) ? (
-                      job.retryOptions
-                        .filter(option => ["validate-samples", "std"].includes(option))
-                        .map(retryFrom => (
-                          <Button
-                            key={retryFrom}
-                            size="mini"
-                            type="button"
-                            disabled={changing === job.id}
-                            onClick={() => change("retry", job.id, retryFrom)}
-                          >
-                            {retryFrom === "validate-samples"
-                              ? aiText("重新校验样例（样例已修正）", "Retry sample validation (samples corrected)")
-                              : aiText("重新生成 std.cpp（标程错误）", "Regenerate std.cpp (incorrect solution)")}
-                          </Button>
-                        ))
-                    ) : (
-                      <Button
-                        size="mini"
-                        type="button"
-                        disabled={changing === job.id}
-                        onClick={() => change("retry", job.id)}
-                      >
-                        {job.result.repair?.review
-                          ? aiText("用同样的程序重新运行", "Run the same programs again")
-                          : aiText("从失败步骤重试", "Retry failed step")}
-                      </Button>
-                    ))}
+                  {job.relevantAction.kind === "retry" && (
+                    <Button
+                      size="mini"
+                      type="button"
+                      disabled={changing === job.id}
+                      onClick={() => change("retry", job.id)}
+                    >
+                      {aiText("从失败步骤重试", "Retry failed step")}
+                    </Button>
+                  )}
+                  <Link href={`/ai/jobs/${job.id}`} className={style.jobRowDetails}>
+                    {job.attention || job.relevantAction.kind === "details"
+                      ? aiText("查看原因与选项", "Reason and options")
+                      : aiText("详情", "Details")}
+                  </Link>
                 </div>
-                {active && (
-                  <Progress
-                    percent={job.progress}
-                    progress
-                    active
-                    size="small"
-                    className={style.jobProgress}
-                    label={job.step.split(".").map(actionName).join(" · ")}
-                  />
-                )}
-                {job.result.referenceSource && (
-                  <p className={style.jobDetail}>
-                    {job.result.referenceSource.kind === "tutorial"
-                      ? aiText("标程来自题解", "Reference solution from a tutorial")
-                      : aiText("标程由 AI 独立生成", "Reference solution generated independently by AI")}
-                    {job.result.referenceSource.discussionId && (
-                      <>
-                        {" "}
-                        ·{" "}
-                        <Link href={`/d/${job.result.referenceSource.discussionId}`}>
-                          {aiText("查看题解", "View tutorial")}
-                        </Link>
-                      </>
-                    )}
-                    {" · "}
-                    {job.result.referenceSource.validated
-                      ? aiText(
-                          `已通过 ${job.result.referenceSource.samplesPassed} 组样例校验`,
-                          `Passed ${job.result.referenceSource.samplesPassed} sample ${
-                            job.result.referenceSource.samplesPassed === 1 ? "check" : "checks"
-                          }`
-                        )
-                      : aiText("尚未通过样例校验", "Not yet sample-validated")}
-                  </p>
-                )}
-                <AiCoverage result={job.result} />
-                <AiJudgingSummary result={job.result} />
-                <AiRunSummary result={job.result} />
-                {(job.result.warnings || [])
-                  .filter(warning =>
-                    [
-                      "GENERATED_DATA_REVIEW_RECOMMENDED",
-                      "REFERENCE_SAMPLES_UNAVAILABLE",
-                      "TUTORIAL_REFERENCE_REJECTED",
-                      "PROTOCOL_ATTACHMENT_SAMPLES_NOT_APPLICABLE",
-                      "TESTDATA_QUALITY_PROTOCOL_UNSUPPORTED",
-                      "CASE_CAPACITY_ADJUSTED",
-                      "DIFFERENTIAL_INPUTS_REPEATED",
-                      "FINAL_CASES_REPEATED"
-                    ].includes(warning)
-                  )
-                  .map(warning => (
-                    <p className={style.notes} key={warning}>
-                      {aiError(warning)}
-                    </p>
-                  ))}
-                {job.result.discussionIds && !job.result.tutorials?.length && (
-                  <p className={style.jobDetail}>
-                    {Object.entries(job.result.discussionIds).map(([locale, id], index) => (
-                      <React.Fragment key={locale}>
-                        {index > 0 && " · "}
-                        <Link href={`/d/${id}`}>{locale === "zh_CN" ? "题解-AI" : "Tutorial-AI"}</Link>
-                      </React.Fragment>
-                    ))}
-                  </p>
-                )}
-                <AiTutorialBinding
-                  job={job}
-                  busy={changing === job.id}
-                  onCorrect={() => change("correctTutorial", job.id)}
-                />
-                {job.status === "failed" && (
-                  <p className={style.jobError} role="alert">
-                    {aiError(job.error || "INTERNAL_ERROR")}
-                  </p>
-                )}
-                {job.status === "failed" && job.error?.startsWith("INVALID_AI_QUALITY_PLAN") && (
-                  <AiPlanIssues issues={job.result.planIssues} rejections={job.result.planRejections} />
-                )}
-                {job.status === "failed" && job.result.scoringReview && (
-                  <AiScoringReview review={job.result.scoringReview} />
-                )}
-                <AiRepairs
-                  job={job}
-                  busy={changing === job.id}
-                  onRetry={(retryFrom, role) => change("retry", job.id, retryFrom, role)}
-                />
-                {job.status === "failed" && job.result.failure && (
-                  <p className={style.jobDetail}>
-                    {failureKindName(job.result.failure.kind)}
-                    {job.result.failure.role &&
-                      ` · ${programName(job.result.failure.role, job.result.failure.candidate)}`}
-                    {job.result.failure.subject && ` · ${job.result.failure.subject}`}
-                  </p>
-                )}
-                <AiEvidence job={job} />
-                <AiFailureDetails job={job} />
-              </div>
+              </li>
             );
           })}
-        </div>
+        </ul>
+      )}
+      {!onlyAttention && moreHistory && historyLimit < 100 && (
+        <Button
+          size="mini"
+          type="button"
+          basic
+          className={style.moreJobs}
+          onClick={() => setHistoryLimit(Math.min(100, historyLimit + (problemId ? 10 : 20)))}
+        >
+          {aiText("显示更早的任务", "Show older jobs")}
+        </Button>
       )}
     </>
   );

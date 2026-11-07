@@ -419,7 +419,7 @@ const sandboxFailure = (kind, message) => {
 };
 
 for (const [kind, label] of [["time_limit", "time"], ["memory_limit", "memory"]])
-  test(`the oracle's ${label} limit on a differential input blames the small-case generator, and nothing is judged on it`, async () => {
+  test(`the oracle's ${label} limit alone retains oracle attribution for review, and nothing is judged on it`, async () => {
     const ran = [];
     const environment = fake();
     const execute = environment.execute;
@@ -432,10 +432,10 @@ for (const [kind, label] of [["time_limit", "time"], ["memory_limit", "memory"]]
     const quality = new AiQuality(request(), environment);
     const error = await quality.runDifferential().then(() => null, failure => failure);
     assert.ok(error, "the differential test stops");
-    assert.match(error.message, new RegExp(`oracle exceeded its ${label} limit on a differential input of 1 bytes`));
+    assert.match(error.message, /oracle stopped/);
     const details = detailsOf(error);
-    assert.equal(details.kind, "oracle_domain_exceeded");
-    assert.equal(details.role, "quality-small-make");
+    assert.equal(details.kind, kind);
+    assert.equal(details.role, "quality-oracle");
     assert.equal(details.phase, "quality-differential");
     assert.equal(details.subtask, 1);
     assert.equal(details.scenarioIndex, 3);
@@ -488,4 +488,37 @@ test("an oracle that crashes or disagrees is still the oracle's failure", async 
   const error = await new AiQuality(request(), crashing).runDifferential().then(() => null, failure => failure);
   assert.equal(detailsOf(error).kind, "runtime_error");
   assert.equal(detailsOf(error).role, "quality-oracle");
+});
+
+for (const [sample, size] of [[6, 56], [8, 576], [8, 580], [5, 244027], [5, 244031]])
+  test(`uploaded baseline sample ${sample} (${size} bytes) is identified before final generation`, async () => {
+    const env = fake();
+    const old = env.execute;
+    env.execute = async (name, input, parameters) => {
+      if (name === 'quality-small-make') return old(name, input, parameters);
+      const value = BigInt(input.toString().trim()) * 2n;
+      return Buffer.from(String(name.startsWith('quality-challenge') ? BigInt.asUintN(32, value) : value));
+    };
+    const quality = new AiQuality(request(), env);
+    const input = Buffer.from('2147483648' + ' '.repeat(size - 10));
+    await quality.checkSample(input, Buffer.from('4294967296'), sample, 'author_validation', true);
+    assert.equal(quality.baselines.length, 1);
+    assert.equal(quality.baselines[0].corpus, 'author_validation');
+    assert.equal(quality.baselines[0].sample, sample);
+    assert.equal(quality.baselines[0].verdict, 'WA');
+    await quality.runDifferential();
+    // Baseline evidence is not any exported novel witness.
+    assert.throws(() => quality.result(), /surviv|challenge|case/i);
+  });
+
+test('candidate baseline qualification never treats compiler or infrastructure failures as target kills', async () => {
+  for (const kind of ['compile_error', 'infrastructure_error']) {
+    const env = fake({ execute: async name => {
+      if (name.startsWith('quality-challenge')) throw sandboxFailure(kind, kind);
+      return Buffer.from('2');
+    } });
+    const quality = new AiQuality(request(), env);
+    await assert.rejects(quality.checkSample(Buffer.from('1'), Buffer.from('2'), 1, 'author_validation', true), new RegExp(kind));
+    assert.deepEqual(quality.baselines, []);
+  }
 });

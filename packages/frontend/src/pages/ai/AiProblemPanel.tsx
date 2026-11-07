@@ -5,6 +5,7 @@ import { appState } from "@/appState";
 import { Link } from "@/utils/hooks";
 import { aiCall, aiText, actionName } from "./api";
 import AiJobs from "./AiJobs";
+import AiStartOptions, { defaultStartOptions, startOptionFields } from "./AiStartOptions";
 import style from "./Ai.module.less";
 import { keyboardMenu } from "@/utils/keyboard";
 export { startAiAfterSave } from "./api";
@@ -21,13 +22,23 @@ export const AiProblemPanel = observer(function AiProblemPanel({
   const [count, setCount] = useState(20),
     [error, setError] = useState(""),
     [pending, setPending] = useState(false),
-    [refreshKey, setRefreshKey] = useState(0);
+    [refreshKey, setRefreshKey] = useState(0),
+    [startOptions, setStartOptions] = useState(defaultStartOptions);
   if (!appState.currentUserHasPrivilege("UseAi" as any)) return null;
   const generate = async (action: string) => {
     setPending(true);
     setError("");
     try {
-      await aiCall("start", { problemId, action, count });
+      await aiCall("start", {
+        problemId,
+        action,
+        count,
+        // The order of work applies to "Run all"; what the model may see of uploaded samples to test data
+        ...startOptionFields({
+          workflow: action === "all" ? startOptions.workflow : "default",
+          corpusPolicy: ["all", "testdata"].includes(action) ? startOptions.corpusPolicy : "private"
+        })
+      });
       setRefreshKey(x => x + 1);
     } catch (e) {
       setError(e.message);
@@ -109,6 +120,12 @@ export const AiProblemPanel = observer(function AiProblemPanel({
         </Dropdown>
         {canGenerate && <span className={style.rangeNote}>{aiText("5–1000 组", "5–1000 cases")}</span>}
       </Form>
+      <details className={style.startOptionsToggle}>
+        <summary>{aiText("更多选项", "More options")}</summary>
+        <Form onSubmit={e => e.preventDefault()}>
+          <AiStartOptions value={startOptions} onChange={setStartOptions} disabled={pending} testdata={canGenerate} />
+        </Form>
+      </details>
       <AiJobs problemId={problemId} refreshKey={refreshKey} onCompleted={onCompleted} />
     </section>
   );

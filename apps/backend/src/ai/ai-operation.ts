@@ -7,6 +7,8 @@
  */
 import {
   AI_EXECUTION_PROTOCOL_VERSION,
+  AI_QUALITY_POLICY_VERSION,
+  AI_RECEIPT_VERSION,
   aiContractDigest,
   parseAiCorpus,
   parseAiExecutionRecord,
@@ -28,20 +30,35 @@ export function aiOperationKey(jobId: string, request: RunnerRequest): string {
   return aiContractDigest({
     version: AI_OPERATION_VERSION,
     contract: AI_EXECUTION_PROTOCOL_VERSION,
+    qualityPolicy: AI_QUALITY_POLICY_VERSION,
+    receiptVersion: AI_RECEIPT_VERSION,
     jobId,
     // Without the key itself, which a keyed request carries
-    request: { ...request, operation: request.operation || "generate", operationKey: undefined }
+    request: {
+      ...request,
+      requiredQualityPolicy: request.requiredQualityPolicy ?? AI_QUALITY_POLICY_VERSION,
+      requiredReceiptVersion: request.requiredReceiptVersion ?? AI_RECEIPT_VERSION,
+      operation: request.operation || "generate",
+      operationKey: undefined
+    }
   });
 }
 
 /** How a completed run was made, if it was made under the current contract; null otherwise (it isn't reused). */
 export function currentExecution(result: unknown): AiExecutionRecord | null {
   const record = parseAiExecutionRecord((result as Record<string, unknown>)?.execution);
-  return record?.contract === AI_EXECUTION_PROTOCOL_VERSION ? record : null;
+  return record?.contract === AI_EXECUTION_PROTOCOL_VERSION &&
+    record.qualityPolicy === AI_QUALITY_POLICY_VERSION &&
+    record.receiptVersion === AI_RECEIPT_VERSION
+    ? record
+    : null;
 }
 
 /** Where a job's result came from, as it's published with the test data. */
 export interface AiExecutionProvenance {
+  contract: number;
+  qualityPolicy: number;
+  receiptVersion: number;
   operation: string;
   // The local AI runner, or a judge machine (its judge task, and the runtime the backend recorded for it)
   origin: "local" | "judge";
@@ -55,6 +72,7 @@ export interface AiExecutionProvenance {
   startedAt: string;
   finishedAt: string;
   reuse: AiExecutionRecord["reuse"];
+  receipts?: AiExecutionRecord["receipts"];
 }
 
 export function executionProvenance(
@@ -68,6 +86,9 @@ export function executionProvenance(
   }
 ): AiExecutionProvenance {
   return {
+    contract: record.contract,
+    qualityPolicy: record.qualityPolicy,
+    receiptVersion: record.receiptVersion,
     operation: operation.key,
     origin: operation.origin,
     ...(operation.task ? { task: operation.task } : {}),
@@ -77,7 +98,8 @@ export function executionProvenance(
     runtime: record.runtime,
     startedAt: record.startedAt,
     finishedAt: record.finishedAt,
-    reuse: record.reuse
+    reuse: record.reuse,
+    ...(record.receipts ? { receipts: record.receipts } : {})
   };
 }
 

@@ -32,6 +32,17 @@ declare namespace ApiTypes {
   export interface AddUserToGroupResponseDto {
     error?: "PERMISSION_DENIED" | "NO_SUCH_USER" | "NO_SUCH_GROUP" | "USER_ALREADY_IN_GROUP";
   }
+  export interface AiAllocationApprovalDto {
+    digest: string; // ^[a-f0-9]{64}$
+    id: string;
+  }
+  export interface AiAllocationApprovalResponseDto {
+    queued?: boolean;
+    id?: string;
+    error?: string;
+    message?: string;
+    unchanged?: boolean;
+  }
   export interface AiApprovedEndpointDto {
     /**
      * Shown to users who choose it.
@@ -45,6 +56,80 @@ declare namespace ApiTypes {
      * Requests with this origin, at or below this path, are approved.
      */
     baseUrl: string;
+  }
+  export interface AiAttentionDto {
+    data?: {
+      [name: string]: any;
+    };
+    code: string;
+    message: string;
+    retryable: boolean;
+    kind?: string;
+  }
+  export interface AiCaseCountersDto {
+    planned: number | null;
+    generated: number | null;
+    qualified: number | null;
+    activated: number | null;
+    requested: number;
+  }
+  export interface AiDeploymentIdentityResponseDto {
+    backend?: {
+      [name: string]: any;
+    };
+    frontend?: {
+      [name: string]: any;
+    };
+    schema?: {
+      [name: string]: any;
+    };
+    usageIdentityColumns?: {
+      [name: string]: boolean;
+    };
+    workers?: {}[];
+    qualityPolicyVersion?: number;
+    receiptVersion?: number;
+    executionProtocolVersion?: number;
+    workersTruncated?: boolean;
+    error?: string;
+    message?: string;
+    unchanged?: boolean;
+  }
+  export interface AiDiagnosticExportDto {
+    includeRejectedProposal?: boolean;
+    id: string;
+  }
+  export interface AiDiagnosticExportResponseDto {
+    deployment?: {
+      [name: string]: any;
+    };
+    job?: {
+      [name: string]: any;
+    };
+    detail?: {
+      [name: string]: any;
+    };
+    requests?: {
+      [name: string]: any;
+    };
+    requestHistory?: {
+      [name: string]: any;
+    };
+    planProposal?: {
+      [name: string]: any;
+    };
+    repairs?: {
+      [name: string]: any;
+    };
+    ioProfile?: {
+      [name: string]: any;
+    };
+    exportVersion?: number;
+    exportedAt?: string;
+    excluded?: string[];
+    error?: string;
+    message?: string;
+    unchanged?: boolean;
   }
   export interface AiEndpointPolicyDto {
     /**
@@ -62,11 +147,161 @@ declare namespace ApiTypes {
   export interface AiFailuresDto {
     jobId: string;
   }
+  export interface AiGenerationCancellationDto {
+    id: string | null;
+    stageId: string | null;
+    purpose: string | null;
+    terminalStatus: string | null;
+    status: "not_requested" | "requested" | "confirmed" | "failed" | "unsupported" | "not_needed";
+    error: string | null;
+    requestAttempts: number;
+    lifecycle: string;
+    createdAt: string;
+    identityStatus: string;
+  }
+  export interface AiJobCountersDto {
+    cases: ApiTypes.AiCaseCountersDto;
+    logicalGenerations: number;
+    legacyGenerationRequests: number;
+    responsePolls: number;
+    failedProviderRequests: number;
+    rejectedPlans: number;
+    invalidCandidates: number;
+    failedQualifications: number;
+  }
+  export interface AiJobDetailDto {
+    ifRevision?: number;
+    id: string;
+  }
+  export interface AiJobDetailResponseDto {
+    errorCode?: string | null;
+    job?: {
+      [name: string]: any;
+    };
+    blockingReason?: {
+      data?: {
+        [name: string]: any;
+      };
+      code: string;
+      message: string;
+      retryable: boolean;
+      kind?: string;
+    } | null;
+    technical?: {
+      [name: string]: any;
+    };
+    runs?: {
+      [name: string]: any;
+    };
+    usage?: {
+      [name: string]: any;
+    };
+    ioProfile?: {
+      [name: string]: any;
+    } | null;
+    planIssues?: {}[];
+    planRepair?: {
+      [name: string]: any;
+    } | null;
+    allocationReview?: {
+      [name: string]: any;
+    } | null;
+    scoringReview?: {
+      [name: string]: any;
+    } | null;
+    failures?: {}[];
+    retention?: {
+      [name: string]: any;
+    };
+    requestFailures?: ApiTypes.AiProviderRequestFailureDto[];
+    warnings?: string[];
+    id?: string;
+    revision?: number;
+    summary?: ApiTypes.AiJobSummaryDto;
+    timeline?: ApiTypes.AiTimelineDto;
+    retry?: ApiTypes.AiRetryExplanationDto;
+    counters?: ApiTypes.AiJobCountersDto;
+    provenance?: string;
+    providerCancellation?: ApiTypes.AiProviderCancellationDto;
+    error?: string;
+    message?: string;
+    unchanged?: boolean;
+  }
   export interface AiJobIdDto {
     id: string;
   }
+  export interface AiJobProblemDto {
+    displayId: number | null;
+    title: string | null;
+    id: number;
+  }
   export interface AiJobQueryDto {
     problemId?: number;
+  }
+  export interface AiJobStageDto {
+    kind:
+      | "queued"
+      | "import"
+      | "source"
+      | "metadata"
+      | "planning"
+      | "programs"
+      | "qualification"
+      | "repair"
+      | "publication"
+      | "completed"
+      | "cancelled"
+      | "other";
+    startedAt: string | null; // date-time
+    elapsedMs: number | null;
+    step: string;
+  }
+  export interface AiJobSummaryDto {
+    problem: {
+      displayId: number | null;
+      title: string | null;
+      id: number;
+    } | null;
+    attention: {
+      data?: {
+        [name: string]: any;
+      };
+      code: string;
+      message: string;
+      retryable: boolean;
+      kind?: string;
+    } | null;
+    id: string;
+    action: string;
+    state: string;
+    stage: ApiTypes.AiJobStageDto;
+    relevantAction: ApiTypes.AiRelevantActionDto;
+    updatedAt: string;
+    revision: number;
+  }
+  export interface AiJobSummaryQueryDto {
+    problemId?: number;
+    section?: "active" | "attention" | "history";
+    limit?: number;
+    cursor?: string;
+    ifVersion?: string; // ^[a-f0-9]{64}$
+  }
+  export interface AiJobSummaryResponseDto {
+    section?: "active" | "attention" | "history";
+    nextCursor?: string | null;
+    version?: string;
+    total?: number;
+    paused?: boolean;
+    jobs?: ApiTypes.AiJobSummaryDto[];
+    error?: string;
+    message?: string;
+    unchanged?: boolean;
+  }
+  export interface AiModelPoliciesDto {
+    reasoning?: ApiTypes.AiPurposePolicyDto;
+    schema_repair?: ApiTypes.AiPurposePolicyDto;
+    metadata?: ApiTypes.AiPurposePolicyDto;
+    compiler_fix?: ApiTypes.AiPurposePolicyDto;
   }
   export interface AiPolicyDto {
     /**
@@ -94,6 +329,36 @@ declare namespace ApiTypes {
     filename: string;
     size: number;
   }
+  export interface AiProviderCancellationDto {
+    localCancelled: boolean;
+    truncated: boolean;
+    generations: ApiTypes.AiGenerationCancellationDto[];
+  }
+  export interface AiProviderRequestFailureDto {
+    model: string | null;
+    purpose: string | null;
+    stageId: string | null;
+    generationId: string | null;
+    errorCode: string | null;
+    diagnostics: {
+      [name: string]: any;
+    } | null;
+    target: string;
+    provider: string;
+    host: string;
+    id: string;
+    operation: string;
+    createdAt: string;
+  }
+  export interface AiPurposePolicyDto {
+    model: string;
+    reasoning?: string;
+    maxTokens?: number;
+  }
+  export interface AiRelevantActionDto {
+    kind: "cancel" | "retry" | "details";
+    jobId: string;
+  }
   export interface AiRepairChangeDto {
     jobId: string;
     round: number;
@@ -102,13 +367,53 @@ declare namespace ApiTypes {
     jobId: string;
     id: string;
   }
+  export interface AiRetryExplanationDto {
+    options: string[];
+    roles: string[];
+    reuses: string[];
+    invalidates: string[];
+    newProviderGeneration: boolean;
+  }
   export interface AiRetryJobDto {
     id: string;
     retryFrom?: "validate-samples" | "std" | "replace-scoring" | "repair" | "regenerate";
     role?: string;
   }
+  export interface AiStageAttemptDto {
+    resumptions?: {}[];
+    deployment?: {
+      [name: string]: any;
+    };
+    id: string;
+    attempt: number;
+    stage: string;
+    step: string;
+    startedAt: string;
+    endedAt?: string;
+    outcome?: string;
+    scope?: string;
+    parentId?: string;
+    workflowAttempt?: number;
+    generationId?: string;
+    status?: string;
+    model?: string;
+    policy?: string;
+    promptBytes?: number;
+    outputBytes?: number;
+    durationMs?: number;
+    requests?: number;
+    responsePolls?: number;
+    failedRequests?: number;
+    reuses?: string[];
+    invalidates?: string[];
+  }
   export interface AiTestDto {
     target: "llm" | "search";
+  }
+  export interface AiTimelineDto {
+    entries: ApiTypes.AiStageAttemptDto[];
+    omitted: number;
+    legacyHistoryUnavailable: boolean;
   }
   export interface AiTutorialStatusDto {
     discussionId: number;
@@ -1230,6 +1535,7 @@ declare namespace ApiTypes {
     currentSessionId?: number;
   }
   export interface LlmConfigurationDto {
+    structuredOutput?: "off" | "json_schema";
     responsesRecovery?: "auto" | "off" | "background";
     type: "chat" | "responses" | "anthropic";
     baseUrl: string;
@@ -1831,6 +2137,8 @@ declare namespace ApiTypes {
     error?: "PERMISSION_DENIED" | "NO_SUCH_USER";
   }
   export interface SaveAiConfigurationDto {
+    modelPolicies?: ApiTypes.AiModelPoliciesDto;
+    sourcePolicy?: "optional" | "required" | "off";
     llm: ApiTypes.LlmConfigurationDto;
     search: ApiTypes.SearchConfigurationDto;
     autoOnSave: boolean;
@@ -2082,10 +2390,13 @@ declare namespace ApiTypes {
     usesOverride: boolean;
   }
   export interface StartAiJobDto {
+    workflow?: "default" | "qualify_first" | "metadata_only";
+    corpusPolicy?: "private" | "summaries" | "model_visible";
     problemId?: number;
     action: "metadata" | "tags" | "source" | "difficulty" | "translate" | "tutorial" | "testdata" | "all" | "import";
     attachmentToken?: string;
     count?: number;
+    allocationMode?: "coverage" | "score_ratio";
     markdown?: string;
     image?: string;
     automatic?: boolean;

@@ -112,6 +112,7 @@ test('old bound and published hashes resume after source-title snapshot expansio
   for (const published of [false, true]) {
     const {svc, snapshot, job, run} = fixture();
     const legacy = structuredClone(snapshot);
+    svc.problemFiles.getProblemFiles = async () => Array.from({length: 5}, (_, i) => ['in', 'out'].map(ext => ({filename: `${i + 1}.${ext}`, uuid: `legacy-${i + 1}-${ext}`}))).flat();
     if (published) {
       legacy.judgeInfo.timeLimit = 2000;
       legacy.submittable = true;

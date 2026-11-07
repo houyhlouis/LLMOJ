@@ -1,5 +1,9 @@
 import { Entity, Column, PrimaryColumn, Index, CreateDateColumn } from "typeorm";
 
+import type { AiError } from "./ai.types";
+
+import { JsonColumn } from "../database/json-column";
+
 @Entity("ai_usage")
 @Index(["ownerId", "createdAt"])
 @Index(["ownerId", "responseHash"])
@@ -46,6 +50,12 @@ export class AiUsageEntity {
   /** The logical generation: a generation and the polls recovering its response share it; null for searches */
   @Column({ type: "varchar", length: 36, nullable: true }) generationId: string;
 
+  @Column({ type: "varchar", length: 36, nullable: true }) stageId: string;
+
+  @Column({ type: "int", nullable: true }) requestAttempt: number;
+
+  @JsonColumn({ nullable: true }) diagnostics: AiError["providerDiagnostics"];
+
   @CreateDateColumn() createdAt: Date;
 }
 
@@ -59,6 +69,26 @@ export class AiResponseCheckpointEntity {
   @PrimaryColumn({ type: "varchar", length: 64 }) requestHash: string;
 
   @Column({ type: "varchar", length: 255 }) responseId: string;
+
+  @Column({ type: "varchar", length: 36, nullable: true }) generationId: string;
+
+  @Column({ type: "varchar", length: 36, nullable: true }) stageId: string;
+
+  @Column({ type: "varchar", length: 20, nullable: true }) purpose: string;
+
+  @Column({ default: 0 }) requestAttempts: number;
+
+  @Column({ type: "varchar", length: 64, nullable: true }) bindingHash: string;
+
+  @Column({ type: "varchar", length: 20, default: "legacy" }) lifecycle:
+    "prepared" | "dispatching" | "pending" | "terminal" | "legacy";
+
+  @Column({ type: "varchar", length: 20, nullable: true }) terminalStatus: string;
+
+  @Column({ type: "varchar", length: 20, default: "not_requested" }) cancellation:
+    "not_requested" | "requested" | "confirmed" | "failed" | "unsupported" | "not_needed";
+
+  @Column({ type: "varchar", length: 80, nullable: true }) cancellationError: string;
 
   @CreateDateColumn() createdAt: Date;
 }

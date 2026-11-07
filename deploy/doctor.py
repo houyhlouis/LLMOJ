@@ -326,6 +326,25 @@ class Doctor:
                     r.add(FAIL, 'ready', say(f'The backend can\'t reach {names.get(name, name)}', f'后端无法连接{names.get(name, name)}'))
             else:
                 r.add(FAIL, 'ready', say('The backend isn\'t ready', '后端未就绪'))
+        identity_status, identity_body = self.host.http(f'http://127.0.0.1:{port}/api/health/identity')
+        try:
+            identity = json.loads(identity_body) if identity_status == 200 else {}
+        except (TypeError, ValueError):
+            identity = {}
+        # Only bounded identifiers are printed; never a response body or checkout HEAD.
+        def safe_identity(value):
+            return str(value)[:80] if value is not None and re.fullmatch(r'[A-Za-z0-9_.:-]{1,80}', str(value)) else 'unknown'
+        for component in ('backend', 'frontend'):
+            value = (identity.get(component) or {}).get('sha256')
+            r.add(OK if value else WARN, component + '-build', component + ': ' + safe_identity(value))
+        schema = (identity.get('schema') or {}).get('version')
+        r.add(OK if schema else WARN, 'schema-version', 'schema: ' + safe_identity(schema))
+        r.add(OK if identity.get('qualityPolicyVersion') else WARN, 'quality-policy',
+              'quality policy: ' + safe_identity(identity.get('qualityPolicyVersion')))
+        for worker in (identity.get('recordedJudgeBuilds') or [])[:20]:
+            r.add(OK, 'judge-build', 'recorded judge build: ' + safe_identity(worker.get('sha256')))
+        if not identity.get('recordedJudgeBuilds'):
+            r.add(WARN, 'judge-build', 'No recorded judge build identity')
         listen = str(self.install.get('listenAddress') or '0.0.0.0')
         address = '127.0.0.1' if listen in ('0.0.0.0', '::', '[::]', '') else listen
         address = f'[{address}]' if ':' in address and not address.startswith('[') else address

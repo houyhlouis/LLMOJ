@@ -4,6 +4,51 @@ import { appState } from "@/appState";
 import { noteSessionEnded, responseRequestId, sessionHeaders } from "@/utils/session";
 export const aiText = (zh: string, en: string) => (appState.locale === "zh_CN" ? zh : en);
 const errors: Record<string, [string, string]> = {
+  // Review Part V (R1–R5)
+  INVALID_AI_TASK_CONTRACT: [
+    "无法从题面中提取有效的执行方式（接口、进程生命周期与计分方式）。",
+    "The statement's execution model (interface, process lifetime and scoring) couldn't be extracted."
+  ],
+  AI_TASK_NEEDS_CONFIGURATION: [
+    "本站评测机不支持此题的执行方式，已在生成程序之前停止。题面保留为草稿。",
+    "This site's judges don't support the task's execution model, so the job stopped before writing programs. The statement stays a draft."
+  ],
+  AI_INTERFACE_MISMATCH: [
+    "生成的程序不符合题目的函数接口（例如自带 main() 或缺少回调函数），没有采用。",
+    "A generated program broke the task's function interface (for example it added main() or left out callbacks) and wasn't used."
+  ],
+  AI_ARTIFACT_COMPILE_FAILED: [
+    "生成的程序编译失败，依赖它的步骤没有继续。",
+    "A generated program failed to compile, so the steps that depend on it didn't run."
+  ],
+  AI_NOVEL_TARGET_REQUIRED: [
+    "待拦截的错误算法已经会被现有样例拦截，不能作为新增强度的目标。请换一个经过审查的自然错误。",
+    "The candidate is already caught by existing samples, so it can't count as a new strengthening target. Replace it with another reviewed natural defect."
+  ],
+  AI_PLAN_REPAIR_EXHAUSTED: [
+    "测试方案的字段修复次数已用完，需要你决定是否重新设计方案。",
+    "The testing plan's field repair is used up; decide whether to design a new plan."
+  ],
+  INVALID_AI_PLAN_FIELD_REPAIR: [
+    "模型返回的字段修复无效（修改了未指定的字段或仍不符合规则）。",
+    "The model's field repair was invalid (it changed other fields or still broke the rules)."
+  ],
+  AI_PROVENANCE_POLICY: [
+    "按来源核实规则，原题未核实前不发布测试数据。这不是评测故障。",
+    "Under the provenance rule, test data isn't published until the source is verified. This isn't a judging failure."
+  ],
+  source_unverified: [
+    "原题检索没有完成，来源标记为未核实；其他步骤照常继续。",
+    "The source search didn't finish, so the source is marked unverified; other work carried on."
+  ],
+  OPTIONAL_REFERENCE_SEARCH_UNAVAILABLE: [
+    "题解或难度参考资料检索不可用，已在没有参考资料的情况下继续。",
+    "Reference lookup for the tutorial or difficulty was unavailable; the job carried on without it."
+  ],
+  SOURCE_REVIEW_REQUIRED: [
+    "检索到的原题与作者填写的来源不一致，请人工核对。作者填写的来源未被修改。",
+    "The verified match differs from the author's source; review it. The author's source wasn't changed."
+  ],
   INVALID_ATTACHMENT_TOKEN: [
     "附加文件上传凭据已失效，请重新选择并上传压缩包。",
     "The attachment upload token is invalid or expired. Select and upload the ZIP again."
@@ -610,6 +655,8 @@ export interface AiObservation {
     memoryBytes?: number;
     timeLimitMs?: number;
     memoryLimitBytes?: number;
+    // "reused": measured by an earlier run and loaded from its receipt (review Part V, R4); absent on older jobs
+    timing?: "fresh" | "reused";
   };
   difference?: {
     unit: "token" | "line" | "byte";
@@ -823,6 +870,135 @@ export interface AiTutorialView {
   corrected?: string;
 }
 
+/** A task's execution model, as the job extracted it and checked it against the installed runners (review Part V, R1). */
+export type AiTaskMode = "batch" | "interactive_stdio" | "sequential_communication" | "persistent_duplex";
+export interface AiTaskContract {
+  version: 1;
+  mode: AiTaskMode;
+  lifetime: "single_process" | "single_session" | "two_fresh_processes" | "two_live_isolated_roles";
+  interface: {
+    headers: { name: string; identity: string }[];
+    functions: { name: string; signature: string; owner: "contestant" | "grader"; role: string }[];
+  };
+  roles: { name: string; permittedInformation: string[] }[];
+  framing: string;
+  scoring: { scope: "case" | "subtask"; reduction: "binary" | "sum" | "min" | "max"; metric: string };
+}
+export interface AiRunnerCapabilities {
+  version: 1;
+  modes: AiTaskMode[];
+  lifetimes: AiTaskContract["lifetime"][];
+  scoring: string[];
+  compileLink: boolean;
+  qualification: boolean;
+  receipts: boolean;
+}
+
+/** One attempt at one stage; retries add attempts instead of overwriting the stage (review Part V, R5/R7). */
+export interface AiStageAttempt {
+  id: string;
+  stage: string;
+  attempt: number;
+  startedAt: string;
+  finishedAt?: string;
+  status: "running" | "completed" | "failed" | "interrupted";
+  generationId?: string;
+  model?: string;
+  policy?: string;
+  promptBytes?: number;
+  outputBytes?: number;
+  durationMs?: number;
+  requests?: number;
+  responsePolls?: number;
+  failedRequests?: number;
+  reuses: string[];
+  invalidates: string[];
+}
+
+export type AiBlockingReason =
+  | { kind: "needs_configuration"; required: AiTaskContract; available: AiRunnerCapabilities[]; missing: string[] }
+  | { kind: "plan_schema"; issues: AiPlanIssue[]; hash: string; remaining: number; status: string }
+  | { kind: "plan_feasibility"; issues: AiPlanIssue[] }
+  | {
+      kind: "interface_mismatch";
+      role: string;
+      expected: AiTaskContract["interface"];
+      proposed: { main: boolean; missing: string[] };
+      diagnostics?: string;
+    }
+  | {
+      kind: "candidate_baseline";
+      candidate: string;
+      corpus: "public_example" | "author_validation";
+      sample?: string;
+      reason: string;
+    }
+  | {
+      kind: "qualification_failed";
+      role?: string;
+      observationId?: string;
+      failureKind: string;
+      subject?: string;
+      profile?: { timeLimitMs?: number; memoryLimitMiB?: number; [key: string]: unknown };
+      inputSize?: number;
+      replay: string;
+    }
+  | { kind: "provenance_policy"; status: "unverified" | "not_attempted" }
+  // Reasons a newer backend may add; shown by their kind
+  | { kind: string; [key: string]: unknown };
+
+export interface AiWorkflowState {
+  version: 1;
+  option: "default" | "qualify_first" | "metadata_only";
+  blocking?: AiBlockingReason;
+  stages: AiStageAttempt[];
+  contract?: {
+    status: "verified" | "unverified";
+    value?: AiTaskContract;
+    snapshot: string;
+    available: AiRunnerCapabilities[];
+    checkedAt: string;
+  };
+  provenance: { status: "verified" | "unverified" | "not_attempted"; reason?: string };
+  corpus: {
+    id: string;
+    class: "public_example" | "author_validation" | "sealed_final";
+    modelAccess: "private" | "summaries" | "model_visible";
+    inputBytes?: number;
+    outputBytes?: number;
+  }[];
+  candidates: {
+    id: string;
+    role: "baseline" | "novel" | "unqualified";
+    status: "compiled" | "qualified" | "rejected";
+    claim: string;
+    reason?: string;
+    source: string;
+    qualification?: string;
+  }[];
+  compiled: Record<string, { source: string; interface?: string; profiles: string; at: string }>;
+  regressions: {
+    observationId: string;
+    role: string;
+    kind: string;
+    replay: "pending" | "passed" | "failed" | "unstable" | "untested";
+  }[];
+  receipts?: { executions: number; comparisons: number; legality: number; fresh: number; reusedTiming: number };
+}
+
+/** The testing plan's one hash-bound field repair (review Part V, R2). */
+export interface AiPlanRepair {
+  schemaVersion: number;
+  spent: number;
+  limit: number;
+  status: "pending" | "repairing" | "accepted" | "exhausted" | "review";
+  proposalHash?: string;
+  rejectedFields: number;
+  acceptedRevision?: string;
+  generationId?: string;
+  structuredOutput: "json_schema" | "prompt_fallback";
+}
+
 export interface AiJob {
   id: string;
   problemId?: number;
@@ -881,6 +1057,9 @@ export interface AiJob {
     // The testing plan's rejected fields, and how many of the job's plans were rejected (review Part IV, W01)
     planIssues?: AiPlanIssue[];
     planRejections?: number;
+    // Contract, stages, corpus, candidates and what blocks the job; the plan's field repair (review Part V, R1–R5)
+    workflow?: AiWorkflowState;
+    planRepair?: AiPlanRepair;
     helpers?: Array<{
       role: "checker" | "interactor" | "manager";
       origin: "problem" | "ai";
@@ -980,8 +1159,304 @@ export const actionName = (name: string) =>
     "validate-sample-inputs": aiText("验证样例输入约束", "Validate sample input constraints"),
     generate: aiText("运行生成器", "Run generator"),
     upload: aiText("保存数据", "Save test data"),
-    samples: aiText("验证样例", "Validate samples")
+    samples: aiText("验证样例", "Validate samples"),
+    contract: aiText("执行方式", "Execution model"),
+    extract: aiText("提取执行方式", "Extract the execution model"),
+    verified: aiText("已核对", "Checked"),
+    needs_configuration: aiText("需要配置评测机", "Needs a capable judge"),
+    corpus: aiText("整理样例与数据集", "Sort samples and data sets"),
+    "plan-issues": aiText("检查测试方案字段", "Check the testing plan's fields"),
+    "field-repair": aiText("修复测试方案字段", "Repair the testing plan's fields"),
+    "compile-failed": aiText("编译失败", "Compilation failed"),
+    interface: aiText("核对函数接口", "Check the function interface"),
+    "candidate-preflight": aiText("预检待拦截算法", "Pre-check a candidate"),
+    "candidate-qualified": aiText("待拦截算法已预检", "Candidate pre-checked"),
+    "baseline-target": aiText("已有样例已能拦截", "Already caught by the samples"),
+    "qualify-boundaries": aiText("边界规模预检", "Check boundary-size cases"),
+    execution: aiText("执行", "Execution"),
+    "compiler-fix": aiText("按编译报错修复", "Fix from compiler output"),
+    "repair-preflight": aiText("预检修复后的程序", "Pre-check the repaired program"),
+    regression: aiText("重放已保留的失败", "Replay kept failures"),
+    unverified: aiText("原题未核实", "Source unverified")
   })[name] ||
   (/^compile-quality-/.test(name)
     ? aiText("编译对拍与对抗测试程序", "Compile differential and adversarial programs")
-    : name);
+    : /^compiled-/.test(name)
+      ? aiText(`已编译 ${name.slice(9)}`, `Compiled ${name.slice(9)}`)
+      : /^compile-/.test(name)
+        ? aiText(`编译 ${name.slice(8)}`, `Compile ${name.slice(8)}`)
+        : name);
+
+// Compact job rows and job details (review Part V, R7)
+export type AiStageKind =
+  | "queued"
+  | "import"
+  | "source"
+  | "metadata"
+  | "planning"
+  | "programs"
+  | "qualification"
+  | "repair"
+  | "publication"
+  | "completed"
+  | "cancelled"
+  | "other";
+export interface AiAttention {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+export interface AiJobSummary {
+  id: string;
+  problem: { id: number; displayId: number | null; title: string | null } | null;
+  action: string;
+  state: "queued" | "running" | "completed" | "failed" | "cancelled";
+  stage: { kind: AiStageKind; step: string; startedAt: string | null; elapsedMs: number | null };
+  attention: AiAttention | null;
+  relevantAction: { kind: "cancel" | "retry" | "details"; jobId: string };
+  updatedAt: string;
+  revision: number;
+}
+export type AiJobSection = "active" | "attention" | "history";
+export type AiJobSummaryResponse =
+  | { unchanged: true; version: string; section: AiJobSection }
+  | {
+      unchanged: false;
+      version: string;
+      section: AiJobSection;
+      total: number;
+      paused: boolean;
+      nextCursor: string | null;
+      jobs: AiJobSummary[];
+    };
+export interface AiTimelineEntry {
+  id: string;
+  attempt: number;
+  stage: AiStageKind;
+  step: string;
+  startedAt: string;
+  endedAt?: string;
+  // "step" spans and the model/search dispatches made in them (linked by parentId)
+  scope?: "step" | "dispatch";
+  parentId?: string;
+  workflowAttempt?: number;
+  generationId?: string;
+  status?: "running" | "completed" | "failed" | "interrupted";
+  model?: string;
+  policy?: string;
+  promptBytes?: number;
+  outputBytes?: number;
+  durationMs?: number;
+  requests?: number;
+  responsePolls?: number;
+  failedRequests?: number;
+  reuses?: string[];
+  invalidates?: string[];
+  resumptions?: Array<{ attempt: number; startedAt: string; endedAt?: string; status?: string }>;
+  deployment?: {
+    backendBuild: string | null;
+    qualityPolicyVersion: number;
+    receiptVersion: number;
+    executionProtocolVersion: number;
+  };
+  outcome?: "advanced" | "completed" | "failed" | "cancelled" | "interrupted";
+}
+export interface AiRequestDiagnostics {
+  httpStatus?: number;
+  providerCode?: string;
+  requestId?: string;
+  requestShapeVersion: number;
+  requestMethod?: "GET" | "POST";
+  requestFields?: string[];
+  requestFieldsOmitted?: number;
+  requestBodyBytes?: number;
+  providerMessageOmitted?: boolean;
+}
+export interface AiAllocationReview {
+  mode: "coverage" | "score_ratio";
+  reason: string;
+  digest: string;
+  changes: Array<{
+    subtask: number;
+    scoringType: string;
+    previousCount: number;
+    proposedCount: number;
+    previousPoints: Array<number | null>;
+    proposedPointsPerCase: number | null;
+  }>;
+}
+export interface AiProviderGeneration {
+  id: string | null;
+  stageId: string | null;
+  purpose: string | null;
+  requestAttempts: number;
+  lifecycle: "legacy" | "prepared" | "dispatching" | "pending" | "terminal";
+  terminalStatus: string | null;
+  status: "not_requested" | "requested" | "confirmed" | "failed" | "unsupported" | "not_needed";
+  error: string | null;
+  createdAt: string;
+  identityStatus: "linked" | "legacy_unlinked";
+}
+export interface AiJobDetail {
+  unchanged: false;
+  id: string;
+  revision: number;
+  // Leads the page; `data` is the typed reason when the workflow recorded one
+  blockingReason: (AiAttention & { kind?: string; data?: AiBlockingReason }) | null;
+  warnings: string[];
+  errorCode: string | null;
+  requestFailures: Array<{
+    id: string;
+    purpose: string | null;
+    stageId: string | null;
+    generationId: string | null;
+    operation: string;
+    target: "llm" | "search";
+    provider: string;
+    host: string;
+    model: string | null;
+    errorCode: string | null;
+    diagnostics: AiRequestDiagnostics | null;
+    createdAt: string;
+  }>;
+  summary: AiJobSummary;
+  technical: {
+    allocationMode: "coverage" | "score_ratio" | null;
+    allocationReviewDigest: string | null;
+    execution: any;
+    taskContract: AiTaskContract | null;
+    contractAdmission: AiWorkflowState["contract"] | null;
+    workflowOption: AiWorkflowState["option"] | null;
+    corpusMembership: AiWorkflowState["corpus"] | null;
+    candidates: AiWorkflowState["candidates"] | null;
+    compiled: AiWorkflowState["compiled"] | null;
+    regressions: AiWorkflowState["regressions"] | null;
+    receipts: AiWorkflowState["receipts"] | null;
+    planRepair: AiPlanRepair | null;
+    provenance: AiWorkflowState["provenance"];
+    searchDiagnostics: Array<{
+      provider?: string;
+      category: string;
+      httpStatus?: number;
+      code?: string;
+      message?: string;
+      requestId?: string;
+      retryable?: boolean;
+      [key: string]: unknown;
+    }>;
+    searchDiagnosticsOmitted: number;
+    protocol: any;
+    publicAbi: any;
+    problemType?: string;
+    protocolMode?: string;
+    executionMode: "local" | "judges" | "judge" | null;
+    sourceRevision: any;
+    profiles: any;
+    corpus: any;
+    finalCorpus?: Array<{
+      index: number;
+      subtask: number;
+      scenarioIndex: number;
+      origin: "generated" | "adversarial";
+      input: { sha256: string; size: number };
+      output: { sha256: string; size: number };
+    }>;
+    limits: { timeLimitMs: number | null; memoryLimitMiB: number | null } | null;
+  };
+  timeline: { entries: AiTimelineEntry[]; omitted: number; legacyHistoryUnavailable: boolean };
+  runs: { entries: AiRunRecord[]; limit: number; complete: boolean };
+  retry: {
+    options: AiRetryFrom[];
+    roles: string[];
+    reuses: string[];
+    invalidates: string[];
+    newProviderGeneration: boolean;
+  };
+  counters: {
+    cases: {
+      requested: number;
+      planned: number | null;
+      generated: number | null;
+      qualified: number | null;
+      activated: number | null;
+    };
+    logicalGenerations: number;
+    legacyGenerationRequests: number;
+    responsePolls: number;
+    failedProviderRequests: number;
+    rejectedPlans: number;
+    invalidCandidates: number;
+    failedQualifications: number;
+  };
+  usage: {
+    reported:
+      | (Omit<AiJobUsage, "inputTokens" | "outputTokens"> & {
+          inputTokens: number | null;
+          outputTokens: number | null;
+          polls?: number;
+          legacyUnlinkedRequests?: number;
+          inputTokensReported?: boolean;
+          outputTokensReported?: boolean;
+          searchCredits?: number | null;
+        })
+      | null;
+    complete: boolean;
+    legacyUnlinkedRequests: number;
+    limitations: string[];
+  };
+  provenance: "verified" | "unverified" | "not_attempted";
+  ioProfile: {
+    verificationMs: number;
+    publicationMs: number;
+    bytes: number;
+    files: number;
+    scope: string;
+    complete: boolean;
+  } | null;
+  providerCancellation: { localCancelled: boolean; truncated: boolean; generations: AiProviderGeneration[] };
+  planIssues: AiPlanIssue[];
+  planRepair: AiPlanRepair | null;
+  allocationReview: AiAllocationReview | null;
+  scoringReview: any;
+  failures: Array<{ id: string; attemptId: string; kind: string; role?: string; phase?: string; subject?: string }>;
+  retention: { observationsTruncated: boolean; runsRetained: number; artifacts: string };
+  // The job as the older endpoints serialize it, for the evidence, repair and failure panels
+  job?: AiJob;
+}
+
+export const stageKindName = (kind: string) =>
+  ({
+    queued: aiText("排队中", "Queued"),
+    import: aiText("导入", "Import"),
+    source: aiText("原题检索", "Source search"),
+    metadata: aiText("题目信息", "Metadata"),
+    planning: aiText("设计方案", "Planning"),
+    programs: aiText("生成程序", "Writing programs"),
+    qualification: aiText("验证", "Qualification"),
+    repair: aiText("修复", "Repair"),
+    publication: aiText("发布", "Publishing"),
+    completed: aiText("完成", "Completed"),
+    cancelled: aiText("已取消", "Cancelled"),
+    other: aiText("其他", "Other")
+  })[kind] || kind;
+
+/** A short, translated reason a job needs its owner; unknown codes keep the server's message. */
+export const attentionText = (attention: AiAttention) =>
+  ({
+    needs_configuration: aiText("评测机不支持此题的执行方式", "Judges don't support this task's execution model"),
+    plan_repair: aiText("测试方案的字段需要修复", "Testing plan fields need repair"),
+    baseline_challenge: aiText("待拦截算法已被现有样例拦截", "A challenge is already caught by existing samples"),
+    alternative_timeout: aiText("另一种正解超时", "The alternative solution timed out"),
+    source_unverified: aiText("原题未核实", "Source unverified"),
+    scoring_review: aiText("需要确认新的计分设置", "New scoring needs your approval"),
+    allocation_review: aiText("需要确认测试点数量的变化", "Test case counts need your approval"),
+    provider_request_failed: aiText("模型或搜索服务请求失败", "A model or search request failed"),
+    provider_recovery: aiText("正在恢复模型服务的回答", "Recovering the model's answer"),
+    provider_accounting_unknown: aiText(
+      "与模型服务的确认丢失，用量与结果未知",
+      "The provider's acknowledgement was lost; usage and outcome are unknown"
+    ),
+    qualification_failed: aiText("程序验证失败", "A program failed qualification"),
+    permission_changed: aiText("权限已变化", "Permissions changed"),
+    job_failed: aiText("任务失败", "The job failed")
+  })[attention.code] || attention.message;

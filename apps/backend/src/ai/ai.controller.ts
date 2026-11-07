@@ -1,9 +1,21 @@
 import { Body, Controller, Post } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import { ApiTags, ApiCreatedResponse } from "@nestjs/swagger";
 
+import {
+  AiJobSummaryResponseDto,
+  AiJobDetailResponseDto,
+  AiAllocationApprovalResponseDto,
+  AiDeploymentIdentityResponseDto,
+  AiDiagnosticExportResponseDto
+} from "./ai-job-view.dto";
+import { AiJobViewService } from "./ai-job-view.service";
 import { AiService } from "./ai.service";
 import { AiError } from "./ai.types";
 import {
+  AiJobSummaryQueryDto,
+  AiJobDetailDto,
+  AiAllocationApprovalDto,
+  AiDiagnosticExportDto,
   SaveAiConfigurationDto,
   StartAiJobDto,
   AiJobQueryDto,
@@ -25,10 +37,13 @@ import { CurrentUser } from "../common/user.decorator";
 @ApiTags("AI")
 @Controller("ai")
 export class AiController {
-  constructor(private readonly ai: AiService) {}
+  constructor(
+    private readonly ai: AiService,
+    private readonly views: AiJobViewService
+  ) {}
 
   /**
-   * Expected AI failures are answered like the rest of the API: HTTP 200 with an error code. Anything else is
+   * Expected AI failures use the existing POST response status (201), with an error code. Anything else is
    * a server error, which the global error filter logs (redacted) and answers with HTTP 500 and the request ID.
    */
   private async call<T>(work: () => Promise<T>) {
@@ -74,6 +89,36 @@ export class AiController {
 
   @Post("jobs") jobs(@CurrentUser() user: UserEntity, @Body() body: AiJobQueryDto) {
     return this.call(() => this.ai.listJobs(user, body.problemId));
+  }
+
+  @ApiCreatedResponse({ type: AiJobSummaryResponseDto })
+  @Post("jobsSummary")
+  jobsSummary(@CurrentUser() user: UserEntity, @Body() body: AiJobSummaryQueryDto) {
+    return this.call(() => this.views.summaries(user, body));
+  }
+
+  @ApiCreatedResponse({ type: AiJobDetailResponseDto })
+  @Post("jobDetail")
+  jobDetail(@CurrentUser() user: UserEntity, @Body() body: AiJobDetailDto) {
+    return this.call(() => this.views.detail(user, body));
+  }
+
+  @ApiCreatedResponse({ type: AiAllocationApprovalResponseDto })
+  @Post("approveAllocation")
+  approveAllocation(@CurrentUser() user: UserEntity, @Body() body: AiAllocationApprovalDto) {
+    return this.call(() => this.views.approveAllocation(user, body.id, body.digest));
+  }
+
+  @ApiCreatedResponse({ type: AiDeploymentIdentityResponseDto })
+  @Post("deploymentIdentity")
+  deploymentIdentity(@CurrentUser() user: UserEntity) {
+    return this.call(() => this.views.deployment(user));
+  }
+
+  @ApiCreatedResponse({ type: AiDiagnosticExportResponseDto })
+  @Post("exportDiagnostic")
+  exportDiagnostic(@CurrentUser() user: UserEntity, @Body() body: AiDiagnosticExportDto) {
+    return this.call(() => this.views.exportDiagnostic(user, body.id, body.includeRejectedProposal));
   }
 
   @Post("cancel") cancel(@CurrentUser() user: UserEntity, @Body() body: AiJobIdDto) {

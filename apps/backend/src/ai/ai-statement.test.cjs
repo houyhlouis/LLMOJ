@@ -234,7 +234,7 @@ test("file I/O rejects invalid paths, ambiguity, same-file truncation and guesse
   );
 });
 
-test("case-insensitive statements or explicit plan flag force SPJ before the runner", async () => {
+test("case-insensitive token equality selects the equivalent builtin comparator before the runner", async () => {
   for (const statement of ["Letter case is ignored.", "Output is case-insensitive.", "答案不区分大小写。", ""]) {
     const svc = aiServices(
       {},
@@ -266,9 +266,10 @@ test("case-insensitive statements or explicit plan flag force SPJ before the run
     Object.assign(job.state, qualityState(job.state.plan.subtasks.map(item => item.id)));
     job.state.testdataSnapshotHash = svc.testdataFingerprint(snapshot);
     await assert.rejects(svc.testdata(job, { id: 1 }, { type: "Traditional" }, {}, snapshot, 0, 100), /MOCK_STOP/);
-    assert.equal(job.state.plan.needsSpj, true);
+    assert.equal(job.state.plan.needsSpj, false);
     assert.equal(job.state.plan.caseSensitive, false);
-    assert.equal(payload.checkerCode, "int main(){}");
+    assert.equal(payload.checkerCode, undefined);
+    assert.deepEqual(payload.checker, { type: "tokens", caseSensitive: false });
   }
 });
 
@@ -419,7 +420,7 @@ test("testdata checkpoints each current model stage before dispatch and persists
       : prompt.startsWith("Independently analyze this programming problem")
         ? "quality-plan"
         : prompt.match(/^Generate ONLY (make|std|checker|validator|small-make|oracle|alternative|challenge)\.cpp/)?.[1];
-    requests.push({ stage, prompt, step: job.step, progress: job.progress, artifactExists: artifactExists(job.state, stage) });
+    requests.push({ stage, prompt, step: job.step, progress: job.progress, artifactExists: artifactExists(job.state, stage), dispatch: structuredClone(job.state.workflow?.stages.find(s => s.stage === `testdata.${stage}` && s.status === "running")) });
     const output =
       stage === "plan"
         ? JSON.stringify({
@@ -468,7 +469,7 @@ test("testdata checkpoints each current model stage before dispatch and persists
       }
     };
     await assert.rejects(
-      svc.testdata(
+      require("./ai-model-policy.ts").withWorkflowModels(job, config, () => svc.checkpoint(job, job.step, job.progress), () => svc.testdata(
         job,
         { id: 1 },
         { type: "Traditional" },
@@ -476,7 +477,7 @@ test("testdata checkpoints each current model stage before dispatch and persists
         { statements: [localized()], samples: [], judgeInfo: {} },
         10,
         60
-      ),
+      )),
       /STOP_BEFORE_SANDBOX/
     );
     assert.deepEqual(
@@ -487,19 +488,13 @@ test("testdata checkpoints each current model stage before dispatch and persists
       if (["quality-plan", "small-make", "oracle", "alternative", "challenge"].includes(request.stage))
         assert(!request.prompt.includes(privateReference), `${request.stage} must independently derive its method without attached solution code`);
       if (request.stage === "make")
-        assert(request.prompt.includes(privateReference), "the primary generator still receives its normal attachment context");
-      assert.equal(
-        request.step,
-        `testdata.${request.stage}`,
-        "stage must already be visible when the HTTP request arrives"
-      );
-      assert.equal(request.progress, 10 + 60 * fractions[request.stage]);
+        assert(!request.prompt.includes(privateReference), "batch generators receive the mathematical context, without unrelated solution sources");
+      assert.equal(request.dispatch?.stage, `testdata.${request.stage}`);
+      assert.match(request.dispatch.id, /^[a-f0-9-]{36}$/);
+      assert.equal(request.dispatch.status, "running", "immutable attempt is durable before HTTP dispatch");
       assert.equal(request.artifactExists, false, "stage starts before its model output exists");
-      assert.deepEqual(
-        checkpoints.filter(x => x.stage === request.stage).map(x => x.artifactExists),
-        [false, true],
-        "keep the post-request checkpoint for durable output"
-      );
+      assert(checkpoints.some(x => x.stage === request.stage && x.artifactExists), "output is checkpointed");
+      assert.equal(job.state.workflow.stages.find(s => s.id === request.dispatch.id).status, "completed");
     }
   } finally {
     await new Promise(resolve => server.close(resolve));

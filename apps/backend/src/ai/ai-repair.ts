@@ -12,6 +12,7 @@ import {
   AI_EVIDENCE_LIMITS,
   AI_PROGRAM_ROLE,
   aiContractDigest,
+  type AiTaskContract,
   type AiFailureObservation
 } from "@libreoj/judge-protocol";
 
@@ -257,6 +258,8 @@ export function routeAiFailure(failure: AiRoutedFailure, context: AiRepairContex
     case "memory_limit":
     case "output_limit":
       if (!role) break;
+      if (role === "quality-oracle" && ["time_limit", "memory_limit"].includes(kind))
+        return attribution("quality-oracle", "quality-small-make");
       if (GENERATORS.includes(role) || role === "validator") return repair(role);
       if (SOLUTIONS.test(role)) return repair(role, kind === "time_limit" || kind === "memory_limit");
       return repair(role);
@@ -264,6 +267,7 @@ export function routeAiFailure(failure: AiRoutedFailure, context: AiRepairContex
       return repair("checker");
     case "invalid_challenge":
       if (!role) break;
+      if (failure.expectedBasis === "official_sample") return { action: "review", reason: "ATTRIBUTION", roles: [] };
       return repair(role);
     case "challenge_survived":
       // The generator gets the target's construction (and its small counterexample, if one was kept)
@@ -446,7 +450,12 @@ const CONTRACTS: Record<string, string> = {
     "a deliberately imperfect attempted solution for the quality gate: it implements the target below exactly, a realistic wrong or slow solution that passes the official samples and some small legal cases. Keep its defect: never make it correct, and never add sleeps, crashes, constant answers or hardcoded samples."
 };
 
-export function repairContract(role: string): string {
+export function repairContract(role: string, task?: AiTaskContract): string {
+  if (role === "std" && task && task.mode !== "batch") {
+    if (task.interface.functions.length)
+      return `std.cpp, contestant-owned callbacks only, NO main and no grader-owned definitions. Exact interface: ${JSON.stringify(task.interface)}. Lifetime: ${task.lifetime}. Permitted information: ${JSON.stringify(task.roles)}. Framing: ${task.framing}. Scoring: ${JSON.stringify(task.scoring)}. Do not replace this API with a standalone stdin/stdout program.`;
+    return `std.cpp, the original ${task.mode} public protocol; ${task.lifetime}. ${task.framing}. Only permitted information: ${JSON.stringify(task.roles)}. Flush public messages and obey EOF.`;
+  }
   if (/^quality-alt-\d+$/.test(role)) return CONTRACTS.alternative;
   if (/^quality-challenge-\d+$/.test(role)) return CONTRACTS.challenge;
   return CONTRACTS[role];
@@ -464,8 +473,16 @@ export function programFile(role: string): string {
  * which the problem's author uploaded and the job never sends to a provider. Statement samples and what the job's own
  * programs made may.
  */
-export function modelVisible(observation: Pick<StoredAiObservation, "phase">, artifact: StoredAiArtifact): boolean {
-  if (artifact.classification === "public") return true;
+export function modelVisible(
+  observation: Pick<StoredAiObservation, "phase">,
+  artifact: StoredAiArtifact,
+  policy: "private" | "summaries" | "model_visible" = "private"
+): boolean {
+  if (
+    artifact.classification === "public" ||
+    (policy === "model_visible" && artifact.classification === "author-private")
+  )
+    return true;
   return !(artifact.classification === "author-private" && SAMPLE_PHASES.includes(observation.phase));
 }
 
@@ -475,9 +492,10 @@ export function modelVisible(observation: Pick<StoredAiObservation, "phase">, ar
  */
 export function failureContext(
   observation: Omit<StoredAiObservation, "attemptId">,
-  diagnostics: string | null
+  diagnostics: string | null,
+  policy: "private" | "summaries" | "model_visible" = "private"
 ): Record<string, unknown> {
-  const visible = observation.artifacts.filter(artifact => modelVisible(observation, artifact));
+  const visible = observation.artifacts.filter(artifact => modelVisible(observation, artifact, policy));
   const hidden = visible.length < observation.artifacts.length;
   const { execution, difference } = observation;
   return {
@@ -506,6 +524,13 @@ export function failureContext(
         ? { preview: artifact.preview, truncated: artifact.originalSize > AI_EVIDENCE_LIMITS.previewBytes }
         : {})
     })),
+    ...(hidden && policy === "summaries"
+      ? {
+          structuralSummary: observation.artifacts
+            .filter(artifact => artifact.role === "input" || artifact.role === "expected")
+            .map(artifact => ({ role: artifact.role, bytes: artifact.originalSize }))
+        }
+      : {}),
     ...(hidden ? { withheld: "The input is one of the problem's own sample files, which isn't shared." } : {})
   };
 }

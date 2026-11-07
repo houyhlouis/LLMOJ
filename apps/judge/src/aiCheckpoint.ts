@@ -16,6 +16,8 @@ import path from "path";
 import winston from "winston";
 import { aiContractDigest, type AiCompileOptions, type AiRuntimeIdentity } from "@libreoj/judge-protocol";
 
+import { AI_RECEIPTS } from "./aiReceipts";
+
 import config from "./config";
 import getRuntimeInfo from "./runtimeIdentity";
 
@@ -40,7 +42,12 @@ const held = new Map<string, number>();
 /** The runtime a run's builds and inputs are bound to, as the judge announces it. */
 export async function runtimeIdentity(): Promise<AiRuntimeIdentity> {
   const info = await getRuntimeInfo();
-  return { judgeProgram: info.judgeProgram, sandboxImage: info.sandboxImage, arch: info.arch };
+  return {
+    judgeProgram: info.judgeProgram,
+    sandboxImage: info.sandboxImage,
+    arch: info.arch,
+    environment: aiContractDigest({ node: info.node, os: info.os, kernel: info.kernel, cpu: info.cpu })
+  };
 }
 
 async function readKept(filename: string): Promise<Buffer | null> {
@@ -213,7 +220,7 @@ export async function holdingJob<T>(jobId: string, work: () => Promise<T>): Prom
 /** Deletes what's kept for a job (the local backend cleans it up). */
 export async function discardJob(jobId: string) {
   if (!UUID.test(jobId) || held.has(jobId.toLowerCase())) return;
-  for (const name of [AI_BUILDS, AI_CORPUS])
+  for (const name of [AI_BUILDS, AI_CORPUS, AI_RECEIPTS])
     await fs.promises.rm(path.join(root(name), jobId.toLowerCase()), { recursive: true, force: true });
 }
 
@@ -222,7 +229,7 @@ export async function discardJob(jobId: string) {
  * (`active`: the tasks running now).
  */
 export async function pruneAiCheckpoints(active: { has(key: string): boolean }, now = Date.now()) {
-  for (const name of [AI_BUILDS, AI_CORPUS, AI_WORK]) {
+  for (const name of [AI_BUILDS, AI_CORPUS, AI_RECEIPTS, AI_WORK]) {
     let entries: fs.Dirent[];
     try {
       entries = await fs.promises.readdir(root(name), { withFileTypes: true });

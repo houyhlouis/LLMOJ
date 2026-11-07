@@ -492,6 +492,9 @@ test(
       return [{ type: "error", message: "Output mismatch", candidateFailure: false, failure: runFailure(attemptId) }];
     };
     const server = net.createServer(socket => {
+      const protocol = require("@libreoj/judge-protocol");
+      socket.write(JSON.stringify({ type: "capabilities", protocolVersion: protocol.AI_EXECUTION_PROTOCOL_VERSION,
+        aiCapabilities: protocol.AI_RUNNER_CAPABILITIES, aiQualityPolicyVersions: [protocol.AI_QUALITY_POLICY_VERSION], aiReceiptVersions: [protocol.AI_RECEIPT_VERSION] }) + "\n");
       let buffer = "";
       socket.on("data", chunk => {
         buffer += chunk;

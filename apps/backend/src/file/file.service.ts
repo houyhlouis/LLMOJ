@@ -386,7 +386,8 @@ export class FileService implements OnModuleInit {
     uploadInfo: FileUploadInfoDto,
     checkLimit: (size: number) => Promise<LimitCheckErrorType> | LimitCheckErrorType,
     transactionalEntityManager: EntityManager,
-    recordContentHash = true
+    recordContentHash = true,
+    expectedSha256?: string
   ): Promise<FileEntity | SignedFileUploadRequestDto | LimitCheckErrorType | "FILE_UUID_EXISTS" | "FILE_NOT_UPLOADED"> {
     if (!uploadInfo.uuid) return await this.prepareUploadRequest(uploadInfo.size, checkLimit);
 
@@ -402,6 +403,10 @@ export class FileService implements OnModuleInit {
     // A file judges don't use may leave its hash to the background (FileContentHashService), so that a large one
     // isn't read while the caller holds its locks. Its sealed copy can't change meanwhile.
     const sealed = await this.sealObjects(uploadInfo.uuid, upload.size, [upload], recordContentHash);
+    if (expectedSha256 && sealed.sha256 !== expectedSha256) {
+      await this.discardSealedUpload(sealed);
+      throw new BadRequestException("FILE_HASH_MISMATCH");
+    }
     const file = await this.registerSealedUpload(sealed, transactionalEntityManager);
     if (file === "FILE_UUID_EXISTS") await this.discardSealedUpload(sealed);
     // What the form wrote isn't needed any more: deleted now, rather than taking space twice until maintenance runs.

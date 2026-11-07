@@ -6,6 +6,8 @@ export * from "./ai-observation";
 export * from "./ai-profile";
 // How a completed AI run was made (its contract, runtime and reuse) and its cases; replays of kept failures
 export * from "./ai-operation";
+export * from "./ai-task-contract";
+export * from "./ai-abi";
 
 export enum JudgeTaskType {
   Submission = "Submission",
@@ -29,8 +31,12 @@ export enum JudgeTaskType {
 // Version 8 reports how a completed AiExecution task was made ("execution": contract, runtime, builds and inputs
 // reused from earlier attempts) and its cases' hashes ("corpus"), and runs replays of kept failures (operation
 // "replay", with the kept files sent as "transfers"). Only judges of this version are sent AiExecution tasks.
-export const JUDGE_PROTOCOL_VERSION = 8;
-export const AI_EXECUTION_PROTOCOL_VERSION = 8;
+// Version 9 requires task-contract/compile-link/qualification capabilities AND quality-policy/receipt versions.
+// Missing announcements are incompatible; version alone never admits an AI execution.
+export const JUDGE_PROTOCOL_VERSION = 9;
+export const AI_EXECUTION_PROTOCOL_VERSION = 9;
+export const AI_QUALITY_POLICY_VERSION = 2;
+export const AI_RECEIPT_VERSION = 1;
 
 /** What a judge judges with, as recorded with each result. */
 export interface JudgeRuntimeInfo {
@@ -48,6 +54,9 @@ export interface JudgeRuntimeInfo {
 /** Sent by a judge client after "ready", as the "capabilities" event. */
 export interface JudgeClientCapabilities {
   protocolVersion: number;
+  aiCapabilities?: import("./ai-task-contract").AiRunnerCapabilities;
+  aiQualityPolicyVersions?: number[];
+  aiReceiptVersions?: number[];
   // The task types it can judge; it's sent no others
   taskTypes: JudgeTaskType[];
   consumerThreads: number;
@@ -78,6 +87,7 @@ export interface JudgeTaskPayload<ExtraInfo> extends JudgeTaskMeta {
 
 /** The progress of an AiExecution task; the final one has `finished`. */
 export interface AiExecutionProgress {
+  receipts?: import("./ai-operation").AiReceiptCounts;
   finished: boolean;
   // While running: the AI runner's phase (e.g. "compile-make", "generate") and its count
   phase?: string;

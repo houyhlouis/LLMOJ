@@ -1,5 +1,7 @@
 import { createHash } from "crypto";
 
+import { searchDiagnostic, type AiSearchDiagnostic } from "./ai-search-diagnostics";
+
 import { AiError, AiStatementText } from "./ai.types";
 import { findVerifiedSourceUrl } from "./ai-source";
 
@@ -28,7 +30,12 @@ export interface SourceSearchTrace {
   searchCount: number;
   modelCount: number;
   searches: Array<
-    SourceSearchQuery & { status: "started" | "completed" | "failed"; documents: SourceSearchDocument[] }
+    SourceSearchQuery & {
+      attempts?: number;
+      diagnostic?: AiSearchDiagnostic;
+      status: "started" | "completed" | "failed";
+      documents: SourceSearchDocument[];
+    }
   >;
   pendingQueries: SourceSearchQuery[];
   pendingCandidates?: Array<{ url: string; title: string }>;
@@ -47,6 +54,7 @@ export interface SourceSearchProgress {
 export interface SourceSearchDependencies {
   model(prompt: string): Promise<Record<string, unknown>>;
   search(query: string): Promise<string>;
+  provider?: string;
   checkActive?(): Promise<void>;
   onProgress?(progress: SourceSearchProgress): Promise<void>;
 }
@@ -397,6 +405,8 @@ export async function discoverProblemSource(
       strategy: text(item.strategy, 40),
       query: safeQuery(item.query) || "invalid cached query",
       status: item.status === "completed" ? "completed" : "failed",
+      attempts: boundedCount(item.attempts, item.status === "completed" ? 1 : 0, 0, 3),
+      ...(item.diagnostic?.requestShape === "search-v1" ? { diagnostic: item.diagnostic } : {}),
       documents:
         item.status === "completed"
           ? array(item.documents, 8)
@@ -477,13 +487,20 @@ export async function discoverProblemSource(
     const query = safeQuery(item.query);
     if (!query) return false;
     const previous = trace.searches.find(record => queryKey(record.query) === queryKey(query));
-    if (previous?.status === "completed" || (!previous && trace.searchCount >= maxSearches)) return false;
+    if (
+      previous?.status === "completed" ||
+      (previous?.diagnostic && (!previous.diagnostic.retryable || (previous.attempts || 0) >= 3)) ||
+      (!previous && trace.searchCount >= maxSearches)
+    )
+      return false;
     await check();
     searched.add(queryKey(query));
     const record = previous || {
       strategy: text(item.strategy, 40),
       query,
       status: "started" as "started" | "completed" | "failed",
+      attempts: 0,
+      diagnostic: undefined as AiSearchDiagnostic,
       documents: [] as SourceSearchDocument[]
     };
     if (!previous) {
@@ -491,6 +508,7 @@ export async function discoverProblemSource(
       trace.searchCount++;
     }
     record.status = "started";
+    record.attempts = (record.attempts || 0) + 1;
     await progress("searching");
     try {
       await check();
@@ -499,6 +517,7 @@ export async function discoverProblemSource(
       record.status = "completed";
     } catch (error) {
       record.status = "failed";
+      record.diagnostic = searchDiagnostic(error, dependencies.provider || "unknown", query);
       await progress("searching");
       throw error;
     }

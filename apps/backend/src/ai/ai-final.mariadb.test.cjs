@@ -202,7 +202,14 @@ test(
         }
       ]
     ];
-    definitions.push([AiResponseCheckpointEntity, "response", {ownerId: {...integer, primary: true}, jobId: {...text, primary: true}, requestHash: {...text, primary: true}, responseId: text, createdAt: {type: Date, nullable: true}}]);
+    definitions.push([AiResponseCheckpointEntity, "response", {ownerId: {...integer, primary: true}, jobId: {...text, primary: true}, requestHash: {...text, primary: true}, generationId: {...text, nullable: true}, responseId: text, createdAt: {type: Date, nullable: true}}]);
+    for (const [entity, , columns] of definitions) {
+      if (entity === AiJobEntity) Object.assign(columns, {
+        revision: { type: Number, version: true, default: 1 }, attempt: { type: Number, default: 0 },
+        projection: { type: "json", nullable: true }, timeline: { type: "json", nullable: true },
+        stageStartedAt: { type: Date, nullable: true }, stageEndedAt: { type: Date, nullable: true }
+      });
+    }
     const entities = definitions.map(
       ([target, name, columns]) => new EntitySchema({ name: target.name, target, tableName: prefix + name, columns, ...(target === ProblemTagMapEntity ? {indices:[{columns:["problemId","problemTagId"],unique:true},{columns:["problemId"]},{columns:["problemTagId"]}]} : {}) })
     );
@@ -292,7 +299,8 @@ test(
         Object.assign(discussions, {connection: db, configService: problems.configService, userPrivilegeService: privileges});
         const uploaded = new Map(), removed = [];
         const files = {
-          uploadFile: async (uuid, input) => {const chunks=[]; for await (const chunk of input) chunks.push(chunk); uploaded.set(uuid, Buffer.concat(chunks));},
+          uploadFile: async (uuid, input) => {const chunks=[]; for await (const chunk of input) chunks.push(chunk); const bytes = Buffer.concat(chunks); uploaded.set(uuid, bytes); return crypto.createHash('sha256').update(bytes).digest('hex');},
+          hashStoredObject: async uuid => {const bytes = uploaded.get(uuid); return {sha256: crypto.createHash('sha256').update(bytes).digest('hex'), size: bytes.length};},
           getFileSizes: async (uuids, manager) => Promise.all(uuids.map(async uuid => (await manager.findOneBy(FileEntity, {uuid})).size)),
           deleteUnfinishedUploadedFile: uuid => {uploaded.delete(uuid); removed.push(uuid);},
           discardUploads: async () => {}

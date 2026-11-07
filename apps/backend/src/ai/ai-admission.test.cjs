@@ -176,7 +176,8 @@ test("a background response's reservation is tied to the response that will repo
       }))
   );
   assert.equal(records[0].pendingResponseId, "resp_1");
-  assert.equal(records[0].responseId, undefined);
+  assert.equal(records[0].responseId, "resp_1");
+  assert.equal(records[0].completedResponse, false);
 });
 
 test("pausing stops every request; a full site refuses interactive requests but makes jobs wait", async () => {
@@ -262,7 +263,10 @@ test("settling releases confirmed or unbilled requests and keeps the rest at the
 
   const rejected = await reserve();
   await service.settle(manager, 1, "job", record({ success: false, errorCode: "PROVIDER_HTTP_ERROR" }), rejected, false, null);
-  assert(!reservations.some(row => row.id === rejected));
+  assert(reservations.some(row => row.id === rejected), "HTTP errors do not prove zero provider usage");
+  const localRefusal = await reserve();
+  await service.settle(manager, 1, "job", record({ success: false, errorCode: "PRIVATE_ENDPOINT_BLOCKED" }), localRefusal, false, null);
+  assert(!reservations.some(row => row.id === localRefusal));
 
   const unknown = await reserve();
   await service.settle(manager, 1, "job", record({ success: false, errorCode: "PROVIDER_TIMEOUT" }), unknown, false, null);
@@ -281,7 +285,7 @@ test("settling releases confirmed or unbilled requests and keeps the rest at the
   assert(!reservations.some(row => row.id === background));
   assert.deepEqual(
     reservations.map(row => row.id),
-    [unknown]
+    [rejected, unknown]
   );
 });
 
@@ -296,7 +300,7 @@ test("the AI service admits configuration-page requests and returns paused jobs 
 
   const updates = [];
   const audits = [];
-  const job = { id: "j1", ownerId: 5, runToken: "token", action: "tags", input: {}, state: { completed: [] } };
+  const job = { id: "j1", ownerId: 5, runToken: "token", action: "tags", step: "queued", input: {}, state: { completed: [] } };
   service.jobs = {
     findOneBy: async () => ({ ...job, status: "running" }),
     update: async (where, values) => (updates.push([where, values]), { affected: 1 })
@@ -306,7 +310,8 @@ test("the AI service admits configuration-page requests and returns paused jobs 
     throw new AiError("AI_PAUSED");
   };
   await service.runJob(job);
-  assert.deepEqual(updates, [
+  assert.equal(updates[0][1].timeline.entries[0].stage, "queued");
+  assert.deepEqual(updates.slice(1), [
     [
       { id: "j1", status: "running", runToken: "token" },
       { status: "queued", runToken: null }

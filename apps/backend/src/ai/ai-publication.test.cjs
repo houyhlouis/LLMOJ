@@ -116,6 +116,7 @@ async function fixture(work, initial = originalJudgeInfo()) {
     {},
     {}
   );
+  service.problemFiles.getProblemFiles = async () => [...state.files.keys()].map(filename => ({ filename, uuid: `fixture-${filename}` }));
   service.assertJob = async () => {
     if (state.cancelled) throw new AiError("JOB_CANCELLED");
     return user;
@@ -213,6 +214,14 @@ async function fixture(work, initial = originalJudgeInfo()) {
     else process.env.HYHOJ_AI_GENERATED_DIR = oldDirectory;
     fs.rmSync(root, { recursive: true, force: true });
   }
+}
+
+async function approveAllocationFixture(job, run, state) {
+  await assert.rejects(run(), /AI_ALLOCATION_REVIEW_REQUIRED/);
+  assert.equal(state.attempts, 0, "review precedes sandbox execution");
+  assert.equal(state.activations, 0);
+  assert.equal(job.state.allocationReview.mode, "score_ratio", "legacy allocation is preserved, with explicit scoring review");
+  job.state.allocationApproval = job.state.allocationReview.digest;
 }
 
 const uploadFailure = () => new AiError("UPLOAD_GENERATED_FILE_FAILED", "synthetic interrupted upload");
@@ -433,7 +442,8 @@ for (const dependency of ["checker", "input", "output", "extra-source"]) {
 for (const interrupt of ["upload", "cancel"]) {
   test(`automatic old testcase discovery ignores a ${interrupt}-interrupted new generation`, async () => {
     const initial = { ...originalJudgeInfo(), subtasks: null };
-    await fixture(async ({ state, run, activePairs }) => {
+    await fixture(async ({ state, job, run, activePairs }) => {
+      await approveAllocationFixture(job, run, state);
       const oldPairs = activePairs();
       state.afterWrite = async name => {
         assert.deepEqual(
@@ -471,7 +481,8 @@ test("only exact reserved UUID testcase names are omitted by both automatic matc
 
 test("the explicit published configuration validates and selects managed .in/.out files", async () => {
   await fixture(
-    async ({ state, run, activePairs }) => {
+    async ({ state, job, run, activePairs }) => {
+      await approveAllocationFixture(job, run, state);
       await run();
       const problemType = new ProblemTypeTraditionalService(
         { config: { resourceLimit: {} } },
@@ -651,6 +662,7 @@ test("regenerated data keeps the problem's scoring and its own checker's setting
       { id: 3, points: 40 }
     ];
     const requests = recordRequests(service);
+    await approveAllocationFixture(job, run, state);
     await run();
     assert.equal(state.activations, 1);
     // The same types, dependencies and points as before (automatic ones stay automatic), and only new cases
@@ -667,6 +679,7 @@ test("regenerated data keeps the problem's scoring and its own checker's setting
     assert.equal(existingScoring(state.active).digest, existingScoring(initial).digest);
     assert.deepEqual(job.state.generated.scoring, {
       status: "kept",
+      allocationReviewDigest: job.state.allocationApproval,
       subtasks: 3,
       digest: existingScoring(initial).digest
     });
@@ -791,6 +804,9 @@ test("published test data records where its run was made and the exact bytes of 
     await run();
     const generation = require("js-yaml").load(state.files.get("data.yaml")).generation;
     assert.deepEqual(generation.execution, {
+      contract: reported.execution.contract,
+      qualityPolicy: reported.execution.qualityPolicy,
+      receiptVersion: reported.execution.receiptVersion,
       operation: "k".repeat(64),
       origin: "judge",
       task: "t",
@@ -882,18 +898,21 @@ test("the job's test data step acknowledges its run only after its checkpoint, a
 
 test("a runner that doesn't report the profiles it was sent qualifies nothing", async () => {
   const service = bareAiServices();
+  service.checkpoint = async () => {};
   service.coordinator = { assertJob: async () => ({ id: 1 }) };
   const profiles = { version: 1, roles: {} };
   for (const reported of [undefined, "0".repeat(64)]) {
     service.execution = { run: async () => ({ validation: { profiles: reported } }) };
     await assert.rejects(
-      service.runSandbox({ id: "job" }, { profiles }, async () => {}),
+      service.runSandbox({ id: "job", state: {} }, { profiles }, async () => {}),
       /INVALID_SANDBOX_RESPONSE/
     );
   }
   // Nor one that doesn't say how it made its result, under the current contract (review Part III, W03)
   const execution = {
     contract: AI_EXECUTION_PROTOCOL_VERSION,
+    qualityPolicy: require("@libreoj/judge-protocol").AI_QUALITY_POLICY_VERSION,
+    receiptVersion: require("@libreoj/judge-protocol").AI_RECEIPT_VERSION,
     attemptId: "0f6c1d2e-3b4a-4c5d-8e9f-0a1b2c3d4e5f",
     runtime: { judgeProgram: "a".repeat(64), sandboxImage: "bbe9c69b2027", arch: "x64" },
     startedAt: "2026-11-04T10:00:00.000Z",
@@ -909,14 +928,14 @@ test("a runner that doesn't report the profiles it was sent qualifies nothing", 
   ]) {
     service.execution = { run: async () => ({ validation: { profiles: aiContractDigest(profiles) }, ...reported }) };
     await assert.rejects(
-      service.runSandbox({ id: "job" }, { profiles }, async () => {}),
+      service.runSandbox({ id: "job", state: {} }, { profiles }, async () => {}),
       /how it made its result/
     );
   }
   service.execution = {
     run: async () => ({ validation: { profiles: aiContractDigest(profiles) }, execution, operation })
   };
-  assert.deepEqual(await service.runSandbox({ id: "job" }, { profiles }, async () => {}), {
+  assert.deepEqual(await service.runSandbox({ id: "job", state: {} }, { profiles }, async () => {}), {
     validation: { profiles: aiContractDigest(profiles) },
     execution,
     operation
@@ -946,7 +965,10 @@ test("a target whose subtasks have no case to build for it gets one, before any 
       assert(job.state.warnings.includes("CASE_CAPACITY_ADJUSTED"));
       assert(job.state.warnings.includes("TEST_COUNT_ADJUSTED"));
     },
-    { ...originalJudgeInfo(), subtasks: null, checker: { type: "lines", caseSensitive: false } }
+    { ...originalJudgeInfo(), subtasks: [
+      { points: 98, scoringType: "GroupMin", testcases: [{ inputFile: "old-1.in", outputFile: "old-1.out" }] },
+      { points: 2, scoringType: "GroupMin", testcases: [{ inputFile: "old-2.in", outputFile: "old-2.out" }] }
+    ], checker: { type: "lines", caseSensitive: false } }
   );
 });
 

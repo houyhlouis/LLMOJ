@@ -66,6 +66,10 @@ class FakeHost(d.Host):
                       for name in (*d.WEB_SERVICES, d.JUDGE_SERVICE, 'libreoj.target')}
         self.answers = {
             'http://127.0.0.1:2002/api/health/live': (200, b'{"status":"ok"}'),
+            'http://127.0.0.1:2002/api/health/identity': (200, json.dumps({
+                'backend': {'sha256': 'a' * 64}, 'frontend': {'sha256': 'b' * 64},
+                'schema': {'version': 'part38-b-v1'}, 'qualityPolicyVersion': 2,
+                'recordedJudgeBuilds': [{'id': 1, 'sha256': 'c' * 64}]}).encode()),
             'http://127.0.0.1:2002/api/health/ready': (200, json.dumps({'status': 'ready', 'checks': {
                 'database': 'ok', 'redis': 'ok', 'storage': 'ok'}}).encode()),
             'http://127.0.0.1:80/api/auth/getSessionInfo': (200, b'{}'),

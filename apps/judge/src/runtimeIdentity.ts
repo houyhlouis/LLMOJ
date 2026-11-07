@@ -15,10 +15,12 @@ export const JUDGE_PROGRAM_SOURCES = [
   "apps/judge/index.mjs",
   "apps/judge/src",
   "apps/judge/native",
+  "apps/judge/build/Release",
   "apps/judge/vendor/testlib/testlib.h",
   "packages/judge-protocol/src",
   "packages/simple-sandbox/src",
-  "packages/simple-sandbox/native"
+  "packages/simple-sandbox/native",
+  "packages/simple-sandbox/build/Release"
 ];
 
 // Tests don't change what the judge does
@@ -53,6 +55,7 @@ export function judgeProgramDigest(root = REPOSITORY_ROOT): string {
   return sha256(lines.join(""));
 }
 
+const startupProgramDigest = judgeProgramDigest();
 let cachedResult: Promise<JudgeRuntimeInfo>;
 
 /** What this judge judges with, announced to the server and recorded with each result. */
@@ -60,7 +63,7 @@ export default function getRuntimeInfo(): Promise<JudgeRuntimeInfo> {
   cachedResult ||= (async () => {
     const systemInfo = await getSystemInfo();
     return {
-      judgeProgram: judgeProgramDigest(),
+      judgeProgram: startupProgramDigest,
       sandboxImage: config.sandbox.rootfsId,
       node: process.version,
       os: systemInfo.os,

@@ -187,13 +187,15 @@ test("a change that can't be read says why", async () => {
   assert.match(text(h.all(node => node.type === "span")), /This repair doesn't exist, or its change wasn't kept\./);
 });
 
-test("My AI jobs counts the jobs waiting for a decision and can show only them", () => {
-  // The list polls the server; its source is checked instead of rendered
+test("My AI jobs counts the jobs that need attention and can show only them", () => {
+  // The list polls the server; its source is checked instead of rendered. Jobs that need attention are asked for
+  // apart from the history (review Part V, R7), and the evidence is on each job's details page.
   const source = fs.readFileSync(path.join(__dirname, "../src/pages/ai/AiJobs.tsx"), "utf8");
-  assert.match(source, /job\.status === "failed" && \(job\.result\.repair\?\.review \|\| job\.result\.scoringReview\)/);
-  assert.match(source, /jobs are"\} waiting for your decision\./);
+  assert.match(source, /const SECTIONS: AiJobSection\[\] = \["attention", "active", "history"\];/);
+  assert.match(source, /jobs need"\} your attention\./);
   assert.match(source, /"Show only these"/);
-  assert.match(source, /<AiEvidence job=\{job\} \/>/);
+  const page = fs.readFileSync(path.join(__dirname, "../src/pages/ai/AiJobPage.tsx"), "utf8");
+  assert.match(page, /<AiEvidence job=\{job\} \/>/);
 });
 
 // Review Part IV, W01: generations apart from the polls that recover background answers, rejected plans, and the
@@ -266,5 +268,8 @@ test("purposes come from the usage records when they have them, so the last requ
     }
   });
   const h = componentHarness("pages/ai/AiEvidence.tsx", { props: { job: failed }, deps: aiApi({}, []) });
-  assert.equal(text(h.all(node => node.type === "p")), "Evidence and cost · 2 model generations: plans 2 · 2,000 tokens in, 800 out");
+  assert.equal(
+    text(h.all(node => node.type === "p")),
+    "Evidence and cost · 2 model generations: plans 2 · 2,000 tokens in, 800 out"
+  );
 });

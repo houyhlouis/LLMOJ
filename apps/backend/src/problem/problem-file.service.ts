@@ -56,7 +56,7 @@ export class ProblemFileService {
   async addProblemFilesFromDisk(
     problem: ProblemEntity,
     type: ProblemFileType,
-    files: { filename: string; path: string; size: number }[],
+    files: { filename: string; path: string; size: number; expectedSha256?: string }[],
     options: {
       authorize: () => Promise<void>;
       replaceExisting?: boolean;
@@ -78,6 +78,8 @@ export class ProblemFileService {
       )
         throw new ArchiveError("ZIP_FILENAME_CONFLICT");
       names.add(file.filename.toLowerCase());
+      if (file.expectedSha256 != null && !/^[a-f0-9]{64}$/.test(file.expectedSha256))
+        throw new ArchiveError("FILE_HASH_MISMATCH");
       if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > ZIP_LIMITS.fileBytes)
         throw new ArchiveError("ZIP_FILE_SIZE_LIMIT");
     }
@@ -99,6 +101,17 @@ export class ProblemFileService {
           if (!stat.isFile() || stat.size !== file.size) throw new ArchiveError("ZIP_INTEGRITY_ERROR");
           // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
           entry.sha256 = await this.fileService.uploadFile(uuid, input.createReadStream({ autoClose: false }), 1);
+          if (file.expectedSha256) {
+            // Generated public headers have an independently qualified source hash. The fresh UUID has no issued write form.
+            // eslint-disable-next-line no-await-in-loop -- Verify immutable storage before registration/activation.
+            const stored = await this.fileService.hashStoredObject(uuid);
+            if (
+              entry.sha256 !== file.expectedSha256 ||
+              stored.sha256 !== file.expectedSha256 ||
+              stored.size !== file.size
+            )
+              throw new ArchiveError("FILE_HASH_MISMATCH");
+          }
         } finally {
           // eslint-disable-next-line no-await-in-loop -- Keep file handles, imports, and transaction operations ordered.
           await input.close();
@@ -311,7 +324,8 @@ export class ProblemFileService {
     uploadInfo: FileUploadInfoDto,
     filename: string,
     noLimit: boolean,
-    actingUser?: UserEntity
+    actingUser?: UserEntity,
+    expectedSha256?: string
   ): Promise<
     | SignedFileUploadRequestDto
     | "NO_SUCH_PROBLEM"
@@ -333,7 +347,9 @@ export class ProblemFileService {
             noLimit
               ? null
               : await this.checkAddProblemFileLimit(problem, type, size, filename, transactionalEntityManager),
-          transactionalEntityManager
+          transactionalEntityManager,
+          true,
+          expectedSha256
         );
 
         // SignedFileUploadRequestDto object or error

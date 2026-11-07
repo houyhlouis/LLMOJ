@@ -6,13 +6,14 @@ import crypto from "crypto";
 import { pipeline } from "stream/promises";
 import { Transform } from "stream";
 
-import winston from "winston";
-
-import Queue from "promise-queue";
-
-import { SandboxResult, SandboxStatus } from "simple-sandbox";
 import {
+  AI_RUNNER_CAPABILITIES,
+  aiAbiProbe,
+  taskCapabilityGaps,
+  type AiTaskContract,
   AI_EXECUTION_PROTOCOL_VERSION,
+  AI_QUALITY_POLICY_VERSION,
+  AI_RECEIPT_VERSION,
   aiContractDigest,
   aiReplayRequestError,
   parseAiExecutionProfiles,
@@ -25,6 +26,15 @@ import {
   type AiReplayRequest,
   type AiReplayRun
 } from "@libreoj/judge-protocol";
+
+import winston from "winston";
+
+import Queue from "promise-queue";
+
+import { SandboxResult, SandboxStatus } from "simple-sandbox";
+
+import { AiReceipts } from "./aiReceipts";
+import { protocolDiagnostics, ProtocolTransition } from "./aiProtocolDiagnostics";
 
 import { runBuiltinChecker } from "./checkers/builtin";
 import { Checker, parseTestlibMessage } from "./checkers";
@@ -70,7 +80,12 @@ import {
 } from "./sandbox";
 
 export interface Request {
-  operation?: "generate" | "cleanup" | "validate-reference" | "replay";
+  operation?: "generate" | "cleanup" | "validate-reference" | "replay" | "capabilities" | "qualify";
+  taskContract?: AiTaskContract;
+  qualification?: "candidate";
+  boundaryCases?: { subtask: number; seed: number; family: string }[];
+  requiredQualityPolicy?: number;
+  requiredReceiptVersion?: number;
   // The backend's key of the logical operation (judge protocol version 8): a run of one replays the inputs its
   // generators made in an earlier run of the job (see aiCheckpoint.ts)
   operationKey?: string;
@@ -193,6 +208,7 @@ function measureOf(result: SandboxResult, timeLimitMs?: number, memoryLimitMiB?:
   return {
     status: (SandboxStatus[result.status] || "Unknown") as AiExecutionMeasure["status"],
     exitCode: result.code,
+    timing: "fresh",
     ...(result.termination ? { termination: result.termination } : {}),
     timeMs: Math.round(result.time / 1e3) / 1e3,
     memoryBytes: result.memory,
@@ -263,8 +279,15 @@ function validateReplay(request: Request, protocol: boolean) {
 
 export function validate(request: Request) {
   if (!request || typeof request.jobId !== "string" || !UUID.test(request.jobId)) throw new Error("Invalid job UUID");
-  if (request.operation === "cleanup") return;
-  if (request.operation && !["generate", "validate-reference", "replay"].includes(request.operation))
+  if (
+    (request.requiredQualityPolicy !== undefined && request.requiredQualityPolicy !== AI_QUALITY_POLICY_VERSION) ||
+    (request.requiredReceiptVersion !== undefined && request.requiredReceiptVersion !== AI_RECEIPT_VERSION)
+  )
+    throw new Error("AI_CAPABILITY_UNSUPPORTED");
+  if (request.operation === "cleanup" || request.operation === "capabilities") return;
+  if (request.taskContract && taskCapabilityGaps(request.taskContract, AI_RUNNER_CAPABILITIES).length)
+    throw new Error("Unsupported task contract");
+  if (request.operation && !["generate", "validate-reference", "replay", "qualify"].includes(request.operation))
     throw new Error("Invalid operation");
   if (
     request.operationKey != null &&
@@ -374,9 +397,25 @@ export function validate(request: Request) {
     )
       throw new Error("Invalid subtask or seed");
   }
+  if (
+    request.boundaryCases != null &&
+    (!Array.isArray(request.boundaryCases) ||
+      request.boundaryCases.length > 16000 ||
+      request.boundaryCases.some(
+        c =>
+          !c ||
+          !request.cases.some(test => test.subtask === c.subtask) ||
+          !Number.isSafeInteger(c.seed) ||
+          c.seed < 1 ||
+          c.seed > 2147483647 ||
+          typeof c.family !== "string" ||
+          c.family.length > 4000
+      ))
+  )
+    throw new Error("Invalid boundary qualification families");
   if (!validating && !protocol) {
     if (!request.validatorCode) throw new Error("Traditional generation requires an input validator");
-    validateQuality(request.quality, request.cases, request.stdCode);
+    validateQuality(request.quality, request.cases, request.stdCode, request.operation === "qualify");
   } else if (request.quality != null)
     throw new Error("Quality verification is only supported for Traditional generation");
   if (request.samples != null && (!Array.isArray(request.samples) || request.samples.length > 100))
@@ -489,7 +528,14 @@ async function compileSource(
         source,
         options,
         testlib: profile.testlib,
-        extraSources: profile.extraSources ? request.extraSourceFiles || {} : null,
+        extraSources: profile.extraSources
+          ? {
+              ...request.extraSourceFiles,
+              ...(name === "std" && request.graderCode && request.taskContract
+                ? { "__abi.cpp": aiAbiProbe(request.taskContract.interface) }
+                : {})
+            }
+          : null,
         grader: name === "std" ? request.graderCode || null : null,
         runtime: await runtimeIdentity()
       })
@@ -513,8 +559,10 @@ async function compileSource(
     if (profile.extraSources)
       for (const [filename, content] of Object.entries(request.extraSourceFiles || {}))
         await fs.promises.writeFile(path.join(sourceDirectory, filename), content);
+    const abi = name === "std" && request.graderCode && request.taskContract?.interface;
     if (name === "std" && request.graderCode)
       await fs.promises.writeFile(path.join(sourceDirectory, "__grader.cpp"), request.graderCode);
+    if (abi) await fs.promises.writeFile(path.join(sourceDirectory, "__abi.cpp"), aiAbiProbe(abi));
     const cpp = getLanguage("cpp");
     const compilation = cpp.compile({
       sourceDirectoryInside: SOURCE,
@@ -541,10 +589,26 @@ async function compileSource(
               candidate: true,
               parameters: [...flags, "-c", `${SOURCE}/main.cpp`, "-o", `${BINARY}/std.o`]
             },
+            ...(abi
+              ? [
+                  {
+                    label: "public ABI",
+                    candidate: true,
+                    parameters: [...flags, "-c", `${SOURCE}/__abi.cpp`, "-o", `${BINARY}/abi.o`]
+                  }
+                ]
+              : []),
             {
               label: "std link",
               candidate: true,
-              parameters: [...flags, `${BINARY}/grader.o`, `${BINARY}/std.o`, "-o", `${BINARY}/${PROGRAM_FILE}`]
+              parameters: [
+                ...flags,
+                `${BINARY}/grader.o`,
+                `${BINARY}/std.o`,
+                ...(abi ? [`${BINARY}/abi.o`] : []),
+                "-o",
+                `${BINARY}/${PROGRAM_FILE}`
+              ]
             }
           ]
         : [{ label: name, candidate: name === "std", parameters: compilation.parameters }];
@@ -787,8 +851,10 @@ async function executeProtocol(binaryDirectory: string, request: Request, input:
       new CompileResultSuccess("", "", programDirectory(binaryDirectory, "std"), 0, ""),
       new CompileResultSuccess("", "", programDirectory(binaryDirectory, program), 0, "")
     ];
+    const transitions: ProtocolTransition[] = [];
     try {
       for (const stage of (communication ? [1, 2] : [1]) as (1 | 2)[]) {
+        transitions.push({ stage, event: "started" });
         const result = await runInteractionTestcase(
           task,
           judgeInfo,
@@ -800,8 +866,10 @@ async function executeProtocol(binaryDirectory: string, request: Request, input:
           compiled,
           path.join(directory, `run-${stage}`),
           disposer,
-          communication ? { stage, managerDirectory: path.join(directory, "manager-state") } : undefined
+          communication ? { stage, managerDirectory: path.join(directory, "manager-state") } : undefined,
+          true
         );
+        transitions.push({ stage, event: "finished", status: result.status });
         if (result.status !== TestcaseStatusInteraction.Accepted || result.score !== 100) {
           const programFailed =
             result.status === TestcaseStatusInteraction.JudgementFailed || result.failureOrigin === "interactor";
@@ -814,17 +882,17 @@ async function executeProtocol(binaryDirectory: string, request: Request, input:
             [TestcaseStatusInteraction.OutputLimitExceeded]: "output_limit",
             [TestcaseStatusInteraction.JudgementFailed]: "checker_failure"
           };
-          const message = JSON.stringify(result.interactorMessage || result.systemMessage || "").slice(0, 2000);
+          const diagnostics = protocolDiagnostics(stage, program, result, transitions);
           throw describe(
             referenceError(
-              `Reference protocol failed at run ${stage}: ${result.status} ${message}`,
+              `Reference protocol failed at run ${stage}: ${result.status}`,
               result.status !== TestcaseStatusInteraction.JudgementFailed && result.failureOrigin !== "interactor"
             ),
             {
               kind: kinds[result.status] || "infrastructure_error",
               role: programFailed ? program : "std",
               subject: `protocol run ${stage}`,
-              data: { input, diagnostics: Buffer.from(message) }
+              data: { input, diagnostics }
             }
           );
         }
@@ -845,6 +913,11 @@ export async function generate(
   checkCanceled: () => void,
   layout: GenerationLayout = localLayout(request.jobId)
 ) {
+  if (
+    (request.requiredQualityPolicy !== undefined && request.requiredQualityPolicy !== AI_QUALITY_POLICY_VERSION) ||
+    (request.requiredReceiptVersion !== undefined && request.requiredReceiptVersion !== AI_RECEIPT_VERSION)
+  )
+    throw new Error("AI_CAPABILITY_UNSUPPORTED");
   // Snapshot backend-owned inputs through O_NOFOLLOW into the judge's own storage before using them.
   // The descriptor-based source path pins the UUID directory even if its owner renames it.
   let snapshot: string;
@@ -1091,6 +1164,38 @@ async function generateWithSamples(
   // The job's builds, and the inputs its generators made in an earlier run, by generator (see aiCheckpoint.ts)
   const builds = new JobBuilds(request.jobId);
   const inputs = new Map<string, GeneratorInputs>();
+  const buildKeys = new Map<string, string>();
+  const receipts = new AiReceipts(config.dataStore, request.jobId);
+  let freshQualification = false;
+  const hashData = async (data: Buffer | { path: string }) => {
+    if (Buffer.isBuffer(data)) return crypto.createHash("sha256").update(data).digest("hex");
+    const contentHash = crypto.createHash("sha256");
+    for await (const chunk of fs.createReadStream(data.path)) contentHash.update(chunk);
+    return contentHash.digest("hex");
+  };
+  const executeKept = async (name: string, input: Buffer | { path: string }, parameters: string[] = []) => {
+    const key = buildKeys.get(name);
+    if (!key || ["make", "quality-small-make", "manager", "interactor"].includes(name))
+      return await execute(binaryDirectory, name, request, input, parameters);
+    const result = await receipts.run(
+      {
+        kind: name === "validator" ? "legality" : "execution",
+        build: key,
+        input: await hashData(input),
+        arguments: parameters,
+        profile: roleProfile(request.profiles, name),
+        runtime,
+        policy: `execution-v${AI_EXECUTION_PROTOCOL_VERSION}`
+      },
+      freshQualification,
+      async () => {
+        const output = await execute(binaryDirectory, name, request, input, parameters);
+        return { output, measure: runMeasures.get(request)?.get(name) };
+      }
+    );
+    if (result.measure) runMeasures.get(request)?.set(name, { ...result.measure, timing: result.timing });
+    return result.output;
+  };
   // The cases' files, as they are when the run completes
   const corpus: AiCorpusCase[] = [];
   const fileHash = (data: Buffer) => ({
@@ -1105,7 +1210,7 @@ async function generateWithSamples(
   let totalBytes = 0;
   const files: string[] = [];
   async function publish(filename: string, contents: Buffer | string) {
-    if (validating) return;
+    if (validating || request.operation === "qualify") return;
     totalBytes += Buffer.byteLength(contents);
     if (Buffer.byteLength(contents) > MAX_FILE || totalBytes > MAX_TOTAL)
       throw new Error("Generated data exceeds the 16 MiB/file or 8 GiB/job limit");
@@ -1154,6 +1259,7 @@ async function generateWithSamples(
   }
   // A generator's build: the inputs it made are kept by it, for an operation the backend keeps track of
   const generator = (name: string, key: string | null) => {
+    if (key) buildKeys.set(name, key);
     if (key && request.operationKey && !validating && ["make", "quality-small-make"].includes(name))
       inputs.set(name, new GeneratorInputs(request.jobId, key, runtime));
   };
@@ -1190,7 +1296,7 @@ async function generateWithSamples(
       label: string
     ) => {
       try {
-        await execute(binaryDirectory, "validator", request, input, [String(subtask), String(caseIndex)]);
+        await executeKept("validator", input, [String(subtask), String(caseIndex)]);
       } catch (error) {
         const reason = String(error.message || error)
           // eslint-disable-next-line no-control-regex
@@ -1218,7 +1324,26 @@ async function generateWithSamples(
       actual: Buffer | { path: string },
       expected: Buffer | { path: string },
       label: number | string
-    ) => await compareOutputs(directory, binaryDirectory, request, input, actual, expected, label);
+    ) => {
+      await receipts.run(
+        {
+          kind: "comparison",
+          build: buildKeys.get("checker") || aiContractDigest(request.checker || {}),
+          input: await hashData(input),
+          actual: await hashData(actual),
+          expected: await hashData(expected),
+          arguments: [],
+          profile: request.profiles.roles.checker,
+          runtime,
+          policy: `comparison-v${AI_EXECUTION_PROTOCOL_VERSION}`
+        },
+        freshQualification,
+        async () => {
+          await compareOutputs(directory, binaryDirectory, request, input, actual, expected, label);
+          return { output: Buffer.alloc(0) };
+        }
+      );
+    };
     const quality = request.quality
       ? new AiQuality(request.quality, {
           execute: async (name, input, parameters) => {
@@ -1227,7 +1352,7 @@ async function generateWithSamples(
             const output =
               name === "quality-small-make" && parameters?.length === 2
                 ? await generated(name, Number(parameters[0]), Number(parameters[1]))
-                : await execute(binaryDirectory, name, request, input, parameters);
+                : await executeKept(name, input, parameters);
             checkCanceled();
             return output;
           },
@@ -1283,10 +1408,17 @@ async function generateWithSamples(
               total: sampleCount
             });
           }
-          const actual = await execute(binaryDirectory, "std", request, input);
+          const actual = await executeKept("std", input);
           checkCanceled();
           await compareSample(input, actual, expected, samplesPassed + 1);
-          if (quality) await quality.checkSample(input, expected, samplesPassed + 1);
+          if (quality)
+            await quality.checkSample(
+              input,
+              expected,
+              samplesPassed + 1,
+              "public_example",
+              request.operation === "qualify"
+            );
         }
       );
       samplesPassed++;
@@ -1324,7 +1456,14 @@ async function generateWithSamples(
           await execute(binaryDirectory, "std", request, input, [], {}, actual.path);
           checkCanceled();
           await compareSample(input, actual, expected, sampleNumber);
-          if (quality) await quality.checkSample(input, expected, sampleNumber);
+          if (quality)
+            await quality.checkSample(
+              input,
+              expected,
+              sampleNumber,
+              "author_validation",
+              request.operation === "qualify"
+            );
         }
       );
       await fs.promises.unlink(actual.path);
@@ -1359,6 +1498,70 @@ async function generateWithSamples(
       });
     }
     if (quality) await quality.runDifferential();
+    if (request.operation === "qualify") {
+      const execution: AiExecutionRecord = {
+        contract: AI_EXECUTION_PROTOCOL_VERSION,
+        attemptId: crypto.randomUUID(),
+        runtime,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        reuse: { builds: builds.reused, inputs: [...inputs.values()].reduce((n, input) => n + input.reused, 0) }
+      };
+      emit({
+        type: "complete",
+        files: [],
+        execution,
+        validation: { profiles: aiContractDigest(request.profiles), samplesPassed, sampleInputsPassed },
+        qualification: {
+          baselines: quality.baselines,
+          fuzzPassed: request.quality.fuzzCases.length,
+          candidates: request.quality.challenges.map(candidate => candidate.id)
+        }
+      });
+      await fs.promises.rm(directory, { recursive: true, force: true });
+      return;
+    }
+    freshQualification = true;
+    let boundariesPassed = 0;
+    if (request.boundaryCases) {
+      emit({
+        type: "progress",
+        phase: "qualify-boundaries",
+        completed: 0,
+        total: request.boundaryCases.length,
+        receipts: receipts.counts
+      });
+      for (const boundary of request.boundaryCases) {
+        checkCanceled();
+        await within(
+          {
+            phase: "qualify-boundaries",
+            subject: boundary.family,
+            subtask: boundary.subtask,
+            scenarioIndex: boundary.seed,
+            classification: "hidden-test"
+          },
+          async () => {
+            const input = await generated("make", boundary.subtask, boundary.seed);
+            await within({ data: { input } }, async () => {
+              await validateInput(input, boundary.subtask, boundary.seed, boundary.family);
+              const output = protocol ? Buffer.alloc(0) : await executeKept("std", input);
+              if (protocol) await executeProtocol(binaryDirectory, request, input);
+              if (quality) await quality.checkCorrect(input, output, boundary.subtask, boundary.family);
+            });
+          }
+        );
+        boundariesPassed++;
+        emit({
+          type: "progress",
+          phase: "qualify-boundaries",
+          completed: boundariesPassed,
+          total: request.boundaryCases.length,
+          receipts: receipts.counts
+        });
+      }
+    }
+    freshQualification = false;
     const finalCases = request.cases.map(testcase => ({ ...testcase }));
     for (let index = 0; index < request.cases.length; index++) {
       checkCanceled();
@@ -1381,7 +1584,7 @@ async function generateWithSamples(
           inputsPassed++;
           emit({ type: "progress", phase: "validate-inputs", completed: inputsPassed, total: request.cases.length });
         }
-        const output = protocol ? Buffer.alloc(0) : await execute(binaryDirectory, "std", request, input);
+        const output = protocol ? Buffer.alloc(0) : await executeKept("std", input);
         if (protocol) {
           await executeProtocol(binaryDirectory, request, input);
           protocolCasesPassed++;
@@ -1418,7 +1621,13 @@ async function generateWithSamples(
         output: fileHash(answer)
       };
       if (quality) quality.recordCase(index, row);
-      emit({ type: "progress", phase: "generate", completed: index + 1, total: request.cases.length });
+      emit({
+        type: "progress",
+        phase: "generate",
+        completed: index + 1,
+        total: request.cases.length,
+        receipts: receipts.counts
+      });
     }
     if (quality) {
       // Replacement candidates (see AiQuality.nextCandidate): each is checked as a final case is, and run against every
@@ -1444,7 +1653,7 @@ async function generateWithSamples(
         // eslint-disable-next-line no-loop-func -- Awaited before the loop goes on
         await within({ ...details, data: { input } }, async () => {
           await validateInput(input, subtask, seed, details.subject);
-          const answer = await execute(binaryDirectory, "std", request, input);
+          const answer = await executeKept("std", input);
           await quality.checkCorrect(input, answer, subtask, details.subject);
           const row = await quality.findKills(input, answer, subtask, true);
           const index = quality.placement(finalCases, candidate, row);
@@ -1468,11 +1677,14 @@ async function generateWithSamples(
     const qualityResult = quality?.result();
     const execution: AiExecutionRecord = {
       contract: AI_EXECUTION_PROTOCOL_VERSION,
+      qualityPolicy: AI_QUALITY_POLICY_VERSION,
+      receiptVersion: AI_RECEIPT_VERSION,
       // This physical attempt: a judge task run again after a restart is another attempt of the same task
       attemptId: crypto.randomUUID(),
       runtime,
       startedAt,
       finishedAt: new Date().toISOString(),
+      receipts: receipts.counts,
       reuse: { builds: builds.reused, inputs: [...inputs.values()].reduce((sum, kept) => sum + kept.reused, 0) }
     };
     const result = {
@@ -1489,6 +1701,8 @@ async function generateWithSamples(
         sampleInputsPassed,
         protocolCasesPassed,
         protocolSamplesPassed,
+        boundariesPassed,
+        boundaryDigest: aiContractDigest(request.boundaryCases || []),
         // What the programs ran with, for the backend to compare with what it sent
         profiles: aiContractDigest(request.profiles),
         ...(qualityResult ? { quality: qualityResult } : {})
@@ -1629,6 +1843,8 @@ async function replayFailure(
     }
     const execution: AiExecutionRecord = {
       contract: AI_EXECUTION_PROTOCOL_VERSION,
+      qualityPolicy: AI_QUALITY_POLICY_VERSION,
+      receiptVersion: AI_RECEIPT_VERSION,
       // This physical attempt: a judge task run again after a restart is another attempt of the same task
       attemptId: crypto.randomUUID(),
       runtime,
@@ -1696,6 +1912,7 @@ export async function runGeneration(
       (request.samples?.length || 0) +
       (request.sampleFiles?.length || 0) +
       (request.protocolSamples?.length || 0);
+    const boundaryExecutions = (request.boundaryCases?.length || 0) * (3 + (request.quality?.alternatives.length || 0));
     const qualityExecutions = request.quality
       ? (request.quality.fuzzCases.length + request.cases.length + request.quality.extraAttempts) *
         (3 + request.quality.alternatives.length + request.quality.challenges.length)
@@ -1705,7 +1922,7 @@ export async function runGeneration(
     const executionBudgetMs = Math.min(
       4 * 60 * 60 * 1000,
       180000 +
-        (baseExecutions + qualityExecutions + replayExecutions) *
+        (baseExecutions + qualityExecutions + replayExecutions + boundaryExecutions) *
           Math.max(20000, request.stdTimeLimitMs * (request.problemType === "Communication" ? 2 : 1) + 15000)
     );
     const deadline = Date.now() + executionBudgetMs;
@@ -1792,6 +2009,13 @@ export async function startAiRunner() {
     const emit: Emit = event => {
       if (!socket.destroyed) socket.write(`${JSON.stringify(event)}\n`);
     };
+    emit({
+      type: "capabilities",
+      protocolVersion: AI_EXECUTION_PROTOCOL_VERSION,
+      aiCapabilities: AI_RUNNER_CAPABILITIES,
+      aiQualityPolicyVersions: [AI_QUALITY_POLICY_VERSION],
+      aiReceiptVersions: [AI_RECEIPT_VERSION]
+    });
     socket.on("data", chunk => {
       if (received) return;
       buffer += chunk;
@@ -1809,6 +2033,14 @@ export async function startAiRunner() {
         try {
           request = JSON.parse(buffer.slice(0, buffer.indexOf("\n")));
           validate(request);
+          if (request.operation === "capabilities") {
+            emit({
+              type: "complete",
+              protocolVersion: AI_EXECUTION_PROTOCOL_VERSION,
+              capabilities: AI_RUNNER_CAPABILITIES
+            });
+            return;
+          }
           if (request.operation === "cleanup" && active.has(request.jobId)) throw new Error("Job already running");
           if (request.operation === "cleanup") {
             await fs.promises.rm(path.join(config.aiGeneratedDirectory, request.jobId), {

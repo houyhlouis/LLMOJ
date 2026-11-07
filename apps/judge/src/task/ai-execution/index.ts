@@ -1,6 +1,8 @@
 import fs from "fs";
 import path from "path";
 
+import { parseAiReceiptCounts } from "@libreoj/judge-protocol";
+
 import winston from "winston";
 import type { AiExecutionProgress, AiRunFailure } from "@libreoj/judge-protocol";
 
@@ -146,6 +148,7 @@ export default async function onAiExecution(task: Task<AiExecutionExtraInfo, AiE
           task.reportProgressRaw({
             finished: false,
             phase: String(event.phase),
+            ...(parseAiReceiptCounts(event.receipts) ? { receipts: parseAiReceiptCounts(event.receipts) } : {}),
             completed: Number(event.completed) || 0,
             total: Number(event.total) || 0
           });

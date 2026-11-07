@@ -7,6 +7,7 @@ import { defineRoute } from "@/AppRouter";
 import { aiCall, aiText } from "./api";
 import preferenceStyle from "../user/edit/UserEdit.module.less";
 import style from "./Ai.module.less";
+import AiDeploymentIdentity from "./AiDeploymentIdentity";
 import { actsAsButton } from "@/utils/keyboard";
 
 export const AiConfigurationPage = observer(function AiConfigurationPage() {
@@ -45,9 +46,33 @@ export const AiConfigurationPage = observer(function AiConfigurationPage() {
       )
     : "";
   const save = async (clearLlmKey = false, clearSearchKey = false) => {
-    const { type, baseUrl, model, reasoning, maxTokens, responsesRecovery = "auto" } = config.llm;
+    const { type, baseUrl, model, reasoning, maxTokens, responsesRecovery = "auto", structuredOutput } = config.llm;
+    // Purposes left without a model inherit the main model (review Part V, R5)
+    const modelPolicies = Object.fromEntries(
+      Object.entries((config.modelPolicies || {}) as Record<string, AiModelPolicy>)
+        .filter(([, policy]) => policy?.model?.trim())
+        .map(([purpose, policy]) => [
+          purpose,
+          {
+            model: policy.model.trim(),
+            ...(policy.reasoning?.trim() ? { reasoning: policy.reasoning.trim() } : {}),
+            ...(policy.maxTokens ? { maxTokens: Number(policy.maxTokens) } : {})
+          }
+        ])
+    );
     const result = await aiCall("saveConfiguration", {
-      llm: { type, baseUrl, model, reasoning, maxTokens, responsesRecovery, ...(llmKey ? { apiKey: llmKey } : {}) },
+      llm: {
+        type,
+        baseUrl,
+        model,
+        reasoning,
+        maxTokens,
+        responsesRecovery,
+        ...(structuredOutput ? { structuredOutput } : {}),
+        ...(llmKey ? { apiKey: llmKey } : {})
+      },
+      sourcePolicy: config.sourcePolicy || "optional",
+      modelPolicies,
       search: {
         type: config.search.type,
         baseUrl: config.search.baseUrl,
@@ -328,6 +353,31 @@ export const AiConfigurationPage = observer(function AiConfigurationPage() {
                         </p>
                       </>
                     )}
+                    <Form.Select
+                      label={aiText("测试方案的结构化输出", "Structured output for testing plans")}
+                      value={config.llm.structuredOutput || "off"}
+                      options={[
+                        {
+                          value: "off",
+                          text: aiText("关闭（在提示中说明格式）", "Off (format described in the prompt)")
+                        },
+                        {
+                          value: "json_schema",
+                          text: aiText("JSON Schema（服务商须支持）", "JSON Schema (provider support required)")
+                        }
+                      ]}
+                      onChange={(_e, { value }) => update("llm", "structuredOutput", value)}
+                    />
+                    <p className={preferenceStyle.notes}>
+                      {aiText(
+                        "开启后，支持的 Chat/Responses 服务会按方案的 JSON Schema 返回；其他服务仍在提示中说明格式。两种方式都会在本站再次校验。",
+                        "When on, supported Chat/Responses services answer in the plan's JSON Schema; others still get the format in the prompt. The site validates the plan either way."
+                      )}
+                    </p>
+                    <AiModelPolicies
+                      value={config.modelPolicies || {}}
+                      onChange={modelPolicies => setConfig(previous => ({ ...previous, modelPolicies }))}
+                    />
                   </>
                 ) : (
                   <>
@@ -392,6 +442,34 @@ export const AiConfigurationPage = observer(function AiConfigurationPage() {
                         onChange={(_e, { value }) => update("search", "tool", value)}
                       />
                     )}
+                    <Form.Select
+                      label={aiText("原题检索", "Source search")}
+                      value={config.sourcePolicy || "optional"}
+                      options={[
+                        {
+                          value: "optional",
+                          text: aiText(
+                            "可选（检索失败不影响其他步骤）",
+                            "Optional (a failed search doesn't stop other work)"
+                          )
+                        },
+                        {
+                          value: "required",
+                          text: aiText(
+                            "必需（发布数据前须核实原题）",
+                            "Required (verify the source before publishing data)"
+                          )
+                        },
+                        { value: "off", text: aiText("关闭", "Off") }
+                      ]}
+                      onChange={(_e, { value }) => setConfig(previous => ({ ...previous, sourcePolicy: value }))}
+                    />
+                    <p className={preferenceStyle.notes}>
+                      {aiText(
+                        "可选时，检索失败只会把原题标记为“未核实”，题面、题解和测试数据照常继续。“必需”是来源核实规则，不是评测故障：未核实时不会发布测试数据。站点也可能统一要求核实。",
+                        "When optional, a failed search only marks the source as unverified; the statement, tutorial and test data carry on. Required is a provenance rule, not a judging failure: test data isn't published until the source is verified. The site may also require it for everyone."
+                      )}
+                    </p>
                   </>
                 )}
                 <div className={style.actions}>
@@ -406,6 +484,7 @@ export const AiConfigurationPage = observer(function AiConfigurationPage() {
                   </Button>
                 </div>
               </Form>
+              {appState.currentUser?.isAdmin && <AiDeploymentIdentity />}
               <div className={preferenceStyle.notes + " " + style.privacyNotes}>
                 {aiText(
                   "密钥加密保存在后端，只属于当前账号。页面不会读取或显示已保存的密钥。AI 功能会将题面、样例和相关配置发送给你选择的模型服务；搜索请求发送给你配置的搜索服务。",
@@ -419,4 +498,95 @@ export const AiConfigurationPage = observer(function AiConfigurationPage() {
     </div>
   );
 });
+export interface AiModelPolicy {
+  model: string;
+  reasoning?: string;
+  maxTokens?: number;
+}
+
+const policyPurposes: Array<[string, () => string, () => string]> = [
+  [
+    "reasoning",
+    () => aiText("算法推理", "Algorithm reasoning"),
+    () => aiText("标程、暴力解、生成器等程序和测试方案", "Solutions, oracles, generators and testing plans")
+  ],
+  [
+    "schema_repair",
+    () => aiText("方案字段修复", "Plan field repair"),
+    () => aiText("只修改测试方案中被拒绝的字段", "Rewrites only a plan's rejected fields")
+  ],
+  [
+    "metadata",
+    () => aiText("题目信息", "Metadata"),
+    () => aiText("标签、难度、翻译等格式化工作", "Tags, difficulty, translation and other formatting")
+  ],
+  [
+    "compiler_fix",
+    () => aiText("编译错误修复", "Compiler fixes"),
+    () => aiText("根据编译器报错直接修改", "Direct fixes from compiler diagnostics")
+  ]
+];
+
+/** A smaller model for work that doesn't need to solve the problem again; blank purposes use the main model (review Part V, R5). */
+function AiModelPolicies({
+  value,
+  onChange
+}: {
+  value: Record<string, AiModelPolicy>;
+  onChange: (value: Record<string, AiModelPolicy>) => void;
+}) {
+  const change = (purpose: string, field: keyof AiModelPolicy, fieldValue: string) =>
+    onChange({
+      ...value,
+      [purpose]: {
+        ...(value[purpose] || { model: "" }),
+        [field]: field === "maxTokens" ? (fieldValue ? Number(fieldValue) : undefined) : fieldValue
+      }
+    });
+  return (
+    <Form.Field>
+      <label>{aiText("按用途选择模型（可选）", "Models by purpose (optional)")}</label>
+      <p className={preferenceStyle.notes}>
+        {aiText(
+          "使用同一服务和密钥。留空的用途使用上面的模型；修复字段、题目信息和编译错误一般不需要最强的模型。",
+          "Uses the same service and key. Purposes left blank use the model above; field repair, metadata and compiler fixes usually don't need the strongest model."
+        )}
+      </p>
+      <div className={style.modelPolicies}>
+        {policyPurposes.map(([purpose, name, note]) => (
+          <div key={purpose} className={style.modelPolicy}>
+            <div>
+              <strong>{name()}</strong>
+              <div className={style.notes}>{note()}</div>
+            </div>
+            <Form.Input
+              aria-label={aiText(`${name()}的模型`, `Model for ${name()}`)}
+              placeholder={aiText("模型", "Model")}
+              maxLength={200}
+              value={value[purpose]?.model || ""}
+              onChange={(_e, { value: model }) => change(purpose, "model", model)}
+            />
+            <Form.Input
+              aria-label={aiText(`${name()}的推理强度`, `Reasoning for ${name()}`)}
+              placeholder={aiText("推理强度", "Reasoning")}
+              maxLength={50}
+              value={value[purpose]?.reasoning || ""}
+              onChange={(_e, { value: reasoning }) => change(purpose, "reasoning", reasoning)}
+            />
+            <Form.Input
+              aria-label={aiText(`${name()}的输出 token 上限`, `Maximum output tokens for ${name()}`)}
+              placeholder={aiText("输出上限", "Max tokens")}
+              type="number"
+              min={512}
+              max={1000000}
+              value={value[purpose]?.maxTokens ?? ""}
+              onChange={(_e, { value: maxTokens }) => change(purpose, "maxTokens", maxTokens)}
+            />
+          </div>
+        ))}
+      </div>
+    </Form.Field>
+  );
+}
+
 export default defineRoute(async () => <AiConfigurationPage />);

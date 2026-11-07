@@ -1,6 +1,10 @@
 import { createHash } from "crypto";
 
+import { PLAN_LIMITS, qualityPlanSchema } from "./ai-plan-definition";
+
 import { AiError } from "./ai.types";
+
+export { PLAN_LIMITS } from "./ai-plan-definition";
 
 export interface AiQualityTarget {
   id: string;
@@ -19,6 +23,7 @@ export interface AiQualityPlan {
 }
 export interface AiQualityRequest {
   version: 1;
+  oracleDomain?: { maxBytes: number; method: string; description: string };
   fuzzCases: { subtask: number; seed: number }[];
   smallMakeCode: string;
   oracleCode: string;
@@ -55,18 +60,6 @@ export interface AiPlanIssue {
   repairClass: "format" | "restatement" | "reference" | "content";
 }
 
-const PLAN_LIMITS = Object.freeze({
-  text: 4000,
-  reason: 2000,
-  id: 48,
-  algorithms: [2, 4],
-  targets: [1, 4],
-  // Issues kept and reported for one proposal
-  issues: 40,
-  // A rejected proposal's text kept with the job, privately (its owner's job), when it's at most this large
-  candidateBytes: 64 * 1024
-});
-
 function short(value: unknown) {
   const text = typeof value === "string" ? value : JSON.stringify(value);
   if (text === undefined) return String(value);
@@ -85,6 +78,8 @@ export function validateAiQualityPlan(
   value: unknown,
   subtasks: { id: number }[]
 ): { plan: AiQualityPlan | null; issues: AiPlanIssue[] } {
+  const schema = qualityPlanSchema(subtasks).properties;
+  const targetSchema = schema.targets.items.properties;
   const issues: AiPlanIssue[] = [];
   const issue = (item: AiPlanIssue) => {
     if (issues.length < PLAN_LIMITS.issues) issues.push(item);
@@ -100,8 +95,8 @@ export function validateAiQualityPlan(
     else if (typeof field !== "string")
       issue({ path, rule: "type", expected: "string", actual: typeName(field), repairClass: "format" });
     else if (!field.trim()) issue({ path, rule: "nonEmpty", repairClass: "content" });
-    else if (field.length > limit)
-      issue({ path, rule: "maxLength", expected: limit, actual: field.length, repairClass: "restatement" });
+    else if (field.trim().length > limit)
+      issue({ path, rule: "maxLength", expected: limit, actual: field.trim().length, repairClass: "restatement" });
     else return true;
     return false;
   };
@@ -123,7 +118,7 @@ export function validateAiQualityPlan(
     return true;
   };
 
-  if (plan.version !== 1)
+  if (plan.version !== schema.version.const)
     issue({
       path: "version",
       rule: plan.version === undefined ? "required" : "const",
@@ -131,23 +126,31 @@ export function validateAiQualityPlan(
       ...(plan.version === undefined ? {} : { actual: short(plan.version) }),
       repairClass: "format"
     });
-  if (list("correctAlgorithms", plan.correctAlgorithms, PLAN_LIMITS.algorithms)) {
+  if (
+    list("correctAlgorithms", plan.correctAlgorithms, [
+      schema.correctAlgorithms.minItems,
+      schema.correctAlgorithms.maxItems
+    ])
+  ) {
     const methods = plan.correctAlgorithms as unknown[];
-    const valid = methods.map((method, index) => text(`correctAlgorithms[${index}]`, method, PLAN_LIMITS.text));
+    const valid = methods.map((method, index) =>
+      text(`correctAlgorithms[${index}]`, method, schema.correctAlgorithms.items.maxLength)
+    );
     if (
       valid.every(Boolean) &&
       new Set(methods.map(method => (method as string).trim().toLowerCase())).size !== methods.length
     )
       issue({ path: "correctAlgorithms", rule: "unique", repairClass: "content" });
   }
-  text("oracleMethod", plan.oracleMethod, PLAN_LIMITS.text);
-  text("smallInputStrategy", plan.smallInputStrategy, PLAN_LIMITS.text);
+  text("oracleMethod", plan.oracleMethod, schema.oracleMethod.maxLength);
+  text("smallInputStrategy", plan.smallInputStrategy, schema.smallInputStrategy.maxLength);
 
   const legalIds = new Set(subtasks.map(subtask => subtask.id));
-  if (list("targets", plan.targets, PLAN_LIMITS.targets)) {
+  if (list("targets", plan.targets, [schema.targets.minItems, schema.targets.maxItems])) {
     const targets = plan.targets as unknown[];
     if (
       targets.length >= PLAN_LIMITS.targets[0] &&
+      targets.every(target => targetSchema.kind.enum.includes((target as AiQualityTarget)?.kind)) &&
       !targets.some(target => (target as AiQualityTarget)?.kind === "wrong")
     )
       issue({ path: "targets", rule: "wrongTarget", expected: 'a target of kind "wrong"', repairClass: "content" });
@@ -159,8 +162,8 @@ export function validateAiQualityPlan(
         return;
       }
       const target = item as Record<string, unknown>;
-      if (text(`${path}.id`, target.id, PLAN_LIMITS.id)) {
-        const id = target.id as string;
+      if (text(`${path}.id`, target.id, targetSchema.id.maxLength)) {
+        const id = (target.id as string).trim();
         if (!/^[a-z][a-z0-9_-]*$/.test(id))
           issue({
             path: `${path}.id`,
@@ -174,7 +177,7 @@ export function validateAiQualityPlan(
         else if (seen.has(id)) issue({ path: `${path}.id`, rule: "unique", actual: id, repairClass: "format" });
         seen.add(id);
       }
-      if (!["wrong", "slow"].includes(target.kind as string))
+      if (!targetSchema.kind.enum.includes(target.kind as string))
         issue({
           path: `${path}.kind`,
           rule: target.kind === undefined ? "required" : "enum",
@@ -182,9 +185,9 @@ export function validateAiQualityPlan(
           ...(target.kind === undefined ? {} : { actual: short(target.kind) }),
           repairClass: "format"
         });
-      text(`${path}.algorithm`, target.algorithm, PLAN_LIMITS.text);
-      text(`${path}.reason`, target.reason, PLAN_LIMITS.reason);
-      text(`${path}.construction`, target.construction, PLAN_LIMITS.text);
+      text(`${path}.algorithm`, target.algorithm, targetSchema.algorithm.maxLength);
+      text(`${path}.reason`, target.reason, targetSchema.reason.maxLength);
+      text(`${path}.construction`, target.construction, targetSchema.construction.maxLength);
       const references = target.subtasks;
       if (!Array.isArray(references) || !references.length)
         issue({
@@ -228,7 +231,7 @@ export function validateAiQualityPlan(
       oracleMethod: valid.oracleMethod.trim(),
       smallInputStrategy: valid.smallInputStrategy.trim(),
       targets: valid.targets.map(target => ({
-        id: target.id,
+        id: target.id.trim(),
         kind: target.kind,
         algorithm: target.algorithm.trim(),
         reason: target.reason.trim(),

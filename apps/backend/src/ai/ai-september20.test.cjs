@@ -298,7 +298,7 @@ test("stale worker authorization and checkpoint compare-and-swap reject before o
   await assert.rejects(service.assertJob(job), /JOB_LEASE_LOST/);
   service.assertJob = async () => ({ id: 1 });
   service.jobs.update = async where => {
-    assert.deepEqual(where, { id: job.id, runToken: "old" });
+    assert.deepEqual(where, { id: job.id, runToken: "old", status: "running" });
     return { affected: 0 };
   };
   await assert.rejects(service.checkpoint(job, "step", 30), /JOB_LEASE_LOST/);

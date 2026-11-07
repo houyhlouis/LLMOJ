@@ -7,12 +7,13 @@ import path from "path";
 import { forwardRef, Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 
-import { DataSource, In, IsNull, LessThan, Not } from "typeorm";
-
 import {
+  parseAiReceiptCounts,
   AI_EVIDENCE_FILE,
   AI_EVIDENCE_LIMITS,
   AI_EXECUTION_PROTOCOL_VERSION,
+  AI_QUALITY_POLICY_VERSION,
+  AI_RECEIPT_VERSION,
   AiExecutionProgress,
   AiFailureKind,
   AiRunFailure,
@@ -20,6 +21,15 @@ import {
   JudgeUploadTarget,
   parseAiRunFailure
 } from "@libreoj/judge-protocol";
+
+import {
+  AI_RUNNER_CAPABILITIES,
+  currentRunnerCapabilities,
+  taskCapabilityGaps,
+  type AiRunnerCapabilities
+} from "@libreoj/judge-protocol";
+
+import { DataSource, In, IsNull, LessThan, Not } from "typeorm";
 
 import { AiExecutionEntity, AiExecutionState } from "./ai-execution.entity";
 import { AiJobEntity } from "./ai.entity";
@@ -106,7 +116,7 @@ const requestObject = (taskId: string) => `${OBJECT_PREFIX}${taskId}/request.jso
 // A replay's kept files, as objects and their content (the judge gets links to them when it takes the task)
 const transfersObject = (taskId: string) => `${OBJECT_PREFIX}${taskId}/transfers.json`;
 // Runs of a job's own steps; a replay runs beside them
-const WORKFLOW_OPERATIONS = ["generate", "validate-reference"];
+const WORKFLOW_OPERATIONS = ["generate", "validate-reference", "qualify"];
 const REPLAY_DIRECTORY = () => process.env.HYHOJ_AI_SAMPLE_INPUTS_DIR || "/opt/LLMOJ/data/ai-sample-inputs";
 const fileObject = (taskId: string, name: string) => `${OBJECT_PREFIX}${taskId}/files/${name}`;
 // A failed run's evidence, uploaded by the judge before it reports the failure
@@ -125,10 +135,12 @@ const MAX_FAILURE_FILE = 1024 * 1024;
 
 /** How long a run may take: from its number of program runs, as the AI runner computes its own budget. */
 export function aiExecutionBudget(request: RunnerRequest): number {
+  if (request.operation === "capabilities") return 10000;
   return Math.min(
     4 * 60 * 60 * 1000,
     180000 +
       (request.cases.length +
+        (request.boundaryCases?.length || 0) * (3 + (request.quality?.alternatives.length || 0)) +
         (request.samples?.length || 0) +
         (request.sampleFiles?.length || 0) +
         (request.protocolSamples?.length || 0) +
@@ -220,6 +232,23 @@ export class AiExecutionService
     return mode;
   }
 
+  async availableCapabilities(job: AiJobEntity): Promise<AiRunnerCapabilities[]> {
+    if (this.mode(job.id) === "judges") return await this.judgeGateway.availableAiCapabilities();
+    try {
+      const result = await this.runLocal(
+        job,
+        { jobId: job.id, operation: "capabilities", cases: [] },
+        async () => undefined,
+        async () => undefined
+      );
+      return result.protocolVersion >= AI_EXECUTION_PROTOCOL_VERSION && currentRunnerCapabilities(result.capabilities)
+        ? [result.capabilities]
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
   /** The directory a generation's files are in on this server. */
   outputDirectory(jobId: string): string {
     return this.mode(jobId) === "local"
@@ -239,6 +268,17 @@ export class AiExecutionService
     progress: (value: RunnerMessage) => Promise<void>,
     checkJob: () => Promise<unknown>
   ): Promise<RunnerMessage> {
+    if (
+      (request.taskContract && taskCapabilityGaps(request.taskContract, AI_RUNNER_CAPABILITIES).length) ||
+      (request.requiredQualityPolicy !== undefined && request.requiredQualityPolicy !== AI_QUALITY_POLICY_VERSION) ||
+      (request.requiredReceiptVersion !== undefined && request.requiredReceiptVersion !== AI_RECEIPT_VERSION)
+    )
+      throw new AiError("AI_CAPABILITY_UNSUPPORTED");
+    request = {
+      ...request,
+      requiredQualityPolicy: AI_QUALITY_POLICY_VERSION,
+      requiredReceiptVersion: AI_RECEIPT_VERSION
+    };
     let phase = "queued";
     const report = async (value: RunnerMessage) => {
       if (value?.phase) phase = String(value.phase);
@@ -488,7 +528,11 @@ export class AiExecutionService
         resolve();
       }, 10000);
       socket.on("connect", () => socket.write(`${JSON.stringify({ operation: "cleanup", jobId })}\n`));
-      socket.on("data", () => socket.end());
+      let reply = "";
+      socket.on("data", chunk => {
+        reply += chunk.toString();
+        if (reply.includes('"type":"complete"') || reply.includes('"type":"error"')) socket.end();
+      });
       socket.on("error", () => {
         clearTimeout(timer);
         resolve();
@@ -534,7 +578,10 @@ export class AiExecutionService
       }, JOB_CHECK_INTERVAL);
       const abort = () => fail(aiCancellationError(signal));
       signal?.addEventListener("abort", abort, { once: true });
-      socket.on("connect", () => socket.write(serialized));
+      // A legacy local runner receives no source-bearing request before proving policy compatibility.
+      let admitted = false;
+      const handshakeTimer = setTimeout(() => fail(new AiError("AI_CAPABILITY_UNSUPPORTED")), 5000);
+      socket.once("close", () => clearTimeout(handshakeTimer));
       socket.on("data", chunk => {
         buffer += chunk.toString("utf8");
         if (buffer.length > 1024 * 1024) {
@@ -553,6 +600,21 @@ export class AiExecutionService
                 message = JSON.parse(line);
               } catch {
                 throw new AiError("INVALID_SANDBOX_RESPONSE");
+              }
+              if (!admitted) {
+                if (
+                  message.type !== "capabilities" ||
+                  !(message.protocolVersion >= AI_EXECUTION_PROTOCOL_VERSION) ||
+                  !currentRunnerCapabilities(message.aiCapabilities) ||
+                  (request.taskContract && taskCapabilityGaps(request.taskContract, message.aiCapabilities).length) ||
+                  !message.aiQualityPolicyVersions?.includes(AI_QUALITY_POLICY_VERSION) ||
+                  !message.aiReceiptVersions?.includes(AI_RECEIPT_VERSION)
+                )
+                  throw new AiError("AI_CAPABILITY_UNSUPPORTED");
+                admitted = true;
+                clearTimeout(handshakeTimer);
+                socket.write(serialized);
+                return;
               }
               if (message.type === "progress") await progress(message);
               else if (message.type === "error") {
@@ -922,6 +984,14 @@ export class AiExecutionService
     const execution = await this.repository.findOneBy({ taskId, state: In(ACTIVE_STATES) });
     if (!execution) return null;
     const request = JSON.parse((await this.fileService.readObject(requestObject(taskId), MAX_REQUEST)).toString());
+    // A queued payload may have been written by another backend version, including before a rollback.
+    // Check it again before handing source or artifact URLs to a worker selected under this backend's policy.
+    if (
+      (request.taskContract && taskCapabilityGaps(request.taskContract, AI_RUNNER_CAPABILITIES).length) ||
+      (request.requiredQualityPolicy !== undefined && request.requiredQualityPolicy !== AI_QUALITY_POLICY_VERSION) ||
+      (request.requiredReceiptVersion !== undefined && request.requiredReceiptVersion !== AI_RECEIPT_VERSION)
+    )
+      throw new AiError("AI_CAPABILITY_UNSUPPORTED");
     // A replay's kept files: links for this judge, signed now
     const transfers: AiExecutionExtraInfo["transfers"] = [];
     if (execution.operation === "replay")
@@ -967,6 +1037,7 @@ export class AiExecutionService
           state: AiExecutionState.Running,
           progress: {
             phase: String(progress.phase || "").slice(0, 64),
+            ...(parseAiReceiptCounts(progress.receipts) ? { receipts: parseAiReceiptCounts(progress.receipts) } : {}),
             completed: Number(progress.completed) || 0,
             total: Number(progress.total) || 0
           }

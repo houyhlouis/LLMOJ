@@ -2,7 +2,9 @@ import http from "http";
 import https from "https";
 import { promises as dns } from "dns";
 import { isIP } from "net";
-import { randomUUID } from "crypto";
+
+import { currentModelDispatch, structuredOutputBody } from "./ai-model-dispatch";
+import { safeHttpError, safeMcpError } from "./ai-search-diagnostics";
 
 import { AiError, LlmConfiguration, SearchConfiguration } from "./ai.types";
 
@@ -10,7 +12,6 @@ import {
   meterProviderRequest,
   AiRequestMetadata,
   currentAiRuntime,
-  currentAiPurpose,
   awaitAiActive,
   aiCancellationError,
   estimateTokens,
@@ -200,7 +201,43 @@ async function rawProviderRequest(
         );
         response.on("end", () => {
           if (response.statusCode < 200 || response.statusCode >= 300) {
-            reject(new AiError("PROVIDER_HTTP_ERROR", String(response.statusCode)));
+            const secrets = Object.values(headers)
+              .flatMap(value => [value, value.replace(/^Bearer\s+/i, "")])
+              .concat(typeof body === "object" && body ? [(body as Record<string, unknown>).api_key as string] : []);
+            const error = safeHttpError(
+              response.statusCode,
+              response.headers["x-request-id"] || response.headers["request-id"],
+              secrets
+            );
+            const identifier = (value: unknown) =>
+              typeof value === "string" &&
+              /^[A-Za-z0-9_.:-]{1,128}$/.test(value) &&
+              !secrets.some(secret => secret && value.includes(secret))
+                ? value
+                : undefined;
+            let providerCode: string;
+            try {
+              providerCode = identifier(JSON.parse(Buffer.concat(chunks).toString("utf8"))?.error?.code);
+            } catch {
+              /* Untrusted provider text is not retained. */
+            }
+            const allFields = body && typeof body === "object" && !Array.isArray(body) ? Object.keys(body) : [];
+            const fields = allFields
+              .filter(field => /^[A-Za-z0-9_]{1,80}$/.test(field))
+              .sort()
+              .slice(0, 32);
+            error.providerDiagnostics = {
+              requestMethod: data === null ? "GET" : "POST",
+              requestFields: fields,
+              requestFieldsOmitted: allFields.length - fields.length,
+              requestBodyBytes: data === null ? 0 : Buffer.byteLength(data),
+              providerMessageOmitted: true,
+              httpStatus: response.statusCode,
+              providerCode,
+              requestId: error.requestId,
+              requestShapeVersion: 1
+            };
+            reject(error);
             return;
           }
           const text = Buffer.concat(chunks).toString("utf8");
@@ -241,7 +278,17 @@ export async function providerRequest(
   timeout?: number,
   metadata?: AiRequestMetadata
 ): Promise<{ data: ProviderResponse | null; headers: http.IncomingHttpHeaders }> {
-  return await meterProviderRequest(metadata, () => rawProviderRequest(urlText, headers, body, timeout ?? 300000));
+  return await meterProviderRequest(
+    metadata
+      ? {
+          ...metadata,
+          ...(metadata.stageId === undefined && currentModelDispatch()
+            ? { stageId: currentModelDispatch().stageId ?? null }
+            : {})
+        }
+      : metadata,
+    () => rawProviderRequest(urlText, headers, body, timeout ?? 300000)
+  );
 }
 
 function endpoint(baseUrl: string, path: string) {
@@ -353,14 +400,22 @@ export async function generateText(
     }
     path = "chat/completions";
   }
+  Object.assign(body, structuredOutputBody(config, currentModelDispatch()?.output));
   // High-effort generations can run beyond the old five-minute deadline. Search/model discovery keep their shorter limits.
   const reserveTokens =
     maxTokens + estimateTokens(system) + estimateTokens(prompt) + (image ? IMAGE_TOKEN_ESTIMATE : 0);
   // The generation and the polls recovering its response are one logical generation, for one purpose fixed now
   // (review Part IV, W01)
-  const generationId = randomUUID();
-  const purpose = currentAiPurpose();
-  const request = async (suffix: string, payload: unknown, operation: string) => {
+  const request = async (
+    suffix: string,
+    payload: unknown,
+    operation: string,
+    identity: {
+      generationId?: string;
+      purpose?: string;
+      requestAttempt: number;
+    }
+  ) => {
     const result = await providerRequest(
       endpoint(config.baseUrl, path) + suffix,
       headers,
@@ -372,16 +427,13 @@ export async function generateText(
         host: new URL(config.baseUrl).hostname,
         model: config.model,
         operation,
-        generationId,
-        ...(purpose ? { purpose } : {}),
+        ...identity,
         ...(operation === "generate" ? { reserveTokens } : {})
       }
     );
     return result.data;
   };
-  const data = responsesRecoveryEnabled(config)
-    ? await recoverableResponse(config, body, request)
-    : await request("", body, "generate");
+  const data = await recoverableResponse(config, body, request, { background: responsesRecoveryEnabled(config) });
   let text: string;
   if (config.type === "anthropic") {
     if (data?.stop_reason === "max_tokens") throw new AiError("MODEL_OUTPUT_TRUNCATED");
@@ -458,7 +510,7 @@ export async function searchWeb(config: SearchConfiguration, query: string): Pro
       { target: "search", provider: "mcp", host: url.hostname, operation: method }
     );
     if (response.headers["mcp-session-id"]) headers["Mcp-Session-Id"] = String(response.headers["mcp-session-id"]);
-    if (response.data?.error) throw new AiError("MCP_ERROR");
+    if (response.data?.error) throw safeMcpError(response.data.error);
     return response.data?.result;
   };
   const initialized = await rpc("initialize", {
@@ -481,4 +533,24 @@ export async function searchWeb(config: SearchConfiguration, query: string): Pro
   const result = await rpc("tools/call", { name: tool.name, arguments: args });
   if (result?.isError) throw new AiError("MCP_SEARCH_FAILED");
   return JSON.stringify(result?.content || result).slice(0, 40000);
+}
+
+/** Only known background-cancellation capabilities are used; compatible APIs may not implement this operation. */
+export async function cancelProviderResponse(
+  config: LlmConfiguration,
+  responseId: string,
+  identity: AiRequestMetadata
+) {
+  if (config.type !== "responses" || new URL(config.baseUrl).hostname !== "api.openai.com")
+    throw new AiError("PROVIDER_CANCEL_UNSUPPORTED");
+  if (!/^[A-Za-z0-9_-]{1,255}$/.test(responseId)) throw new AiError("INVALID_PROVIDER_RESPONSE");
+  const { data } = await providerRequest(
+    `${endpoint(config.baseUrl, "responses")}/${encodeURIComponent(responseId)}/cancel`,
+    authorization(config),
+    {},
+    30000,
+    identity
+  );
+  if (data?.id !== responseId) throw new AiError("INVALID_PROVIDER_RESPONSE");
+  return data;
 }

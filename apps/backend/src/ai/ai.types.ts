@@ -7,6 +7,7 @@ export interface LlmConfiguration {
   model: string;
   reasoning?: string;
   maxTokens?: number;
+  structuredOutput?: "off" | "json_schema";
   responsesRecovery?: "auto" | "off" | "background";
 }
 export interface SearchConfiguration {
@@ -19,6 +20,8 @@ export interface AiConfiguration {
   llm: LlmConfiguration;
   search: SearchConfiguration;
   autoOnSave: boolean;
+  modelPolicies?: import("./ai-model-policy").AiModelPolicies;
+  sourcePolicy?: "optional" | "required" | "off";
   maxConcurrentJobs?: number;
 }
 export const defaultConfiguration: AiConfiguration = {
@@ -55,6 +58,17 @@ export interface AiStatementText {
 export type AiRetryFrom = "validate-samples" | "std" | "replace-scoring" | "repair" | "regenerate";
 
 export class AiError extends Error {
+  providerDiagnostics?: {
+    httpStatus?: number;
+    providerCode?: string;
+    requestId?: string;
+    requestShapeVersion: number;
+    requestMethod?: "GET" | "POST";
+    requestFields?: string[];
+    requestFieldsOmitted?: number;
+    requestBodyBytes?: number;
+    providerMessageOmitted?: boolean;
+  };
   candidateFailure?: boolean;
 
   // The kept observation of the run failure this is (see AiEvidenceService)

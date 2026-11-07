@@ -1,4 +1,6 @@
-import { Entity, Column, PrimaryColumn, Index, CreateDateColumn, UpdateDateColumn } from "typeorm";
+import { Entity, Column, PrimaryColumn, Index, CreateDateColumn, UpdateDateColumn, VersionColumn } from "typeorm";
+
+import type { AiJobProjection, AiStageAttempt } from "./ai-job-view";
 
 import { JsonColumn } from "../database/json-column";
 
@@ -18,6 +20,7 @@ export type AiJobStatus = "queued" | "running" | "completed" | "failed" | "cance
 @Entity("ai_job")
 @Index(["ownerId", "createdAt"])
 @Index(["problemId", "status"])
+@Index("IDX_ai_job_owner_status_created", ["ownerId", "status", "createdAt", "id"])
 export class AiJobEntity {
   @PrimaryColumn({ type: "varchar", length: 36 }) id: string;
 
@@ -37,6 +40,9 @@ export class AiJobEntity {
 
   @JsonColumn() input: {
     count: number;
+    workflow?: import("./ai-workflow-state").AiWorkflowOption;
+    corpusPolicy?: import("./ai-workflow-state").AiCorpusPolicy;
+    allocationMode?: "coverage" | "score_ratio";
     markdown?: string;
     image?: string;
     attachmentToken?: string;
@@ -48,6 +54,22 @@ export class AiJobEntity {
   @JsonColumn() state: Record<string, any>;
 
   @Column({ type: "text", nullable: true }) error: string;
+
+  @VersionColumn({ default: 1 }) revision: number;
+
+  @Column({ default: 0 }) attempt: number;
+
+  @Column({ type: "datetime", precision: 6, nullable: true }) stageStartedAt: Date;
+
+  @Column({ type: "datetime", precision: 6, nullable: true }) stageEndedAt: Date;
+
+  @JsonColumn({ nullable: true }) projection: AiJobProjection;
+
+  @JsonColumn({ nullable: true }) timeline: {
+    entries: AiStageAttempt[];
+    omitted: number;
+    legacyHistoryUnavailable?: boolean;
+  };
 
   @CreateDateColumn() createdAt: Date;
 

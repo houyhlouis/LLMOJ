@@ -64,6 +64,7 @@ export interface TestcaseResultInteraction {
   interactorMessage?: OmittableString;
   systemMessage?: OmittableString;
   failureOrigin?: "contestant" | "interactor";
+  roleDiagnostics?: { contestant: OmittableString; helper: OmittableString };
 }
 
 export interface SubmissionContentInteraction {
@@ -95,7 +96,8 @@ export async function runTestcase(
   extraParameters: ExtraParametersInteraction,
   taskWorkingDirectory: string,
   disposer: Disposer,
-  session?: { stage: 1 | 2; managerDirectory: string }
+  session?: { stage: 1 | 2; managerDirectory: string },
+  captureDiagnostics = false
 ): Promise<TestcaseResultInteraction> {
   const [compileResult, interactorCompileResult] = extraParameters;
 
@@ -271,6 +273,11 @@ export async function runTestcase(
 
   const MESSAGE_LENGTH_LIMIT = 256;
   const interactorMessage = await readFileOmitted(interactorStderrFile.outside, MESSAGE_LENGTH_LIMIT);
+  if (captureDiagnostics)
+    result.roleDiagnostics = {
+      contestant: await readFileOmitted(userStderrFile.outside, 4096),
+      helper: await readFileOmitted(interactorStderrFile.outside, 4096)
+    };
 
   // testlib uses normal nonzero exits for WA, PE, FAIL and partial scores.
   // Signals, cancellation and resource failures must not trust stderr text.

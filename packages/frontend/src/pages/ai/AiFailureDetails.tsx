@@ -164,7 +164,7 @@ export function ArtifactView({
         </p>
       )}
       {text && (
-        <pre className={style.evidence} tabIndex={0}>
+        <pre className={style.artifactCode} tabIndex={0}>
           {text}
           {loaded < artifact.size && !artifact.binary && "\n…"}
         </pre>
@@ -242,7 +242,8 @@ const replayRunName = (run: AiReplayRecord["runs"][number]) =>
     : [
         failureKindName(run.kind || "unclassified"),
         run.verdict,
-        run.execution?.timeMs != null && `${Math.round(run.execution.timeMs)} ms`
+        run.execution?.timeMs != null &&
+          `${Math.round(run.execution.timeMs)} ms${run.execution.timing === "reused" ? aiText("（复用）", " (reused)") : ""}`
       ]
         .filter(Boolean)
         .join(", ");
@@ -369,7 +370,11 @@ export function ObservationView({
             execution?.status,
             execution?.exitCode != null && aiText(`退出码 ${execution.exitCode}`, `exit code ${execution.exitCode}`),
             execution?.timeMs != null &&
-              `${Math.round(execution.timeMs)} ms${execution.timeLimitMs ? ` / ${execution.timeLimitMs} ms` : ""}`,
+              `${Math.round(execution.timeMs)} ms${execution.timeLimitMs ? ` / ${execution.timeLimitMs} ms` : ""}${
+                execution.timing === "reused"
+                  ? aiText("（复用之前测得的用时）", " (reused from an earlier measurement)")
+                  : ""
+              }`,
             execution?.memoryBytes != null &&
               `${size(execution.memoryBytes)}${execution.memoryLimitBytes ? ` / ${size(execution.memoryLimitBytes)}` : ""}`
           ]

@@ -25,6 +25,7 @@ function load(t, free = 1e12) {
   const loaded = { exports: {} };
   const runtime = { ...RUNTIME };
   const stubs = {
+    "./aiReceipts": { AI_RECEIPTS: "ai-receipts" },
     winston: { __esModule: true, default: { warn: () => {} } },
     "@libreoj/judge-protocol": protocol,
     "./config": { __esModule: true, default: { dataStore: root } },

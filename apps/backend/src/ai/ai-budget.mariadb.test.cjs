@@ -49,6 +49,7 @@ test("AI budgets (real MariaDB)", { skip: !configPath && "needs LLMOJ_AI_BUDGET_
       AuditLogEntity,
       SettingsEntity,
       AiUsageEntity,
+      require("./ai.entity.ts").AiJobEntity,
       AiResponseCheckpointEntity,
       AiReservationEntity
     ],
@@ -169,6 +170,57 @@ test("AI budgets (real MariaDB)", { skip: !configPath && "needs LLMOJ_AI_BUDGET_
       await assert.rejects(call(), /AI_JOB_REQUEST_LIMIT/);
     });
 
+    await t.test("configuration tests journal purpose and identity before dispatch without inventing a job", async () => {
+      const { recoverableResponse } = require("./ai-responses.ts");
+      const ids = [];
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const context = usage.context(member.id);
+        assert.equal(context.jobId, undefined);
+        await withAiRuntime(context, () => recoverableResponse({ type: "responses", baseUrl: "https://api.openai.com/v1", apiKey: "synthetic", model: "fixture" }, {}, async (_, __, ___, identity) => {
+          const checkpoint = await ds.getRepository(AiResponseCheckpointEntity).findOneBy({ ownerId: member.id, generationId: identity.generationId });
+          assert(checkpoint);
+          assert.equal(checkpoint.purpose, "configuration");
+          assert.match(checkpoint.jobId, /^cfg:[a-f0-9]{32}$/);
+          ids.push(identity.generationId);
+          return { id: `resp_configuration_${attempt}`, status: "completed" };
+        }));
+      }
+      assert.notEqual(ids[0], ids[1], "a new explicit connection test must not replay an earlier test's response");
+    });
+
+    await t.test("in-progress cumulative usage is reconciled without releasing or double-counting its reservation", async () => {
+      await policies.update(admin, { ...DEFAULT_AI_POLICY, userDailyTokens: 100000 }, "127.0.0.1");
+      const job = "88888888-8888-4888-8888-888888888888", identity = { generationId: job, purpose: "plan" };
+      const before = await admission.usage(member.id);
+      let attempt = 0;
+      const report = (status, output, operation) => withAiRuntime(runtime(member.id, job), () => meterProviderRequest(
+        { ...generate, ...identity, requestAttempt: ++attempt, operation, ...(operation === "generate" ? { reserveTokens: 400 } : {}) },
+        async () => ({ data: { object: "response", id: "resp_progress", status, usage: { input_tokens: 100, output_tokens: output } } })));
+      await report("queued", 0, "generate");
+      assert.equal((await admission.usage(member.id)).tokens - before.tokens, 400);
+      assert.equal((await admission.usage(member.id)).heldTokens - before.heldTokens, 300);
+      await report("in_progress", 50, "responses.poll");
+      assert.equal((await admission.usage(member.id)).tokens - before.tokens, 400);
+      assert.equal((await admission.usage(member.id)).heldTokens - before.heldTokens, 250);
+      await report("completed", 80, "responses.poll");
+      const after = await admission.usage(member.id);
+      assert.equal(after.tokens - before.tokens, 180);
+      assert.equal(after.heldTokens, before.heldTokens);
+      const total = (await usage.jobTotals(member.id, [job])).get(job);
+      assert.equal(total.inputTokens, 100);
+      assert.equal(total.outputTokens, 80);
+      assert.equal(total.generations, 1);
+      assert.equal(total.polls, 2);
+      const immediateJob = "99999999-9999-4999-8999-999999999999";
+      const beforeImmediate = await admission.usage(member.id);
+      await withAiRuntime(runtime(member.id, immediateJob), () => meterProviderRequest({ ...generate, reserveTokens: 400, generationId: immediateJob, requestAttempt: 1 },
+        async () => ({ data: { object: "response", id: "resp_immediate", status: "completed" } })));
+      assert.equal((await admission.usage(member.id)).heldTokens - beforeImmediate.heldTokens, 400);
+      await withAiRuntime(runtime(member.id, immediateJob), () => meterProviderRequest({ ...generate, operation: "responses.poll", generationId: immediateJob, requestAttempt: 2 },
+        async () => ({ data: { object: "response", id: "resp_immediate", status: "completed", usage: { input_tokens: 10, output_tokens: 20 } } })));
+      assert.equal((await admission.usage(member.id)).heldTokens, beforeImmediate.heldTokens, "terminal acknowledgement without usage remains linked for later reconciliation");
+    });
+
     // Review Part IV, W01: logical generations apart from transport requests, the purpose each request was sent for,
     // and usage resolved per generation; a repeated retrieval still isn't counted twice
     await t.test("a generation and its 100 polls: one generation, 101 requests, its usage once", async () => {
@@ -197,17 +249,40 @@ test("AI budgets (real MariaDB)", { skip: !configPath && "needs LLMOJ_AI_BUDGET_
       const totals = (await usage.jobTotals(member.id, [job], new Date(Date.now() - 3600000))).get(job);
       assert.deepEqual(totals, {
         generations: 3,
+        polls: 101,
+        legacyUnlinkedRequests: 1,
         requests: 104,
         searches: 0,
         failed: 0,
         inputTokens: 100,
         outputTokens: 200,
+        inputTokensReported: true,
+        outputTokensReported: true,
+        searchCredits: null,
         cachedTokens: null,
         reasoningTokens: null,
         unreported: 2,
         // The request recorded before purposes isn't counted by one
         purposes: { plan: { generations: 1, requests: 102 }, programs: { generations: 1, requests: 1 } }
       });
+      assert.deepEqual(await usage.generationCounts(member.id, job), { logicalGenerations: 0, legacyGenerationRequests: 3 },
+        "old request-local IDs do not prove durable generation identity");
+      const legacyJob = "66666666-6666-4666-8666-666666666666";
+      await withAiRuntime(runtime(member.id, legacyJob), () => meterProviderRequest({ ...generate, operation: "responses.poll" },
+        async () => ({ data: { id: "resp_unlinked", object: "response", status: "in_progress" } })));
+      const legacy = (await usage.jobTotals(member.id, [legacyJob])).get(legacyJob);
+      assert.equal(legacy.inputTokensReported, false);
+      assert.equal(legacy.outputTokensReported, false);
+      assert.equal(legacy.legacyUnlinkedRequests, 1);
+      const partialJob = "77777777-7777-4777-8777-777777777777";
+      for (const tokens of [{ input_tokens: 10 }, { input_tokens: 10, output_tokens: 20 }]) {
+        await withAiRuntime(runtime(member.id, partialJob), () => meterProviderRequest({ ...generate, operation: "responses.poll", generationId: partialJob },
+          async () => ({ data: { id: "resp_partial", object: "response", status: "completed", usage: tokens } })));
+      }
+      const partial = (await usage.jobTotals(member.id, [partialJob])).get(partialJob);
+      assert.equal(partial.inputTokens, 10);
+      assert.equal(partial.outputTokens, 20);
+      assert.equal(partial.unreported, 0, "input/output reported in separate rows reconcile to one complete generation");
       const report = await usage.report(member.id, 1);
       assert.equal(report.totals.generations >= 3, true);
       assert.equal(report.totals.requests >= 104, true);

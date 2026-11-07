@@ -6,6 +6,7 @@ import { AiUsageEntity, AiResponseCheckpointEntity } from "./ai-usage.entity";
 import { AiUsageService } from "./ai-usage.service";
 import { AiAdmissionService } from "./ai-admission.service";
 import { AiReservationEntity } from "./ai-reservation.entity";
+import { AiJobViewService } from "./ai-job-view.service";
 import { AiService } from "./ai.service";
 import { AiConfigurationService } from "./ai-configuration.service";
 import { AiJobCoordinator } from "./ai-job-coordinator.service";
@@ -55,6 +56,7 @@ import { RedisModule } from "../redis/redis.module";
     AiArtifactPublisher,
     AiWorkflowService,
     AiService,
+    AiJobViewService,
     AiUsageService,
     AiAdmissionService,
     AiExecutionService,

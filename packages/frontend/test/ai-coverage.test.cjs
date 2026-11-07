@@ -157,8 +157,10 @@ test("the new warnings have messages and are listed with the job", () => {
   const path = require("node:path");
   const source = name => fs.readFileSync(path.join(__dirname, "../src/pages/ai", name), "utf8");
   const api = source("api.ts");
-  const jobs = source("AiJobs.tsx");
-  const shown = jobs.slice(jobs.indexOf("GENERATED_DATA_REVIEW_RECOMMENDED"), jobs.indexOf("].includes(warning)"));
+  // Listed on the job's details page (review Part V, R7)
+  const jobs = source("AiJobPage.tsx");
+  const start = jobs.indexOf("GENERATED_DATA_REVIEW_RECOMMENDED");
+  const shown = jobs.slice(start, jobs.indexOf("];", start));
   for (const warning of ["CASE_CAPACITY_ADJUSTED", "DIFFERENTIAL_INPUTS_REPEATED", "FINAL_CASES_REPEATED"]) {
     assert.match(api, new RegExp(`\\n  ${warning}: \\[\\n    "[^"]+",\\n    "[^"]+"\\n  \\]`), warning);
     assert(shown.includes(`"${warning}"`), warning);

@@ -119,7 +119,7 @@ export default function AiEvidence({ job }: { job: AiJob }) {
   const runSeconds = runs.reduce((total, run) => total + run.seconds, 0);
   const rejected = job.result.planRejections || 0;
   return (
-    <div className={style.evidence}>
+    <div className={style.evidenceSummary}>
       <p className={style.jobDetail}>
         <strong>{aiText("证据与开销", "Evidence and cost")}</strong>
         {" · "}

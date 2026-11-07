@@ -55,7 +55,7 @@ function loadRpc(taskHandler) {
     },
     "./task": { __esModule: true, default: taskHandler, supportedTaskTypes: ["Submission", "Hack"] },
     "./taskQueue": { executionScheduler: { slots: 7, memoryBudget: 2374, aiSlots: 6 } },
-    "@libreoj/judge-protocol": { JUDGE_PROTOCOL_VERSION: 3 },
+    "@libreoj/judge-protocol": { JUDGE_PROTOCOL_VERSION: 9, AI_QUALITY_POLICY_VERSION: 2, AI_RECEIPT_VERSION: 1, AI_RUNNER_CAPABILITIES: require("@libreoj/judge-protocol").AI_RUNNER_CAPABILITIES },
     "./systemInfo": { __esModule: true, default: async () => ({}) },
     "./runtimeIdentity": { __esModule: true, default: async () => runtime },
     "./architecture": { C_ARCHITECTURES: ["64"] },
@@ -132,7 +132,10 @@ test("after connecting, the judge client announces what it can judge, its capaci
     [
       "capabilities",
       {
-        protocolVersion: 3,
+        protocolVersion: 9,
+        aiQualityPolicyVersions: [2],
+        aiReceiptVersions: [1],
+        aiCapabilities: require("@libreoj/judge-protocol").AI_RUNNER_CAPABILITIES,
         taskTypes: ["Submission", "Hack"],
         consumerThreads: 3,
         executionSlots: 7,

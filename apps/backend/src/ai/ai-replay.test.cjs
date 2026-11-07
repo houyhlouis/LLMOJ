@@ -252,6 +252,8 @@ function replayFixture({ job: jobChanges = {}, paused = false, run } = {}) {
 
 const record = {
   contract: protocol.AI_EXECUTION_PROTOCOL_VERSION,
+  qualityPolicy: require("@libreoj/judge-protocol").AI_QUALITY_POLICY_VERSION,
+  receiptVersion: require("@libreoj/judge-protocol").AI_RECEIPT_VERSION,
   attemptId: crypto.randomUUID(),
   runtime: { judgeProgram: "a".repeat(64), sandboxImage: "bbe9c69b2027", arch: "x64" },
   startedAt: "2026-11-04T10:00:00.000Z",

@@ -157,6 +157,8 @@ function fixture({ runs = [], replays = [], state = jobState(), privileges } = {
         validation: { profiles: aiContractDigest({ version: 1 }) },
         execution: {
           contract: AI_EXECUTION_PROTOCOL_VERSION,
+          qualityPolicy: require("@libreoj/judge-protocol").AI_QUALITY_POLICY_VERSION,
+          receiptVersion: require("@libreoj/judge-protocol").AI_RECEIPT_VERSION,
           attemptId: crypto.randomUUID(),
           runtime: { judgeProgram: "0".repeat(64), sandboxImage: "test", arch: "x64" },
           startedAt: now,

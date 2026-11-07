@@ -277,6 +277,7 @@ export class AiEvidenceService {
         { id },
         { observation: { ...row.observation, replays: change(row.observation.replays || []) } }
       );
+      await manager.increment(AiJobEntity, { id: row.jobId }, "revision", 1);
     });
   }
 

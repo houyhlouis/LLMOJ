@@ -74,6 +74,8 @@ function asCurrentRunner(run) {
       operation: { key: "0".repeat(64), origin: "local", result: "new" },
       execution: {
         contract: AI_EXECUTION_PROTOCOL_VERSION,
+        qualityPolicy: require("@libreoj/judge-protocol").AI_QUALITY_POLICY_VERSION,
+        receiptVersion: require("@libreoj/judge-protocol").AI_RECEIPT_VERSION,
         attemptId: crypto.randomUUID(),
         runtime: { judgeProgram: "0".repeat(64), sandboxImage: "test", arch: "x64" },
         startedAt: now,
@@ -94,6 +96,12 @@ function asCurrentRunner(run) {
         });
       reported.corpus = corpus;
     }
+    const request = args[1];
+    if (request?.boundaryCases && result.validation) result.validation = {
+      boundariesPassed: request.boundaryCases.length,
+      boundaryDigest: require("@libreoj/judge-protocol").aiContractDigest(request.boundaryCases),
+      ...result.validation
+    };
     return { ...reported, ...result };
   };
 }
@@ -113,6 +121,12 @@ function wire(services) {
 }
 
 function combined(services, explicitParts = new Set()) {
+  // These legacy service fixtures mock the entire runner. Part 38 split its preflight
+  // from its final run; both remain simulated here. The Part 38 suite restores the real
+  // methods when testing admission, quarantine and candidate qualification.
+  services.workflow.ensureTaskContract = async () => {};
+  services.workflow.compileArtifact = async () => {};
+  services.workflow.qualifyCandidate = async () => {};
   const own = services.facade;
   return new Proxy(
     {},
@@ -142,6 +156,7 @@ function combined(services, explicitParts = new Set()) {
               if (!explicitParts.has(part)) for (const key of FIELDS[part]) services[key][part] = value;
           return true;
         }
+        if (name === "checkpoint") services.coordinator.progress = value;
         const owners = methodOwners(name);
         const stub = name === "runSandbox" && typeof value === "function" ? asCurrentRunner(value) : value;
         if (owners.length) for (const key of owners) services[key][name] = stub;

@@ -115,6 +115,7 @@ const AppRouter: React.FC = () => {
           "/registration-reviews": lazy(() => import("./pages/registration-review")),
           "/ai/configuration": lazy(() => import("./pages/ai/AiConfigurationPage")),
           "/ai/import": lazy(() => import("./pages/ai/AiImportPage")),
+          "/ai/jobs/:id": lazy(() => import("./pages/ai/AiJobPage")),
           "/s": getRoute(() => import("./pages/submission"), "s"),
           "/hacks": lazy(() => import("./pages/hack")),
           "/self-eval": lazy(() => import("./pages/self-eval")),

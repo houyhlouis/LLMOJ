@@ -56,6 +56,9 @@ These are the fields the configuration page saves. Both the model and the search
 | `search.apiKey` | none | Kept or cleared like the model key. Both Tavily and MCP need one. |
 | `search.tool` | empty | MCP only: the tool to call, exactly as `tools/list` names it. Empty uses the first tool whose name contains `search`. |
 | `maxConcurrentJobs` | `3` | **Maximum concurrent AI jobs** of yours that run at once, 1 to 8 |
+| `llm.structuredOutput` | `off` | **Structured output for testing plans**: `json_schema` asks Chat/Responses providers that support it to answer in the plan's JSON Schema; `off` (and the `anthropic` format) describes the format in the prompt. LLMOJ validates the plan either way. |
+| `sourcePolicy` | `optional` | **Source search**: `optional` (a failed search marks the source unverified and the job carries on), `required` (test data isn't published until the source is verified) or `off` |
+| `modelPolicies.<purpose>` | none | **Models by purpose**, optional, for `reasoning`, `schema_repair`, `metadata` and `compiler_fix`: `model` (1–200 characters), `reasoning` (up to 50) and `maxTokens` (512–1000000). They use the same provider and key; a purpose left blank uses `llm.model`. |
 
 Saved keys are never sent back to the browser; the page only shows whether one is saved. **Delete saved key** removes the key of the current tab.
 
@@ -101,6 +104,8 @@ Tavily is asked for up to five results with `advanced` search. MCP servers are r
 
 Without a search key, the **source** action fails with `SEARCH_NOT_CONFIGURED`, and combined actions skip source discovery and carry on. A source that couldn't be verified is never presented as the original problem.
 
+Source discovery is optional by default: if the search service fails (for example with an HTTP 400), the job marks the source **unverified** and the statement, tutorial and test data carry on. The job details list each failed search with its HTTP status, a safe category (`invalid_request`, `authentication`, `permission`, `rate_limit`, `quota`, `transient`, `configuration`), the provider's request ID when it sent one, and a hash of the query instead of its text. An unchanged request that was rejected (400/422) isn't sent again; temporary failures are tried at most three times, counted across restarts. With **Source search** set to *required*, or `LLMOJ_AI_REQUIRE_VERIFIED_PROVENANCE=1` in the backend's environment for the whole site, test data isn't published until the source is verified (error `AI_PROVENANCE_POLICY`): that's a provenance rule, not a judging failure. An author-entered source is never overwritten; a verified match that differs from it asks for review (`SOURCE_REVIEW_REQUIRED`).
+
 ## Permissions and jobs
 
 | To | You need |
@@ -117,7 +122,8 @@ Permissions are checked again before anything is written. If someone edits the s
 - At most 8 jobs run on the site at once, and one per problem. Each user has up to **Maximum concurrent AI jobs** running and at most 100 running or queued. Lowering your limit doesn't stop jobs already running.
 - Generated programs are compiled and run by the local judge, which runs at most three AI pipelines at once and shares its judge slots with ordinary judging; see [Judge configuration](Judge-Configuration.md).
 - **Import** runs: statement recognition, source, translation, tags, difficulty, solution, test data. **All** does the same without creating the problem; **metadata** runs source, translation, tags and difficulty only.
-- You can ask for 5 to 1000 test cases (20 by default). The number may be raised, up to 1000, so that subtask scores divide evenly; the page says when this happens. Import supports traditional, interactive and communication problems (communication mode `run-twice` or C++ `grader`, detected or chosen); create answer-only problems by hand.
+- **Order of work** (under **More options** on a problem, and on the import page): *Default* keeps that order, but first checks that the judges support the task's execution model (see [Execution models, plans and qualification](#execution-models-plans-and-qualification)). *Qualify first* makes and checks the test data before the source search, translation, tags, tutorial and difficulty, and finishes the tutorial around the checked programs. *Metadata only* runs the source search, translation, tags and difficulty, and writes no programs.
+- You can ask for 5 to 1000 test cases (20 by default). New jobs share the cases out by what each subtask needs to be covered (its minimum and maximum sizes and its targets), not by the ratio of subtask scores, so a score like 33.3 can't force hundreds of cases; the total may still be raised, up to 1000, when the required coverage needs it (`TEST_COUNT_COVERAGE_EXCEEDED` if it can't fit). Jobs started before Part 38 keep the ratio method. If the change would alter how many cases a released partial-credit subtask has (Sum subtasks, where each case's share changes, or GroupMul), the job stops for your approval with the old and new counts; see [Job details](#job-details). Import supports traditional, interactive and communication problems (communication mode `run-twice` or C++ `grader`, detected or chosen); create answer-only problems by hand.
 - Import accepts statement files up to 10 MiB (Markdown or text, or PNG, JPEG, WebP or GIF images) and a ZIP attachment up to 64 MiB.
 
 ## Site limits
@@ -186,6 +192,22 @@ If a target still survives, generation fails and the data isn't published. The j
 
 Interactive and communication problems keep their protocol simulation and checks but can't use this independent testing; they get a `TESTDATA_QUALITY_PROTOCOL_UNSUPPORTED` warning. However many tests pass, they can't prove that every wrong or slow program fails, or that the reference solution is correct. All this takes more model calls, money and time; see [AI environment](AI-Environment.md).
 
+## Execution models, plans and qualification
+
+These checks come before the expensive steps, so that a job that can't succeed stops early and spends as little as possible.
+
+**Execution model.** Before writing a tutorial or programs, the job extracts the task's execution model from the statement: a batch program, an interactive program, a communication task run twice in turn, or a persistent session in which two isolated roles stay alive and call each other. It records the exact functions and headers, which side implements each one, what each role may know, and how the score is combined (per case, or across a subtask). Judges announce which models they support. A task they don't support, such as a persistent two-role session, stops as **Needs a capable judge** (`AI_TASK_NEEDS_CONFIGURATION`) with what it needs and what the judges offer; the statement stays a draft and no more model calls are made. Retry once a capable judge is installed. Older jobs' prose descriptions are shown as unverified rather than reinterpreted.
+
+**Function interfaces.** For a task with a C++ grader, a generated or repaired program is held back until it compiles and links against the grader and headers. A program that adds its own `main()`, leaves out a callback or changes a signature is rejected (`AI_INTERFACE_MISMATCH`) and never becomes the job's program, and repairs are told to keep the interface, the process lifetime and what each role may know. Every generated program is compiled as soon as it's written; when one doesn't compile (`AI_ARTIFACT_COMPILE_FAILED`), the steps that depend on it don't run.
+
+**Testing plan repair.** One definition of the plan's rules drives the check, the prompt and (when on) the JSON Schema, so the examples in the prompt follow the rules. Text is trimmed before lengths are checked, and identifiers are assigned by the server. When an answer breaks the rules, the job keeps it with the list of rejected fields and asks the model once to rewrite only those fields; the rest of the plan is kept as it was and the whole plan is checked again. That one field repair is a budget that survives restarts and retries. A plan whose problem is its content, such as an oracle that can't handle the input sizes, isn't repaired as formatting: the job stops for review, and **Start over with a new method and programs** makes a new plan. Targets are never deleted and constraints never relaxed to pass. A model chosen for **Plan field repair** in [Models by purpose](#configuration-fields) is used for the field repair.
+
+**Uploaded samples.** The job keeps three groups apart: the statement's public examples, samples uploaded with the problem, and the final test data. **What the model may learn from uploaded samples** (on the start form) decides what of the uploaded samples is sent to the model: *Keep private* (the default) sends neither their contents nor descriptions; *Summaries only* sends server-computed facts such as sizes, or that the existing samples already catch a defect; *Failure previews allowed* also sends previews of a program's failure on them when repairing. Whole sample files are never uploaded to the model.
+
+**Challenge candidates.** Each wrong or slow program the plan proposes to reject is compiled and checked on the samples as soon as it's written. If the samples already reject it, it's kept as a **baseline** target: it shows the existing data catches that defect, but it can't count as a new strengthening target (`AI_NOVEL_TARGET_REQUIRED` when the plan relies on it). Replace it with another reviewed defect; programs are never made to recognize samples. Compile errors and infrastructure failures never count as rejections.
+
+**Early qualification and reuse.** Before the full run, the reference and alternative solutions are run on boundary cases of each subtask (smallest, largest and the plan's worst shapes). Every mismatch and time or memory limit failure the job has seen stays a regression check: a repair must pass all of them, plus the boundary cases, before the full run. Results of runs that succeeded are kept under the exact hashes of the programs, inputs, options, limits, runtime, checker and policy, and reused by later runs: changing one program reruns only its own results, a new checker reruns comparisons, and a new validator rechecks the inputs. Reused times are labelled *reused*; boundary checks and resource confirmations always run fresh. Timing out on the boundary cases is reported as such, with the limits and input size.
+
 ## Scoring and judging settings
 
 Generating test data replaces a problem's test cases, not how they're judged.
@@ -195,12 +217,13 @@ Generating test data replaces a problem's test cases, not how they're judged.
 - **Isolation.** Each program of a job (generators, reference solution, input validator, checker, oracle, second solution and challenges) runs seeing only its own compiled program, never another's: a challenge can't pass by running the reference solution.
 - **In the job.** A finished job says whether it kept, set or replaced the scoring settings, and how its checker, interactor or manager was compiled and limited. `data.yaml` records the scoring decision with its SHA-256 digest (`scoring`), and each program's settings (`executionProfiles`).
 
-AI test data programs run on judges of protocol version 8; see [Distributed judging](Distributed-Judging.md#ai).
+AI test data programs run on judges of protocol version 9 (with quality policy 2 and receipt version 1); see [Distributed judging](Distributed-Judging.md#ai).
 
 ## Uploads, cancelling and failures
 
 - A job is created only after its files have uploaded successfully. **Cancel upload** stops a preparation or upload, and leaving the page cancels them. Once the server has accepted a job, closing the page doesn't stop it: cancel it in **My AI jobs**. If starting a job timed out, look at **My AI jobs** before importing again.
 - Cancelling can't undo what the provider has already charged or what the job has already published.
+- Cancelling also asks the model provider to cancel a background response that's still running, where the provider supports it (OpenAI's background responses do). The job details show the two apart: *cancel requested locally* for this site, and for each model generation whether the provider confirmed it, wasn't asked because the answer had already finished, can't cancel, or the request failed. You can cancel a failed job too, because its background response may still be running; cancelling an already cancelled job again retries the provider cancellation. When a backend restarts and another one takes over a job, the job recovers its running generation under the same identity instead of cancelling or repeating it.
 - Cancelling a job that's generating test data stops the program it's running at once (a compiler, a solution, or an interactive problem's solution and interactor together), on this server or on a judge machine, and none of its programs starts afterwards, even one that was waiting for its turn. A cancelled run isn't a failure: none of it is kept as failure evidence, and none of it is published.
 - When a program fails while generating test data, the job repairs the one program it wrote that's at fault, runs the same programs again, or stops for your decision: see [When generation fails](#when-generation-fails). Uploaded checkers, interactors, managers and graders are never rewritten, and keep their own compile options and limits.
 - Solutions are checked for claims about sources and scoring before they're published; this doesn't replace reviewing their algorithms yourself.
@@ -246,13 +269,13 @@ When a program of a test data job fails, the job decides what to do from what fa
   - a repair didn't change the failure, the model proposed the same program or one that isn't valid, or the job used its repairs.
 - **Limits.** A job makes at most 3 repairs by itself and 8 in all. Restarts and retries don't reset these counts. Each repair is one model request, counted in your budgets like any other.
 
-In **My AI jobs**, a job that stopped says why, with **Repair** for each program involved, and **Write all programs again**, which writes every program again from the same plan (what retrying did before). **Run the same programs again** retries with the programs as they are, for example after the infrastructure recovered. **Repairs** lists each repair: the program, the failure it repaired, whether the job made it or you chose it, whether it passed the kept failure, and how the next run ended; a replay that tested a repair says so under **Failure details**. A finished job says how many repairs its data was made after, and `data.yaml` records the SHA-256 of every program the data was made and checked with, and the repairs (`generation.revision`). Repairs are recorded in the audit log (`ai.job.repair`).
+On its [details page](#job-details), a job that stopped says why, with **Repair** for each program involved, and **Write all programs again**, which writes every program again from the same plan (what retrying did before). **Run the same programs again** retries with the programs as they are, for example after the infrastructure recovered. **Repairs** lists each repair: the program, the failure it repaired, whether the job made it or you chose it, whether it passed the kept failure, and how the next run ended; a replay that tested a repair says so under **Failure details**. A finished job says how many repairs its data was made after, and `data.yaml` records the SHA-256 of every program the data was made and checked with, and the repairs (`generation.revision`). Repairs are recorded in the audit log (`ai.job.repair`).
 
 The model is never sent the problem's own sample files, only statement samples and what the job's programs made, and configured keys are removed from what it's sent.
 
 ## Failure details
 
-When a run of an AI job's programs fails, the job keeps what failed and the exact data involved, before the run's working files are deleted. **Failure details** under the job in **My AI jobs** (and in a problem's **AI** panel) lists them, latest first:
+When a run of an AI job's programs fails, the job keeps what failed and the exact data involved, before the run's working files are deleted. **Failure details** on the job's [details page](#job-details) (reached from **My AI jobs** or a problem's **AI** panel) lists them, latest first:
 
 - **What failed**: a compilation error, a rejected input, outputs that differ, a runtime error, a time or memory limit, too much output, a checker that failed or accepted malformed output, an invalid challenge program, a wrong or slow program that wasn't rejected, the execution budget, or a failure of the judging infrastructure rather than the programs. **Ended the latest run** marks the one that failed the job's latest run.
 - **Which program and which case**: for example std.cpp on *differential case 7, subtask 2*, or the alternative solution on a final test case. A case index isn't a random seed: generators draw fresh randomness each time, so only the kept input reproduces a failure.
@@ -273,9 +296,24 @@ Only the job's owner sees these, and only while they could still run the job: th
 
 The evidence is stored with the site's files, as temporary objects under `temporary/ai-evidence/` that the backend deletes when they expire, and the failures in the `ai_observation` table. On a `web` site, the judge machine uploads the evidence of a failed run before it reports the failure; a failure reported while the backend was restarting is the outcome the job takes when it runs again (the run isn't made again), or the cleanup every 10 minutes records it.
 
+## My AI jobs
+
+**My AI jobs** (on the import page, and the three latest on each problem) is a compact list. Jobs that need you and running jobs are fetched apart from the history, so a long history can't hide them; **Show older jobs** pages through the rest. Each row shows the problem, the state, the current stage with how long it has run, why it needs you, and one action (cancel, retry, or open the details). When jobs need you, the top of the list says how many, and **Show only these** lists just them. The list asks the server for changes once every two seconds (less often in a background tab), with one request at a time, and never lets an older answer replace a newer one.
+
+## Job details
+
+Each job has its own page, **/ai/jobs/ID**. It starts with what stops the job, in its own terms: for example *Unsupported persistent two-role session* with the capabilities needed and available, *N testing plan fields need repair* with the fields and the repair left, *Proposed challenge already rejected by an uploaded validation sample*, *Alternative solution timed out* with its limits and input size, or the provenance rule. Then:
+
+- **Options**: the retries the job offers, with what a retry reuses and what it checks again, and an approval for a change of case counts (**Approve and continue** requeues it; permissions and the problem are checked again before publishing).
+- **Counts**: test cases requested, planned, generated, qualified and activated; model generations apart from the polls that fetch background answers; failed provider requests, rejected plans, invalid candidates and failed qualifications, each counted apart. Reported tokens are shown as reported: usage a provider didn't report is unknown, not zero.
+- **Cancellation**: see [Uploads, cancelling and failures](#uploads-cancelling-and-failures).
+- **Timeline**: every attempt at every step, with the model and search requests made in it (model, purpose, requests, polls, failures, and what it reused or checked again). A request recovered after a restart is marked as a recovery, not a new generation. Times are wall-clock, including waiting for the model.
+- **Execution model, candidates, kept failures and samples**, the source status and failed searches, and the job's results, evidence, repairs and failure details as before.
+- **Technical details**: problem type and mode, where it ran, limits, each program's compiler and limits, the program revision, the final data's size, failed provider requests (HTTP status, safe code, request ID; never the provider's message or your prompt), and how long saving the data took.
+
 ## Job evidence and cost
 
-Each test data job in **My AI jobs** has an **Evidence and cost** line:
+The details page has an **Evidence and cost** line for test data jobs:
 
 - **Model generations**: how many answers the job asked a model for, what each was for (plans, programs, repairs, tutorial, translation, source search…), and how many requests failed. What a request is for is recorded when it's sent, so a request made just before a job failed is still counted under its purpose (jobs from before Part 35 count those as *other*).
   - **Polling requests** are counted apart: with [connection recovery](#connection-recovery), one generation can be checked on many times while the provider works on it, and each check is a request but not a new generation, nor billed as one.
@@ -285,7 +323,12 @@ Each test data job in **My AI jobs** has an **Evidence and cost** line:
 
 Under **Repairs**, **Show change** shows what a repair changed in its program, as a diff: removed lines, then added lines, with 3 lines around them. A change of more than 64 KiB shows its start only.
 
-When jobs stopped for your decision, **My AI jobs** says how many at the top, and **Show only these** lists just them, each with its decision.
+
+## Deployment identity and diagnostics
+
+Site administrators see **Deployment identity** at the bottom of the AI configuration page: fingerprints of the backend's loaded program files and of the deployed frontend files (not necessarily what a given browser loaded), the AI execution protocol (9), quality policy (2) and receipt (1) versions, the database migration the upgrader recorded, and for each judge its build, protocol and whether it can take new AI jobs. None of it is read from a git checkout. A judge that can't run the new AI jobs is never given one; ordinary judging isn't affected. `deploy/doctor.sh` prints the same identifiers from `/api/health/identity`.
+
+On a job's details page, administrators can **Export diagnostics**: a JSON file of at most 2 MiB with the deployment identity, the job's stages, requests (status and safe codes only), plan issues, repairs and IO times, with explicit markers for anything missing, cut short or left out. It never contains keys, sessions, program or diff text, hidden test data, the model's reasoning or provider response handles. It's private evidence for troubleshooting: review it before sharing it anywhere.
 
 ## Where AI runs and where keys are kept
 

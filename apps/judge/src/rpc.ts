@@ -1,14 +1,16 @@
-import SocketIO, { Socket } from "socket.io-client";
-import winston from "winston";
-import lodashDebounce from "lodash.debounce";
-import SocketIOParser from "socket.io-msgpack-parser";
-
 import {
+  AI_RUNNER_CAPABILITIES,
   JUDGE_PROTOCOL_VERSION,
+  AI_QUALITY_POLICY_VERSION,
+  AI_RECEIPT_VERSION,
   JudgeClientCapabilities,
   JudgeUploadRequest,
   JudgeUploadTarget
 } from "@libreoj/judge-protocol";
+import SocketIO, { Socket } from "socket.io-client";
+import winston from "winston";
+import lodashDebounce from "lodash.debounce";
+import SocketIOParser from "socket.io-msgpack-parser";
 
 import config, { updateServerSideConfig } from "./config";
 import taskHandler, { supportedTaskTypes, Task } from "./task";
@@ -92,6 +94,9 @@ export class RPC {
           // Older servers ignore it
           const announced: JudgeClientCapabilities = {
             protocolVersion: JUDGE_PROTOCOL_VERSION,
+            aiCapabilities: AI_RUNNER_CAPABILITIES,
+            aiQualityPolicyVersions: [AI_QUALITY_POLICY_VERSION],
+            aiReceiptVersions: [AI_RECEIPT_VERSION],
             taskTypes: supportedTaskTypes,
             consumerThreads: config.taskConsumingThreads,
             executionSlots: executionScheduler.slots,

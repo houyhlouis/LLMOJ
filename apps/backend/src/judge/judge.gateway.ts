@@ -9,6 +9,8 @@ import {
   OnGatewayDisconnect
 } from "@nestjs/websockets";
 
+import { currentRunnerCapabilities, type AiRunnerCapabilities } from "@libreoj/judge-protocol";
+
 import { Server, Socket } from "socket.io"; // eslint-disable-line import/no-extraneous-dependencies
 import SocketIOParser from "socket.io-msgpack-parser";
 import { Redis } from "ioredis";
@@ -16,6 +18,8 @@ import proxyAddr from "proxy-addr";
 
 import {
   AI_EXECUTION_PROTOCOL_VERSION,
+  AI_QUALITY_POLICY_VERSION,
+  AI_RECEIPT_VERSION,
   JudgeClientCapabilities,
   JudgeClientSystemInfo,
   JudgeTaskMeta,
@@ -113,7 +117,13 @@ const MAX_UPLOADS_PER_REQUEST = 20000;
 // than it's judged with after publication.
 export function aiExecutionLimit(capabilities: JudgeClientCapabilities): number {
   if (!capabilities || capabilities.consumerThreads < 2) return 0;
-  if (!(capabilities.protocolVersion >= AI_EXECUTION_PROTOCOL_VERSION)) return 0;
+  if (
+    !(capabilities.protocolVersion >= AI_EXECUTION_PROTOCOL_VERSION) ||
+    !currentRunnerCapabilities(capabilities.aiCapabilities) ||
+    !capabilities.aiQualityPolicyVersions?.includes(AI_QUALITY_POLICY_VERSION) ||
+    !capabilities.aiReceiptVersions?.includes(AI_RECEIPT_VERSION)
+  )
+    return 0;
   return Math.max(1, Math.min(capabilities.aiExecutionSlots || 1, capabilities.consumerThreads - 1));
 }
 
@@ -142,6 +152,13 @@ function parseCapabilities(value: unknown): JudgeClientCapabilities {
     return null;
   return {
     protocolVersion: capabilities.protocolVersion,
+    ...(currentRunnerCapabilities(capabilities.aiCapabilities) ? { aiCapabilities: capabilities.aiCapabilities } : {}),
+    ...(Array.isArray(capabilities.aiQualityPolicyVersions)
+      ? { aiQualityPolicyVersions: capabilities.aiQualityPolicyVersions.filter(v => isCount(v, 1000)).slice(0, 32) }
+      : {}),
+    ...(Array.isArray(capabilities.aiReceiptVersions)
+      ? { aiReceiptVersions: capabilities.aiReceiptVersions.filter(v => isCount(v, 1000)).slice(0, 32) }
+      : {}),
     // Unknown types are newer than this backend
     taskTypes: [...new Set(capabilities.taskTypes.filter(type => taskTypes.includes(type)))],
     consumerThreads: capabilities.consumerThreads,
@@ -243,6 +260,18 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
       [...state.assignedTasks.keys()].map(taskId => ({ taskId, connectionId }))
     );
     await this.judgeQueueService.renewLeases(leases);
+  }
+
+  async availableAiCapabilities(): Promise<AiRunnerCapabilities[]> {
+    const clients = await this.judgeClientService.listJudgeClients();
+    const announced = await Promise.all(
+      clients
+        .filter(client => !client.draining)
+        .map(client => this.judgeClientService.getJudgeClientCapabilities(client))
+    );
+    return announced
+      .filter(capabilities => aiExecutionLimit(capabilities) > 0)
+      .map(capabilities => capabilities.aiCapabilities);
   }
 
   // Send the cancel task operation to ALL nodes

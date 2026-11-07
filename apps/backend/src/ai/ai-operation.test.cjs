@@ -43,6 +43,8 @@ const request = () => ({
 });
 const record = (overrides = {}) => ({
   contract: protocol.AI_EXECUTION_PROTOCOL_VERSION,
+  qualityPolicy: require("@libreoj/judge-protocol").AI_QUALITY_POLICY_VERSION,
+  receiptVersion: require("@libreoj/judge-protocol").AI_RECEIPT_VERSION,
   attemptId: crypto.randomUUID(),
   runtime: { judgeProgram: "a".repeat(64), sandboxImage: "bbe9c69b2027", arch: "x64" },
   startedAt: "2026-11-04T10:00:00.000Z",
@@ -94,6 +96,9 @@ test("only a result made under the current contract is reused", () => {
   assert.equal(currentExecution(null), null);
   for (const broken of [
     { attemptId: "x" },
+    { qualityPolicy: 999 },
+    { receiptVersion: 999 },
+    { qualityPolicy: undefined },
     { runtime: { judgeProgram: "short", sandboxImage: "i", arch: "x64" } },
     { runtime: { judgeProgram: "a".repeat(64), sandboxImage: "../x", arch: "x64" } },
     { startedAt: "yesterday" },
@@ -114,6 +119,9 @@ test("the provenance published with test data: where its run was made, and how t
       judgeRuntimeId: 3
     }),
     {
+      contract: protocol.AI_EXECUTION_PROTOCOL_VERSION,
+      qualityPolicy: protocol.AI_QUALITY_POLICY_VERSION,
+      receiptVersion: protocol.AI_RECEIPT_VERSION,
       operation: "k".repeat(64),
       origin: "judge",
       task: "t",

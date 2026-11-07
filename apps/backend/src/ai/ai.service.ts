@@ -20,16 +20,15 @@ import { SaveAiConfigurationDto, StartAiJobDto } from "./ai.dto";
 import { normalizeLlmConfiguration } from "./ai-validation";
 import { resolveAiImportType } from "./ai-import-type";
 
-import { AiJobUsage, AiUsageService } from "./ai-usage.service";
+import { AiUsageService } from "./ai-usage.service";
 import { AiAdmissionService } from "./ai-admission.service";
 import { AiConfigurationService } from "./ai-configuration.service";
 import { AiJobCoordinator } from "./ai-job-coordinator.service";
 import { AiWorkflowService } from "./ai-workflow.service";
-import { AiEvidenceService, AiFailureSummary } from "./ai-evidence.service";
+import { AiEvidenceService } from "./ai-evidence.service";
 import { AiReplayService } from "./ai-replay.service";
-import { AI_REPAIR_LIMITS, AiRepairState } from "./ai-repair";
-import { AiPurpose, AiRunRecord, AiSpending } from "./ai-session";
-import { tutorialCorrectionRefusal, tutorialViews } from "./ai-tutorial-binding";
+import { AiRepairState } from "./ai-repair";
+import { serializeAiJob, serializeAiJobs } from "./ai-job-serialization";
 
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeType } from "../user/user-privilege.service";
@@ -61,43 +60,6 @@ async function boundedDiagnosticCall<T>(userId: number, work: () => Promise<T>):
     if (remaining > 0) diagnosticCalls.set(userId, remaining);
     else diagnosticCalls.delete(userId);
   }
-}
-
-/** Whether a job's tutorials can have their code replaced by its reference solution: "available", or why not. */
-function tutorialCorrection(job: AiJobEntity) {
-  if (job.state.tutorialCorrection) return ["queued", "running"].includes(job.status) ? "pending" : undefined;
-  if (job.status !== "completed") return undefined;
-  const refusal = tutorialCorrectionRefusal(job.state, job.state.plan?.fileIo || null);
-  return refusal === "NOTHING_TO_CORRECT" ? undefined : refusal || "available";
-}
-
-/** A job's repairs as its owner sees them. */
-function repairView(job: AiJobEntity) {
-  const repairs = job.state.repair as AiRepairState;
-  if (!repairs?.revisions) return undefined;
-  return {
-    automatic: repairs.automatic,
-    limits: { automatic: AI_REPAIR_LIMITS.automatic, total: AI_REPAIR_LIMITS.total },
-    // Without the failures' signatures, which only the job compares, and with only the size of each change (its text
-    // is read with repairChange)
-    revisions: repairs.revisions.map(revision => ({
-      ...revision,
-      signature: undefined,
-      diff: revision.diff
-        ? { added: revision.diff.added, removed: revision.diff.removed, truncated: revision.diff.truncated }
-        : undefined
-    })),
-    review: job.status === "failed" ? repairs.review : undefined,
-    pending: repairs.pending
-  };
-}
-
-/** A job's runs and requests as its owner sees them; the totals are the recorded requests (see AiUsageService). */
-function evidenceView(job: AiJobEntity, usage?: AiJobUsage) {
-  const runs = (job.state.runs as AiRunRecord[]) || [];
-  const spending = job.state.spending as Partial<Record<AiPurpose, AiSpending>>;
-  if (!runs.length && !spending && !usage) return undefined;
-  return { runs, spending: spending || {}, ...(usage ? { usage } : {}) };
 }
 
 /**
@@ -160,6 +122,8 @@ export class AiService {
       llm: { ...config.llm, apiKey: undefined, hasKey: !!config.llm.apiKey },
       search: { ...config.search, apiKey: undefined, hasKey: !!config.search.apiKey },
       autoOnSave: false,
+      modelPolicies: config.modelPolicies || {},
+      sourcePolicy: config.sourcePolicy || "optional",
       maxConcurrentJobs: config.maxConcurrentJobs,
       parallelism: { min: 1, max: 8, globalMax: 8, maxQueuedJobs: 100 },
       // The site's approved endpoints first; other providers only where custom addresses are allowed
@@ -279,6 +243,8 @@ export class AiService {
       throw new AiError("INVALID_AI_CONCURRENCY");
     const config: AiConfiguration = {
       maxConcurrentJobs,
+      modelPolicies: value.modelPolicies ?? previous.modelPolicies,
+      sourcePolicy: value.sourcePolicy ?? previous.sourcePolicy ?? "optional",
       llm: {
         ...llm,
         apiKey: value.clearLlmKey
@@ -381,72 +347,6 @@ export class AiService {
     return { paused, userDailyTokens, userDailyRequests, jobRequests };
   }
 
-  private serialize(
-    job: AiJobEntity,
-    observations?: { count: number; failure?: AiFailureSummary },
-    usage?: AiJobUsage
-  ) {
-    return {
-      id: job.id,
-      problemId: job.problemId,
-      action: job.action,
-      status: job.status,
-      progress: job.progress,
-      step: job.step,
-      error: job.error,
-      retryOptions: this.workflow.retryOptions(job),
-      // The programs the owner may have repaired (retry "repair")
-      repairRoles: this.workflow.repairRoles(job),
-      createdAt: job.createdAt,
-      updatedAt: job.updatedAt,
-      result: {
-        discussionId: job.state.discussionId,
-        discussionIds: job.state.discussionIds,
-        requestedCount: job.input.count,
-        generatedCount: job.state.generated?.count || job.state.caseAllocation?.count,
-        warnings: job.state.warnings || [],
-        difficultyRationale: job.state.difficultyRationale,
-        sourceEvidence: job.state.sourceEvidence,
-        sourceSearch: job.state.sourceSearch,
-        testdataQuality: job.state.generated?.qualityValidation || job.state.qualityValidation,
-        referenceSource: job.state.referenceSource
-          ? {
-              kind: job.state.referenceSource.kind,
-              discussionId: job.state.referenceSource.discussionId,
-              samplesPassed: job.state.referenceSource.samplesPassed || 0,
-              validated: job.state.referenceSource.validated === true
-            }
-          : undefined,
-        // Failed runs kept with their evidence (see failures), and the one that ended the latest run
-        observationCount: observations?.count || 0,
-        failure: observations?.failure,
-        // How the published data awards points and runs its helpers (see ai-judging-contract.ts)
-        scoring: job.state.generated?.scoring,
-        helpers: job.state.generated?.helpers,
-        // Where its test data was made, and its cases' digest (review Part III, W03)
-        execution: job.state.generated?.execution,
-        corpus: job.state.generated?.corpus,
-        // Subtasks given more cases than their points' share, so that their targets get one built (W05)
-        caseCapacity: job.state.caseAllocation?.capacity?.length ? job.state.caseAllocation.capacity : undefined,
-        // The testing plan's rejected fields, while the job's latest proposal is rejected, and how many proposals
-        // the job had rejected: a completed request whose answer broke the plan's rules (review Part IV, W01)
-        planIssues: job.state.planProposal?.issues,
-        planRejections: job.state.planRejections || undefined,
-        // A scoring change that waits for the owner's approval
-        scoringReview: job.status === "failed" ? job.state.scoringReview : undefined,
-        // The job's tutorials and what their code passed (review Part III, H08), and whether their code can be
-        // replaced by the reference solution now (correctTutorial)
-        tutorials: tutorialViews(job.state),
-        tutorialCorrection: tutorialCorrection(job),
-        // The programs the job replaced, and why it stopped for its owner (review Part III, W04)
-        repair: repairView(job),
-        revision: job.state.generated?.revision,
-        // Its runs, and what its model requests were for and used (review Part III, §8.4)
-        evidence: evidenceView(job, usage)
-      }
-    };
-  }
-
   async listJobs(user: UserEntity, problemId?: number) {
     if (!user) throw new AiError("PERMISSION_DENIED");
     const jobs = await this.jobs.find({
@@ -454,14 +354,8 @@ export class AiService {
       order: { createdAt: "DESC" },
       take: 50
     });
-    const observations = await this.evidence?.summaries(jobs);
-    const usage = await this.usage?.jobTotals(
-      user.id,
-      jobs.map(job => job.id),
-      jobs.length ? jobs[jobs.length - 1].createdAt : undefined
-    );
     return {
-      jobs: jobs.map(job => this.serialize(job, observations?.get(job.id), usage?.get(job.id))),
+      jobs: await serializeAiJobs(user, jobs, { workflow: this.workflow, usage: this.usage, evidence: this.evidence }),
       paused: (await this.coordinator.policy()).paused
     };
   }
@@ -494,7 +388,7 @@ export class AiService {
     const job = await this.coordinator.enqueue(user, input);
     await this.coordinator.recordAiAudit(user, "job.queue", job);
     this.coordinator.wake();
-    return { job: this.serialize(job) };
+    return { job: serializeAiJob(job, this.workflow) };
   }
 
   async cancel(user: UserEntity, id: string) {

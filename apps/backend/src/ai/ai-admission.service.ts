@@ -16,8 +16,8 @@ export const AI_BUDGET_WINDOW_MS = 24 * 3600 * 1000;
 const RESERVATION_RETENTION_MS = 48 * 3600 * 1000;
 const BILLABLE_USAGE_SQL =
   "((target = 'llm' AND operation = 'generate') OR (target = 'search' AND operation IN ('search', 'tools/call')))";
-/** The provider answered with an error status, or the request never left the server: nothing was billed. */
-const UNBILLED_ERRORS = new Set(["PROVIDER_HTTP_ERROR", "PRIVATE_ENDPOINT_BLOCKED"]);
+/** A local refusal proves no request left the server. Upstream HTTP errors alone do not establish zero usage. */
+const UNBILLED_ERRORS = new Set(["PRIVATE_ENDPOINT_BLOCKED"]);
 
 export interface AiBudgetUsage {
   /** Reported tokens in the window plus tokens held for unconfirmed requests. */
@@ -28,9 +28,17 @@ export interface AiBudgetUsage {
   heldTokens: number;
 }
 
-export function aiResponseHash(jobId: string | undefined, host: string, responseId: string): string {
+export function aiResponseHash(
+  jobId: string | undefined,
+  host: string,
+  responseId: string,
+  accountBinding?: string,
+  generationId?: string
+): string {
   return createHash("sha256")
-    .update(`${jobId || "connection"}\n${host}\n${responseId}`)
+    .update(
+      `${jobId || "connection"}\n${host}\n${responseId}${accountBinding ? `\n${accountBinding}` : ""}${generationId ? `\ngeneration:${generationId}` : ""}`
+    )
     .digest("hex");
 }
 
@@ -179,7 +187,7 @@ export class AiAdmissionService {
 
   /**
    * Called with the usage record, inside its transaction. A reservation is released when the provider reports the
-   * request's usage, or nothing was billed; otherwise it keeps counting, at its reserved maximum, for 24 hours.
+   * request's usage, or nothing was billed; otherwise its unreported remainder keeps counting for 24 hours. Reported partial usage is not counted twice.
    */
   async settle(
     manager: EntityManager,
@@ -191,9 +199,28 @@ export class AiAdmissionService {
     responseHash: string | null
   ) {
     const reservations = manager.getRepository(AiReservationEntity);
-    // A background response's usage arrives with the poll that completes it.
-    if (responseHash && confirmed) await reservations.delete({ ownerId, responseHash });
-    if (!reservationId) return;
+    const handle = record.pendingResponseId || record.responseId;
+    const knownResponseHash =
+      responseHash ||
+      (handle
+        ? aiResponseHash(
+            jobId,
+            record.host,
+            handle,
+            record.accountBinding,
+            record.requestAttempt != null ? record.generationId : undefined
+          )
+        : null);
+    if (knownResponseHash && confirmed) await reservations.delete({ ownerId, responseHash: knownResponseHash });
+    const reportedTokens = Math.max(0, Number(record.inputTokens || 0) + Number(record.outputTokens || 0));
+    if (!reservationId) {
+      if (knownResponseHash && !confirmed && reportedTokens)
+        await reservations.update(
+          { ownerId, responseHash: knownResponseHash },
+          { tokens: () => `GREATEST(0, tokens - ${reportedTokens})` }
+        );
+      return;
+    }
     if (confirmed || record.target === "search" || UNBILLED_ERRORS.has(record.errorCode))
       await reservations.delete({ id: reservationId, ownerId });
     else
@@ -201,9 +228,8 @@ export class AiAdmissionService {
         { id: reservationId, ownerId },
         {
           settledAt: new Date(),
-          ...(record.pendingResponseId
-            ? { responseHash: aiResponseHash(jobId, record.host, record.pendingResponseId) }
-            : {})
+          ...(reportedTokens ? { tokens: () => `GREATEST(0, tokens - ${reportedTokens})` } : {}),
+          ...(knownResponseHash ? { responseHash: knownResponseHash } : {})
         }
       );
   }

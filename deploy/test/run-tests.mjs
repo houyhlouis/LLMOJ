@@ -41,8 +41,9 @@ const BACKEND_SUITES = [
 ];
 
 const JUDGE_SUITES = [
+  'apps/judge/src/aiProtocolDiagnostics.test.cjs',
   'apps/judge/src/aiQuality.test.cjs', 'apps/judge/src/aiEvidence.test.cjs', 'apps/judge/src/aiProfile.test.cjs',
-  'apps/judge/src/aiCheckpoint.test.cjs', 'apps/judge/src/cancelScope.test.cjs',
+  'apps/judge/src/aiCheckpoint.test.cjs', 'apps/judge/src/aiReceipts.test.cjs', 'apps/judge/src/cancelScope.test.cjs',
   'apps/judge/src/task/hack/hack.test.cjs',
   'apps/judge/src/task/self-eval/self-eval.test.cjs',
   'apps/judge/src/rpc.test.cjs', 'apps/judge/src/executionScheduler.test.cjs', 'apps/judge/src/selfTestConfig.test.cjs',
@@ -94,9 +95,10 @@ const GROUPS = {
   frontend: () => [node('--test', 'packages/frontend/test/*.test.cjs')],
   deploy: ci => [
     node('--test', 'deploy/fake-migration.test.cjs'),
-    node('--test', 'deploy/test/upgrade-schema.test.mjs', 'deploy/test/community-schema.test.mjs',
+    node('--test', 'deploy/test/ai-lifecycle-schema.test.mjs', 'deploy/test/upgrade-schema.test.mjs', 'deploy/test/community-schema.test.mjs',
       'deploy/test/team-storage.test.mjs', 'deploy/test/upgrade-registration.test.mjs'),
-    node('--test', 'deploy/test/community-schema.mariadb.test.mjs', 'deploy/test/initialize-schema.test.mjs'),
+    node('--test', 'deploy/test/community-schema.mariadb.test.mjs', 'deploy/test/initialize-schema.test.mjs',
+      'deploy/test/ai-lifecycle-schema.mariadb.test.mjs'),
     node('--test', 'deploy/test/backup-keys.test.mjs', 'deploy/test/dependency-audit.test.mjs'),
     // In Chrome or Chromium (LLMOJ_TEST_CHROME, or on PATH); skipped without one
     node('--test', 'deploy/test/service-worker-retirement.test.mjs'),

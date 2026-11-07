@@ -22,6 +22,11 @@ export interface AiRequestMetadata {
   purpose?: string;
   /** The logical generation it belongs to: a generation and its recovery polls share it */
   generationId?: string;
+  /** Persisted ordinal within the logical generation, including recovery polls. */
+  requestAttempt?: number;
+  stageId?: string;
+  /** Internal credential/account binding; never stored in usage rows or returned by APIs. */
+  accountBinding?: string;
 }
 /** Model generations and searches; polls, model listings and MCP handshakes aren't billed by providers. */
 export function isBillableRequest(metadata: Pick<AiRequestMetadata, "target" | "operation">): boolean {
@@ -48,6 +53,7 @@ export interface AiAdmission {
   release(): void;
 }
 export interface AiUsageRecord extends Omit<AiRequestMetadata, "reserveTokens"> {
+  diagnostics?: AiError["providerDiagnostics"];
   success: boolean;
   errorCode: string | null;
   elapsedMs: number;
@@ -60,10 +66,19 @@ export interface AiUsageRecord extends Omit<AiRequestMetadata, "reserveTokens"> 
   responseId?: string;
   /** A background response still being generated; its usage arrives with the poll that completes it. */
   pendingResponseId?: string;
+  /** Internal observation: a terminal model response, distinct from interim usage snapshots. */
+  completedResponse?: boolean;
 }
 export interface AiResponseCheckpoint {
   responseId: string;
   createdAt: number;
+  generationId?: string;
+  purpose?: string;
+  requestAttempts?: number;
+  stageId?: string;
+  bindingHash?: string;
+  lifecycle?: "prepared" | "dispatching" | "pending" | "terminal" | "legacy";
+  terminalStatus?: string;
 }
 export interface AiRuntimeContext {
   ownerId: number;
@@ -81,9 +96,15 @@ export interface AiRuntimeContext {
   record: (record: AiUsageRecord, reservationId?: string) => Promise<void>;
   /** What a request sent now is for, unless withAiPurpose says (a job: its current step's purpose) */
   purpose?: () => string | undefined;
+  stageId?: () => string | undefined;
   checkActive?: () => Promise<void>;
   loadResponse?: (requestHash: string) => Promise<AiResponseCheckpoint | null>;
+  claimResponse?: (
+    requestHash: string,
+    value: AiResponseCheckpoint
+  ) => Promise<{ checkpoint: AiResponseCheckpoint; created: boolean }>;
   saveResponse?: (requestHash: string, value: AiResponseCheckpoint) => Promise<void>;
+  nextResponseAttempt?: (requestHash: string) => Promise<number>;
 }
 const runtime = new AsyncLocalStorage<AiRuntimeContext>();
 export function withAiRuntime<T>(context: AiRuntimeContext, work: () => Promise<T>): Promise<T> {
@@ -188,12 +209,16 @@ export async function meterProviderRequest<T extends { data: ProviderResponse }>
 ): Promise<T> {
   const context = runtime.getStore();
   if (!context || !metadata) return await work();
+  const captured = {
+    ...metadata,
+    purpose: (metadata.purpose === undefined ? currentAiPurpose() : metadata.purpose)?.slice(0, 20),
+    stageId: metadata.stageId === undefined ? context.stageId?.() : metadata.stageId
+  };
   await context.checkActive?.();
-  const admission = await context.admit?.(metadata);
+  const admission = await context.admit?.(captured);
   try {
-    const request = { ...metadata };
+    const request = { ...captured };
     delete request.reserveTokens;
-    request.purpose = (metadata.purpose ?? currentAiPurpose())?.slice(0, 20);
     const start = Date.now();
     let result: T;
     let failure: unknown;
@@ -206,19 +231,27 @@ export async function meterProviderRequest<T extends { data: ProviderResponse }>
       ? failure instanceof AiError
         ? failure.code
         : "PROVIDER_NETWORK_ERROR"
-      : responseFailure(result?.data);
+      : metadata.operation === "responses.cancel" && result?.data?.status === "cancelled"
+        ? null
+        : responseFailure(result?.data);
     const response = result?.data;
-    const responseObject = typeof response?.id === "string" && response?.object === "response";
+    const responseObject =
+      typeof response?.id === "string" && /^[A-Za-z0-9_-]{1,255}$/.test(response.id) && response?.object === "response";
     await context.record(
       {
         ...request,
         model: (metadata.model || "").slice(0, 200),
         success: !errorCode,
         errorCode,
+        ...(failure instanceof AiError && failure.providerDiagnostics
+          ? { diagnostics: failure.providerDiagnostics }
+          : {}),
         elapsedMs: Math.max(0, Date.now() - start),
         ...extractUsage(response),
-        responseId:
-          responseObject && ["completed", "incomplete", "failed"].includes(response.status) ? response.id : undefined,
+        completedResponse: responseObject
+          ? ["completed", "incomplete", "failed", "cancelled"].includes(response.status)
+          : !["queued", "in_progress"].includes(response?.status),
+        responseId: responseObject ? response.id : undefined,
         pendingResponseId:
           responseObject && ["queued", "in_progress"].includes(response.status) ? response.id : undefined
       },

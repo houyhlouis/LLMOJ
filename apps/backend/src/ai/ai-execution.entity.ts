@@ -41,7 +41,7 @@ export class AiExecutionEntity {
 
   // The latest progress while it runs
   @JsonColumn({ nullable: true })
-  progress: Pick<AiExecutionProgress, "phase" | "completed" | "total">;
+  progress: Pick<AiExecutionProgress, "phase" | "completed" | "total" | "receipts">;
 
   // The judge's final progress, and the runtime the backend recorded for the judge machine
   @JsonColumn({ nullable: true })

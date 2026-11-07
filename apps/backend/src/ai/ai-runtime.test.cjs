@@ -311,10 +311,11 @@ test("metering deduplicates tokens from repeated response retrieval but records 
   const rows = [];
   const repo = {
     findOneBy: async filter => rows.find(row => Object.entries(filter).every(([key, value]) => row[key] === value)),
+    find: async ({ where }) => rows.filter(row => Object.entries(where).every(([key, value]) => row[key] === value)),
     insert: async row => rows.push(row)
   };
   const usage = new AiUsageService(
-    { transaction: async cb => cb({ findOne: async () => ({ id: 1 }), getRepository: () => repo }) },
+    { transaction: async cb => cb({ findOne: async () => ({ id: 1 }), getRepository: () => repo }), getRepository: () => ({ increment: async () => {} }) },
     repo,
     {}
   );
@@ -547,7 +548,7 @@ test("automatic requests from stale browsers do not enqueue jobs or access API c
     skipped: true
   });
 });
-test("explicit semantic retry discards old provider results while a short-outage retry preserves its response handle", async () => {
+test("explicit semantic retry retires old provider lookup keys while preserving handles; short-outage retry keeps its lookup key", async () => {
   for (const [error, expectedDeletes] of [
     ["UNVERIFIED_AI_SOURCE", 1],
     ["RESPONSE_RECOVERY_EXPIRED", 1],
@@ -572,7 +573,10 @@ test("explicit semantic retry discards old provider results while a short-outage
         work({
           findOne: async () => ({ id: 1 }),
           getRepository: () => ({ countBy: async () => 0, update: async () => ({ affected: 1 }) }),
-          delete: async (_entity, where) => deleted.push(where)
+          update: async (_entity, where, changes) => {
+            assert.match(changes.requestHash(), /SHA2/);
+            deleted.push(where);
+          }
         })
     };
     await service.retry({ id: 1 }, job.id);

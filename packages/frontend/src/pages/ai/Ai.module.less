@@ -250,7 +250,8 @@
   }
 }
 
-.evidence {
+// Program text, inputs and outputs keep their exact layout; prose never uses this class (review Part V, IV-10)
+.artifactCode {
   max-height: 320px;
   overflow: auto;
   margin: 6px 0 0;
@@ -312,9 +313,12 @@
   }
 }
 
-// A job's evidence and cost, its repairs' changes, and the jobs waiting for their owner (review Part III, §8.1/§8.4)
-.evidence {
+// A job's evidence and cost, its repairs' changes, and the jobs waiting for their owner (review Part III, §8.1/§8.4).
+// Ordinary text: it wraps and uses the page's font size, unlike .artifactCode
+.evidenceSummary {
   margin-top: 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .runList {
@@ -354,4 +358,204 @@
 
 .tutorialStatus {
   margin: 8px 0 !important;
+}
+
+// Start options (review Part V, R3/R5)
+.startOptions {
+  margin: 12px 0;
+}
+
+.startOptionsToggle {
+  margin: 8px 0 12px;
+
+  > summary {
+    cursor: pointer;
+  }
+}
+
+.modelPolicies {
+  display: grid;
+  gap: 10px;
+}
+
+.modelPolicy {
+  display: grid;
+  grid-template-columns: minmax(160px, 2fr) repeat(3, minmax(90px, 1fr));
+  align-items: center;
+  gap: 8px;
+
+  :global(.field) {
+    margin: 0 !important;
+  }
+
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+// Compact job rows: one line of facts, its stage, its reason and one action (review Part V, R7)
+.jobRows {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jobRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--theme-border);
+  overflow-wrap: anywhere;
+
+  @media (max-width: 640px) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.jobRowMain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.jobRowProblem {
+  min-width: 0;
+}
+
+.jobState {
+  font-size: 13px;
+  color: var(--theme-foreground-transparent);
+
+  &[data-state="running"],
+  &[data-state="queued"] {
+    color: var(--theme-status-running);
+  }
+  &[data-state="failed"] {
+    color: var(--theme-status-runtime-error);
+  }
+  &[data-state="completed"] {
+    color: var(--theme-status-accepted);
+  }
+  &[data-state="cancelled"] {
+    color: var(--theme-status-canceled);
+  }
+}
+
+.jobRowStage,
+.jobRowAttention {
+  grid-column: 1;
+  font-size: 13px;
+}
+
+.jobRowAttention {
+  color: var(--theme-status-time-limit-exceeded);
+}
+
+.jobRowActions {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+
+  > :global(.button) {
+    margin: 0;
+  }
+
+  @media (max-width: 640px) {
+    grid-column: 1;
+    grid-row: auto;
+    justify-content: flex-start;
+  }
+}
+
+.jobRowDetails {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.moreJobs {
+  margin-top: 10px !important;
+}
+
+// A job's details page
+.jobPage {
+  overflow-wrap: anywhere;
+}
+
+.jobPageActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+
+  > :global(.button) {
+    margin: 0;
+  }
+}
+
+.detailSection {
+  margin: 18px 0;
+
+  > summary {
+    cursor: pointer;
+    font-weight: bold;
+  }
+}
+
+.blocking {
+  margin: 14px 0 !important;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 8px 0;
+
+  dt {
+    font-weight: bold;
+  }
+  dd {
+    margin: 0;
+  }
+
+  @media (max-width: 640px) {
+    grid-template-columns: minmax(0, 1fr);
+
+    dd {
+      margin-bottom: 6px;
+    }
+  }
+}
+
+.tableScroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.workflow > section {
+  margin: 16px 0;
+}
+
+.timeline {
+  margin: 4px 0;
+  padding-left: 20px;
+  line-height: 1.6;
+
+  > li[data-outcome="failed"] {
+    color: var(--theme-status-runtime-error);
+  }
+}
+
+.timelineDispatches {
+  margin: 2px 0 4px;
+  padding-left: 18px;
+  font-size: 13px;
+  list-style: circle;
 }

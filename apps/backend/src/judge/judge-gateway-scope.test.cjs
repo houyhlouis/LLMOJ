@@ -339,6 +339,7 @@ test("a queue error does not drop the client's request for a task", async () => 
 });
 
 const capabilities = (overrides = {}) => ({
+  aiQualityPolicyVersions: [2], aiReceiptVersions: [1],
   protocolVersion: 2,
   taskTypes: ["Submission", "Hack", "SelfEval", "SelfEvalPrepare"],
   consumerThreads: 3,
@@ -479,7 +480,7 @@ test("generated files are only signed for a task assigned to the requesting judg
   const b = await connect(2);
   await gateway.onCapabilities(
     a.client,
-    capabilities({ protocolVersion: 8, taskTypes: ["Submission", "AiExecution"] })
+    capabilities({ protocolVersion: protocol.AI_EXECUTION_PROTOCOL_VERSION, aiCapabilities: protocol.AI_RUNNER_CAPABILITIES, taskTypes: ["Submission", "AiExecution"] })
   );
   queue.push(aiTask("ai-1"));
   await gateway.onConsumeTask(a.client, 0);
@@ -510,7 +511,8 @@ test("AI runs leave a judge client's other threads to other work", async () => {
   await gateway.onCapabilities(
     a.client,
     capabilities({
-      protocolVersion: 8,
+      protocolVersion: protocol.AI_EXECUTION_PROTOCOL_VERSION,
+      aiCapabilities: protocol.AI_RUNNER_CAPABILITIES,
       taskTypes: ["Submission", "AiExecution"],
       consumerThreads: 3,
       aiExecutionSlots: 6
@@ -526,7 +528,7 @@ test("AI runs leave a judge client's other threads to other work", async () => {
     "two of three threads at most"
   );
   assert.equal(aiExecutionLimit(null), 0);
-  const current = { protocolVersion: protocol.AI_EXECUTION_PROTOCOL_VERSION };
+  const current = { protocolVersion: protocol.AI_EXECUTION_PROTOCOL_VERSION, aiCapabilities: protocol.AI_RUNNER_CAPABILITIES };
   assert.equal(
     aiExecutionLimit(capabilities({ ...current, consumerThreads: 1, aiExecutionSlots: 4 })),
     0,
@@ -554,7 +556,12 @@ test("judge clients that can't run AI programs with their execution profiles are
   assert.deepEqual(claims.at(-1)[1], ["Submission"]);
   assert.equal(aiExecutionLimit(capabilities({ protocolVersion: 6, consumerThreads: 8 })), 0);
   assert.equal(aiExecutionLimit(capabilities({ protocolVersion: 7, consumerThreads: 8 })), 0);
-  assert.equal(aiExecutionLimit(capabilities({ protocolVersion: 8, consumerThreads: 8 })), 6);
+  assert.equal(aiExecutionLimit(capabilities({ protocolVersion: 8, consumerThreads: 8 })), 0);
+  assert.equal(aiExecutionLimit(capabilities({ protocolVersion: protocol.AI_EXECUTION_PROTOCOL_VERSION, consumerThreads: 8 })), 0, "version alone does not assert the task capabilities");
+  assert.equal(aiExecutionLimit(capabilities({ protocolVersion: protocol.AI_EXECUTION_PROTOCOL_VERSION, aiCapabilities: protocol.AI_RUNNER_CAPABILITIES, consumerThreads: 8 })), 6);
+  assert.equal(aiExecutionLimit(capabilities({ protocolVersion: protocol.AI_EXECUTION_PROTOCOL_VERSION, aiCapabilities: { ...protocol.AI_RUNNER_CAPABILITIES, compileLink: false }, consumerThreads: 8 })), 0);
+  assert.equal(aiExecutionLimit(capabilities({ protocolVersion: 9, aiCapabilities: protocol.AI_RUNNER_CAPABILITIES, consumerThreads: 8, aiQualityPolicyVersions: [] })), 0);
+  assert.equal(aiExecutionLimit(capabilities({ protocolVersion: 9, aiCapabilities: protocol.AI_RUNNER_CAPABILITIES, consumerThreads: 8, aiReceiptVersions: [] })), 0);
 });
 
 test("while a contest runs, judge machines keep the policy's task threads for its submissions", async () => {
