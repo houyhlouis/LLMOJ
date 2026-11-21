@@ -24,7 +24,7 @@ const { ProblemFileEntity, ProblemFileType } = require('./problem-file.entity.ts
 const { LocalizedContentEntity, LocalizedContentType } = require('../localized-content/localized-content.entity.ts');
 
 test('problem mutations preserve concurrent fields and file ownership (real MariaDB)',
-  { skip: !process.env.HYHOJ_PROBLEM_TEST_DB_CONFIG, timeout: 60000 }, async t => {
+  { skip: !process.env.HYHOJ_PROBLEM_TEST_DB_CONFIG && "needs HYHOJ_PROBLEM_TEST_DB_CONFIG", timeout: 60000 }, async t => {
   const cfg = require('js-yaml').load(fs.readFileSync(process.env.HYHOJ_PROBLEM_TEST_DB_CONFIG, 'utf8')).services.database;
   const prefix = 'qa_finalfix_problem_' + crypto.randomBytes(8).toString('hex') + '_';
   const int = { type: Number }, json = { type: 'json' };
@@ -51,7 +51,7 @@ test('problem mutations preserve concurrent fields and file ownership (real Mari
     const svc = bareProblemServices();
     Object.assign(svc, { connection: db, problemRepository: repo, problemFileRepository: files,
       submissionService: { setSubmissionsPublic: async () => {}, problemHasAnySubmission: async () => false },
-      redisService: { cacheDelete: async () => {} },
+      redisService: { generationCache: { invalidate: async () => {} } },
       problemTypeFactoryService: { type: () => ({ getDefaultJudgeInfo: () => ({ default: true }) }) },
       localizedContentService: {
         createOrUpdate: async (objectId, type, locale, data, manager) => manager.save(LocalizedContentEntity, { objectId, type, locale, data }),

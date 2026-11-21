@@ -75,8 +75,10 @@ local function read_lock(expire)
     return false
   end
 
-  -- Increase the number of readers
-  redis.call("incr", key_readers)
+  -- A stale non-positive count represents no readers.
+  if redis.call("incr", key_readers) <= 0 then
+    redis.call("set", key_readers, 1)
+  end
 
   -- Refresh the expire time of read lock
   redis.call("pexpire", key_readers, expire)
@@ -85,24 +87,29 @@ end
 
 -- Unlock the read lock locked by this client
 local function read_unlock()
-  local value_readers = redis.call("get", key_readers)
-  if value_readers == false then
+  local count = tonumber(redis.call("get", key_readers))
+  if not count then
     -- It expired before unlock or refresh
     return false
   end
 
-  -- If this is the last reader to release the lock, delete the key
-  if value_readers == 1 then
-    redis.call("del", key_readers)
-  else
+  if count > 1 then
     redis.call("decr", key_readers)
+    return true
   end
 
-  return true
+  -- Remove the last reader, or discard a stale count with no reader to release.
+  redis.call("del", key_readers)
+  return count == 1
 end
 
 -- Reset expire time of the read lock locked by this client
 local function read_refresh(expire)
+  local count = tonumber(redis.call("get", key_readers))
+  if not count or count <= 0 then
+    -- There is no lease to extend. A legacy zero key can expire on its original deadline.
+    return 0
+  end
   return redis.call("pexpire", key_readers, expire)
 end
 

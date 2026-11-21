@@ -75,7 +75,7 @@ function inspectFreshProcess(mode) {
 // Use the emitted production graph: transpileModule can mask a missing cyclic
 // runtime type with Object, so its metadata is not a substitute for a real build.
 const requiresBuild = {
-  skip: !require("node:fs").existsSync(path.resolve(__dirname, "../../dist/main.js"))
+  skip: !require("node:fs").existsSync(path.resolve(__dirname, "../../dist/main.js")) && "needs the compiled backend (pnpm build)"
 };
 test("main-first production build imports resolve every constructor dependency", requiresBuild, () => {
   assert.deepEqual(inspectFreshProcess("compiled").missing, []);

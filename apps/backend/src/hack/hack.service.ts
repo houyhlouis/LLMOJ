@@ -29,6 +29,7 @@ import { ContestAccessService } from "../contest/contest-access.service";
 import { ContestSubmissionService } from "../contest/contest-submission.service";
 import { contestHackDetailsHidden, contestSubmissionVisibility } from "../contest/contest-policy";
 import { ContestEntity } from "../contest/contest.entity";
+import { isVirtualContestSubmission } from "../contest/contest-virtual-timeline";
 import { JudgeQueueService, JudgeTask, JudgeTaskPriorityType } from "../judge/judge-queue.service";
 import { JudgeTaskCompletion, JudgeTaskService } from "../judge/judge-task-service.interface";
 import { LockService } from "../redis/lock.service";
@@ -152,7 +153,13 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
     let inContest: Awaited<ReturnType<ContestAccessService["get"]>>;
     if (submission.contestId) {
       inContest = await this.contestAccess.get(user, submission.contestId, true);
+      if (inContest.virtualRun) throw new ForbiddenException("Hacks are unavailable during virtual participation");
       await this.contestSubmissions.submissionDetail(user, submission.contestId, submission.id);
+      if (await isVirtualContestSubmission(this.db.manager, submission))
+        throw new BadRequestException({
+          error: "VIRTUAL_HACK_TARGET",
+          message: "Virtual submissions cannot be hacked"
+        });
     } else if (!(await this.submissionAccess.userHasPermission(user, submission, SubmissionPermissionType.View)))
       throw new ForbiddenException();
     const canManageConfig = await this.canConfigure(user, submission.problemId);
@@ -469,7 +476,7 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
     });
   }
 
-  private async canView(user: UserEntity, hack: HackEntity) {
+  private async canView(user: UserEntity, hack: HackEntity, explainVirtual = false) {
     if (
       !(await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewSite)) ||
       !(await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewHack)) ||
@@ -480,12 +487,17 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
     if (!target) return !!user?.isAdmin;
     if (!(await this.submissionAccess.userHasTeamResourceAccess(user, target))) return false;
     if (target.contestId) {
+      let access: Awaited<ReturnType<ContestAccessService["get"]>>;
       try {
-        const { contest, manager } = await this.contestAccess.get(user, target.contestId, true);
-        return contestSubmissionVisibility(contest, target, { manager, userId: user?.id }).visible;
+        access = await this.contestAccess.get(user, target.contestId, true);
       } catch {
         return false;
       }
+      if (access.virtualRun) {
+        if (explainVirtual) throw new ForbiddenException("Hacks are unavailable during virtual participation");
+        return false;
+      }
+      return contestSubmissionVisibility(access.contest, target, { manager: access.manager, userId: user?.id }).visible;
     }
     return await this.submissionAccess.userHasPermission(user, target, SubmissionPermissionType.View);
   }
@@ -568,7 +580,7 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
     this.id(id);
     const hack = await this.db.getRepository(HackEntity).findOneBy({ id });
     if (!hack) throw new NotFoundException();
-    if (!(await this.canView(user, hack))) throw new ForbiddenException();
+    if (!(await this.canView(user, hack, true))) throw new ForbiddenException();
     const canManage = await this.canConfigure(user, hack.problemId);
     // Input/message remain private during a blind contest, including the opposing submitter.
     const contest = hack.contestId
@@ -599,6 +611,8 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
     const hack = await this.db.getRepository(HackEntity).findOneBy({ id });
     if (!hack) throw new NotFoundException();
     if (!(await this.canConfigure(user, hack.problemId))) throw new ForbiddenException();
+    if (hack.contestId && (await this.contestAccess.get(user, hack.contestId, true)).virtualRun)
+      throw new ForbiddenException("Hacks are unavailable during virtual participation");
     return await this.locks.lock(`Hack_${id}`, async () => {
       const fresh = await this.db.getRepository(HackEntity).findOneBy({ id });
       if (fresh.taskId || fresh.status === HackStatus.Success)
@@ -651,8 +665,14 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
     const target = await this.submissions.findSubmissionById(hack.submissionId);
     if (!target || !(await this.submissionAccess.userHasTeamResourceAccess(user, target))) return false;
     try {
-      if (target.contestId) await this.contestSubmissions.submissionDetail(user, target.contestId, target.id);
-      else if (!(await this.submissionAccess.userHasPermission(user, target, SubmissionPermissionType.View)))
+      if (target.contestId) {
+        if (
+          (await this.contestAccess.get(user, target.contestId, true)).virtualRun ||
+          (await isVirtualContestSubmission(this.db.manager, target))
+        )
+          return false;
+        await this.contestSubmissions.submissionDetail(user, target.contestId, target.id);
+      } else if (!(await this.submissionAccess.userHasPermission(user, target, SubmissionPermissionType.View)))
         return false;
     } catch {
       return false;

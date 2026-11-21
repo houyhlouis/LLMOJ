@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { recordSchemaMigration, validateAiLifecycleSchema } from "./ai-lifecycle-schema.mjs";
+import { validateContestVirtualSchema } from "./contest-virtual-schema.mjs";
 // Creates the database schema of a new installation from the built backend's entities.
 // The production backend never changes the schema at startup; installed instances use the upgrader.
 // No Nest startup, HTTP listeners, workers or service changes.
@@ -51,6 +52,7 @@ async function main() {
     // interrupted installation completes the schema without touching existing rows.
     await ds.synchronize();
     await validateAiLifecycleSchema(ds, []);
+    await validateContestVirtualSchema(ds, []);
     await recordSchemaMigration(ds);
     const tables = await ds.query('SHOW TABLES');
     process.stdout.write(JSON.stringify({ initialized: true, tables: tables.length }) + '\n');

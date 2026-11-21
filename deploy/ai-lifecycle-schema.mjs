@@ -53,7 +53,7 @@ export async function validateAiLifecycleSchema(ds, queries, ErrorType = Error) 
 
 }
 
-export const SCHEMA_MIGRATION_VERSION = 'part38-b-v1';
+export const SCHEMA_MIGRATION_VERSION = 'contest-virtual-v1';
 export async function recordSchemaMigration(ds) {
   await ds.query('INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)',
     ['deployment.schema', JSON.stringify({ version: SCHEMA_MIGRATION_VERSION, appliedAt: new Date().toISOString() })]);

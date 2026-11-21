@@ -11,7 +11,7 @@ import { PermissionObjectType } from "./permission-object-type.enum";
 
 import { UserEntity } from "../user/user.entity";
 import { GroupEntity } from "../group/group.entity";
-import { GroupService } from "../group/group.service";
+import { GroupService, visibleGroupSql } from "../group/group.service";
 import { GroupMembershipEntity } from "../group/group-membership.entity";
 
 export { PermissionObjectType } from "./permission-object-type.enum";
@@ -329,6 +329,29 @@ export class PermissionService {
     return [
       await this.getUserPermissionListOfObject(objectId, objectType),
       await this.getGroupPermissionListOfObject(objectId, objectType)
+    ];
+  }
+
+  async getVisiblePermissionsOfObject<PermissionLevel extends number>(
+    objectId: number,
+    objectType: PermissionObjectType
+  ): Promise<[[UserEntity, PermissionLevel][], [GroupEntity, PermissionLevel][]]> {
+    const [userGrants, groupGrants] = await Promise.all([
+      this.permissionForUserRepository
+        .createQueryBuilder("permission")
+        .innerJoinAndSelect("permission.user", "u")
+        .where({ objectId, objectType })
+        .getMany(),
+      this.permissionForGroupRepository
+        .createQueryBuilder("permission")
+        .innerJoinAndSelect("permission.group", "g")
+        .where({ objectId, objectType })
+        .andWhere(visibleGroupSql("g.id"))
+        .getMany()
+    ]);
+    return [
+      userGrants.map(({ user, permissionLevel }) => [user, permissionLevel as PermissionLevel]),
+      groupGrants.map(({ group, permissionLevel }) => [group, permissionLevel as PermissionLevel])
     ];
   }
 

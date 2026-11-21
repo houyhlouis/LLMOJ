@@ -6,7 +6,6 @@ import { NestExpressApplication } from "@nestjs/platform-express";
 import { Logger, ValidationPipe } from "@nestjs/common";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 
-import getGitRepoInfo from "git-repo-info";
 import moment from "moment";
 import { Request, Response, json } from "express"; // eslint-disable-line import/no-extraneous-dependencies
 import {
@@ -23,6 +22,7 @@ import { ConfigService } from "./config/config.service";
 import { MigrationService } from "./migration/migration.service";
 import { ErrorFilter } from "./error.filter";
 import { ClusterService } from "./cluster/cluster.service";
+import { appGitRepoInfo } from "./common/server-revision";
 import { RequestLogger } from "./common/request-logger";
 import { MetricsService } from "./metrics/metrics.service";
 import { isSchemaSyncEnabled } from "./database/database.providers";
@@ -33,7 +33,7 @@ String.prototype.format = function format(...args) {
   return util.format.call(undefined, this, ...args);
 };
 
-export const appGitRepoInfo = getGitRepoInfo();
+export { appGitRepoInfo } from "./common/server-revision";
 
 const JSON_BODY_LIMIT = "32mb";
 

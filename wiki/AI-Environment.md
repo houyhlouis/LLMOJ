@@ -14,13 +14,13 @@ The installer sets these in the services' systemd units, using your installation
 | `HYHOJ_AI_GENERATED_DIR` | backend | `/opt/LLMOJ/data/ai-generated` | Where the backend reads the AI worker's results. Must match `aiGeneratedDirectory` in the local `judge.yaml`. |
 | `HYHOJ_AI_SAMPLE_INPUTS_DIR` | backend and judge | `/opt/LLMOJ/data/ai-sample-inputs` | Private samples and input files handed to the AI worker. Both services must use the same directory. |
 | `HYHOJ_AI_RUNNER_SOCKET` | backend | `/opt/LLMOJ/data/judge/ai-runner.sock` | The local AI worker's socket. Must match `aiRunnerSocket` in the local `judge.yaml`. |
-| `LLMOJ_AI_EXECUTION` | backend | automatic | Where AI jobs run their programs: `local` (the local AI worker's socket) or `judges` (the judge queue, on any judge of protocol version 4; see [Distributed judging](Distributed-Judging.md#ai)). Without it, `local` when the socket exists, otherwise `judges`. Files a judge generates are downloaded to the backend's `TMPDIR` (`data/tmp`) before they're published, up to 8 GiB for a job. |
+| `LLMOJ_AI_EXECUTION` | backend | automatic | Where AI jobs run their programs: `local` (the local AI worker's socket) or `judges` (the judge queue, on judges of judge protocol 9 that announce quality policy 2 and receipt version 1; see [Distributed judging](Distributed-Judging.md#ai)). Without it, `local` when the socket exists, otherwise `judges`. Files a judge generates are downloaded to the backend's `TMPDIR` (`data/tmp`) before they're published, up to 8 GiB for a job. |
 | `HYHOJ_ARCHIVE_WORK_DIRECTORY` | backend | `/opt/LLMOJ/data/backend-archives` | Temporary space for archives, including AI ZIP attachments while they're checked |
 | `HYHOJ_AI_PRIVATE_HOSTS` | backend | none | Hosts approved for every account, in addition to the [addresses approved in Site management](AI.md#which-addresses-accounts-may-use), separated by commas or spaces, each with an optional port, for example `llm.lan, 10.0.0.5:8000, [fd00::5]:8080`. Prefer Site management, which needs no restart and shows who uses what. |
 
 These are absolute file system paths, not URLs. Setting one doesn't move existing data or change the other service's configuration, and `HYHOJ_ROOT` doesn't change them at runtime.
 
-Model and search requests are made by the backend; the local judge compiles and runs generated programs. Only the `all` role has the local AI worker: remote judges have it turned off, and a `web` site has none. See [Distributed judging](Distributed-Judging.md).
+Model and search requests are made by the backend; the local judge compiles and runs generated programs. Only the `all` role has the local AI worker: remote judges have it turned off, and a `web` site has none and sends its AI runs to remote judges instead. See [Distributed judging](Distributed-Judging.md).
 
 ## Directories, keys and the socket
 
@@ -31,7 +31,7 @@ With `libreoj` as the backend's user and group, an installation has:
 | `data/ai` | `libreoj:libreoj`, `0700` | The backend checks the owner and tightens the mode when it starts. |
 | `data/ai/master.key` | backend's user, `0600` | A regular 32-byte file with a single link; symbolic links are refused. If encrypted configurations exist but the key is missing, the backend won't start. |
 | `data/ai/two-factor.key` | backend's user, `0600` | The same rules. Encrypts authenticator secrets of [two-factor sign-in](Two-Factor-Sign-In.md); created when first needed. If users have authenticator apps set up, a missing key is never replaced and their codes stop working. |
-| `data/ai-generated` | `root:libreoj`, `0750` | Written by the AI worker (root) and read by the backend. Must be a real directory, not a link. |
+| `data/ai-generated` | the judge's account and the backend's group (`libreoj-judge:libreoj`), `2750` | Written by the local AI worker, which runs as the judge's unprivileged account; the root sandbox launcher prepares the directory when the judge starts. The set-group-ID bit gives new files the backend's group (`aiRunnerGid`), so the backend can read them. Must be a real directory, not a link. |
 | `data/ai-sample-inputs` | `libreoj:libreoj`, `0700` | Written by the backend; the worker checks paths, owners and sizes before reading. |
 | `data/judge/ai-runner.sock` | `root:libreoj`, `0660` | Its group is `aiRunnerGid` from `judge.yaml`. It's a local socket, not a network port. |
 | AI folders under `backend-archives` | backend's user, `0700` | Temporary; removed when the operation ends. |

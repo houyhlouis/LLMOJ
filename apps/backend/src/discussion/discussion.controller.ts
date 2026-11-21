@@ -228,9 +228,12 @@ export class DiscussionController {
         error: ToggleReactionResponseError.PERMISSION_DENIED
       };
 
+    // Reviewing a pending team reply grants no additional reaction rights.
     if (
       discussionReply &&
-      !(await this.discussionService.userHasViewDiscussionReplyPermission(currentUser, discussionReply, discussion))
+      !discussionReply.isPublic &&
+      currentUser.id !== discussionReply.publisherId &&
+      !(await this.userPrivilegeService.userHasPrivilege(currentUser, UserPrivilegeType.ManageDiscussion))
     )
       return {
         error: ToggleReactionResponseError.PERMISSION_DENIED
@@ -438,14 +441,8 @@ export class DiscussionController {
       };
 
     const discussionProblem = discussion.problemId && (await this.problemService.findProblemById(discussion.problemId));
-    if (
-      !(await this.discussionService.userHasPermission(
-        currentUser,
-        discussion,
-        DiscussionPermissionType.View,
-        discussionProblem
-      ))
-    )
+    const moderation = await this.discussionService.getReplyModeration(currentUser, discussion, discussionProblem);
+    if (!moderation.canViewDiscussion)
       return {
         error: GetDiscussionAndRepliesResponseError.PERMISSION_DENIED
       };
@@ -486,7 +483,8 @@ export class DiscussionController {
               discussion,
               replyEntities,
               hasPrivilege,
-              discussionProblem || undefined
+              discussionProblem || undefined,
+              moderation
             )
           ]);
 
@@ -512,7 +510,7 @@ export class DiscussionController {
           const [head, tail, count] = await this.discussionService.queryDiscussionRepliesByHeadTail(
             currentUser,
             discussion,
-            hasPrivilege,
+            moderation.viewHidden,
             headTakeCount,
             tailTakeCount
           );
@@ -525,7 +523,7 @@ export class DiscussionController {
           const [replyEntities, count] = await this.discussionService.queryDiscussionRepliesInIdRange(
             currentUser,
             discussion,
-            hasPrivilege,
+            moderation.viewHidden,
             request.beforeId || 0,
             request.afterId || 0,
             idRangeTakeCount
@@ -841,18 +839,8 @@ export class DiscussionController {
         error: SetDiscussionReplyPublicResponseError.NO_SUCH_DISCUSSION_REPLY
       };
 
-    if (
-      !(await this.discussionService.userHasPermission(
-        currentUser,
-        await this.discussionService.findDiscussionById(discussionReply.discussionId),
-        DiscussionPermissionType.ManagePublicness
-      ))
-    )
-      return {
-        error: SetDiscussionReplyPublicResponseError.PERMISSION_DENIED
-      };
-
-    await this.discussionService.setReplyPublic(discussionReply, request.isPublic);
+    const error = await this.discussionService.setReplyPublic(discussionReply, request.isPublic, currentUser);
+    if (error) return { error };
 
     await this.auditService.log(
       request.isPublic ? "discussion.set_reply_public" : "discussion.set_reply_non_public",

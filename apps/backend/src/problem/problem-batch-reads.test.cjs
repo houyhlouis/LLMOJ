@@ -25,10 +25,22 @@ String.prototype.format ||= function format(...args) {
   return require("node:util").format(String(this), ...args);
 };
 
-const { EntityManager } = require("typeorm");
+const { DataSource, EntityManager } = require("typeorm");
+const { DatabaseSync } = require("node:sqlite");
 const { LocalizedContentService } = require("../localized-content/localized-content.service.ts");
 const { LocalizedContentType } = require("../localized-content/localized-content.entity.ts");
 const { ProblemService } = require("./problem.service.ts");
+const { ProblemController } = require("./problem.controller.ts");
+const { DiscussionController } = require("../discussion/discussion.controller.ts");
+const { DiscussionService } = require("../discussion/discussion.service.ts");
+const { GroupEntity } = require("../group/group.entity.ts");
+const { GroupService } = require("../group/group.service.ts");
+const { PermissionService } = require("../permission/permission.service.ts");
+const { PermissionForUserEntity } = require("../permission/permission-for-user.entity.ts");
+const { PermissionForGroupEntity } = require("../permission/permission-for-group.entity.ts");
+const { UserAuthEntity } = require("../auth/user-auth.entity.ts");
+const { UserEntity } = require("../user/user.entity.ts");
+const { UserService } = require("../user/user.service.ts");
 const { bareProblemServices } = require("./problem-test-services.cjs");
 const { prefetchTeamResources, teamResourceAccess } = require("../team/team-access.ts");
 const { TeamResourceEntity } = require("../team/team.entity.ts");
@@ -187,4 +199,88 @@ test("a request notes which of its problems belong to teams; checks of the other
   request.res.writableEnded = true;
   await requestContext.run(request, async () => assert.equal(await teamResourceAccess(db, user, "problem", 1), null));
   assert.equal(lookups, 2);
+});
+
+test("problem and discussion permission views batch existing principals and keep their grant levels", async t => {
+  // Execute the MariaDB query builders' SELECTs against local rows, including grants left behind by a deletion.
+  const source = new DataSource({
+    type: "mariadb", database: "permission_views",
+    entities: [UserEntity, UserAuthEntity, GroupEntity, PermissionForUserEntity, PermissionForGroupEntity]
+  });
+  await source.buildMetadatas();
+  const rows = new DatabaseSync(":memory:");
+  t.after(() => rows.close());
+  for (const table of source.entityMetadatas) {
+    const columns = table.columns.map(column => '"' + column.databaseName + '"').join(", ");
+    rows.exec('CREATE TABLE "' + table.tableName + '" (' + columns + ')');
+  }
+  rows.exec(`
+    CREATE TABLE team (permissionGroupId INTEGER);
+    INSERT INTO team VALUES (63);
+    INSERT INTO user (id, username, email, avatarInfo) VALUES
+      (14, 'reader', 'reader@example.invalid', 'github:reader'), (15, 'gone', '', '');
+    INSERT INTO "group" (id, name, memberCount) VALUES
+      (61, 'Graphs', 4), (62, 'Algebra', 2), (63, 'Internal group', 3), (64, 'Removed group', 0);
+    INSERT INTO permission_for_user (objectId, objectType, userId, permissionLevel) VALUES
+      (51, 'Problem', 14, 1), (51, 'Problem', 15, 2), (51, 'Discussion', 14, 2), (51, 'Discussion', 15, 1);
+    INSERT INTO permission_for_group (objectId, objectType, groupId, permissionLevel) VALUES
+      (51, 'Problem', 61, 2), (51, 'Problem', 62, 1), (51, 'Problem', 63, 1), (51, 'Problem', 64, 2),
+      (51, 'Discussion', 61, 1), (51, 'Discussion', 63, 1), (51, 'Discussion', 64, 2), (52, 'Discussion', 62, 2);
+    DELETE FROM user WHERE id = 15;
+    DELETE FROM "group" WHERE id = 64;
+  `);
+  const runner = source.createQueryRunner();
+  let queryCount = 0;
+  runner.query = async (sql, parameters) => {
+    queryCount++;
+    return { records: rows.prepare(sql).all(...parameters) };
+  };
+  const repository = entity => runner.manager.getRepository(entity);
+  const userService = Object.assign(Object.create(UserService.prototype), { userRepository: repository(UserEntity) });
+  const groupService = Object.assign(Object.create(GroupService.prototype), { groupRepository: repository(GroupEntity) });
+  const permissionService = new PermissionService(
+    source, repository(PermissionForUserEntity), repository(PermissionForGroupEntity), groupService
+  );
+  const resource = { id: 51, isPublic: true, type: "Traditional", locales: ["en_US"] };
+  const lock = (_id, _mode, read) => read(resource);
+  const problemService = Object.assign(Object.create(ProblemService.prototype), {
+    permissionService, userService, groupService, findProblemById: async () => resource
+  });
+  const problem = Object.assign(Object.create(ProblemController.prototype), {
+    problemService, problemAccess: { userHasPermission: async () => true }, problemLocks: { lockProblemById: lock },
+    userService, groupService
+  });
+  const discussionService = Object.assign(Object.create(DiscussionService.prototype), {
+    permissionService, userService, groupService, findDiscussionById: async () => resource,
+    userHasPermission: async () => true, lockDiscussionById: lock
+  });
+  const discussion = Object.assign(Object.create(DiscussionController.prototype), {
+    discussionService, userService, groupService
+  });
+
+  const views = [
+    [() => problem.getProblem(null, { id: 51, permissions: true }), 1, [[61, "Graphs", 4, 2], [62, "Algebra", 2, 1]]],
+    [() => discussion.getDiscussionPermissions(null, { id: 51 }), 2, [[61, "Graphs", 4, 1]]]
+  ];
+  for (const [read, userLevel, expectedGroups] of views) {
+    queryCount = 0;
+    const { permissions } = await read();
+    assert.equal(queryCount, 2);
+    assert.deepEqual(
+      permissions.userPermissions.map(({ user, permissionLevel }) => [user.id, user.username, permissionLevel]),
+      [[14, "reader", userLevel]]
+    );
+    const groups = permissions.groupPermissions.map(({ group, permissionLevel }) =>
+      [group.id, group.name, group.memberCount, permissionLevel]);
+    assert.deepEqual(groups.sort((a, b) => a[0] - b[0]), expectedGroups);
+  }
+
+  const admin = { id: 12, isAdmin: true };
+  const request = {
+    userPermissions: [],
+    groupPermissions: [{ groupId: 63, permissionLevel: 1 }, { groupId: 61, permissionLevel: 2 }]
+  };
+  const missing = { error: "NO_SUCH_GROUP", errorObjectId: 63 };
+  assert.deepEqual(await problem.setProblemPermissions(admin, { problemId: 51, ...request }), missing);
+  assert.deepEqual(await discussion.setDiscussionPermissions(admin, { discussionId: 51, ...request }), missing);
 });

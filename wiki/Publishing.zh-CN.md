@@ -43,13 +43,28 @@ git push
 
 导出脚本只写入 Markdown 文件：不运行 Git，也不联网。它会把页面之间的链接转换为 Wiki 链接，并生成中文在前的双语侧栏 `_Sidebar.md`。`Home` 是中文首页，`Home.en` 是英文首页；保留 `Home.zh-CN` 是为了让旧链接仍然可用。同名页面会被替换，因此推送前请检查 `git diff`；只存在于 Wiki 中的页面会保留。
 
+**检查 Wiki 是否一致。** `wiki/` 改变时，GitHub Wiki 不会自动更新。发布前后，请把它与本仓库的页面比较：
+
+```bash
+cd /path/to/LLMOJ
+python3 deploy/export-wiki.py --compare ~/llmoj-wiki
+```
+
+它会导出到临时目录，列出 Wiki 中缺少的、多出的和内容不同的页面，并忽略导出脚本改写的链接和换行符的差异。两者一致时退出码为 0，不一致时为 1（参数错误时为 2）；它不会修改任何文件，也不联网，所以请先对 Wiki 克隆执行 `git pull`。分叉仓库请加上 `--repository OWNER/REPO`。
+
 如果更新包中已经包含导出好的 Wiki 页面，请把其导出目录**内部**的 `.md` 文件复制到 Wiki 仓库根目录，不要放进 `wiki/` 子目录，也不要覆盖其中的 `.git`。
 
 参见 GitHub 关于[本地编辑 Wiki](https://docs.github.com/en/communities/documenting-your-project-with-wikis/adding-or-editing-wiki-pages) 和[用 GitHub Desktop 克隆](https://docs.github.com/en/desktop/adding-and-cloning-repositories/cloning-and-forking-repositories-from-github-desktop)的说明。
 
 ## 创建版本标签
 
-创建标签之前，请在全新的 Ubuntu 服务器上测试两个安装器（`install.sh` 和 `install.zh-CN.sh`）：`all` 和 `web` 模式、自定义端口、默认和自定义 Docker 源、第一个管理员以及远程评测机。然后：
+创建标签之前，请在全新的 Ubuntu 服务器上测试两个安装器（`install.sh` 和 `install.zh-CN.sh`）：`all` 和 `web` 模式、自定义端口、默认和自定义 Docker 源、第一个管理员以及远程评测机。还要检查：
+
+1. 要打标签的提交已通过 CI：**Code**（它还会对解压后的源码包进行构建、类型检查和代码检查，并检查文档中写的协议版本与代码一致）、两种架构的 **Native**，以及 **Dependencies**。
+2. 已发布的 Wiki 一致：`python3 deploy/export-wiki.py --compare ~/llmoj-wiki` 的退出码为 0（不是 0 时请先发布页面）。
+3. 在发布说明中记下两个版本：源码提交（`git rev-parse HEAD`）和 Wiki 提交（`git -C ~/llmoj-wiki rev-parse HEAD`）。
+
+然后：
 
 ```bash
 git tag v0.1.0
@@ -60,10 +75,12 @@ git push origin v0.1.0
 
 ## 从源码包创建新仓库
 
-如果要从已安装的副本在新仓库中发布 LLMOJ，请先生成干净的源码包。它只包含 Git 跟踪的文件，不包括旧的 `.git`、`runtime`、`data`、日志、真实配置或密钥。该工具不会覆盖已有的压缩包，必要时请换一个文件名。
+如果要在新仓库中发布 LLMOJ，请先从目标版本的 Git 检出副本生成干净的源码包。它只包含 Git 跟踪的文件（包括来自子模块的 testlib），不包括旧的 `.git`、`runtime`、`data`、日志、真实配置或密钥；加上 `--include-untracked` 还会包含 Git 没有跟踪、也没有忽略的文件，汇总信息会说明使用了哪种选择方式。该工具不会覆盖已有的压缩包，必要时请换一个文件名。
+
+`/opt/LLMOJ` 这样的已安装副本没有 `.git`，工具无法在那里判断哪些是源码。在那里运行它也可以：它不会写入任何文件，而是根据安装和升级记录（回滚之后同样适用）判断已安装的版本，并输出把这个提交连同子模块克隆到新目录、再生成源码包的命令。如果无法判断版本（例如文件被修改过），请向安装站点的人索取对应版本的检出副本。对于检出副本：
 
 ```bash
-cd /opt/LLMOJ
+cd ~/llmoj-checkout
 python3 deploy/prepare-github.py --archive release/llmoj-source.tar.gz
 sha256sum release/llmoj-source.tar.gz
 mkdir -p ~/llmoj-publish
@@ -71,7 +88,7 @@ tar -xzf release/llmoj-source.tar.gz -C ~/llmoj-publish
 cd ~/llmoj-publish/LibreOJ
 ```
 
-压缩包中是一个 `LibreOJ/` 目录。testlib 及其许可证作为普通文件包含在内：请原样提交，这样 GitHub 的下载快照可以直接安装；不要把这个目录改回子模块链接。`.gitmodules` 仍然记录 testlib 的来源。
+压缩包中是一个 `LibreOJ/` 目录，其中包括根目录的 `upgrade.sh`、`upgrade.zh-CN.sh` 和共享的代码检查规则 `eslint.airbnb-base.mjs`。该工具会检查源码包是否完整：Git 跟踪的每个文件要么在包中，要么属于某条已命名的排除规则（见[源码包](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/SOURCE-PACKAGE.zh-CN.md)）；如果某个被跟踪的文件两者都不是（例如仓库根目录新增的文件），工具会停止，不生成源码包。testlib 及其许可证作为普通文件包含在内：请原样提交，这样 GitHub 的下载快照可以直接安装；不要把这个目录改回子模块链接。`.gitmodules` 仍然记录 testlib 的来源。
 
 在 GitHub 上创建一个空的**公开**仓库，不要自动生成 README 或许可证（匿名一键安装需要公开仓库）。把两份 README 和 Wiki 命令中的 `houyhlouis/LLMOJ` 替换为你的仓库路径，然后推送：
 

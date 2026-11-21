@@ -8,12 +8,13 @@ import { auditSchema, applySchema, COMMUNITY_TABLES, LEGACY_SUBMISSION_STATUSES,
   FILE_SIZE_BIGINT_SQL, TEAM_FILE_SIZE_BIGINT_SQL, TEAM_QUOTA_DEFAULT_SQL, TWO_FACTOR_SQL, TWO_FACTOR_TABLES, JUDGE_QUEUE_SQL, JUDGE_QUEUE_TABLES, JUDGE_CLIENT_DRAINING_SQL, DATA_VERSION_SQL, DATA_VERSION_TABLES, AI_BUDGET_SQL, AI_BUDGET_TABLES,
   RUNTIME_IDENTITY_SQL, RUNTIME_IDENTITY_TABLES, RUNTIME_IDENTITY_COLUMNS, AI_EXECUTION_SQL, AI_EXECUTION_TABLES, DATA_RETENTION_SQL,
   DATA_RETENTION_TABLES, AI_EVIDENCE_SQL, AI_EVIDENCE_TABLES, AI_OPERATION_SQL, AI_OPERATION_COLUMNS } from '../upgrade-schema.mjs';
+import { CONTEST_VIRTUAL_SQL } from '../contest-virtual-schema.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(path.join(root, 'apps/backend/package.json'));
 const configPath = process.env.HYHOJ_COMMUNITY_SCHEMA_TEST_DB_CONFIG;
 
 test('real metadata: mature legacy upgrade, new-schema no-op, preserved data, repeat and drift rejection',
-  { skip: !configPath, timeout: 90000 }, async () => {
+  { skip: !configPath && 'needs HYHOJ_COMMUNITY_SCHEMA_TEST_DB_CONFIG', timeout: 90000 }, async () => {
   require('reflect-metadata');
   const ts = require('typescript');
   require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
@@ -43,6 +44,7 @@ test('real metadata: mature legacy upgrade, new-schema no-op, preserved data, re
       for (const table of RUNTIME_IDENTITY_TABLES) await ds.query('DROP TABLE `' + table + '`');
       for (const [table, column] of RUNTIME_IDENTITY_COLUMNS) await ds.query('ALTER TABLE `' + table + '` DROP COLUMN `' + column + '`');
     };
+    await ds.query('DROP TABLE `contest_virtual_participation`');
     await dropRuntimeIdentity();
     for (const table of COMMUNITY_TABLES) await ds.query('DROP TABLE `' + table + '`');
     for (const table of [...TWO_FACTOR_TABLES].reverse()) await ds.query('DROP TABLE `' + table + '`');
@@ -79,15 +81,15 @@ test('real metadata: mature legacy upgrade, new-schema no-op, preserved data, re
       console.error('Rejected legacy schema proposal:', (await ds.driver.createSchemaBuilder().log()).upQueries.map(query => query.query));
       throw error;
     }
-    assert.equal(legacy.queries.length, 46);
+    assert.equal(legacy.queries.length, 49);
     // The judge queue and data version tables are created with their runtime column
     const runtimeAdditions = RUNTIME_IDENTITY_SQL.filter(sql => !/`(judge_job_attempt|submission_result_history)`/.test(sql));
-    for (const sql of [...TWO_FACTOR_SQL, ...JUDGE_QUEUE_SQL, JUDGE_CLIENT_DRAINING_SQL, ...DATA_VERSION_SQL, ...AI_BUDGET_SQL, ...runtimeAdditions, ...AI_EXECUTION_SQL, ...DATA_RETENTION_SQL, ...AI_EVIDENCE_SQL]) assert(legacy.queries.includes(sql), sql);
+    for (const sql of [...CONTEST_VIRTUAL_SQL, ...TWO_FACTOR_SQL, ...JUDGE_QUEUE_SQL, JUDGE_CLIENT_DRAINING_SQL, ...DATA_VERSION_SQL, ...AI_BUDGET_SQL, ...runtimeAdditions, ...AI_EXECUTION_SQL, ...DATA_RETENTION_SQL, ...AI_EVIDENCE_SQL]) assert(legacy.queries.includes(sql), sql);
     assert.equal(runtimeAdditions.length, 3);
     assert.deepEqual(legacy.solutions, { pending: 0, schemaPending: true });
     assert(!legacy.queries.some(query => /DROP|TRUNCATE/.test(query)));
     const applied = await applySchema(ds);
-    assert.equal(applied.queries.length, 46);
+    assert.equal(applied.queries.length, 49);
     assert.equal(applied.solutions.classified, 1); assert.equal(applied.solutions.pending, 0);
     // Existing submissions have no data version, and no recorded runtime
     assert.deepEqual(await ds.query('SELECT * FROM submission ORDER BY id'),
@@ -98,6 +100,13 @@ test('real metadata: mature legacy upgrade, new-schema no-op, preserved data, re
     const repeat = await applySchema(ds);
     assert.deepEqual(repeat.queries, []); assert.equal(repeat.solutions.classified, 0);
     assert.equal((await ds.driver.createSchemaBuilder().log()).upQueries.length, 0);
+    // MariaDB commits each DDL independently. Resume a virtual run migration after its first FK.
+    await ds.query('DROP TABLE `contest_virtual_participation`');
+    const previous = (await auditSchema(ds)).queries;
+    assert.deepEqual(previous, CONTEST_VIRTUAL_SQL);
+    for (const sql of previous.slice(0, 2)) await ds.query(sql);
+    assert.deepEqual((await applySchema(ds)).queries, [CONTEST_VIRTUAL_SQL[2]]);
+    assert.deepEqual((await auditSchema(ds)).queries, []);
     // From the previous release: only the content hashes and runtimes are added, and every row is kept
     await ds.query("INSERT INTO file(id,uuid,size,uploadTime) VALUES (800,'00000000-0000-4000-8000-000000000800',64,'2026-10-10')");
     await ds.query("INSERT INTO judge_job_attempt(taskId,fence,judgeClientId,leaseOwner,startedAt,endedAt,outcome) VALUES ('00000000-0000-4000-8000-000000000801',1,3,'socket','2026-10-10','2026-10-10','Finished')");

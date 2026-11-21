@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 
 import { DataSource, In } from "typeorm";
@@ -6,6 +6,8 @@ import { DataSource, In } from "typeorm";
 import { ContestEntity } from "./contest.entity";
 import { ContestProblemEntity } from "./contest-problem.entity";
 import { ContestSummaryEntity } from "./contest-summary.entity";
+import { ContestVirtualParticipationEntity } from "./contest-virtual-participation.entity";
+import { runTimes } from "./contest-virtual";
 import { ContestAccessService } from "./contest-access.service";
 import { ContestScoreService } from "./contest-score.service";
 import { ContestProblemService } from "./contest-problem.service";
@@ -25,6 +27,8 @@ import { SubmissionService } from "../submission/submission.service";
 import { teamResourceAccess } from "../team/team-access";
 import { SubmissionEntity } from "../submission/submission.entity";
 import { FileService } from "../file/file.service";
+import { getCurrentRequest } from "../auth/auth.middleware";
+import { AuditLogEntity } from "../audit/audit-log.entity";
 
 /**
  * Contests themselves: the contest list and page, creating, changing and deleting contests, scoreboards and their
@@ -57,15 +61,24 @@ export class ContestService {
   }
 
   async detail(user: UserEntity, id: number) {
-    const { contest, manager } = await this.access.get(user, id);
-    const now = Date.now();
+    const { contest, manager, now, virtualRun, participation } = await this.access.get(user, id);
     const started = contestStarted(contest, now);
     const ended = contestEnded(contest, now);
     const problems = started || manager ? await this.contestProblems.problemList(contest.id) : [];
     // Running NOI contests conceal verdicts even when aggregate statistics are enabled.
     const showStatistics = problems.length && contestStatisticsVisible(contest, manager, now);
-    const scores = problems.length ? await this.scores.contestScores(contest, problems) : [];
-    const own = (await this.access.canSeeOwnResults(user)) ? scores.find(row => row.userId === user.id) : null;
+    const scores = !problems.length
+      ? []
+      : virtualRun
+        ? await this.scores.virtualScores(contest, problems, now - +contest.startTime)
+        : await this.scores.contestScores(contest, problems);
+    let own: (typeof scores)[number];
+    if (user && (await this.access.canSeeOwnResults(user))) {
+      // A finished virtual participant sees their own result; the ended contest's aggregate stays official.
+      const ownScores =
+        participation && !virtualRun && problems.length ? await this.scores.virtualScores(contest, problems) : scores;
+      own = ownScores.find(row => row.userId === user.id);
+    }
     const problemStats = Object.fromEntries(
       problems.map(problem => {
         const entries = scores.map(row => row.problems[problem.id]).filter(Boolean);
@@ -88,6 +101,8 @@ export class ContestService {
         return [p.id, contestOwnResult(entry, contest, manager, now)];
       })
     );
+    const canRank = (await this.access.scoreboard(user, contest, manager, now, virtualRun)) === "allowed";
+    const reason = await this.access.virtualStartReason(user, contest, manager, participation);
     return {
       contest,
       problems,
@@ -97,9 +112,35 @@ export class ContestService {
       serverTime: new Date(),
       problemStats,
       ownResults,
-      canRank: (await this.access.scoreboard(user, contest, manager, now)) === "allowed",
-      canSubmit: await this.access.canSubmit(user, contest, manager, now)
+      canRank,
+      canSubmit: await this.access.canSubmit(user, contest, manager, now),
+      virtualParticipation: { canStart: reason === null, reason, run: participation ? runTimes(participation) : null },
+      hasVirtualParticipants: !!(ended && canRank && (await this.scores.hasVirtualParticipants(contest)))
     };
+  }
+
+  async startVirtual(user: UserEntity, id: number) {
+    return await this.db.transaction("READ COMMITTED", async transaction => {
+      const contest = await this.access.requireVirtualStart(user, id, transaction);
+      // Submission and contest DATETIMEs have second precision. Persist and return the identical window.
+      const startTime = new Date(Math.floor(Date.now() / 1000) * 1000);
+      const endTime = new Date(+startTime + (+contest.endTime - +contest.startTime));
+      await transaction.insert(ContestVirtualParticipationEntity, {
+        contestId: id,
+        userId: user.id,
+        startTime,
+        endTime,
+        createdAt: startTime
+      });
+      await transaction.save(AuditLogEntity, {
+        userId: user.id,
+        action: "contest.start_virtual",
+        time: startTime,
+        ip: getCurrentRequest()?.ip || "127.0.0.1",
+        details: { contestId: id }
+      });
+      return { run: { startTime, endTime } };
+    });
   }
 
   async save(user: UserEntity, id: number, data: ContestRequestData) {
@@ -113,10 +154,11 @@ export class ContestService {
       contest = this.db.getRepository(ContestEntity).create({ ownerId: user.id, createdAt: new Date() });
     }
     if (!isContestRule(data.rule)) throw new BadRequestException("Invalid rule");
-    if (id && data.rule !== contest.rule && (await this.db.getRepository(SubmissionEntity).countBy({ contestId: id })))
-      throw new BadRequestException("Cannot change rule after submissions");
     const start = new Date(data.startTime);
     const end = new Date(data.endTime);
+    // Validate, compare and persist the same whole seconds as the contest's DATETIME columns.
+    start.setUTCMilliseconds(0);
+    end.setUTCMilliseconds(0);
     if (!Number.isFinite(+start) || !Number.isFinite(+end) || +start >= +end)
       throw new BadRequestException("Invalid time range");
     let ruleOptions: ContestEntity["ruleOptions"];
@@ -153,17 +195,49 @@ export class ContestService {
       adminIds: [...new Set(data.adminIds)],
       languages
     });
-    await this.db.getRepository(ContestEntity).save(contest);
+    if (id) {
+      await this.db.transaction("READ COMMITTED", async transaction => {
+        // Start and submission admission hold a shared lock until their records commit.
+        const stored = await transaction.findOne(ContestEntity, { where: { id }, lock: { mode: "pessimistic_write" } });
+        if (!stored) throw new NotFoundException();
+        if (
+          data.rule !== stored.rule &&
+          (await transaction.getRepository(SubmissionEntity).existsBy({ contestId: id }))
+        )
+          throw new BadRequestException("Cannot change rule after submissions");
+        if (
+          (+stored.startTime !== +start || +stored.endTime !== +end) &&
+          (await transaction.getRepository(ContestVirtualParticipationEntity).existsBy({ contestId: id }))
+        )
+          throw new BadRequestException({
+            error: "VIRTUAL_RUNS_EXIST",
+            message: "Virtual runs have started for this contest, so its start and end can't change."
+          });
+        await transaction.save(contest);
+      });
+    } else await this.db.getRepository(ContestEntity).save(contest);
     return { id: contest.id };
   }
 
-  async ranklist(user: UserEntity, id: number) {
-    const { contest, manager } = await this.access.get(user, id, true);
-    const scoreboard = await this.access.scoreboard(user, contest, manager);
+  async ranklist(user: UserEntity, id: number, includeVirtual = false) {
+    return await this.readRanklist(user, id, includeVirtual ? "virtual" : "default");
+  }
+
+  private async readRanklist(user: UserEntity, id: number, mode: "default" | "virtual" | "export") {
+    const { contest, manager, now, virtualRun } = await this.access.get(user, id, true);
+    const scoreboard = await this.access.scoreboard(user, contest, manager, now, virtualRun);
     if (scoreboard === "denied") throw new ForbiddenException();
     if (scoreboard === "hidden") throw new ForbiddenException("Ranklist is hidden during this contest");
     const problems = await this.contestProblems.problemList(id);
-    const rows = await this.scores.contestScores(contest, problems);
+    const rows =
+      virtualRun || (mode === "virtual" && contestEnded(contest, now))
+        ? await this.scores.virtualScores(
+            contest,
+            problems,
+            virtualRun ? now - +contest.startTime : undefined,
+            mode !== "export"
+          )
+        : await this.scores.contestScores(contest, problems);
     const users = new Map(
       (rows.length ? await this.db.getRepository(UserEntity).findBy({ id: In(rows.map(r => r.userId)) }) : []).map(
         u => [u.id, u.username]
@@ -177,7 +251,7 @@ export class ContestService {
 
   async export(user: UserEntity, id: number) {
     await this.access.requirePrivilege(user, UserPrivilegeType.ExportContest);
-    const result = await this.ranklist(user, id);
+    const result = await this.readRanklist(user, id, "export");
     return {
       csv: csvDocument([
         ["Rank", "User", "Score", "Time (seconds)", ...result.problems.map(p => p.title)],
@@ -249,20 +323,43 @@ export class ContestService {
     if ((await teamResourceAccess(this.db, user, "contest", id)) !== null)
       throw new BadRequestException("Archive team contests from the team page");
     if (!(await this.access.get(user, id)).manager) throw new ForbiddenException();
-    for (const s of await this.db.getRepository(SubmissionEntity).findBy({ contestId: id })) {
-      // eslint-disable-next-line no-await-in-loop -- Finish each deletion before processing the next submission.
-      await this.submissions.deleteSubmission(s);
+    for (;;) {
+      // Submission admission holds a shared contest lock through commit. Finalize only when the exclusive
+      // lock sees no submissions. Release it before taking the problem/submission locks needed for cleanup.
+      // eslint-disable-next-line no-await-in-loop -- Each committed batch determines the next step.
+      const batch = await this.db.transaction("READ COMMITTED", async transaction => {
+        const contest = await transaction.findOne(ContestEntity, {
+          where: { id },
+          lock: { mode: "pessimistic_write" }
+        });
+        if (!contest) return { remove: null };
+        const submissions = await transaction.find(SubmissionEntity, {
+          where: { contestId: id },
+          order: { id: "ASC" },
+          take: 100
+        });
+        if (submissions.length) return { submissions };
+        const problems = await transaction
+          .getRepository(ContestProblemEntity)
+          .createQueryBuilder("p")
+          .where("p.contestId = :id", { id })
+          .setLock("pessimistic_write")
+          .getMany();
+        const remove = await this.files.deleteFile(
+          problems.flatMap(p => p.attachments.map(a => a.uuid)),
+          transaction
+        );
+        await transaction.delete(ContestEntity, { id });
+        return { remove };
+      });
+      if (!batch.submissions) {
+        batch.remove?.();
+        return {};
+      }
+      for (const submission of batch.submissions) {
+        // eslint-disable-next-line no-await-in-loop -- Cancel and clean each submission with its existing locks.
+        await this.submissions.deleteSubmission(submission);
+      }
     }
-    const problems = await this.db.getRepository(ContestProblemEntity).findBy({ contestId: id });
-    let remove: () => void;
-    await this.db.transaction(async manager => {
-      remove = await this.files.deleteFile(
-        problems.flatMap(p => p.attachments.map(a => a.uuid)),
-        manager
-      );
-      await manager.delete(ContestEntity, { id });
-    });
-    remove();
-    return {};
   }
 }

@@ -78,7 +78,7 @@ const generated = () => ({
 
 test(
   "AI current permission publication and import authorization (real MariaDB)",
-  { skip: !process.env.HYHOJ_AI_TEST_DB_CONFIG, timeout: 30000 },
+  { skip: !process.env.HYHOJ_AI_TEST_DB_CONFIG && "needs HYHOJ_AI_TEST_DB_CONFIG", timeout: 30000 },
   async t => {
     const config = backendRequire("js-yaml").load(fs.readFileSync(process.env.HYHOJ_AI_TEST_DB_CONFIG, "utf8")).services
       .database;
@@ -243,7 +243,7 @@ test(
           progress: 0,
           error: null
         });
-        const redis = { cacheDelete: async () => {} };
+        const redis = { generationCache: { invalidate: async () => {} }, cacheDelete: async () => {} };
         const problems = bareProblemServices();
         Object.assign(problems, {
           connection: db,

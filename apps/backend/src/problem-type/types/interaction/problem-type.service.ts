@@ -35,7 +35,7 @@ export class ProblemTypeInteractionService implements ProblemTypeServiceInterfac
   getDefaultJudgeInfo(): ProblemJudgeInfoInteraction {
     return {
       timeLimit: Math.min(1000, this.configService.config.resourceLimit.problemTimeLimit),
-      memoryLimit: Math.min(512, this.configService.config.resourceLimit.problemTimeLimit),
+      memoryLimit: Math.min(512, this.configService.config.resourceLimit.problemMemoryLimit),
       runSamples: true,
       subtasks: null,
       interactor: null

@@ -53,6 +53,10 @@ A submission is judged with the problem's judging data as it was when it was sub
 - Replaced or removed test data files stay while something still needs them (see [How long removed test data stays](#how-long-removed-test-data-stays)). Removed attachments are deleted at once.
 - A rejudge keeps the result it replaces. Users who can rejudge the submission see the five most recent under **Earlier results**: when each was replaced, its status, score, time, memory, data version and what judged it. Deleting the submission deletes them too.
 
+### Changing a problem's type
+
+A problem's type (traditional, interactive, communication, answer submission) can change only while it has no submissions. The change replaces its judge settings with the new type's defaults; existing data versions keep the settings they recorded. The new settings are used at once: every backend stops using the old ones as soon as the change is saved, and a data version made afterwards records the new type's settings. Whether the problem accepts submissions doesn't change. A problem that accepts them and becomes interactive or communication accepts them before its interactor or manager is set up, so set it up, or turn submissions off first.
+
 ### How long removed test data stays
 
 A data version names its test data files, but a result can only be judged again with the same data while those files exist. When test data is replaced or removed, its files aren't deleted at once. A cleanup every ten minutes deletes those that nothing keeps any more:

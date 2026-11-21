@@ -44,7 +44,7 @@ const deferred = () => {
 test(
   "registration policy persistence, authorization and atomic updates (real MariaDB)",
   {
-    skip: !process.env.LLMOJ_REGISTRATION_TEST_DATABASE,
+    skip: !process.env.LLMOJ_REGISTRATION_TEST_DATABASE && "needs LLMOJ_REGISTRATION_TEST_DATABASE for a disposable MariaDB socket",
     timeout: 90000
   },
   async t => {

@@ -50,19 +50,25 @@ node packages/frontend/scripts/generate-api.js --from-backend-build
 
 评测沙箱镜像用 Docker 构建，提交的程序在原生 `simple-sandbox` 中运行。中英文安装器共用同一份代码，只有提示语言不同；有测试检查两个下载脚本除此之外完全相同。见 [Docker 源](wiki/Docker-Sources.zh-CN.md)。
 
+## 在本机运行
+
+`deploy/dev/stack.mjs` 为后端和前端开发服务器启动一套一次性的 MariaDB、Redis 和 MinIO，可选地添加示例数据，用完后再全部删除，不需要 root：见[本地开发](wiki/Development.zh-CN.md)。[使用 API](wiki/API.zh-CN.md) 介绍 HTTP API 的约定，[容量](wiki/Capacity.zh-CN.md#重复这项测量)介绍 `deploy/benchmark` 中的性能测试工具。
+
 ## 测试
 
 ```bash
 pnpm test
 ```
 
-通过 [deploy/test/run-tests.mjs](deploy/test/run-tests.mjs) 运行所有测试，最后输出汇总。指定分组可以只运行这些分组，例如 `pnpm test backend frontend`：`ai`、`judge`、`backend`、`frontend`、`deploy` 和 `wiki`。请先构建（`pnpm build`）：数据库结构和 API 契约测试读取构建好的后端。CI（[.github/workflows/ci.yml](.github/workflows/ci.yml)）用 `--ci` 运行相同的列表，但不包括需要 Ubuntu 26.04 的 Python 和系统工具的部署测试；这些测试在这样的机器上用 `pnpm test` 运行。
+通过 [deploy/test/run-tests.mjs](deploy/test/run-tests.mjs) 运行所有测试，最后输出汇总。指定分组可以只运行这些分组，例如 `pnpm test backend frontend`：`ai`、`judge`、`backend`、`frontend`、`deploy` 和 `wiki`。请先构建（`pnpm build`）：数据库结构和 API 契约测试读取构建好的后端。CI（[.github/workflows/ci.yml](.github/workflows/ci.yml)）用 `--ci` 运行相同的分组。
+
+在任何测试开始之前，运行器会检查仓库中的每个测试文件恰好属于一个分组，或属于一条写明原因的排除规则（[deploy/test/suite-inventory.mjs](deploy/test/suite-inventory.mjs)）：新增的测试文件没有登记或被登记两次时，运行会停止。新测试请登记在 `deploy/test/run-tests.mjs` 中（MariaDB 测试还需要在 `deploy/test/setup-community-ci.mjs` 中加入其数据库）。部署测试也在那里分类并写明原因：可移植的以普通用户运行，需要 root 的通过 `sudo` 运行（CI 中也是），需要真实安装环境的主机验收测试不在 CI 中运行。使用 `--ci` 时，缺少 CI 会提供的数据库变量或 `redis-server` 会使运行停止，而不是让测试跳过。汇总会列出每个测试运行和跳过了多少用例，以及原因。
 
 需要本机缺少的条件的测试会跳过相应用例，汇总会列出缺少什么：
 
 - **MariaDB：** 下面的[数据库测试](#数据库测试)需要设置各自的变量；
 - **redis-server**，用于评测队列和 Redis 测试；
-- **root**，用于部署测试中创建账户、挂载文件系统或运行服务的用例。运行器在可以时使用免密码的 `sudo`（与 CI 相同），并用 `-B` 运行 Python，以免在源码树中出现属于 root 的缓存文件；
+- **root**，用于部署测试中创建账户、挂载文件系统或运行服务的用例。运行器在可以时使用免密码的 `sudo`（与 CI 相同；设置 `LLMOJ_TEST_NO_SUDO=1` 可让它完全不尝试），并用 `-B` 运行 Python，以免在源码树中出现属于 root 的缓存文件；
 - **MinIO**（`LLMOJ_MINIO_BINARY`，或某个安装的 `runtime/minio`），用于上传封存测试和备份检查器的内容检查；
 - **`TMPDIR` 中 2 GiB 空间**，用于 AI 测试的 ZIP 归档。临时目录较小时，运行器改用 `/var/tmp`；
 - **Chrome 或 Chromium**（`LLMOJ_TEST_CHROME`，或 `PATH` 中的 `google-chrome` 或 `chromium`），用于检查站点会移除旧 bootstrap service worker 的测试。测试以无界面方式、不带沙箱运行浏览器，只打开本地测试页面。
@@ -93,6 +99,11 @@ pnpm test
 | `LLMOJ_AI_BUDGET_TEST_DB_CONFIG` | `ai/ai-budget.mariadb.test.cjs`（空数据库） |
 | `LLMOJ_ACCESS_MATRIX_TEST_DB_CONFIG` | `access/permission-matrix.mariadb.test.cjs`（空数据库） |
 | `LLMOJ_OPERATIONS_TEST_DB_CONFIG` | `metrics/operational-metrics.mariadb.test.cjs`、`contest/contest-score-revision.mariadb.test.cjs`、`ai/ai-execution.mariadb.test.cjs`（会删除其中所有数据表） |
+| `LLMOJ_JUDGE_INFO_CACHE_TEST_DB_CONFIG` | `problem/problem-judge-info-cache.mariadb.test.cjs`（更改类型后的评测设置缓存；还需要 `redis-server`） |
+| `LLMOJ_STATISTICS_CACHE_TEST_DB_CONFIG` | `submission/submission-statistics-cache.mariadb.test.cjs`（练习统计缓存与迟到的读取；还需要 `redis-server`） |
+| `LLMOJ_CONTEST_VIRTUAL_TEST_DB_CONFIG` | `contest/contest-virtual-start.mariadb.test.cjs`（开始虚拟参赛与同时进行的提交和修改；数据库 `llmoj_test_contest_virtual`，须为空） |
+| `LLMOJ_DIAGNOSTIC_BUNDLE_TEST_DB_CONFIG` | `site-management/diagnostic-bundle.mariadb.test.cjs`（诊断包中的已保存任务、队列和评测机状态；数据库 `llmoj_test_diagnostic_bundle`，须为空；还需要 `redis-server`） |
+| `LLMOJ_NARROW_WRITES_TEST_DB_CONFIG` | `user/user-narrow-writes.mariadb.test.cjs`、`submission/submission-visibility.mariadb.test.cjs`（在修改资料、邮箱和公开状态的同时并发修改数据；使用各自的随机数据表） |
 | `LLMOJ_SCHEMA_TEST_DB_CONFIG` | `deploy/test/initialize-schema.test.mjs` |
 | `LLMOJ_REGISTRATION_TEST_DATABASE` | `auth/registration-review.mariadb.test.cjs`、`site-management/registration-settings.mariadb.test.cjs` |
 
@@ -119,7 +130,10 @@ socket 必须符合上面的格式；切换数据库或包含客户端命令的�
 
 ```bash
 pnpm --filter @libreoj/judge test:native
+node --test packages/simple-sandbox/test/cgroup-events.test.mjs
 ```
+
+第二条命令会围绕沙箱的 cgroup 事件等待函数编译一个小的 C++ 程序，检查它在事件文件格式错误时也会关闭描述符（需要 g++ 和 libfmt，缺少时跳过）。`pnpm test` 的 judge 组也会运行它，以及检查原生调用失败时沙箱清理的 `packages/simple-sandbox/test/sandbox-process.test.cjs`。
 
 运行沙箱自身的检查，以及针对已安装站点的评测机自检：
 

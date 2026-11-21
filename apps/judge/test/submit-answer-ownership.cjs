@@ -109,6 +109,7 @@ function fixture(options = {}) {
       }
     },
     "../../../sandbox": {},
+    "../../../rpc": { isCanceled: () => false },
     "../../../config": {},
     "../../../utils": {},
     "../../../omittableString": { prependOmittableString: (prefix, message) => prefix + message },
@@ -148,8 +149,9 @@ function fixture(options = {}) {
         else await nextTurn(); // The default checker completes before the file branch.
         fail("download");
       },
-      unzip: async wantedFiles => {
+      unzip: async (wantedFiles, isCanceled) => {
         calls.unzip++;
+        assert.equal(isCanceled(), false);
         assert.deepEqual(Array.from(wantedFiles), ["1.out", "custom.out"]);
         fail("unzip");
         return unzipResult;

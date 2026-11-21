@@ -14,9 +14,10 @@ import { RedisService } from "../redis/redis.service";
 
 // A contest without changes for this long starts its revisions again; cached scores never live this long
 const REVISION_KEEP_SECONDS = 30 * 24 * 60 * 60;
-const CHANGED_CONTESTS = "changedContestIds";
+const CHANGED_CONTESTS = "changedContestScoreKeys";
 
-const revisionKey = (contestId: number) => `contest-score-revision:${contestId}`;
+const revisionKey = (contestId: number, virtual: boolean) =>
+  virtual ? `contest-virtual-score-revision:${contestId}` : `contest-score-revision:${contestId}`;
 
 /**
  * A revision of each contest's submissions, for caching what's computed from all of them (scores). The transaction
@@ -36,20 +37,21 @@ export class ContestScoreRevisionService implements EntitySubscriberInterface, O
   }
 
   /** Call in the transaction that writes a submission of the contest. */
-  noteChange(manager: EntityManager, contestId: number): void {
+  noteChange(manager: EntityManager, contestId: number, virtual = false): void {
+    const key = revisionKey(contestId, virtual);
     const { queryRunner } = manager;
     if (!queryRunner?.isTransactionActive) {
-      this.advance([contestId]);
+      this.advance([key]);
       return;
     }
-    if (!queryRunner.data[CHANGED_CONTESTS]) queryRunner.data[CHANGED_CONTESTS] = new Set<number>();
-    queryRunner.data[CHANGED_CONTESTS].add(contestId);
+    if (!queryRunner.data[CHANGED_CONTESTS]) queryRunner.data[CHANGED_CONTESTS] = new Set<string>();
+    queryRunner.data[CHANGED_CONTESTS].add(key);
   }
 
   afterTransactionCommit(event: TransactionCommitEvent): void {
     // A savepoint was released, not the transaction committed
     if (event.queryRunner.isTransactionActive) return;
-    const changed: Set<number> = event.queryRunner.data?.[CHANGED_CONTESTS];
+    const changed: Set<string> = event.queryRunner.data?.[CHANGED_CONTESTS];
     if (!changed) return;
     delete event.queryRunner.data[CHANGED_CONTESTS];
     this.advance([...changed]);
@@ -60,14 +62,14 @@ export class ContestScoreRevisionService implements EntitySubscriberInterface, O
   }
 
   /** The contest's current revision; rejects without Redis. */
-  async revision(contestId: number): Promise<string> {
-    return (await this.redisService.cacheGet(revisionKey(contestId))) ?? "0";
+  async revision(contestId: number, virtual = false): Promise<string> {
+    return (await this.redisService.cacheGet(revisionKey(contestId, virtual))) ?? "0";
   }
 
   // Never delays or fails the commit it follows: a revision that couldn't move on is caught up by the cache's time limit
-  private advance(contestIds: number[]): void {
-    Promise.all(
-      contestIds.map(contestId => this.redisService.increment(revisionKey(contestId), REVISION_KEEP_SECONDS))
-    ).catch(e => logger.warn(`Failed to update contest score revisions: ${e}`));
+  private advance(keys: string[]): void {
+    Promise.all(keys.map(key => this.redisService.increment(key, REVISION_KEEP_SECONDS))).catch(e =>
+      logger.warn(`Failed to update contest score revisions: ${e}`)
+    );
   }
 }

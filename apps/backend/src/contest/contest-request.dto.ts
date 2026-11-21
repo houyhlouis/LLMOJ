@@ -31,6 +31,8 @@ export interface ContestRequestData {
   content?: SubmissionContent | string;
   problemId?: number;
   userId?: number;
+  /** Include virtual participants in the contest ranklist. */
+  virtual?: boolean;
   locale?: Locale;
   /** The viewer's time zone (IANA), for times in downloaded statements */
   timeZone?: string;

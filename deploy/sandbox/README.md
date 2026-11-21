@@ -1,5 +1,7 @@
 # LibreOJ 原版评测沙盒
 
+简体中文 | [English](#the-original-libreoj-judging-sandbox)
+
 本项目使用 [LibreOJ/LibreOJ](https://github.com/LibreOJ/LibreOJ) 原版 `infra/sandbox-rootfs` 构建配方，保持该目录与仓库上游版本一致。arm64（AArch64）服务器使用 `infra/sandbox-rootfs/arm64/` 中的配方：同样的编译器、版本和 Ubuntu 软件包快照，换用 arm64 的软件包和下载，没有 32 位与 x32 工具链（见 [ARM64 服务器](../../wiki/ARM64.zh-CN.md)）。评测进程和 AI 生成程序继续通过 `simple-sandbox` 执行，共享已有队列、资源限制和安全修复。
 
 ## 准备与构建
@@ -56,3 +58,68 @@ LibreOJ 项目代码按根目录 `LICENSE` 的 MIT 条款使用；`infra/sandbox
 ## 验证
 
 部署前执行 `infra/sandbox-rootfs` 自带的构建与暂存 smoke test，并通过项目类型检查、原生沙盒测试、竞赛语言选项一致性测试和 grader/AI 回归。Judge 服务的正式运行验证须在实际部署并明确启动服务后完成。
+
+---
+
+<a id="the-original-libreoj-judging-sandbox"></a>
+
+# The original LibreOJ judging sandbox
+
+[简体中文](#libreoj-原版评测沙盒) | English. This is a translation of the Chinese text above.
+
+This project uses the original `infra/sandbox-rootfs` build recipe of [LibreOJ/LibreOJ](https://github.com/LibreOJ/LibreOJ) and keeps that directory identical to the upstream version. arm64 (AArch64) servers use the recipe in `infra/sandbox-rootfs/arm64/`: the same compilers, versions and Ubuntu package snapshot, with arm64 packages and downloads, and no 32-bit or x32 toolchains (see [ARM64 servers](../../wiki/ARM64.md)). Judged programs and AI-generated programs still run through `simple-sandbox`, sharing the existing queues, resource limits and security fixes.
+
+## Preparing and building
+
+By default `build.sh` only shows the recipe ID and the target path: it downloads no image, mounts no file system and starts no service. Building needs Docker with BuildKit (buildx), Git, Bash, gzip and SHA-256 tools. Staging (checking and installing an image) needs root, Linux `chroot` and mount permissions, and a host of the image's architecture: an amd64 image also needs a kernel that runs 32-bit programs, and the default full check also needs x32 support in the kernel; a host without x32 support must choose the check described below explicitly. The script uses the recipe of the host's architecture; `ROOTFS_ARCHITECTURE=amd64|arm64` picks the other one for showing the plan or building (building for the other architecture needs Docker's QEMU user-mode emulation), and staging accepts only images of the host's architecture.
+
+```bash
+cd /opt/LLMOJ
+bash deploy/sandbox/build.sh plan
+bash deploy/sandbox/build.sh build
+# With the absolute ARCHIVE path that the previous command printed:
+sudo bash deploy/sandbox/build.sh stage /opt/LLMOJ/runtime/sandbox-archives/rootfs-ACTUAL_ROOTFS_ID.tar.gz
+# Only when the host definitely can't run x32 programs:
+sudo env LIBREOJ_X32_SUPPORTED=0 bash deploy/sandbox/build.sh stage /opt/LLMOJ/runtime/sandbox-archives/rootfs-ACTUAL_ROOTFS_ID.tar.gz
+```
+
+The build script calls the upstream `infra/sandbox-rootfs/build.sh` directly. The upstream recipe pins the base image, downloaded packages and testlib by digest or checksum, and APT uses a snapshot of a fixed date. The recipe's content gives the `ROOTFS_ID`, and the archive comes with a SHA-256 file. The archive uses gzip's fast compression level and shows the bytes processed and the rate on standard error; the compression level isn't part of the `ROOTFS_ID`, and the archive format and checksum rules stay the same. Pinned sources make builds more reproducible, but a Docker export isn't promised to be byte-for-byte identical across builders.
+
+The staging script calls the upstream `stage.sh` directly. It checks the archive's hash, the embedded ID, device nodes and the sandbox UID, runs the upstream smoke test of every language, unmounts the check's mounts, installs the image to `runtime/rootfs-<ID>`, and then creates the `runtime/sandbox-rootfs` symbolic link and the `runtime/rootfs-id` build metadata. An existing target isn't overwritten. Neither building nor staging starts the judge or any other service.
+
+`infra/sandbox-rootfs/stage.sh` is used by default. arm64 images always use `stage-host.sh` with `infra/sandbox-rootfs/arm64/smoke-test.sh` (there are no x32 checks to skip). Both staging entries set the permissions of the check directory explicitly, so that UID 999 can still read the check scripts on the read-only mount when the installer runs with `umask 0077`, and can't write to that directory. With `LIBREOJ_X32_SUPPORTED=0` set explicitly, `stage-host.sh` and `smoke-test-host.sh` are used: they skip only running x32 binaries, still compile x32, and keep every amd64/i386, language version, testlib and archive integrity check. This choice changes neither the upstream recipe, nor the image, nor its embedded `ROOTFS_ID`.
+
+The judge configuration uses:
+
+```yaml
+sandbox:
+  rootfs: /opt/LLMOJ/runtime/sandbox-rootfs
+  rootfsId: the 64-hex-digit ROOTFS_ID that build.sh printed
+  user: sandbox
+  resourceMode: default
+  environments:
+    PATH: /usr/local/bin:/usr/bin:/bin
+    HOME: /tmp
+    LC_ALL: en_US.UTF-8
+    PYTHONDONTWRITEBYTECODE: "1"
+```
+
+`resourceMode: default` uses the existing cgroup resource control. `rootfsId` is checked against `/etc/libreoj-rootfs-id` in the image; no separate ID file is needed. Enabling services and creating runtime directories belong to the actual deployment steps.
+
+## Languages
+
+The default submission options are the original 12 languages again: C++, C, Java, Kotlin, Pascal, Python, Rust, Swift, Go, Haskell, C# and F#. The versions and paths the recipe is expected to provide are in `languages.json` (for C and C++, `architectures` lists the amd64 options and `arm64Architectures` the arm64 ones); a build or staging counts as successful only after the upstream smoke test passes.
+
+GCC and Clang are called through the original links in `/usr/local/bin`. Python uses the original 2.7, 3.9 and 3.10 paths, with the same options in the frontend and backend. The C and C++ standards, compilers, optimizations and 32-bit options match the original recipe. This deployment offers only amd64/i386 (`64`/`32`) by default in the frontend and backend; arm64 judge machines compile only `64` (AArch64, with `-march=native -fsigned-char`), a 32-bit submission ends with a compilation error there, and the frontend doesn't offer the option while none of the site's judge machines can compile 32-bit programs. x32 submissions that the host can't run aren't accepted; a deployment that explicitly supports x32 and has passed the full staging check can extend the backend's C/C++ validation and the frontend's architecture options together. The fixes for linking communication problems' extra source files, Python's stack limit, Go's parallelism limit and .NET's compilation resource limits are kept.
+
+The adapter sources for Ruby, Perl, Bash, Awk, bc, assembly, Emacs Lisp, sed and dc that were added earlier are kept, but aren't registered by default, and their submission options aren't accepted. Some of these tools are build dependencies; the other interpreters aren't explicitly installed or checked by the original recipe. Enabling those languages needs a customized recipe of its own and matching changes to the backend's, frontend's and judge's language lists.
+
+## Licenses and distribution
+
+The LibreOJ project's code is used under the MIT terms of the root `LICENSE`; `infra/sandbox-rootfs/LICENSE` licenses that directory's recipe and helper scripts under the Unlicense. Keep these license texts.
+
+The generated rootfs is a collection of third-party software, whose licenses don't all become MIT or the Unlicense. Ubuntu packages, GCC/LLVM, Java, Python, Go, Rust, Swift, Kotlin, GHC, .NET/Mono and testlib each keep their own licenses. Releases of the repository contain only the build recipe and adapter sources, not the built rootfs or binary archives. If you distribute an image later, keep the copyright and license material in it, and meet the applicable source and other distribution obligations component by component; the exact sources are pinned in the upstream Dockerfile.
+
+## Checks
+
+Before deploying, run the build and staging smoke tests that come with `infra/sandbox-rootfs`, and pass the project's type checks, the native sandbox tests, the contest language option consistency test and the grader/AI regression tests. The judge service's real operation can be confirmed only after it is actually deployed and explicitly started.

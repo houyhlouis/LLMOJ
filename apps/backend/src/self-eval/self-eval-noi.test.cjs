@@ -48,6 +48,16 @@ test('all self-evaluation context APIs reject ordinary tasks, disabled contests 
     assert.equal(f.events.length,0);
   }
 });
+test('an active virtual viewer cannot list, prepare or run Self Eval in an enabled contest', async () => {
+  const f = fixture();
+  f.contest.startTime = new Date(1000);
+  f.contest.endTime = new Date(3000);
+  f.service.contestAccess.get = async () => ({ contest: f.contest, manager: false, virtualRun: { startTime: new Date() } });
+  for (const method of ['info', 'list', 'prepare', 'create', 'configureProfile'])
+    await assert.rejects(f.service[method](f.user, manual), /Self Eval is unavailable during virtual participation/);
+  assert.deepEqual(f.events, []);
+});
+
 test('NOI preparation requires an organizer with problem data permissions before the start', async()=>{
   const f=fixture();f.setManager(false);await assert.rejects(f.service.configureProfile(f.user,manual),ForbiddenException);
   f.setManager(true);f.contest.startTime=new Date(Date.now()-1);await assert.rejects(f.service.configureProfile(f.user,manual),/before the contest/);

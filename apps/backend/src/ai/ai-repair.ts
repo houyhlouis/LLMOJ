@@ -1,10 +1,7 @@
 /*
- * Narrow, bounded repairs (review Part III, H02/W04): what a job does about a failed run of its programs. A typed
- * failure is routed to running the same programs again (the infrastructure failed, not a program), to replacing the
- * one AI-written program the evidence says is at fault, or to stopping for the job's owner: when nothing trusted says
- * which program is wrong, or the program is the problem's own. A repair replaces one program and nothing else; the
- * plan, the cases, the limits, the checks and the problem's own helpers stay as they are, so a run after a repair is
- * held to the same gates. Repairs are counted for the job's whole life: restarts and retries don't reset the count.
+ * A typed failure can trigger an infrastructure retry, a repair of the AI-written program identified by the
+ * evidence, or review by the job's owner. Each repair replaces one program and reruns the job under the same plan,
+ * cases, limits and checks. The repair count spans the job's lifetime, including restarts and retries.
  */
 import { createHash } from "crypto";
 
@@ -188,7 +185,7 @@ export function routedFailure(error: unknown): AiRoutedFailure | null {
 }
 
 const GENERATORS = ["make", "quality-small-make"];
-// A program that should be correct: one too slow or too large on a case is replayed before it's rewritten
+// Solutions eligible for repair after a confirmed resource failure. Oracle time and memory limits go to owner review.
 const SOLUTIONS = /^(?:std|quality-oracle|quality-alt-\d+)$/;
 const SAMPLE_PHASES = ["validate-samples", "validate-sample-inputs", "validate-protocol-samples"];
 
@@ -211,7 +208,7 @@ export function routeAiFailure(failure: AiRoutedFailure, context: AiRepairContex
       roles: target === "std" ? ["std"] : []
     };
   };
-  // Programs that disagree: the owner says which one is wrong
+  // When several programs could explain a failure, the owner chooses the repair target.
   const attribution = (...roles: string[]): AiRepairDecision => ({
     action: "review",
     reason: "ATTRIBUTION",
@@ -229,9 +226,7 @@ export function routeAiFailure(failure: AiRoutedFailure, context: AiRepairContex
     case "insufficient_case_capacity":
       return { action: "review", reason: "CAPACITY", roles: [] };
     case "oracle_domain_exceeded":
-      // A differential input the oracle can't solve in its limits is an invalid test configuration: small-make.cpp
-      // made a case outside the oracle's small domain. It's repaired (no replay: the oracle's limits are fixed, the
-      // input is what's wrong); the oracle isn't rewritten for it and no solution is judged on it
+      // The judge measured a differential input above the declared byte limit before running the oracle.
       return repair("quality-small-make");
     case "compile_error":
       if (!role) break;
@@ -258,6 +253,7 @@ export function routeAiFailure(failure: AiRoutedFailure, context: AiRepairContex
     case "memory_limit":
     case "output_limit":
       if (!role) break;
+      // A time or memory limit alone leaves the choice between the oracle and the small-case generator to the owner.
       if (role === "quality-oracle" && ["time_limit", "memory_limit"].includes(kind))
         return attribution("quality-oracle", "quality-small-make");
       if (GENERATORS.includes(role) || role === "validator") return repair(role);
@@ -406,7 +402,7 @@ export function requestSources(request: any): Record<string, string> {
 
 /**
  * What published test data was qualified with: every program of the run that made it, by SHA-256, and the repairs that
- * made them what they are. A qualification is of exactly these programs (review Part III, W04).
+ * made them what they are. A qualification is of exactly these programs.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The versioned runner wire payload
 export function generationRevision(request: any, state: Record<string, unknown>) {
@@ -469,9 +465,8 @@ export function programFile(role: string): string {
 }
 
 /**
- * Whether an artifact's bytes may go to the model: not when they're (from) one of the problem's own sample files,
- * which the problem's author uploaded and the job never sends to a provider. Statement samples and what the job's own
- * programs made may.
+ * Public evidence can supply a preview. In sample validation, sharing previews of author-private artifacts requires
+ * the owner's explicit model_visible policy.
  */
 export function modelVisible(
   observation: Pick<StoredAiObservation, "phase">,
@@ -487,8 +482,9 @@ export function modelVisible(
 }
 
 /**
- * What the model is told about a failure: what failed, how, and previews of the bytes it may see, as data. The bytes of
- * the problem's own sample files are left out, and so are the excerpts of their difference.
+ * Builds the repair prompt's failure context from permitted artifact previews. When an artifact is hidden, diagnostics
+ * and the free-text summary are withheld and the difference gives only its position. The summaries policy also
+ * supplies input and expected-output sizes.
  */
 export function failureContext(
   observation: Omit<StoredAiObservation, "attemptId">,

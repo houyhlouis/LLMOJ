@@ -27,7 +27,9 @@ export function sharedReading<T>(read: () => Promise<T>, milliseconds = 1000): (
 export class MetricsService {
   private readonly registry = new PromClient.Registry();
 
-  private readonly processName = cluster.isPrimary ? "Master" : `Worker #${cluster.worker.id}`;
+  private readonly workerSlot = cluster.isPrimary ? 0 : Number(process.env.LLMOJ_WORKER_SLOT ?? cluster.worker.id);
+
+  private readonly processName = cluster.isPrimary ? "Master" : `Worker #${this.workerSlot}`;
 
   private readonly logger = new Logger(`${MetricsService.name}/${this.processName}`);
 
@@ -40,8 +42,7 @@ export class MetricsService {
 
     PromClient.collectDefaultMetrics({ register: this.registry });
 
-    const processName = cluster.isPrimary ? "Master" : `Worker #${cluster.worker.id}`;
-    const port = config.basePort + (cluster.isPrimary ? 0 : cluster.worker.id);
+    const port = config.basePort + this.workerSlot;
     http
       .createServer(async (req, res) => {
         try {
@@ -64,7 +65,7 @@ export class MetricsService {
         }
       })
       .listen(port, config.hostname, () => {
-        this.logger.log(`Metrics server is listening on ${config.hostname}:${port} (${processName})`);
+        this.logger.log(`Metrics server is listening on ${config.hostname}:${port} (${this.processName})`);
       });
   }
 

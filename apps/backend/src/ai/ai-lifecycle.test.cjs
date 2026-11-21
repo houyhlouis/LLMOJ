@@ -300,7 +300,7 @@ test("diagnostic export is bounded and redacts credentials, private bytes and so
 test(
   "more than fifty history jobs cannot hide active work; cursors and revisions cannot bypass authorization",
   {
-    skip: !process.env.HYHOJ_AI_TEST_DB_CONFIG
+    skip: !process.env.HYHOJ_AI_TEST_DB_CONFIG && "needs HYHOJ_AI_TEST_DB_CONFIG"
   },
   async () => {
     const crypto = require("node:crypto");
@@ -495,7 +495,7 @@ test("same-size generated file corruption is rejected after sealing and before r
 test(
   "concurrent dispatchers atomically claim one generation before a provider request (real MariaDB)",
   {
-    skip: !process.env.HYHOJ_AI_TEST_DB_CONFIG
+    skip: !process.env.HYHOJ_AI_TEST_DB_CONFIG && "needs HYHOJ_AI_TEST_DB_CONFIG"
   },
   async () => {
     const crypto = require("node:crypto");
@@ -784,7 +784,7 @@ test("persisted future-policy tasks are rejected at dispatch before source or ar
 test(
   "a late failed duplicate cancellation cannot erase provider confirmation (real MariaDB)",
   {
-    skip: !process.env.HYHOJ_AI_TEST_DB_CONFIG,
+    skip: !process.env.HYHOJ_AI_TEST_DB_CONFIG && "needs HYHOJ_AI_TEST_DB_CONFIG",
     timeout: 15000
   },
   async () => {

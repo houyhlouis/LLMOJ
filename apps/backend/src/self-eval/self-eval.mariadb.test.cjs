@@ -15,7 +15,7 @@ const { HackEntity } = require('../hack/hack.entity.ts');
 const { HackService } = require('../hack/hack.service.ts');
 const options = { compiler:'g++',std:'c++17',O:'2',m:'64' };
 
-test('private fixed prediction sets and contest-wide quotas (real MariaDB)', {skip: !process.env.LLMOJ_SELF_EVAL_TEST_DB_CONFIG, timeout:120000}, async t => {
+test('private fixed prediction sets and contest-wide quotas (real MariaDB)', {skip: !process.env.LLMOJ_SELF_EVAL_TEST_DB_CONFIG && 'needs LLMOJ_SELF_EVAL_TEST_DB_CONFIG', timeout:120000}, async t => {
   const cfg = require('js-yaml').load(fs.readFileSync(process.env.LLMOJ_SELF_EVAL_TEST_DB_CONFIG, 'utf8')).services.database;
   if (!/^llmoj_(?:features|test)_/.test(cfg.database)) throw new Error('Disposable test databases only');
   const db = new DataSource({...cfg,entities:[path.join(__dirname,'../**/*.entity.ts')],synchronize:false});

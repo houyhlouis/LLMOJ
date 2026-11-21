@@ -32,7 +32,7 @@ test('invalid arguments and completed installations are refused without connecti
 });
 
 test('a new database gets the complete current schema, and running again changes nothing',
-  { skip: !configPath, timeout: 180000 }, async () => {
+  { skip: !configPath && 'needs LLMOJ_SCHEMA_TEST_DB_CONFIG', timeout: 180000 }, async () => {
   assert.ok(fs.existsSync(path.join(root, 'apps/backend/dist')), 'Build the backend first');
   const require = createRequire(path.join(root, 'apps/backend/package.json'));
   require('reflect-metadata');
@@ -55,6 +55,8 @@ test('a new database gets the complete current schema, and running again changes
     // The schema matches the entities exactly and needs no upgrade migration.
     assert.equal((await ds.driver.createSchemaBuilder().log()).upQueries.length, 0);
     assert.deepEqual((await auditSchema(ds)).queries, []);
+    const [stamp] = await ds.query("SELECT value FROM settings WHERE `key`='deployment.schema'");
+    assert.equal(JSON.parse(stamp.value).version, 'contest-virtual-v1');
     const second = run('--root', root, '--config', configPath);
     assert.equal(second.status, 0, second.stderr);
     assert.equal(await tables(), created);

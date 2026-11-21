@@ -649,14 +649,14 @@ export class SubmissionController {
         error: SetSubmissionPublicResponseError.PERMISSION_DENIED
       };
 
-    if (submission.isPublic === request.isPublic) return {};
-    await this.submissionService.setSubmissionPublic(submission, request.isPublic);
+    const changed = await this.submissionService.setSubmissionPublic(submission, request.isPublic);
 
-    await this.auditService.log(
-      request.isPublic ? "submission.set_public" : "submission.set_non_public",
-      AuditLogObjectType.Submission,
-      submission.id
-    );
+    if (changed)
+      await this.auditService.log(
+        request.isPublic ? "submission.set_public" : "submission.set_non_public",
+        AuditLogObjectType.Submission,
+        submission.id
+      );
 
     return {};
   }

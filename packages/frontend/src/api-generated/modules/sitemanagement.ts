@@ -4,6 +4,10 @@
 
 import { createGetApi, createPostApi } from "@/api";
 
+export const diagnosticBundle = createPostApi<
+  ApiTypes.DiagnosticBundleRequestDto,
+  ApiTypes.DiagnosticBundleResponseDto
+>("site-management/diagnosticBundle", {});
 export const getSettings = createGetApi<void, ApiTypes.SiteManagementSettingsDto>("site-management/getSettings");
 export const updateRegistrationMode = createPostApi<
   ApiTypes.UpdateRegistrationModeRequestDto,

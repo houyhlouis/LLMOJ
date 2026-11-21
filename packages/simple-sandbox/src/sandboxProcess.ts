@@ -2,138 +2,151 @@ import { SandboxParameter, SandboxResult, SandboxStatus } from './interfaces';
 import sandboxAddon from './nativeAddon';
 import * as utils from './utils';
 
+interface ProcessExit {
+    status: 'exited' | 'signaled';
+    code: number;
+    userCpuTimeNanoseconds: string;
+}
+
+const activeSandboxes = new Set<SandboxProcess>();
+function stopActiveSandboxes(): void {
+    for (const sandbox of activeSandboxes) sandbox.stop();
+}
+
 export class SandboxProcess {
-    private readonly cancellationToken: NodeJS.Timeout = null;
-    private readonly stopCallback: () => void;
+    private watchdog: NodeJS.Timeout;
+    private failure: unknown;
+    private cgroupState: 'active' | 'stopping' | 'removed' = 'active';
+    private timedOut = false;
+    private readonly waitPromise: Promise<SandboxResult>;
 
-    private countedCpuTime: number = 0;
-    private actualCpuTime: number = 0;
-    private timeout: boolean = false;
-    private cancelled: boolean = false;
-    private waitPromise: Promise<SandboxResult> = null;
-
-    public running: boolean = true;
+    public running = true;
 
     constructor(
         public readonly parameter: SandboxParameter,
         public readonly pid: number,
-        private readonly execution: any
+        private execution: unknown
     ) {
-        const myFather = this;
-        // Stop the sandboxed process on Node.js exit.
-        this.stopCallback = () => {
-            myFather.stop();
-        }
-
-        let checkIfTimedOut = () => { };
-        if (this.parameter.time !== -1) {
-            // Check every 50ms.
-            const checkInterval = Math.min(this.parameter.time / 10, 50);
-            let lastCheck = new Date().getTime();
-            checkIfTimedOut = () => {
-                let current = new Date().getTime();
-                const spent = current - lastCheck;
-                lastCheck = current;
-                const val = Number(sandboxAddon.readSandboxStats(myFather.execution).cpuTimeNanoseconds);
-                myFather.countedCpuTime += Math.max(
-                    val - myFather.actualCpuTime,  // The real time, or if less than 40%,
-                    utils.milliToNano(spent) * 0.4 // 40% of actually elapsed time
-                );
-                myFather.actualCpuTime = val;
-
-                // Time limit exceeded
-                if (myFather.countedCpuTime > utils.milliToNano(parameter.time)) {
-                    myFather.timeout = true;
-                    myFather.stop();
-                }
-            };
-            this.cancellationToken = setInterval(checkIfTimedOut, checkInterval);
-        }
-
-        this.waitPromise = new Promise((res, rej) => {
-            sandboxAddon.waitForProcess(execution, (err, runResult) => {
-                if (err) {
-                    try {
-                        myFather.stop();
-                        myFather.cleanup(true);
-                    } catch (e) {
-                        console.log("Error cleaning up error sandbox:", e);
-                    }
-                    rej(err);
-                } else {
-                    try {
-                        const stats = myFather.parseStats(sandboxAddon.finalizeSandboxCgroup(myFather.execution));
-                        myFather.cleanup(false);
-                        myFather.actualCpuTime = parameter.resourceMode === "arbiter"
-                            ? Number(runResult.userCpuTimeNanoseconds) : stats.cpuTime;
-
-                        const result: SandboxResult = {
-                            status: SandboxStatus.Unknown,
-                            time: myFather.actualCpuTime,
-                            memory: stats.memoryPeak,
-                            code: runResult.code,
-                            termination: runResult.status
-                        };
-
-                        if (
-                            myFather.timeout ||
-                            (myFather.parameter.time !== -1 &&
-                                myFather.actualCpuTime > utils.milliToNano(myFather.parameter.time))
-                        ) {
-                            result.status = SandboxStatus.TimeLimitExceeded;
-                        } else if (myFather.cancelled) {
-                            result.status = SandboxStatus.Cancelled;
-                        } else if (
-                            stats.oomKills > 0 ||
-                            // SIGSEGV alone is not evidence of excessive memory use: invalid
-                            // accesses and stack exhaustion produce the same signal.
-                            (myFather.parameter.memory != -1 && stats.memoryPeak > myFather.parameter.memory)
-                        ) {
-                            result.status = SandboxStatus.MemoryLimitExceeded;
-                        } else if (runResult.status === 'signaled' || runResult.code !== 0) {
-                            result.status = SandboxStatus.RuntimeError;
-                        } else if (runResult.status === 'exited') {
-                            result.status = SandboxStatus.OK;
-                        }
-
-                        res(result);
-                    } catch (e) {
-                        rej(e);
-                    }
-                }
-            })
-        });
+        this.waitPromise = this.waitForResult();
     }
 
-    private parseStats(stats: any): { cpuTime: number; memoryPeak: number; oomKills: number } {
-        return {
-            cpuTime: Number(stats.cpuTimeNanoseconds),
-            memoryPeak: Number(stats.memoryPeakBytes),
-            oomKills: Number(stats.oomKillCount)
-        };
+    private startWatchdog(): void {
+        if (this.parameter.time === -1) return;
+
+        const interval = Math.min(this.parameter.time / 10, 50);
+        let lastCheck = Date.now();
+        let lastCpuTime = 0;
+        let countedCpuTime = 0;
+        this.watchdog = setInterval(() => {
+            try {
+                const now = Date.now();
+                const cpuTime = Number(sandboxAddon.readSandboxStats(this.execution).cpuTimeNanoseconds);
+                // Charge actual CPU use or 40% of the elapsed wall time, whichever is greater.
+                countedCpuTime += Math.max(cpuTime - lastCpuTime, utils.milliToNano(now - lastCheck) * 0.4);
+                lastCheck = now;
+                lastCpuTime = cpuTime;
+                if (countedCpuTime > utils.milliToNano(this.parameter.time)) {
+                    this.timedOut = true;
+                    this.stop();
+                }
+            } catch (error) {
+                // Reap the stopped child before handing its workspace back to the launcher.
+                this.failure ??= error;
+                this.stop();
+            }
+        }, interval);
     }
 
-    private cleanup(removeCgroup: boolean): void {
-        if (this.running) {
-            if (this.cancellationToken) {
-                clearInterval(this.cancellationToken);
-            }
-            process.removeListener('exit', this.stopCallback);
-            if (removeCgroup) {
-                sandboxAddon.removeSandboxCgroup(this.execution);
-            }
+    private clearWatchdog(): void {
+        if (this.watchdog) {
+            clearInterval(this.watchdog);
+            this.watchdog = null;
+        }
+    }
+
+    private async waitForResult(): Promise<SandboxResult> {
+        if (!activeSandboxes.size) process.once('exit', stopActiveSandboxes);
+        activeSandboxes.add(this);
+        try {
+            const runResult = await new Promise<ProcessExit>((resolve, reject) => {
+                this.startWatchdog();
+                sandboxAddon.waitForProcess(this.execution, (error, result) => {
+                    if (error) reject(error);
+                    else resolve(result);
+                });
+            });
+            if (this.failure) throw this.failure;
+            return this.collectResult(runResult);
+        } catch (error) {
+            this.failure ??= error;
+            this.tryKillCgroup();
+            this.tryRemoveCgroup();
+            throw this.failure;
+        } finally {
             this.running = false;
+            this.clearWatchdog();
+            activeSandboxes.delete(this);
+            if (!activeSandboxes.size) process.removeListener('exit', stopActiveSandboxes);
+            this.execution = null;
+        }
+    }
+
+    private collectResult(runResult: ProcessExit): SandboxResult {
+        const stats = sandboxAddon.finalizeSandboxCgroup(this.execution);
+        const time = this.parameter.resourceMode === 'arbiter'
+            ? Number(runResult.userCpuTimeNanoseconds) : Number(stats.cpuTimeNanoseconds);
+        const memory = Number(stats.memoryPeakBytes);
+        let status = SandboxStatus.Unknown;
+        if (this.timedOut || (this.parameter.time !== -1 && time > utils.milliToNano(this.parameter.time))) {
+            status = SandboxStatus.TimeLimitExceeded;
+        } else if (this.cgroupState === 'stopping') {
+            status = SandboxStatus.Cancelled;
+        } else if (
+            Number(stats.oomKillCount) > 0 ||
+            // SIGSEGV alone is not evidence of excessive memory use.
+            (this.parameter.memory !== -1 && memory > this.parameter.memory)
+        ) {
+            status = SandboxStatus.MemoryLimitExceeded;
+        } else if (runResult.status === 'signaled' || runResult.code !== 0) {
+            status = SandboxStatus.RuntimeError;
+        } else if (runResult.status === 'exited') {
+            status = SandboxStatus.OK;
+        }
+        return { status, time, memory, code: runResult.code, termination: runResult.status };
+    }
+
+    private tryKillCgroup(): boolean {
+        if (this.cgroupState !== 'active') return true;
+        try {
+            sandboxAddon.killSandbox(this.execution);
+            this.cgroupState = 'stopping';
+            return true;
+        } catch (error) {
+            this.failure ??= error;
+            return false;
+        }
+    }
+
+    private tryRemoveCgroup(): void {
+        if (this.cgroupState === 'removed') return;
+        try {
+            // Kill descendants, wait for an empty cgroup and remove it without reading stats.
+            sandboxAddon.removeSandboxCgroup(this.execution);
+            this.cgroupState = 'removed';
+        } catch {
+            // Preserve the first failure. The native execution destructor also retries removal.
         }
     }
 
     stop(): void {
-        this.cancelled = true;
-        try {
-            sandboxAddon.killSandbox(this.execution);
-        } catch (err) {}
+        if (!this.running) return;
+        this.clearWatchdog();
+        // A failed cgroup.kill gets another chance in Remove(). The registered waiter
+        // still owns completion, even if both attempts fail and the child is still live.
+        if (!this.tryKillCgroup()) this.tryRemoveCgroup();
     }
 
-    async waitForStop(): Promise<SandboxResult> {
-        return await this.waitPromise;
+    waitForStop(): Promise<SandboxResult> {
+        return this.waitPromise;
     }
-};
+}

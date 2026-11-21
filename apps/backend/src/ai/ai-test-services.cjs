@@ -61,9 +61,8 @@ const fileHash = filename => {
 };
 
 /**
- * A stubbed `runSandbox` reports with its result what a runner of judge protocol version 8 does (review Part III,
- * W03), unless it reports it itself: how the result was made, the operation it is, and its cases, from the files it
- * wrote (1.in, 1.out, 2.in, …).
+ * Supplies current execution and operation metadata when a stubbed runner omits it, and derives the case corpus
+ * from the files the stub wrote (1.in, 1.out, 2.in, …).
  */
 function asCurrentRunner(run) {
   return async (...args) => {

@@ -16,7 +16,7 @@ const { DiscussionContentEntity } = require("./discussion-content.entity.ts");
 const { DiscussionType } = require("./discussion-type.enum.ts");
 
 test("solution creation, preserved IDs/replies, My discussions, pagination and idempotent upgrade (MariaDB)",
-  { skip: !process.env.HYHOJ_DISCUSSION_TEST_DB_CONFIG, timeout: 60000 }, async () => {
+  { skip: !process.env.HYHOJ_DISCUSSION_TEST_DB_CONFIG && "needs HYHOJ_DISCUSSION_TEST_DB_CONFIG", timeout: 60000 }, async () => {
   const config = require("js-yaml").load(fs.readFileSync(process.env.HYHOJ_DISCUSSION_TEST_DB_CONFIG, "utf8")).services.database;
   const prefix = "qa_solutions_" + crypto.randomBytes(6).toString("hex") + "_";
   const integer = { type: Number }, date = { type: "datetime" };

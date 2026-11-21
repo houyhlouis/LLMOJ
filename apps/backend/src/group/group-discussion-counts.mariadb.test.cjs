@@ -25,6 +25,8 @@ const { DiscussionService } = require("../discussion/discussion.service.ts");
 const { DiscussionEntity } = require("../discussion/discussion.entity.ts");
 const { DiscussionContentEntity } = require("../discussion/discussion-content.entity.ts");
 const { DiscussionReplyEntity } = require("../discussion/discussion-reply.entity.ts");
+const { TeamResourceEntity } = require("../team/team.entity.ts");
+const { UserEntity } = require("../user/user.entity.ts");
 const { GroupService } = require("./group.service.ts");
 const { GroupEntity } = require("./group.entity.ts");
 const { GroupMembershipEntity } = require("./group-membership.entity.ts");
@@ -41,11 +43,14 @@ function overlap(db, participants = 2) {
 }
 
 test("discussion/group counters reflect committed child rows under concurrency (real MariaDB)",
-  { skip: !process.env.HYHOJ_COUNT_TEST_DB_CONFIG, timeout: 45000 }, async t => {
+  { skip: !process.env.HYHOJ_COUNT_TEST_DB_CONFIG && "needs HYHOJ_COUNT_TEST_DB_CONFIG", timeout: 45000 }, async t => {
   const config = require("js-yaml").load(fs.readFileSync(process.env.HYHOJ_COUNT_TEST_DB_CONFIG, "utf8")).services.database;
   const prefix = `qa_counts_${crypto.randomBytes(8).toString("hex")}_`;
   const integer = { type: Number }, datetime = { type: "datetime" };
   const definitions = [
+    [UserEntity, "user", { id: { ...integer, primary: true }, isAdmin: { type: Boolean } }],
+    // An empty team-resource index identifies the ordinary discussions in this fixture.
+    [TeamResourceEntity, "team_resource", { id: { ...integer, primary: true }, kind: { type: String }, resourceId: integer }],
     [DiscussionEntity, "discussion", { id: { ...integer, primary: true, generated: true },
       title: { type: String }, isPublic: { type: Boolean }, publisherId: integer, problemId: { ...integer, nullable: true },
       replyCount: integer, publishTime: datetime, editTime: { ...datetime, nullable: true }, sortTime: datetime }],
@@ -67,6 +72,7 @@ test("discussion/group counters reflect committed child rows under concurrency (
   let initialized = false, remainingTables;
   try {
     await db.initialize(); initialized = true;
+    await db.getRepository(UserEntity).insert({ id: 1, isAdmin: true });
     const discussionRepository = db.getRepository(DiscussionEntity), replyRepository = db.getRepository(DiscussionReplyEntity);
     const groupRepository = db.getRepository(GroupEntity), memberRepository = db.getRepository(GroupMembershipEntity);
     async function discussionFixture() {
@@ -79,6 +85,7 @@ test("discussion/group counters reflect committed child rows under concurrency (
         publishTime: new Date(`2026-01-0${day + 1}T00:00:00Z`), editTime: null })));
       const service = Object.create(DiscussionService.prototype);
       Object.assign(service, { connection: db, discussionRepository, discussionReplyRepository: replyRepository,
+        userPrivilegeService: { userHasPrivilege: async user => user?.isAdmin === true },
         configService: { config: { preference: { security: { discussionReplyDefaultPublic: true } } } } });
       return { discussion, replies, service };
     }
@@ -207,7 +214,7 @@ test("discussion/group counters reflect committed child rows under concurrency (
       await f.service.updateReplyContent(reply, "edited content");
       assert.equal(reply.content, "edited content");
       assert.ok(reply.editTime instanceof Date);
-      await f.service.setReplyPublic(reply, false);
+      assert.equal(await f.service.setReplyPublic(reply, false, { id: 1, isAdmin: true }), null);
       assert.equal(reply.isPublic, false);
       const stored = await replyRepository.findOneBy({ id: reply.id });
       assert.equal(stored.content, "edited content"); assert.equal(stored.isPublic, false);
@@ -218,7 +225,7 @@ test("discussion/group counters reflect committed child rows under concurrency (
       const f = await discussionFixture();
       await f.service.deleteReply({ ...f.replies[0] });
       await f.service.updateReplyContent({ ...f.replies[0] }, "late edit");
-      await f.service.setReplyPublic({ ...f.replies[0] }, false);
+      assert.equal(await f.service.setReplyPublic({ ...f.replies[0] }, false, { id: 1, isAdmin: true }), "NO_SUCH_DISCUSSION_REPLY");
       assert.equal(await replyRepository.countBy({ id: f.replies[0].id }), 0);
       await assertDiscussionCount(f, 1, "stale reply edits");
     });

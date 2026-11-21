@@ -15,6 +15,9 @@ export interface JudgeTaskCompletion {
 
   /** The runtime the result was judged with, if the judge client announced one. */
   judgeRuntimeId?: number;
+
+  /** The machine holding the confirmed lease, including clients which don't announce a runtime. */
+  judgeClientId?: number;
 }
 
 export interface JudgeTaskService<TaskProgress extends JudgeTaskProgress, ExtraInfo extends JudgeTaskExtraInfo> {

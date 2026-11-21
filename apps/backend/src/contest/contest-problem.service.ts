@@ -13,8 +13,8 @@ import { DataSource } from "typeorm";
 
 import { ContestProblemEntity } from "./contest-problem.entity";
 import { ContestAccessService } from "./contest-access.service";
-import { filename, text } from "./contest-input";
 import { contestSubmissionsOpen } from "./contest-policy";
+import { filename, text } from "./contest-input";
 
 import type { ContestRequestData } from "./contest-request.dto";
 
@@ -233,7 +233,7 @@ export class ContestProblemService {
   }
 
   async problem(user: UserEntity, id: number, problemId: number, locale: string) {
-    const { contest, manager } = await this.access.get(user, id, true);
+    const { contest, manager, now } = await this.access.get(user, id, true);
     const row = await this.db.getRepository(ContestProblemEntity).findOneBy({ id: problemId, contestId: id });
     if (!row) throw new NotFoundException();
     const problem = await row.problem;
@@ -262,7 +262,7 @@ export class ContestProblemService {
         memoryLimit: (judgeInfo as Partial<ProblemJudgeInfoCommunication> & Partial<ProblemJudgeInfoTraditional>)
           ?.memoryLimit
       },
-      submittable: submittable && contestSubmissionsOpen(contest, manager)
+      submittable: submittable && contestSubmissionsOpen(contest, manager, now)
     };
   }
 

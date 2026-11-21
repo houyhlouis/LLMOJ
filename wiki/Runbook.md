@@ -8,7 +8,7 @@ What to do when [doctor](Operations-Configuration.md#doctor) warns or fails, a [
 sudo bash /opt/LLMOJ/deploy/doctor.sh
 ```
 
-Doctor only reads. Each section below names doctor's message, what it means, and what to do. The backend's log (`sudo journalctl -u libreoj-backend --since "1 hour ago"`) has the details of most problems; an error ID a user reports finds its lines (`grep 'ID'`).
+Doctor only reads. Each section below names doctor's message, what it means, and what to do. The backend's log (`sudo journalctl -u libreoj-backend --since "1 hour ago"`) has the details of most problems; an error ID a user reports finds its lines (`grep 'ID'`). To ask someone else for help, send them a [diagnostic bundle](#collecting-a-diagnostic-bundle).
 
 ## The site is down or not ready
 
@@ -99,3 +99,16 @@ Doctor only reads. Each section below names doctor's message, what it means, and
 ## Upgrades
 
 **"The upgrade … stopped halfway"**: see [If the upgrade fails](Upgrade.md#if-the-upgrade-fails): fix the cause and run the upgrader again with the same options, or [roll back](Upgrade.md#rolling-back).
+
+## Collecting a diagnostic bundle
+
+To send whoever supports your site what it needs to look into a problem, download a **diagnostic bundle**: **Site management** → **Diagnostic bundle** (site administrators only). It's one JSON file with:
+
+- the site's version, Node.js version, platform, uptime and a summary of its non-secret settings;
+- the health checks of the database, Redis and storage;
+- the judge machines (state, protocol, architecture, capacity) and the judge queue;
+- recent unexpected errors of the backend process that answered: their request IDs, times, routes and error classes;
+- the AI pause, limits and the status of recent failed AI jobs;
+- if you name them, the metadata of particular submissions and AI jobs.
+
+It never contains code, test data, inputs or outputs, compiler or checker messages, prompts, passwords, keys or other secrets, even for the submissions and jobs you name. Each download is recorded in the audit log. A user's report with a request ID (see [Using the API](API.md#answers-and-errors)) and the bundle's recent errors can be matched by that ID.

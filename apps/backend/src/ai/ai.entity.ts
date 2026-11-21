@@ -13,9 +13,20 @@ export class AiConfigurationEntity {
   @UpdateDateColumn() updatedAt: Date;
 }
 
-export type AiAction =
-  "metadata" | "tags" | "source" | "difficulty" | "translate" | "tutorial" | "testdata" | "all" | "import";
-export type AiJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export const AI_ACTIONS = [
+  "metadata",
+  "tags",
+  "source",
+  "difficulty",
+  "translate",
+  "tutorial",
+  "testdata",
+  "all",
+  "import"
+] as const;
+export type AiAction = (typeof AI_ACTIONS)[number];
+export const AI_JOB_STATUSES = ["queued", "running", "completed", "failed", "cancelled"] as const;
+export type AiJobStatus = (typeof AI_JOB_STATUSES)[number];
 
 @Entity("ai_job")
 @Index(["ownerId", "createdAt"])

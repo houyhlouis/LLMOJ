@@ -9,6 +9,7 @@ import { sanitize } from "./sanitize";
 import { useNavigationChecked, useMaybeAsyncFunctionResult } from "@/utils/hooks";
 import { getTwemojiOptions } from "@/components/EmojiRenderer";
 import { codeBoxStyle } from "@/components/CodeBox";
+import { PlainTextFallback } from "@/components/RenderFailedNotice";
 
 export interface MarkdownContentPatcher {
   onPatchRenderer?: (renderer: MarkdownIt) => void;
@@ -158,7 +159,7 @@ async function render(
 // Move all async-rendering-control related code to a helper hook
 
 const MarkdownContent: React.FC<MarkdownContentProps> = props => {
-  const [html, pending] = useMaybeAsyncFunctionResult(
+  const [html, pending, renderError, retryRender] = useMaybeAsyncFunctionResult(
     render,
     [props.content, props.noSanitize, props.patcher],
     [props.content]
@@ -195,6 +196,10 @@ const MarkdownContent: React.FC<MarkdownContentProps> = props => {
 
     return () => cleanCallbacks.forEach(fn => fn && fn());
   }, [props.patcher, wrapperElement]);
+
+  if (renderError)
+    // The renderer (or a module it loads) failed: the text as it is, never unsanitized HTML
+    return <PlainTextFallback text={props.content} className={props.className} onRetry={retryRender} />;
 
   return pending ? (
     <Placeholder>

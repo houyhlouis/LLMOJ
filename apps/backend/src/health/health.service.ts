@@ -18,6 +18,18 @@ export interface Readiness {
   checks: Record<HealthCheckName, "ok" | "failed">;
 }
 
+export interface TimedReadiness {
+  status: Readiness["status"];
+  database: TimedHealthCheck;
+  redis: TimedHealthCheck;
+  storage: TimedHealthCheck;
+}
+
+interface TimedHealthCheck {
+  status: "ok" | "failed";
+  durationMs: number;
+}
+
 // Each dependency must answer within this time
 const CHECK_TIMEOUT = 2000;
 // Probes within this time share one check, so that frequent probes can't multiply into dependency queries
@@ -46,7 +58,7 @@ export async function withTimeout<T>(promise: Promise<T>, milliseconds: number):
 export class HealthService {
   checkTimeout = CHECK_TIMEOUT;
 
-  private readiness: { at: number; result: Promise<Readiness> } = null;
+  private readiness: { at: number; result: Promise<TimedReadiness> } = null;
 
   private readonly failureLoggedAt = new Map<HealthCheckName, number>();
 
@@ -83,30 +95,37 @@ export class HealthService {
   }
 
   async ready(): Promise<Readiness> {
+    const { status, database, redis, storage } = await this.timedReadiness();
+    return { status, checks: { database: database.status, redis: redis.status, storage: storage.status } };
+  }
+
+  async timedReadiness(): Promise<TimedReadiness> {
     if (!this.readiness || Date.now() - this.readiness.at >= READINESS_CACHE_TIME)
       this.readiness = { at: Date.now(), result: this.check() };
     return await this.readiness.result;
   }
 
-  private async check(): Promise<Readiness> {
+  private async check(): Promise<TimedReadiness> {
     const names = Object.keys(this.checks) as HealthCheckName[];
     const states = await Promise.all(
       names.map(async name => {
+        const start = performance.now();
         try {
           await withTimeout(this.checks[name](), this.checkTimeout);
-          return "ok" as const;
+          return { status: "ok" as const, durationMs: Math.round(performance.now() - start) };
         } catch (e) {
           if (Date.now() - (this.failureLoggedAt.get(name) ?? -Infinity) >= FAILURE_LOG_INTERVAL) {
             this.failureLoggedAt.set(name, Date.now());
             logger.warn(`Readiness check ${name} failed: ${e instanceof Error ? e.message : String(e)}`);
           }
-          return "failed" as const;
+          return { status: "failed" as const, durationMs: Math.round(performance.now() - start) };
         }
       })
     );
-    return {
-      status: states.every(state => state === "ok") ? "ready" : "unavailable",
-      checks: Object.fromEntries(names.map((name, index) => [name, states[index]])) as Readiness["checks"]
-    };
+    const checks = Object.fromEntries(names.map((name, i) => [name, states[i]])) as Record<
+      HealthCheckName,
+      TimedHealthCheck
+    >;
+    return { status: states.every(check => check.status === "ok") ? "ready" : "unavailable", ...checks };
   }
 }

@@ -14,7 +14,7 @@ LLMOJ 是基于 LibreOJ 的在线评测系统，提供 AI 辅助出题功能。�
 | [HTTPS](HTTPS.zh-CN.md) | 域名、TLS 证书和外部反向代理 |
 | [Docker 源](Docker-Sources.zh-CN.md) | Docker 软件包源和镜像加速源 |
 | [运维配置](Operations-Configuration.zh-CN.md) | 安装后的 Nginx、MariaDB、Redis、MinIO 与 systemd；健康检查、备份与计数修正 |
-| [运维手册](Runbook.zh-CN.md) | doctor 发出警告、指标越界或用户报告问题时该怎么办 |
+| [运维手册](Runbook.zh-CN.md) | doctor 发出警告、指标越界或用户报告问题时该怎么办；诊断包 |
 | [容量](Capacity.zh-CN.md) | 小型网站在实测负载下的表现，以及本版本前后的对比 |
 | [ARM64 服务器](ARM64.zh-CN.md) | 在 arm64（AArch64）上安装，C 与 C++ 的不同之处，以及两种架构的评测机 |
 
@@ -22,7 +22,10 @@ LLMOJ 是基于 LibreOJ 的在线评测系统，提供 AI 辅助出题功能。�
 
 | 页面 | 内容 |
 | --- | --- |
-| [比赛赛制](Contest-Rules.zh-CN.md) | NOI / OI、IOI、ICPC 与严格 IOI 的计分和反馈 |
+| [比赛赛制](Contest-Rules.zh-CN.md) | NOI / OI、IOI、ICPC 与严格 IOI 的计分和反馈；比赛题目页的代码草稿；虚拟参赛 |
+| [出题指南](Problem-Authoring.zh-CN.md) | 题面、测试数据、四种题目类型的评测设置，测试、共享与公开 |
+| [题单与讨论](Study-Lists-and-Discussions.zh-CN.md) | 个人题单；讨论的发布权限、公开与隐藏 |
+| [权限](Permissions.zh-CN.md) | 谁可以做什么：站点权限、特权、用户组和团队，以及以哪条规则为准 |
 | [私人团队](Teams.zh-CN.md) | 通过编号加入、审核、分组与共享资源 |
 | [题解](Solutions.zh-CN.md) | 题目页内的题解、我的讨论与 AI 题解 |
 | [提交记录](Submissions.zh-CN.md) | 提交预览、测试数据版本与此前的评测结果 |
@@ -61,7 +64,9 @@ LLMOJ 是基于 LibreOJ 的在线评测系统，提供 AI 辅助出题功能。�
 | [环境变量](Environment.zh-CN.md) | 运行、安装和构建用的环境变量；维护脚本 |
 | [发布](Publishing.zh-CN.md) | 用 GitHub Desktop 应用更新、发布本 Wiki 和创建版本 |
 | [依赖与工具链](Dependencies.zh-CN.md) | 受支持的 Node.js、pnpm、库和浏览器版本，暂缓升级的部分，自成一体的前端构建，依赖清单与安全通告检查 |
+| [本地开发](Development.zh-CN.md) | 用一次性的数据库、Redis 和 MinIO 在本机运行后端和前端；示例数据与测试 |
+| [使用 API](API.zh-CN.md) | 登录方式、错误与请求编号、分页、工作量证明、文件上传和实时评测更新 |
 
-完整安装（`--role all`）包含网站、存储和本机评测，也可以再接入远程评测机。仅网页安装（`--role web`）不构建本机评测环境：提交由远程评测机评测，已更新的评测机（协议版本 4）也负责 AI 验证标程和生成测试数据（见[分布式评测](Distributed-Judging.zh-CN.md)）。
+完整安装（`--role all`）包含网站、存储和本机评测，也可以再接入远程评测机。仅网页安装（`--role web`）不构建本机评测环境：提交由远程评测机评测，判题协议 9、声明质量策略 2 和回执版本 1 的评测机也负责运行 AI 验证标程和生成测试数据的程序（见[分布式评测](Distributed-Judging.zh-CN.md)）。
 
-LLMOJ 在 Ubuntu 24.04 amd64 上经过测试，并在模拟的虚拟机中测试了 Ubuntu 26.04 arm64。本项目代码采用 MIT 许可，上游组件保留各自的许可。
+LLMOJ 运行在 amd64 和 arm64 的 Ubuntu 24.04 与 26.04 上；实际测试过的内容、环境和时间见[已测试的平台](Installation.zh-CN.md#已测试的平台)。本项目代码采用 MIT 许可，上游组件保留各自的许可。

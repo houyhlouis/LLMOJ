@@ -12,6 +12,7 @@ node_modules/
 /logs/
 /cache/
 /runtime/
+/.dev-stack/
 /public/
 .env
 .env.*

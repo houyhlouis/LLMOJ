@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from "react";
-import { Button, Form, Header, Label, Message, Pagination, Table } from "semantic-ui-react";
+import React, { useState } from "react";
+import { Button, Checkbox, Form, Header, Label, Loader, Message, Pagination, Table } from "semantic-ui-react";
 import { defineRoute } from "@/AppRouter";
-import { Link, useLocalizer } from "@/utils/hooks";
+import { Link, useLocalizer, usePoll } from "@/utils/hooks";
 import MarkdownContent from "@/markdown/MarkdownContent";
 import ContestFrame from "./ContestFrame";
 import {
@@ -18,50 +18,48 @@ import { appState } from "@/appState";
 import { ruleDescription } from "./contest-rules";
 import { SubmissionPreviewLink, SubmissionPreviewProvider } from "@/pages/submission/SubmissionPreview";
 import { ArchiveManifest, ArchiveProgress, downloadContestArchive } from "./contestArchive";
+import { VirtualParticipationPanel, virtualRunActive } from "./VirtualRun";
 
-function ContestPage({ initial, tab }: { initial: any; tab: string }) {
+export function ContestPage({ initial, tab }: { initial: any; tab: string }) {
   const localizeLanguage = useLocalizer("code_language");
   const [detail, setDetail] = useState(initial),
-    [data, setData] = useState<any>(null),
+    [shown, setShown] = useState<{ query: string; data: any }>(null),
     [error, setError] = useState(""),
     [page, setPage] = useState(1);
   const [userId, setUserId] = useState(""),
     [problemId, setProblemId] = useState("");
+  // The standings with virtual runs too (after the contest; the server shows them by itself during the viewer's run)
+  const [showVirtual, setShowVirtual] = useState(false);
+  const inVirtualRun = virtualRunActive(detail);
   const id = detail.contest.id;
-  // `withDetail` false: only the tab's data, when the contest's detail was just loaded
-  async function refresh(withDetail = true) {
-    try {
-      if (withDetail) setDetail(await callContest("detail", { id }));
-      if (tab !== "overview")
-        setData(
-          await callContest(tab, {
-            id,
-            page,
-            data: { userId: Number(userId) || undefined, problemId: Number(problemId) || undefined }
-          })
-        );
-      setError("");
-    } catch (e) {
-      setError(e.message);
-    }
-  }
-  useEffect(() => {
-    let live = true;
-    refresh(false);
-    // Every open contest page refreshes; one in a background tab waits until it's shown again
-    const interval = setInterval(() => {
-      if (live && !document.hidden) refresh();
-    }, 10000);
-    const shown = () => {
-      if (live && !document.hidden) refresh();
-    };
-    document.addEventListener("visibilitychange", shown);
-    return () => {
-      live = false;
-      clearInterval(interval);
-      document.removeEventListener("visibilitychange", shown);
-    };
-  }, [id, tab, page, userId, problemId]);
+  const filter = { userId: Number(userId) || undefined, problemId: Number(problemId) || undefined };
+  // What the tab, page and filters ask for. Rows are kept with the query that produced them, so an earlier query's
+  // answer is never shown as the current one: while a new query loads, the last rows stay, dimmed.
+  const query = JSON.stringify([tab, page, filter.userId ?? null, filter.problemId ?? null, showVirtual]);
+  const data = shown?.data;
+  const stale = !!shown && shown.query !== query;
+  const loading = tab !== "overview" && (!shown || stale) && !error;
+  // Every open contest page refreshes every 10 seconds, one request at a time; one in a background tab waits until it's
+  // shown again. Changing the tab, page or a filter aborts the request in flight, and its answer is dropped.
+  usePoll(
+    async (signal, first) => {
+      try {
+        // The first request for a query skips the contest's detail: the page has just loaded it, or only the query
+        // changed
+        const nextDetail = first ? null : await callContest("detail", { id });
+        const requestData = tab === "ranklist" && showVirtual ? { ...filter, virtual: true } : filter;
+        const next = tab === "overview" ? null : await callContest(tab, { id, page, data: requestData });
+        if (signal.aborted) return;
+        if (nextDetail) setDetail(nextDetail);
+        if (tab !== "overview") setShown({ query, data: next });
+        setError("");
+      } catch (e) {
+        if (!signal.aborted) setError(e.message);
+      }
+    },
+    [id, tab, page, userId, problemId, showVirtual],
+    { intervalMs: 10000, hiddenIntervalMs: null }
+  );
   async function exportCsv() {
     try {
       const result = await callContest("export", { id });
@@ -98,6 +96,13 @@ function ContestPage({ initial, tab }: { initial: any; tab: string }) {
         <>
           <MarkdownContent content={detail.contest.description} />
           <p className={style.description}>{ruleDescription(detail.contest.rule)}</p>
+          <VirtualParticipationPanel
+            contestId={id}
+            startTime={detail.contest.startTime}
+            endTime={detail.contest.endTime}
+            participation={detail.virtualParticipation}
+            onStarted={setDetail}
+          />
           {(detail.started || detail.manager) && detail.problems.length > 0 && (
             <div className={style.sectionToolbar}>
               <Button
@@ -221,6 +226,14 @@ function ContestPage({ initial, tab }: { initial: any; tab: string }) {
           <div className={style.sectionToolbar}>
             <Header as="h2">{tr("排名", "Standings")}</Header>
             <div className={style.headerRightControls}>
+              {detail.hasVirtualParticipants && (
+                <Checkbox
+                  toggle
+                  checked={showVirtual}
+                  label={tr("显示虚拟参赛者", "Show virtual participants")}
+                  onChange={(_, v) => setShowVirtual(!!v.checked)}
+                />
+              )}
               <Button
                 className="labeled icon"
                 icon="download"
@@ -229,8 +242,17 @@ function ContestPage({ initial, tab }: { initial: any; tab: string }) {
               />
             </div>
           </div>
+          {inVirtualRun && (
+            <Message info size="small">
+              {tr(
+                "你正在虚拟参赛：排行榜显示比赛进行到同一时刻时的状态，并计入你自己的结果。",
+                "During your virtual run, the standings show the contest as it stood at the same point of its time, with your own results added."
+              )}
+            </Message>
+          )}
+          {loading && <Loader active inline="centered" size="small" className={style.loading} />}
           {data && (
-            <div className={style.tableScroll}>
+            <div className={stale ? `${style.tableScroll} ${style.stale}` : style.tableScroll} aria-busy={stale}>
               <Table basic="very" textAlign="center" unstackable>
                 <Table.Header>
                   <Table.Row>
@@ -247,10 +269,25 @@ function ContestPage({ initial, tab }: { initial: any; tab: string }) {
                 </Table.Header>
                 <Table.Body>
                   {data.rows.map((row: any) => (
-                    <Table.Row key={row.userId} className={style.row}>
+                    <Table.Row
+                      key={row.userId}
+                      className={row.virtual ? `${style.row} ${style.virtualRow}` : style.row}
+                    >
                       <Table.Cell>{row.rank}</Table.Cell>
                       <Table.Cell>
                         <Link href={`/u/${row.username}`}>{row.username}</Link>
+                        {row.virtual && (
+                          <Label
+                            size="mini"
+                            className={style.virtualLabel}
+                            title={tr(
+                              `虚拟参赛，开始于 ${formatDate(row.virtualStartTime)}`,
+                              `Virtual run, started ${formatDate(row.virtualStartTime)}`
+                            )}
+                          >
+                            {tr("虚拟", "Virtual")}
+                          </Label>
+                        )}
                       </Table.Cell>
                       <Table.Cell>{row.score}</Table.Cell>
                       <Table.Cell>{Math.round(row.penalty / 60)}</Table.Cell>
@@ -283,7 +320,7 @@ function ContestPage({ initial, tab }: { initial: any; tab: string }) {
               </Table>
             </div>
           )}
-          {data && !data.rows.length && <Message>{tr("暂无参赛记录", "No participants yet")}</Message>}
+          {data && !stale && !data.rows.length && <Message>{tr("暂无参赛记录", "No participants yet")}</Message>}
         </>
       )}
       {tab === "submissions" && (
@@ -315,8 +352,9 @@ function ContestPage({ initial, tab }: { initial: any; tab: string }) {
               />
             </Form.Group>
           </Form>
+          {loading && <Loader active inline="centered" size="small" className={style.loading} />}
           {data && (
-            <div className={style.tableScroll}>
+            <div className={stale ? `${style.tableScroll} ${style.stale}` : style.tableScroll} aria-busy={stale}>
               <Table basic="very">
                 <Table.Header>
                   <Table.Row>
@@ -365,7 +403,7 @@ function ContestPage({ initial, tab }: { initial: any; tab: string }) {
               </Table>
             </div>
           )}
-          {data && !data.total && <Message>{tr("暂无提交", "No submissions yet")}</Message>}
+          {data && !stale && !data.total && <Message>{tr("暂无提交", "No submissions yet")}</Message>}
           {data?.total > 50 && (
             <div className={style.pagination}>
               <Pagination

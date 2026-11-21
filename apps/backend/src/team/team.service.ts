@@ -66,6 +66,12 @@ const FILE_UPLOAD_LIFETIME = 24 * 3600 * 1000;
 // A completing upload keeps its reservation and parts at least this long while it's sealed
 const FILE_SEALING_TIME = 30 * 60 * 1000;
 
+interface AssignmentScore {
+  score: number;
+  status: SubmissionEntity["status"];
+  submissionId: number;
+}
+
 function integer(value: unknown): number {
   if (!Number.isSafeInteger(value) || Number(value) < 1) throw new BadRequestException("Invalid ID");
   return Number(value);
@@ -1078,35 +1084,40 @@ export class TeamService {
     }
     const resultsVisible = await this.privileges.userHasPrivilege(user, UserPrivilegeType.ViewSubmission);
     const resultProblemIds = resultsVisible ? visibleProblemIds : [];
-    const scores = new Map<number, SubmissionEntity[]>();
+    const scores = new Map(members.map(m => [m.userId, new Map<number, AssignmentScore>()]));
     if (members.length && resultProblemIds.length) {
       const qb = this.db
         .getRepository(SubmissionEntity)
         .createQueryBuilder("s")
+        .select(["s.id", "s.submitterId", "s.problemId", "s.status", "s.score"])
         .where("s.submitterId IN (:...ids) AND s.problemId IN (:...problems) AND s.contestId IS NULL", {
           ids: members.map(m => m.userId),
           problems: resultProblemIds
-        });
+        })
+        .andWhere("s.score IS NOT NULL");
       if (assignment.deadline) qb.andWhere("s.submitTime <= :deadline", { deadline: assignment.deadline });
-      const submissions = await qb.orderBy("s.id", "ASC").getMany();
-      submissions.forEach(s => scores.set(s.submitterId, [...(scores.get(s.submitterId) ?? []), s]));
+      for (const { submitterId, problemId, id, status, score } of await qb.getMany()) {
+        const earned =
+          status === "Accepted"
+            ? 100
+            : status === "Fake" || status === "Hacked"
+              ? 0
+              : Math.max(0, Math.min(100, Number(score) || 0));
+        const byProblem = scores.get(submitterId);
+        const best = byProblem.get(problemId);
+        if (!best || earned > best.score || (earned === best.score && id > best.submissionId))
+          byProblem.set(problemId, { score: earned, status, submissionId: id });
+      }
     }
     const rows = members.map((m, i) => {
       const results = {};
       let total = 0;
       for (const problemId of resultProblemIds) {
-        const submissions = (scores.get(m.userId) ?? []).filter(s => s.problemId === problemId && s.score != null);
-        const score = (s: SubmissionEntity) =>
-          s.status === "Accepted"
-            ? 100
-            : ["Fake", "Hacked"].includes(s.status)
-              ? 0
-              : Math.max(0, Math.min(100, Number(s.score) || 0));
-        const best = submissions.sort((a, b) => score(b) - score(a) || b.id - a.id)[0];
+        const best = scores.get(m.userId).get(problemId);
         results[problemId] = best
-          ? { score: score(best), status: best.status, submissionId: best.id, accepted: best.status === "Accepted" }
+          ? { ...best, accepted: best.status === "Accepted" }
           : { score: 0, status: null, submissionId: null, accepted: false };
-        total += best ? score(best) : 0;
+        total += best?.score ?? 0;
       }
       return {
         userId: m.userId,

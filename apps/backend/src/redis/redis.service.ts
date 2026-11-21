@@ -2,13 +2,17 @@ import { Injectable, OnModuleInit } from "@nestjs/common";
 
 import Redis from "ioredis";
 
+import { GenerationCache } from "./generation-cache";
+
 import { ConfigService } from "../config/config.service";
 
-const REDIS_CACHE_EXPIRE_TIME = 60 * 60 * 24 * 30; // 7 days
+const REDIS_CACHE_EXPIRE_TIME = 60 * 60 * 24 * 30; // 30 days
 
 @Injectable()
 export class RedisService implements OnModuleInit {
   private readonly client: Redis;
+
+  readonly generationCache: GenerationCache;
 
   private readonly untilReady: Promise<void>;
 
@@ -16,6 +20,7 @@ export class RedisService implements OnModuleInit {
     this.client = new Redis(this.configService.config.services.redis, {
       enableReadyCheck: true
     });
+    this.generationCache = new GenerationCache(this.client);
 
     // TODO: Handle errors after connected?
     this.untilReady = new Promise((resolve, reject) => {

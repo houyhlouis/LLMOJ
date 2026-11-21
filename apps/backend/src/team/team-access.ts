@@ -93,7 +93,7 @@ async function evaluateTeamResourceAccess(
   user: UserEntity,
   kind: TeamResourceKind,
   resourceId: number,
-  permission: TeamPermission | "read" | "post" = "read"
+  permission: TeamPermission | "read" | "post" | "reviewReplies" = "read"
 ): Promise<boolean | null> {
   const lock = db instanceof EntityManager ? { lock: { mode: "pessimistic_read" as const } } : {};
   if (!(db instanceof EntityManager)) {
@@ -129,6 +129,8 @@ async function evaluateTeamResourceAccess(
           : "assignments",
     globalManager
   );
+  // Discussion managers retain read access to pending replies in the archive.
+  if (permission === "reviewReplies") return kind === "discussion" && manager;
   if (team.archived || resource.archived) return manager && permission === "read";
   if (permission === "post") return manager || member?.status === "member";
   if (permission !== "read") return hasTeamPermission(team, member, user, permission, globalManager);
@@ -159,7 +161,7 @@ export async function teamResourceAccess(
   user: UserEntity,
   kind: TeamResourceKind,
   resourceId: number,
-  permission: TeamPermission | "read" | "post" = "read"
+  permission: TeamPermission | "read" | "post" | "reviewReplies" = "read"
 ): Promise<boolean | null> {
   try {
     return await evaluateTeamResourceAccess(db, user, kind, resourceId, permission);

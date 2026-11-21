@@ -11,7 +11,7 @@
 ### Problems, contests and community
 
 - Chinese and English interfaces and an in-browser code editor; problem management, study lists, discussions and submission history.
-- [Contest rules](wiki/Contest-Rules.md): NOI / OI, IOI, ICPC and Strict IOI (each subtask counts the best of all submissions), with scoreboards and rejudging.
+- [Contest rules](wiki/Contest-Rules.md): NOI / OI, IOI, ICPC and Strict IOI (each subtask counts the best of all submissions), with scoreboards and rejudging. After a contest, those who missed it can take it as a [virtual run](wiki/Contest-Rules.md#virtual-participation); contest problem pages keep your code as a draft in the browser.
 - Users, groups and fine-grained permissions: problems and discussions can be shared individually, and contest and administration rights are granted separately.
 - [Private teams](wiki/Teams.md): join a team by its ID under **My teams** on your profile; there is no public team list. Teams have groups and roles, problems, contests, assignments, discussions and shared files (10 GiB in total; large files upload in parts).
 - [Solutions](wiki/Solutions.md): read and write them on the problem page, or have AI draft one.
@@ -34,10 +34,10 @@
 - **Finding sources:** combine search results with semantic comparison to help find a problem's original source.
 - **Test data:** for traditional problems, at least 64 small cases are first checked against an independent reference algorithm, then all the data is cross-checked with a second correct solution, and prepared wrong or too-slow programs must actually fail on it. Only then is the data installed, together with a validation report. Interactive and communication problems are checked by simulating their protocol.
 - **Job management:** follow progress, cancel or retry; before writing to a problem, AI jobs check the permissions again and whether the problem has changed.
-- **Your own services:** each user enters their own model and search services (Tavily / MCP); API keys are stored encrypted. Private-network and local addresses are available only to site administrators, unless the server administrator allows them with `HYHOJ_AI_PRIVATE_HOSTS`.
+- **Your own services:** each user enters their own model and search services (Tavily / MCP); API keys are stored encrypted. Site administrators approve the addresses accounts may use under **Site management** → **AI addresses**, and can allow only approved ones; private-network and local addresses need their approval (or, on the server, `HYHOJ_AI_PRIVATE_HOSTS`).
 - **Site limits:** administrators can pause AI for the whole site, and limit each account's tokens and requests per 24 hours, each job's requests, and how many AI requests run at once. Every request is checked before it's sent.
 
-Review everything AI generates. Validating reference solutions and generating test data run in a local sandbox on the web server; see the [AI guide](wiki/AI.md).
+Review everything AI generates. Model and search requests always go out from the backend. The programs that validating reference solutions and generating test data write (reference solutions, generators, validators, checkers) run in a sandbox: on a full installation (`all`) its own judge runs them through the local AI worker, and a website-only installation (`web`) sends them to remote judges of protocol 9 or later. See the [AI guide](wiki/AI.md) and [Distributed judging](wiki/Distributed-Judging.md#ai).
 
 ## Installation
 
@@ -45,7 +45,7 @@ Review everything AI generates. Validating reference solutions and generating te
 
 | Item | Requirement |
 | --- | --- |
-| System | Ubuntu 24.04 / 26.04 on amd64 (tested) or arm64 (see [ARM64 servers](wiki/ARM64.md)), on a virtual machine or physical server |
+| System | Ubuntu 24.04 / 26.04 on amd64 or arm64 (see [ARM64 servers](wiki/ARM64.md)), on a virtual machine or physical server; what has been tested is listed in [Tested platforms](wiki/Installation.md#tested-platforms) |
 | CPU and memory | At least 2 logical CPUs; 256 MiB of RAM per judge execution slot; 8 GiB recommended for building |
 | Disk | At least 30 GiB free for a full installation (40 GiB recommended), 10 GiB for the website only |
 | Other | systemd 254 or later, cgroup v2, and access to package repositories, GitHub and the build dependencies' download sources |
@@ -86,10 +86,10 @@ The script checks compatibility, builds the new version in a separate directory,
 
 | Mode | Contents |
 | --- | --- |
-| `--role all` (default) | Website, storage, local judging and the AI execution environment; remote judge machines can be added |
-| `--role web` | Website and storage only, without a rootfs; submissions are judged by remote judge machines |
+| `--role all` (default) | Website, storage, local judging and the local AI worker; remote judge machines can be added |
+| `--role web` | Website and storage only, without a rootfs; submissions are judged, and AI jobs' programs run, on remote judge machines |
 
-To validate reference solutions and generate test data with AI, use `all` on the web server: remote judge machines don't replace the local AI execution environment. Architecture diagrams, judge registration and setup steps are in [Distributed judging](wiki/Distributed-Judging.md).
+AI test data generation and reference checks work in both modes. On a `web` site they need at least one remote judge of judge protocol 9 that announces quality policy 2 and receipt version 1 (any current judge does), with two or more task threads; older judges still judge submissions but get no AI runs. `LLMOJ_AI_EXECUTION` chooses where an `all` site runs them. Architecture diagrams, judge registration and setup steps are in [Distributed judging](wiki/Distributed-Judging.md).
 
 ## Documentation
 
@@ -98,9 +98,10 @@ To validate reference solutions and generate test data with AI, use `all` on the
 | [Installation](wiki/Installation.md) · [Docker sources](wiki/Docker-Sources.md) | Installer options, mirrors, service management and retries |
 | [Distributed judging](wiki/Distributed-Judging.md) · [Remote judges](wiki/Remote-Judge.md) · [Judge configuration](wiki/Judge-Configuration.md) | Architecture, adding judge machines, the sandbox and capacity |
 | [Registration approval](wiki/Registration-Approval.md) · [Two-factor sign-in](wiki/Two-Factor-Sign-In.md) · [Upgrade](wiki/Upgrade.md) | Registration settings, sign-in security, upgrading and rollback |
-| [Contest rules](wiki/Contest-Rules.md) · [Hacks](wiki/Hacks.md) · [Self Eval](wiki/Self-Evaluation.md) | Scoring, Hacks and Self Eval |
+| [Contest rules](wiki/Contest-Rules.md) · [Hacks](wiki/Hacks.md) · [Self Eval](wiki/Self-Evaluation.md) | Scoring, Hacks, Self Eval, code drafts and virtual participation |
+| [Problem authoring](wiki/Problem-Authoring.md) · [Permissions](wiki/Permissions.md) · [Study lists and discussions](wiki/Study-Lists-and-Discussions.md) | Writing problems of each type, who may do what, study lists and moderation |
 | [AI features](wiki/AI.md) · [HTTPS](wiki/HTTPS.md) | Model configuration, execution environment and encrypted access |
-| [Development](README-DEVELOPMENT.md) · [Source package](deploy/SOURCE-PACKAGE.md) | Building, testing and what the source package contains |
+| [Development](README-DEVELOPMENT.md) · [Local development](wiki/Development.md) · [API](wiki/API.md) · [Source package](deploy/SOURCE-PACKAGE.md) | Building, testing, a disposable local stack, using the API and what the source package contains |
 
 Browse the full [English Wiki](wiki/Home.en.md) / [中文 Wiki](wiki/Home.md).
 

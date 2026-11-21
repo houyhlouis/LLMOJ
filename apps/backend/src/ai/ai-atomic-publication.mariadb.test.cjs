@@ -36,7 +36,7 @@ const generated = () => ({ ...original(), subtasks: [{ points: 100, scoringType:
   testcases: Array.from({ length: 5 }, (_, i) => ({ inputFile: `${i + 1}.in`, outputFile: `${i + 1}.out` })) }] });
 
 test("AI final publication is atomic against cancel, lease loss and human edits (real MariaDB)",
-  { skip: !process.env.HYHOJ_AI_TEST_DB_CONFIG, timeout: 30000 }, async t => {
+  { skip: !process.env.HYHOJ_AI_TEST_DB_CONFIG && "needs HYHOJ_AI_TEST_DB_CONFIG", timeout: 30000 }, async t => {
   const config = require("js-yaml").load(fs.readFileSync(process.env.HYHOJ_AI_TEST_DB_CONFIG, "utf8")).services.database;
   const prefix = `qa_ai_commit_${crypto.randomBytes(8).toString("hex")}_`;
   const integer = { type: Number }, text = { type: String, length: 255 }, json = { type: "json" };
@@ -83,7 +83,7 @@ test("AI final publication is atomic against cancel, lease loss and human edits 
       ]);
       const job = await db.getRepository(AiJobEntity).save({ id: crypto.randomUUID(), ownerId: user.id,
         problemId: problem.id, action: "testdata", status: "running", step: "testdata", runToken: crypto.randomUUID(), state: {}, input: { count: 5 }, progress: 0, error: null });
-      const redis = { cacheDelete: async () => {} };
+      const redis = { generationCache: { invalidate: async () => {} }, cacheDelete: async () => {} };
       const problems = bareProblemServices();
       Object.assign(problems, { connection: db, problemRepository: db.getRepository(ProblemEntity),
         problemJudgeInfoRepository: db.getRepository(ProblemJudgeInfoEntity), problemSampleRepository: db.getRepository(ProblemSampleEntity),

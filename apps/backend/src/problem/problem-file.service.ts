@@ -13,7 +13,7 @@ import { ProblemEntity, ProblemType } from "./problem.entity";
 import { deferTestDataDeletion } from "./deferred-file-deletion";
 import { ProblemAccessService } from "./problem-access.service";
 import { ProblemLockService } from "./problem-lock.service";
-import { preprocessedJudgeInfoCacheKey } from "./problem-judge-info-cache";
+import { invalidatePreprocessedJudgeInfo } from "./problem-judge-info-cache";
 
 import { ProblemFileDto } from "./dto";
 
@@ -211,7 +211,7 @@ export class ProblemFileService {
         committed = true;
         for (const remove of removeObjects) remove();
         if (type === ProblemFileType.TestData)
-          await this.redisService.cacheDelete(preprocessedJudgeInfoCacheKey(problem.id));
+          await invalidatePreprocessedJudgeInfo(this.redisService.generationCache, problem.id);
       });
       return prepared.map(file => ({ uuid: file.uuid, filename: file.filename, size: file.size }));
     } finally {
@@ -380,7 +380,7 @@ export class ProblemFileService {
 
       if (deleteOldFileActually) deleteOldFileActually();
       if (type === ProblemFileType.TestData)
-        await this.redisService.cacheDelete(preprocessedJudgeInfoCacheKey(problem.id));
+        await invalidatePreprocessedJudgeInfo(this.redisService.generationCache, problem.id);
 
       return ret;
     });
@@ -426,7 +426,7 @@ export class ProblemFileService {
 
       if (deleteFilesActually) deleteFilesActually();
       if (type === ProblemFileType.TestData)
-        await this.redisService.cacheDelete(preprocessedJudgeInfoCacheKey(problem.id));
+        await invalidatePreprocessedJudgeInfo(this.redisService.generationCache, problem.id);
     });
   }
 
@@ -510,7 +510,7 @@ export class ProblemFileService {
         return true;
       });
       if (renamed === true && type === ProblemFileType.TestData)
-        await this.redisService.cacheDelete(preprocessedJudgeInfoCacheKey(problem.id));
+        await invalidatePreprocessedJudgeInfo(this.redisService.generationCache, problem.id);
       return renamed;
     });
   }

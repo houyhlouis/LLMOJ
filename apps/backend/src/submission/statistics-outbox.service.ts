@@ -9,6 +9,7 @@ import { StatisticsOutboxEntity, StatisticsOutboxKind } from "./statistics-outbo
 import { SubmissionEntity } from "./submission.entity";
 import { ContestScoreRevisionService } from "./contest-score-revision.service";
 
+import { isVirtualContestSubmission } from "../contest/contest-virtual-timeline";
 import { logger } from "../logger";
 import { ProblemEntity } from "../problem/problem.entity";
 import { UserEntity } from "../user/user.entity";
@@ -21,7 +22,10 @@ const REPLAY_AGE = 30 * 1000;
 const REPLAY_BATCH = 500;
 const REDIS_KEY_REPLAY_TURN = "statistics-outbox:replay-turn";
 
-export type CountedSubmission = Pick<SubmissionEntity, "problemId" | "submitterId" | "contestId" | "status">;
+export type CountedSubmission = Pick<
+  SubmissionEntity,
+  "problemId" | "submitterId" | "contestId" | "status" | "submitTime"
+>;
 
 /**
  * Keeps the counts derived from non-contest submissions (problems' submissions and accepted submissions, users'
@@ -84,7 +88,8 @@ export class StatisticsOutboxService implements OnModuleInit, OnModuleDestroy {
     const { problemId, submitterId, contestId } = after ?? before;
     // Contest submissions aren't counted, but what's computed from them is kept for each revision of the contest
     if (contestId != null) {
-      this.contestScores?.noteChange(manager, contestId);
+      if (this.contestScores)
+        this.contestScores.noteChange(manager, contestId, await isVirtualContestSubmission(manager, after ?? before));
       return [];
     }
     const submissions = Number(!!after) - Number(!!before);

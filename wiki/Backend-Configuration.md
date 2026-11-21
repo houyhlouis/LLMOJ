@@ -27,7 +27,7 @@ The installer creates the file only if it doesn't exist. Compared with the examp
 | `server.hostname` | `127.0.0.1` | IP address the backend listens on (an address, not a host name). Installations keep it on `127.0.0.1` behind Nginx. |
 | `server.port` | `2002` | Port the backend listens on. Change Nginx and the local judge's `serverUrl` with it. |
 | `server.trustProxy` | `["loopback"]` | List of proxies to trust, as addresses, networks or names such as `loopback`. It decides which client IP address and protocol the backend sees, which rate limiting depends on. List only proxies you actually use. |
-| `server.clusters` | `null` | **Optional.** Number of backend worker processes: leave out or `null` for one process, `0` for one per CPU. More workers use more memory and metrics ports. This has nothing to do with judging capacity. |
+| `server.clusters` | `null` | **Optional.** Number of backend worker processes: leave out or `null` for one process, `0` for one per CPU. More workers use more memory and metrics ports. This has nothing to do with judging capacity. A worker that exits unexpectedly is replaced in the same slot, after a delay that starts at 250 ms and doubles up to 4 s (and resets once a worker has run for a minute). After 9 failures within a minute, the main process stops the workers and exits with an error so that systemd restarts the backend. The installer and upgrader use one process. |
 
 ## `metrics`: Prometheus metrics
 
@@ -36,7 +36,7 @@ The installer creates the file only if it doesn't exist. Compared with the examp
 | Setting | Example | Meaning |
 | --- | --- | --- |
 | `metrics.hostname` | `127.0.0.1` | IP address to serve metrics on. Use `127.0.0.1` or a protected network. |
-| `metrics.basePort` | `2020` | Port of the main process; worker processes use this port plus their worker number, so keep the range free. |
+| `metrics.basePort` | `2020` | Port of the main process; worker processes use this port plus their slot number (1, 2, …), which a replacement worker keeps, so keep the range free. |
 | `metrics.allowedIps` | `[]` | **Optional.** IP addresses allowed to read metrics, compared exactly with the connection's address (no ranges, no proxy headers). Empty or missing allows everyone. The installer writes `[127.0.0.1]`. |
 
 ## `services`: database, file storage, Redis and mail
@@ -136,7 +136,7 @@ LLMOJ doesn't check that mail can actually be sent. Send yourself a test message
 | `preference.security.allowOwnerManageProblemPermission` | `false` | A problem's owner may change who can access it (for public problems, only if the previous setting is on) |
 | `preference.security.allowOwnerDeleteProblem` | `true` | A problem's owner may delete it (for public problems, only if editing public problems is allowed) |
 | `preference.security.discussionDefaultPublic` | `true` | New discussions are public by default |
-| `preference.security.discussionReplyDefaultPublic` | `true` | New replies are public by default |
+| `preference.security.discussionReplyDefaultPublic` | `true` | New replies are public by default. With `false`, a new reply is seen only by its author and moderators until approved; in a team, the team's discussion moderators approve it (see [Teams](Teams.md)). |
 | `preference.security.allowEveryoneCreateDiscussion` | `true` | Signed-in users may start discussions unless a permission rule says otherwise |
 
 The "allow" settings are defaults: explicit permission rules on the **Permissions** page still take precedence. Don't set `captchaEnabled` or `turnstileSiteKey` here: the backend fills them in from `security.captcha`.
@@ -200,7 +200,7 @@ Never sent to browsers.
 | `resourceLimit.problemSamplesToRun` | `10` | Samples run before the tests of a submission; `0` runs none |
 | `resourceLimit.problemTestcases` | `1000` | Tests per problem (at least 1) |
 | `resourceLimit.problemTimeLimit` | `2000` | Highest time limit a problem may have, in milliseconds |
-| `resourceLimit.problemMemoryLimit` | `512` | Highest memory limit a problem may have, in MiB |
+| `resourceLimit.problemMemoryLimit` | `512` | Highest memory limit a problem may have, in MiB. New problems, and problems whose type changes, start with 512 MiB or this, whichever is less (and 1 second or `problemTimeLimit`, whichever is less). |
 | `resourceLimit.submissionFileSize` | `10485760` (10 MiB) | Largest submitted file, in bytes. Nginx, a proxy in front, or the problem type may allow less. |
 
 `0` is allowed where it makes sense, and means "none", not "unlimited". Users with permission to ignore limits may exceed some of these. AI imports and generation have limits of their own, which these settings don't change.
@@ -241,6 +241,25 @@ The section must be present; leave `telegramBotToken` empty to turn notification
 | `eventReport.telegramApiRoot` | `null` | **Optional.** Address of the Telegram API, if not the default |
 | `eventReport.sentTo` | `@example` | **Optional.** Chat ID, or a channel the bot may post to |
 | `eventReport.proxyUrl` | `null` | **Optional.** Proxy for Telegram only. Secret if it contains a password. |
+
+### What a report contains
+
+When a request fails with an unexpected server error (the user sees `INTERNAL_ERROR` and a request ID), the backend sends `sentTo` a short message with an attached `Event_<event ID>.json`. Both contain only:
+
+| Field | Content |
+| --- | --- |
+| `eventId`, `requestId` | The event's number, and the request ID the user was shown |
+| `method`, `route` | The HTTP method and the matched route, such as `/api/submission/setSubmissionPublic` (`[unmatched route]` if none matched) |
+| `queryKeys` | The names of the query parameters, never their values |
+| `userId` | The signed-in user's numeric ID |
+| `errorClass` | The class of the exception |
+| `errorMessage`, `message` | The exception's message, with every value the request carried removed. It's `[REDACTED]` when the request sent a password, code, token, key, source code or another private field, and a fixed text for AI requests. |
+
+Reports never contain request bodies, header values, cookies, query values, stack traces, IP addresses, usernames or whole exception objects. The full message and stack trace stay in the backend's own log on the server, under the same request ID (with the request's values removed): search the log for the ID from the report.
+
+Earlier versions attached the request body to the report, so an error while someone signed in, reset a password, confirmed a two-factor code or saved an AI key could send those values to the chat. If you used Telegram reports before this version, consider clearing that chat's history.
+
+Delivery is best effort and never stops the site. Reports are sent one at a time, each within 10 seconds. When Telegram is slow, unreachable, rate-limited or refuses the token, up to 64 reports wait (the oldest is dropped when more arrive), a report that failed isn't sent again, and sending pauses for 1 second after a failure, doubling up to 30 seconds while failures go on. The backend's log counts the reports that failed or were dropped, without their contents.
 
 ## `vendor`: IP address locations
 

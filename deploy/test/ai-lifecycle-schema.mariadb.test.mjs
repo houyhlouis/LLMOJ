@@ -12,6 +12,9 @@ import { fileURLToPath } from 'node:url';
 import { auditSchema, applySchema } from '../upgrade-schema.mjs';
 import { AI_LIFECYCLE_COLUMNS, AI_LIFECYCLE_SQL, validateAiLifecycleSchema } from '../ai-lifecycle-schema.mjs';
 
+import { CONTEST_VIRTUAL_SQL } from '../contest-virtual-schema.mjs';
+
+const expectedPlan = [...AI_LIFECYCLE_SQL, ...CONTEST_VIRTUAL_SQL];
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(path.join(root, 'apps/backend/package.json'));
 const configPath = process.env.LLMOJ_SCHEMA_TEST_DB_CONFIG;
@@ -21,6 +24,7 @@ async function prepareLegacySchema(ds) {
   assert.match(ds.options.database, /^libreoj_upgrade_[0-9a-f]{16}$/);
   await ds.synchronize(false);
   assert.deepEqual((await ds.driver.createSchemaBuilder().log()).upQueries, []);
+  await ds.query('DROP TABLE `contest_virtual_participation`');
   await ds.query('DROP INDEX `IDX_ai_job_owner_status_created` ON `ai_job`');
   for (const [table, column] of AI_LIFECYCLE_COLUMNS)
     await ds.query(`ALTER TABLE \`${table}\` DROP COLUMN \`${column}\``);
@@ -100,7 +104,7 @@ for (const external of [false, true]) {
       if (external) {
         tables = await loadSchemaOnly(ds, schemaPath);
       } else {
-        // A portable fixture for CI: retain all earlier entities, remove only the Part 38 additions.
+        // A portable fixture for CI: retain all earlier entities, remove the additions made since the pre-Part-38 schema.
         await prepareLegacySchema(ds);
         tables = (await ds.query('SHOW TABLES')).map(row => Object.values(row)[0]);
       }
@@ -109,13 +113,13 @@ for (const external of [false, true]) {
         assert.equal(Number((await ds.query(`SELECT COUNT(*) AS count FROM \`${table}\``))[0].count), 0, 'The fixture has no data');
 
       const proposed = (await ds.driver.createSchemaBuilder().log()).upQueries;
-      assert.equal(proposed.length, 19);
+      assert.equal(proposed.length, 22);
       // Compare every SQL byte, including default quoting; only statement order is immaterial.
-      assert.deepEqual(proposed.map(query => query.query).sort(), [...AI_LIFECYCLE_SQL].sort());
+      assert.deepEqual(proposed.map(query => query.query).sort(), [...expectedPlan].sort());
       assert(proposed.every(query => !query.parameters?.length));
       const audit = await auditSchema(ds);
       assert.equal(audit.compatible, true);
-      assert.equal(audit.queries.length, 19);
+      assert.equal(audit.queries.length, 22);
       assert.deepEqual(audit.queries, proposed.map(query => query.query));
       await validateAiLifecycleSchema(ds, proposed);
 
@@ -141,7 +145,7 @@ for (const external of [false, true]) {
         await ds.query(`ALTER TABLE \`${table}\` ALTER COLUMN \`${column}\` SET DEFAULT '${expected}'`);
       }
       assert.deepEqual((await auditSchema(ds)).queries, []);
-      t.diagnostic(`Verified ${tables.length} empty tables, all 18 additions and the index, then an empty re-audit`);
+      t.diagnostic(`Verified ${tables.length} empty tables, all 18 lifecycle columns, the index and the virtual participation DDL, then an empty re-audit`);
     } finally {
       try { if (ds.isInitialized) await ds.destroy(); }
       finally {
@@ -183,11 +187,11 @@ test('live/restored audit multisets agree across metadata order and each databas
       // Table creation alone may leave a stable catalog order on this host. Explicitly model both
       // enumeration orders at TypeORM's metadata boundary; its real builder still produces all SQL.
       const position = new Map(tableOrder.map((table, index) => [table, index]));
-      ds.entityMetadatas.sort((a, b) => position.get(a.tableName) - position.get(b.tableName));
+      ds.entityMetadatas.sort((a, b) => (position.get(a.tableName) ?? tableOrder.length) - (position.get(b.tableName) ?? tableOrder.length));
       item.audit = await auditSchema(ds);
       assert.equal(item.audit.compatible, true);
-      assert.equal(item.audit.queries.length, 19);
-      assert.deepEqual([...item.audit.queries].sort(), [...AI_LIFECYCLE_SQL].sort());
+      assert.equal(item.audit.queries.length, 22);
+      assert.deepEqual([...item.audit.queries].sort(), [...expectedPlan].sort());
     }
     const [restored, live] = databases.map(item => item.audit);
     assert.notDeepEqual(restored.queries, live.queries, 'The two real TypeORM plans must differ in order');
@@ -210,7 +214,7 @@ print(json.dumps({'status': fixture.manifest['status'], 'restored': fixture.mani
       const query = ds.query.bind(ds);
       const executed = [];
       ds.query = async (...args) => {
-        if (AI_LIFECYCLE_SQL.includes(args[0])) executed.push(args[0]);
+        if (expectedPlan.includes(args[0])) executed.push(args[0]);
         return await query(...args);
       };
       const applied = await applySchema(ds);
@@ -218,7 +222,7 @@ print(json.dumps({'status': fixture.manifest['status'], 'restored': fixture.mani
       assert.deepEqual(executed, audit.queries, 'Execute TypeORM order, never the clone order or a sorted plan');
       assert.deepEqual((await auditSchema(ds)).queries, []);
     }
-    t.diagnostic('Two different 19-statement TypeORM plans passed activate(); both applied in their original order');
+    t.diagnostic('Two different 22-statement TypeORM plans passed activate(); both applied in their original order');
   } finally {
     const failures = [];
     for (const { database, ds } of databases.reverse()) {

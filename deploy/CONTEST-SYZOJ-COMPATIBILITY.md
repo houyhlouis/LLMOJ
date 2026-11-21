@@ -25,4 +25,4 @@ Contest settings: contest-scoped file input/output names are copied into each su
 
 All regular submission queries, latest-submission widgets, public problem statistics, and leaderboard cache rebuilds exclude contest submissions. The regular submission detail endpoint does not bypass running-contest feedback rules. Contest result metadata is serialized through an explicit allowlist, and test-input/output/checker contents are not included in contestant result responses.
 
-The contest feature set does not include virtual participation, a registration/password gate or timed scoreboard freezing.
+Virtual participation: after a contest ends, each user who made no submission in it may take it once later, under its rule and with the scoreboard as it stood at the same elapsed time; virtual runs appear on the scoreboard only on request, marked, and never change official results (see [Contest rules](../wiki/Contest-Rules.md#virtual-participation)). The contest feature set does not include a registration/password gate or timed scoreboard freezing.

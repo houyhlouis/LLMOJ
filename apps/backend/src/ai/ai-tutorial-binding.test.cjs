@@ -247,8 +247,7 @@ test("the reference solution check records what each tutorial's code did, with t
     }
     return { validation: { samplesPassed: 1, sampleInputsPassed: 1, inputsPassed: 0 } };
   };
-  f.svc.runProfiles = () => ({});
-  await f.svc.tryTutorialReference(f.job, f.user, f.problem, f.snapshot, { fileIo: null }, 0, 100);
+  await f.svc.tryTutorialReference(f.job, f.user, f.problem, f.snapshot, { timeLimitMs: 1000, memoryLimitMiB: 64, fileIo: null }, 0, 100);
   assert.equal(f.job.state.stdCode, right);
   const checks = f.job.state.tutorialChecks;
   assert.deepEqual(

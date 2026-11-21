@@ -57,7 +57,7 @@ export function parseAiReceiptCounts(value: unknown): AiReceiptCounts | null {
   };
 }
 
-/** How a completed run was made, as its runner reports it (judge protocol version 8). */
+/** A parsed execution record, including legacy records without quality or receipt versions. */
 export interface AiExecutionRecord {
   // The AI execution contract it was made under (AI_EXECUTION_PROTOCOL_VERSION): only a result of the current one is
   // reused
@@ -75,6 +75,14 @@ export interface AiExecutionRecord {
   receipts?: AiReceiptCounts;
 }
 
+/** Every newly emitted record carries all three current contract versions. */
+export interface CurrentAiExecutionRecord extends AiExecutionRecord {
+  contract: typeof import("./index").AI_EXECUTION_PROTOCOL_VERSION;
+  qualityPolicy: typeof import("./index").AI_QUALITY_POLICY_VERSION;
+  receiptVersion: typeof import("./index").AI_RECEIPT_VERSION;
+}
+
+/** Compatibility parser; consumers must separately check versions before reusing a legacy record. */
 export function parseAiExecutionRecord(value: unknown): AiExecutionRecord | null {
   if (!isObject(value) || !isObject(value.runtime) || !isObject(value.reuse)) return null;
   const { runtime, reuse } = value;

@@ -5,7 +5,7 @@ import { InjectDataSource } from "@nestjs/typeorm";
 
 import { DataSource, In } from "typeorm";
 
-import { boundedDiagnosticExport, diagnosticPlanCandidate } from "./ai-diagnostic-export";
+import { boundedDiagnosticExport, diagnosticJobIdentity, diagnosticPlanCandidate } from "./ai-diagnostic-export";
 import { AiUsageEntity } from "./ai-usage.entity";
 
 import { AiJobEntity } from "./ai.entity";
@@ -225,7 +225,7 @@ export class AiJobViewService {
     const state = job.state || {};
     return boundedDiagnosticExport({
       deployment: await this.deployment(user),
-      job: { id, revision: job.revision, action: job.action, status: job.status },
+      job: diagnosticJobIdentity(job, id),
       detail,
       requests: requests.slice(0, 1000).map(r => ({
         id: r.id,

@@ -21,7 +21,7 @@ const { GroupMembershipEntity } = require("../group/group-membership.entity.ts")
 const { PermissionForUserEntity } = require("../permission/permission-for-user.entity.ts");
 const { PermissionForGroupEntity } = require("../permission/permission-for-group.entity.ts");
 test("all discussion pages/counts apply private-problem/team/global/object ACLs before pagination (real MariaDB)",
-  { skip: !process.env.HYHOJ_DISCUSSION_TEST_DB_CONFIG, timeout: 90000 }, async () => {
+  { skip: !process.env.HYHOJ_DISCUSSION_TEST_DB_CONFIG && "needs HYHOJ_DISCUSSION_TEST_DB_CONFIG", timeout: 90000 }, async () => {
   const config = require("js-yaml").load(fs.readFileSync(process.env.HYHOJ_DISCUSSION_TEST_DB_CONFIG, "utf8")).services.database;
   assert.equal(config.database, "llmoj_features_discussion", "Only use the dedicated disposable discussion database");
   const db = new DataSource({ ...config, entities: [path.join(__dirname, "../**/*.entity.ts")], synchronize: false, logging: false });

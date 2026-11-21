@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Menu } from "semantic-ui-react";
 import { observer } from "mobx-react";
 import type * as Monaco from "monaco-editor";
@@ -32,10 +32,13 @@ let TabbedEditor: React.FC<TabbedEditorProps> = props => {
   const refOnChangeCallback = useRef<typeof props.onChange>();
   refOnChangeCallback.current = props.onChange;
 
+  // The tabs' models and their change listeners belong to this component: it disposes them all when it unmounts or
+  // its editor is mounted again (the editor wrapper disposes only the model attached to the editor)
   const refTabStates = useRef<
     {
       model: Monaco.editor.ITextModel;
       viewState: Monaco.editor.ICodeEditorViewState;
+      subscription: Monaco.IDisposable;
     }[]
   >(null);
 
@@ -50,17 +53,40 @@ let TabbedEditor: React.FC<TabbedEditorProps> = props => {
   const refCurrentTabIndex = useRef(currentTabIndex);
   refCurrentTabIndex.current = currentTabIndex;
 
+  function disposeTabs() {
+    const tabs = refTabStates.current;
+    refTabStates.current = null;
+    if (!tabs) return;
+    const editor = refEditor.current;
+    try {
+      // Detach ours first, so that the wrapper doesn't dispose it a second time
+      if (editor && tabs.some(tab => tab.model === editor.getModel())) editor.setModel(null);
+    } catch {
+      // The editor was disposed already, with its model
+    }
+    for (const tab of tabs) {
+      tab.subscription.dispose();
+      if (!tab.model.isDisposed()) tab.model.dispose();
+    }
+  }
+  useEffect(() => disposeTabs, []);
+
   function editorDidMount(editor: Monaco.editor.IStandaloneCodeEditor) {
+    disposeTabs();
+    const initialModel = editor.getModel();
     refTabStates.current = props.tabs.map((tab, i) => {
       const model = (window["Monaco"] as typeof Monaco).editor.createModel(tab.initialContent, tab.language);
-      model.onDidChangeContent(() => refOnChangeCallback.current(i, model.getValue()));
+      const subscription = model.onDidChangeContent(() => refOnChangeCallback.current(i, model.getValue()));
       return {
         model,
-        viewState: null
+        viewState: null,
+        subscription
       };
     });
     refEditor.current = editor;
     editor.setModel(refTabStates.current[refCurrentTabIndex.current]?.model);
+    // The empty model the wrapper created is attached to nothing now
+    if (initialModel && initialModel !== editor.getModel() && !initialModel.isDisposed()) initialModel.dispose();
   }
 
   function onChangeTab(index: number) {

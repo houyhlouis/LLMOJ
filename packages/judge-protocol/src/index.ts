@@ -26,11 +26,10 @@ export enum JudgeTaskType {
 // Version 6 reports a failed AiExecution task as a typed failure ("failure") and uploads its evidence first
 // ("requestUploads" with "evidence").
 // Version 7 runs each program of an AiExecution task with its role's execution profile ("profiles": compile options,
-// limits, CPU class), seeing only its own binary, and reports the profiles' digest with the result. Only judges of this
-// version are sent AiExecution tasks.
+// limits, CPU class), seeing only its own binary, and reports the profiles' digest with the result.
 // Version 8 reports how a completed AiExecution task was made ("execution": contract, runtime, builds and inputs
 // reused from earlier attempts) and its cases' hashes ("corpus"), and runs replays of kept failures (operation
-// "replay", with the kept files sent as "transfers"). Only judges of this version are sent AiExecution tasks.
+// "replay", with the kept files sent as "transfers").
 // Version 9 requires task-contract/compile-link/qualification capabilities AND quality-policy/receipt versions.
 // Missing announcements are incompatible; version alone never admits an AI execution.
 export const JUDGE_PROTOCOL_VERSION = 9;

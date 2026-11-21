@@ -77,6 +77,7 @@ import { normalizeAiMarkdown, normalizeAiSections, AI_MARKDOWN_RULES } from "./a
 
 import { allocationReview, automaticAllocationSnapshot } from "./ai-allocation-review";
 import { allocateAiTestcases } from "./ai-case-allocation";
+import { aiRunProfiles } from "./ai-run-profiles";
 import {
   AiProfileInput,
   decideScoring,
@@ -484,7 +485,7 @@ export class AiWorkflowService implements AiWorkflowRunner {
     if (!this.execution) throw new AiError("SANDBOX_UNAVAILABLE");
     const state = workflowState(job.state);
     const contract = state.contract?.value;
-    const run = this.runProfiles(problem, snapshot, job.state.plan, job.state.stdFileIo || null);
+    const run = aiRunProfiles(problem.type, snapshot.judgeInfo, job.state.plan, job.state.stdFileIo || null);
     const grader = role === "std" && !!job.state.graderCode;
     const pin = grader ? interfacePin(job.state.graderCode, job.state.protocolExtraSourceFiles || {}) : undefined;
     if (grader) {
@@ -600,7 +601,7 @@ export class AiWorkflowService implements AiWorkflowRunner {
       small: artifacts.smallMakeCode,
       oracle: artifacts.oracleCode,
       alternatives: artifacts.alternatives,
-      profiles: this.runProfiles(problem, snapshot, job.state.plan, job.state.stdFileIo || null)
+      profiles: aiRunProfiles(problem.type, snapshot.judgeInfo, job.state.plan, job.state.stdFileIo || null)
     });
     const entry = {
       id: candidate.id,
@@ -647,7 +648,7 @@ export class AiWorkflowService implements AiWorkflowRunner {
             type: job.state.plan.outputComparison || "tokens",
             caseSensitive: job.state.plan.caseSensitive
           },
-          ...this.runProfiles(problem, snapshot, job.state.plan, job.state.stdFileIo || null),
+          ...aiRunProfiles(problem.type, snapshot.judgeInfo, job.state.plan, job.state.stdFileIo || null),
           stdFileIo: job.state.stdFileIo || null,
           samples: inline,
           sampleFiles: samples.files,
@@ -2058,7 +2059,7 @@ export class AiWorkflowService implements AiWorkflowRunner {
               stdFileIo: plan.fileIo || null,
               samples,
               sampleFiles: sampleFiles.files,
-              ...this.runProfiles(problem, snapshot, plan, plan.fileIo || null)
+              ...aiRunProfiles(problem.type, snapshot.judgeInfo, plan, plan.fileIo || null)
             },
             async () => {
               await this.coordinator.assertJob(job);
@@ -2758,7 +2759,7 @@ export class AiWorkflowService implements AiWorkflowRunner {
     // W04)
     await this.ownerRepair(job, config, problem, snapshot);
     // How each program is compiled and run, as the published judging settings will give them (review Part III, H03)
-    const run = this.runProfiles(problem, snapshot, plan, job.state.stdFileIo || null);
+    const run = aiRunProfiles(problem.type, snapshot.judgeInfo, plan, job.state.stdFileIo || null);
     await this.coordinator.checkpoint(job, "testdata.compile", base + share * 0.45);
     const sampleFiles = protocolProblem
       ? { files: [], directory: null }
@@ -3679,7 +3680,7 @@ export class AiWorkflowService implements AiWorkflowRunner {
       programs[role] = source;
     }
     const snapshot = await this.publisher.snapshot(problem);
-    const run = this.runProfiles(problem, snapshot, testPlan, job.state.stdFileIo || null);
+    const run = aiRunProfiles(problem.type, snapshot.judgeInfo, testPlan, job.state.stdFileIo || null);
     const digest = aiContractDigest(run.profiles);
     return {
       programs,
@@ -3711,35 +3712,6 @@ export class AiWorkflowService implements AiWorkflowRunner {
           programs
         }
       }
-    };
-  }
-
-  /**
-   * A run's execution profiles (see ai-judging-contract.ts), and the limits a runner reads from them for its budget.
-   * `stdFileIo` is the reference solution's: a tutorial's may use the problem's files, a generated one never does.
-   */
-  private runProfiles(
-    problem: ProblemEntity,
-    snapshot: AiProblemSnapshot,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Legacy AI plan shapes are validated at runtime.
-    plan: any,
-    stdFileIo: { inputFilename: string; outputFilename: string } | null
-  ) {
-    const profiles = resolveAiProfiles({
-      problemType: problem.type as AiProfileInput["problemType"],
-      judgeInfo: snapshot.judgeInfo,
-      timeLimitMs: plan.timeLimitMs,
-      memoryLimitMiB: plan.memoryLimitMiB,
-      fileIo: stdFileIo,
-      checker: !!plan.needsSpj
-    });
-    const { generator, std } = profiles.roles;
-    return {
-      profiles,
-      timeLimitMs: generator.timeLimitMs,
-      memoryLimitMiB: generator.memoryLimitMiB,
-      stdTimeLimitMs: std.timeLimitMs,
-      stdMemoryLimitMiB: std.memoryLimitMiB
     };
   }
 

@@ -5,6 +5,11 @@ import { SubmissionEntity } from "./submission.entity";
 
 import { JsonColumn } from "../database/json-column";
 
+/** Local result metadata, stored with the verdict so a rejudge assigns a new time and machine. */
+export type StoredSubmissionProgress = SubmissionProgress & {
+  completion?: { judgedAt: string; judgeMachineId: number | null };
+};
+
 @Entity("submission_detail")
 // The unique index TypeORM 0.3.7 also made for this one-to-one primary key; newer TypeORM leaves it out, so it
 // is declared to keep the schema of existing and new installations the same
@@ -25,5 +30,5 @@ export class SubmissionDetailEntity {
   fileUuid: string;
 
   @JsonColumn({ nullable: true })
-  result: SubmissionProgress;
+  result: StoredSubmissionProgress;
 }

@@ -111,10 +111,8 @@ const LEGACY_TASK_TYPES = [JudgeTaskType.Submission];
 
 const MAX_UPLOADS_PER_REQUEST = 20000;
 
-// AI runs take a task thread for long; a judge client keeps one thread for other work, and runs at most as many as
-// its AI slots. One with a single thread runs none, and so does one too old to run each program with its role's
-// execution profile and its own binary only (judge protocol version 7): it could check a program under other settings
-// than it's judged with after publication.
+// A judge must advertise the required AI protocol, capabilities, quality policy and receipt version before it can
+// take an AI task. Its AI slots are capped to reserve at least one task thread for other work.
 export function aiExecutionLimit(capabilities: JudgeClientCapabilities): number {
   if (!capabilities || capabilities.consumerThreads < 2) return 0;
   if (
@@ -246,6 +244,11 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     });
     this.leaseRenewalTimer = setInterval(() => {
       this.renewLeases().catch(e => logger.error(`Failed to renew judge task leases: ${e}`));
+      const connected = [...this.mapSessionIdToJudgeClient.values()].filter(state => state.socket.connected);
+      // Diagnostics are best effort; a Redis outage must not hold up the database lease renewal.
+      this.judgeClientService.noteConnected(connected.map(state => state.judgeClient.id)).catch(() => {
+        // Leave the last known time available. The next sampling tick retries.
+      });
     }, LEASE_RENEW_INTERVAL);
     this.leaseRenewalTimer.unref();
   }

@@ -1,6 +1,6 @@
 /* On a disposable MariaDB database (never a production one): an AI job's programs run on a judge machine through the
  * judge queue and give the job the same result as the local AI runner, with the generated files checked against
- * what the judge reported; and the local runner's socket client. Storage, the queue and the gateway are stand-ins. */
+ * what the judge reported; and the local runner's socket client. The retry case uses the durable queue. */
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
@@ -31,6 +31,11 @@ require("@nestjs/common").Logger.overrideLogger(false);
 const { DataSource } = require("typeorm");
 const { AiExecutionEntity } = require("./ai-execution.entity.ts");
 const { AiExecutionService, aiExecutionBudget } = require("./ai-execution.service.ts");
+const { JudgeQueueService } = require("../judge/judge-queue.service.ts");
+const { JudgeJobEntity, JudgeJobAttemptEntity } = require("../judge/judge-job.entity.ts");
+const loadWorker = require("../../../judge/src/task/ai-execution/ai-execution-worker.fixture.cjs");
+const { describe } = require("../../../judge/src/aiFailure.ts");
+const { keepFailure, profileOf } = require("../../../judge/src/aiEvidence.ts");
 const { aiOperationKey } = require("./ai-operation.ts");
 const { AiError } = require("./ai.types.ts");
 const { withAiRuntime } = require("./ai-runtime.ts");
@@ -48,9 +53,10 @@ const until = async (condition, what) => {
   throw new Error(`timed out waiting for ${what}`);
 };
 
-async function fixture(t) {
+async function fixture(t, durableQueue = false) {
   const { database } = JSON.parse(fs.readFileSync(configPath, "utf8")).services;
-  const ds = new DataSource({ ...database, entities: [AiExecutionEntity], synchronize: true, dropSchema: true, logging: false });
+  const entities = durableQueue ? [AiExecutionEntity, JudgeJobEntity, JudgeJobAttemptEntity] : [AiExecutionEntity];
+  const ds = new DataSource({ ...database, entities, synchronize: true, dropSchema: true, logging: false });
   await ds.initialize();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "llmoj-ai-execution-"));
   const savedTmp = process.env.TMPDIR;
@@ -92,7 +98,10 @@ async function fixture(t) {
       return data.length;
     }
   };
-  const queue = {
+  // Claims and fences live in MariaDB. This single backend polls for work directly.
+  const notifications = { getClient: () => ({ publish: async () => 0 }) };
+  const metrics = { histogram: () => ({ observe() {} }), gauge() {} };
+  const queue = durableQueue ? new JudgeQueueService(ds, notifications, metrics) : {
     services: new Map(),
     enqueued: [],
     registerTaskType(type, service) {
@@ -104,7 +113,7 @@ async function fixture(t) {
   const gateway = { canceled: [], cancelTask: taskId => gateway.canceled.push(taskId) };
   const service = new AiExecutionService(ds, files, queue, gateway, { takeTurn: async () => true });
   const row = async taskId => await ds.getRepository(AiExecutionEntity).findOneBy({ taskId });
-  return { ds, service, objects, modified, queue, gateway, row, tmp };
+  return { ds, service, objects, modified, queue, gateway, row, tmp, files };
 }
 
 const sampleUuids = [crypto.randomUUID(), crypto.randomUUID()];
@@ -123,6 +132,165 @@ const complete = (contents, overrides = {}) => ({
   result: { validation: { samplesPassed: 1, inputsPassed: 1 }, requestHash: "h" },
   files: Object.entries(contents).map(([name, data]) => ({ name, size: Buffer.byteLength(data), sha256: sha256(data) })),
   ...overrides
+});
+
+test("generated upload forms sign only the current files in order and retain evidence in the manifest", async () => {
+  const taskId = crypto.randomUUID();
+  const execution = { taskId, state: "Running", uploads: [] };
+  const repo = {
+    findOneBy: async () => execution,
+    update: async (_where, patch) => Object.assign(execution, patch)
+  };
+  const signed = [];
+  const storage = {
+    signJudgeUpload: async (key, size) => {
+      signed.push([key, size]);
+      return { url: "https://storage.invalid/upload", extraFormData: { key, size: String(size) }, fileFieldName: "file" };
+    }
+  };
+  const service = new AiExecutionService({ getRepository: () => repo }, storage, { registerTaskType() {} });
+  const evidence = { name: "0.input", size: 3 };
+  const generated = [{ name: "7.out", size: 2 }, { name: "7.in", size: 4 }];
+  const prefix = `temporary/ai-execution/${taskId}/`;
+  const earlier = await service.signUploads(taskId, [evidence], true);
+  assert.deepEqual(earlier.map(target => target.name), [evidence.name]);
+  const targets = await service.signUploads(taskId, generated);
+  assert.deepEqual(targets.map(target => target.name), generated.map(file => file.name));
+  assert.deepEqual(signed, [
+    [`${prefix}evidence/0.input`, 3],
+    [`${prefix}files/7.out`, 2],
+    [`${prefix}files/7.in`, 4]
+  ]);
+  assert.deepEqual(execution.uploads, [{ name: "evidence/0.input", size: 3 }, ...generated]);
+});
+
+test("a disconnect after evidence upload requeues the execution and publishes the retried result once", { skip }, async t => {
+  const { ds, service, queue, row, tmp, objects, files } = await fixture(t, true);
+  const job = { id: crypto.randomUUID() };
+  const firstOwner = { connectionId: "first-connection", judgeClientId: 1 };
+  const nextOwner = { connectionId: "next-connection", judgeClientId: 2 };
+  const worker = runGeneration => loadWorker({
+    winston: { error() {}, warn() {} },
+    "../../config": { dataStore: tmp },
+    "../../error": { CanceledError: class extends Error {} },
+    "../../file": { ensureFiles: async () => {}, hashFileAtPath: async file => sha256(await fs.promises.readFile(file)) },
+    "../../rpc": {
+      ensureNotCanceled() {},
+      isCanceled: () => false,
+      requestUploads: ({ taskId, files, evidence }) => queue.signTaskUploads({ taskId, type: "AiExecution" }, files, evidence)
+    },
+    "../../utils": {
+      safelyJoinPath: path.join,
+      uploadWithForm: async (form, data) => {
+        assert.equal(Number(form.extraFormData.size), data.length);
+        await files.putTemporaryObject(form.extraFormData.key, data);
+      }
+    },
+    "../../aiRunner": { validate() {}, runGeneration }
+  });
+  const stop = new AbortController();
+  const running = withAiRuntime({ ownerId: 1, jobId: job.id, signal: stop.signal, record: async () => {} }, () =>
+    service.run(job, { ...request(job.id), sampleFiles: [] }, async () => {}, async () => {})
+  );
+  running.catch(() => {});
+  try {
+    const first = await until(() => queue.claim(firstOwner), "the first lease");
+    const meta = first.task.getMeta();
+    const prefix = `temporary/ai-execution/${meta.taskId}/`;
+    const put = t.mock.method(files, "putTemporaryObject");
+    const failed = worker(async (input, _emit, _cancel, layout) => {
+      const error = describe(new Error("Output mismatch"), {
+        kind: "solver_disagreement",
+        data: { input: Buffer.from("17\n") }
+      });
+      const limit = { timeLimitMs: 1000, memoryLimitMiB: 64 };
+      error.failure = await keepFailure(error, "generate", {
+        directory: layout.evidenceDirectory,
+        share: async () => {},
+        attemptId: layout.attemptId,
+        operation: input.operation,
+        sourceHashes: { std: sha256(input.stdCode) },
+        profile: profileOf({ auxiliary: limit, solution: limit, oracle: limit }, "test-compiler", "tokens"),
+        comparison: null
+      });
+      throw error;
+    });
+    let undelivered;
+    const disconnect = new Error("Judge connection closed");
+    await assert.rejects(
+      failed({
+        ...first.task,
+        reportProgressRaw: progress => {
+          undelivered = progress;
+          throw disconnect;
+        }
+      }),
+      error => error === disconnect
+    );
+    assert.equal(undelivered.status, "Failed");
+    assert.equal(undelivered.message, "Output mismatch");
+    const [observation] = undelivered.failure.observations;
+    assert.deepEqual(
+      observation.artifacts.map(({ name, sha256 }) => [name, sha256]),
+      [["0.input", sha256("17\n")]],
+      observation.evidenceError
+    );
+    assert.deepEqual(objects.get(`${prefix}evidence/0.input`), Buffer.from("17\n"));
+    const interrupted = await row(meta.taskId);
+    assert.deepEqual(interrupted.uploads, [{ name: "evidence/0.input", size: 3 }]);
+    assert.equal(interrupted.result, null);
+    await queue.release(meta.taskId, first.fence, firstOwner.connectionId, "Disconnected");
+
+    const retry = await queue.claim(nextOwner);
+    assert.equal(retry.task.taskId, meta.taskId);
+    assert.equal(retry.fence, first.fence + 1);
+    assert.equal(await queue.onTaskProgress(meta, { ...firstOwner, fence: first.fence }, undelivered), false);
+    const contents = { "7.out": "34\n", "7.in": "17\n" };
+    const signed = t.mock.method(queue, "signTaskUploads");
+    const succeeded = worker(async (_request, emit, _cancel, layout) => {
+      for (const [name, data] of Object.entries(contents)) fs.writeFileSync(path.join(layout.outputRoot, name), data);
+      emit({
+        type: "complete",
+        directory: layout.outputRoot,
+        files: Object.keys(contents),
+        execution: executionRecord({ attemptId: layout.attemptId })
+      });
+    });
+    const reports = [];
+    await succeeded({ ...retry.task, reportProgressRaw: progress => reports.push(progress) });
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].status, "Complete", reports[0].message);
+    assert.equal(signed.mock.callCount(), 1);
+    const retryTargets = await signed.mock.calls[0].result;
+    assert.deepEqual(retryTargets.map(target => target.name), Object.keys(contents));
+    const lease = { ...nextOwner, fence: retry.fence };
+    const finish = t.mock.method(service, "onTaskProgress");
+    const download = t.mock.method(files, "downloadFileToPath");
+    assert.equal(await queue.onTaskProgress(meta, lease, reports[0]), true);
+    assert.equal(await queue.onTaskProgress(meta, lease, reports[0]), true, "the repeated final report is acknowledged");
+    assert.equal(finish.mock.callCount(), 1);
+    const collected = await running;
+    assert.deepEqual(collected.files, Object.keys(contents));
+    const downloaded = download.mock.calls.map(call => call.arguments[0]);
+    assert.deepEqual(downloaded, collected.files.map(name => `${prefix}files/${name}`));
+    assert.deepEqual(
+      put.mock.calls.map(call => call.arguments[0]).sort(),
+      [`${prefix}evidence/0.input`, ...downloaded].sort(),
+      "both attempts together uploaded one copy of each artifact"
+    );
+    for (const [name, data] of Object.entries(contents))
+      assert.equal(fs.readFileSync(path.join(collected.directory, name), "utf8"), data);
+    assert.deepEqual((await row(meta.taskId)).uploads.map(file => file.name), ["evidence/0.input", ...collected.files]);
+    assert.deepEqual(objects.get(`${prefix}evidence/0.input`), Buffer.from("17\n"), "evidence survives collection");
+    const attempts = await ds.getRepository(JudgeJobAttemptEntity).find({ where: { taskId: meta.taskId }, order: { fence: "ASC" } });
+    assert.deepEqual(attempts.map(attempt => attempt.outcome), ["Disconnected", "Finished"]);
+    await service.acknowledge(job.id);
+    assert.equal(await row(meta.taskId), null);
+    assert.equal(objects.size, 0);
+  } finally {
+    stop.abort();
+    await running.catch(() => {});
+  }
 });
 
 test("a job's programs run on a judge machine and give the same result as the local runner", { skip }, async t => {
@@ -362,7 +530,7 @@ test("old runs and the objects nothing refers to are cleaned up", { skip }, asyn
   assert.deepEqual([...objects.keys()].sort(), [orphanNew, `temporary/ai-execution/${active}/request.json`].sort());
 });
 
-// How a run of judge protocol version 8 says it made its result
+// Execution metadata reported by a judge using the current AI contract.
 const executionRecord = (overrides = {}) => ({
   contract: AI_EXECUTION_PROTOCOL_VERSION,
   qualityPolicy: require("@libreoj/judge-protocol").AI_QUALITY_POLICY_VERSION,

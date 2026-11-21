@@ -60,6 +60,10 @@ function componentHarness(file, options = {}) {
       const index = cursor++;
       return (slots[index] ||= { current: initial });
     },
+    useCallback: callback => callback,
+    // Function components only: refs and memoization don't matter here
+    forwardRef: render => render,
+    memo: component => component,
     useEffect(callback, dependencies) {
       const index = cursor++,
         previous = slots[index];
@@ -86,7 +90,10 @@ function componentHarness(file, options = {}) {
     "Dropdown",
     "Label",
     "Loader",
+    "Menu",
     "Modal",
+    "Pagination",
+    "Placeholder",
     "Popup",
     "Table"
   ]) {
@@ -149,6 +156,8 @@ function componentHarness(file, options = {}) {
       Link: { name: "Link" }
     },
     "@/utils/formatFileSize": { __esModule: true, default: size => `${size} B` },
+    // Saving a file in the browser: tests that check it pass their own
+    "@/utils/downloadFile": { __esModule: true, default() {}, saveBlob() {} },
     "@/utils/formatDateTime": { __esModule: true, default: date => [`short ${date}`, `long ${date}`] },
     "@/pages/problem/utils": {
       getProblemUrl: (id, { subRoute, use } = {}) =>
@@ -210,16 +219,22 @@ function componentHarness(file, options = {}) {
           throw new Error(`Unexpected import ${name}`);
         },
         setTimeout: fn => timers.push(fn),
+        clearTimeout() {},
         setInterval: () => 0,
         clearInterval() {},
         Date,
         Intl,
-        window: { confirm: () => options.confirm !== false, ...options.window }
+        window: { confirm: () => options.confirm !== false, ...options.window },
+        // E.g. document and AbortController for components that poll
+        ...options.globals
       },
       { filename }
     );
     return module.exports;
   }
+  // Hooks to run for real, from src/utils/hooks, instead of the stubs above (e.g. ["usePoll"])
+  for (const hook of options.realHooks || [])
+    Object.assign(deps["@/utils/hooks"], load(path.join(src, `utils/hooks/${hook}.ts`)));
   const exported = load(path.join(src, file));
   component =
     (options.component && exported[options.component]) ||

@@ -31,6 +31,8 @@ class DatabaseInitialization(unittest.TestCase):
         # The tests work for non-root developers too, without real ownership changes.
         self.chown = mock.patch.object(db.os, "chown").start()
         self.addCleanup(mock.patch.stopall)
+        self.mysql_user = mock.patch.object(db.pwd, "getpwnam", return_value=SimpleNamespace(pw_uid=1234)).start()
+        self.mysql_group = mock.patch.object(db.grp, "getgrnam", return_value=SimpleNamespace(gr_gid=5678)).start()
         self.lock = mock.patch.object(db, "instance_lock").start()
 
     def process(self, code=0):
@@ -57,6 +59,9 @@ class DatabaseInitialization(unittest.TestCase):
         self.assertFalse(any(value.startswith("--user=") for value in command))
         self.assertEqual(launch.call_args.kwargs["cwd"], "/")
         self.assertNotIn("MYSQLD_BOOTSTRAP", launch.call_args.kwargs["env"])
+        self.mysql_user.assert_called_once_with("mysql")
+        self.mysql_group.assert_called_once_with("mysql")
+        self.assertEqual(self.chown.call_args_list, [mock.call(path, 1234, 5678) for path in (observed[0].parent, observed[0])])
         self.assertEqual((self.root / "data/mariadb/verified-table").read_text(), "safe fixture")
         self.assertFalse(observed[0].exists())
 

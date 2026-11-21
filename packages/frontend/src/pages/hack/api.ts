@@ -80,6 +80,9 @@ export function reasonText(reason: string) {
         "题目管理员需要先配置 STD 和输入校验器。",
       "The configured reference is no longer an accepted submission": "当前 STD 已失效，请管理员更新配置。",
       "The trusted reference cannot be hacked": "作为 STD 来源的提交不能作为 Hack 目标。",
+      "Virtual submissions cannot be hacked": "虚拟参赛的提交不能作为 Hack 目标。",
+      "Hacks are unavailable during virtual participation": "虚拟参赛期间不能 Hack。",
+      "Self Eval is unavailable during virtual participation": "虚拟参赛期间不能使用自测。",
       "STD file I/O requires two distinct safe filenames":
         "请为 STD 填写两个不同的安全文件名，最多 255 字节，不允许路径、特殊符号或 hack-stderr。",
       "Self evaluation is disabled for this contest": "此比赛未开启自测。",

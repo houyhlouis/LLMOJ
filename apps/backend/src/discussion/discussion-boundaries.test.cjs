@@ -12,6 +12,7 @@ const { validate } = require("class-validator");
 const { DiscussionController } = require("./discussion.controller.ts");
 const { DiscussionService, DiscussionReplyPermissionType, DiscussionReactionType } = require("./discussion.service.ts");
 const { UserPrivilegeType } = require("../user/user-privilege.service.ts");
+const { TeamEntity, TeamMemberEntity, TeamResourceEntity } = require("../team/team.entity.ts");
 const { GetDiscussionAndRepliesRequestDto, GetDiscussionAndRepliesRequestQueryRepliesType } = require("./dto/get-discussion-and-replies-request.dto.ts");
 const { GetDiscussionAndRepliesResponseError } = require("./dto/get-discussion-and-replies-response.dto.ts");
 const { ToggleReactionResponseError } = require("./dto/toggle-reaction-response.dto.ts");
@@ -75,6 +76,24 @@ for (const reaction of [true, false]) {
     assert.deepEqual(f.writes, []);
   });
 }
+test("reviewing an active or archived team's pending reply confers no reaction rights", async () => {
+  const f = fixture(), moderator = { id: 9 };
+  const resource = { teamId: 3, kind: "discussion", resourceId: f.parent.id, archived: false };
+  const rows = new Map([
+    [TeamEntity, { id: 3, ownerId: 8, archived: false }],
+    [TeamResourceEntity, resource], [TeamMemberEntity, { status: "member", permissions: ["discussions"] }]
+  ]);
+  f.service.connection.getRepository = entity => ({ findOne: async () => rows.get(entity) ?? null });
+  f.service.userPrivilegeService.userHasPrivilege = async (_user, p) => ["ViewDiscussion", "ViewSite"].includes(p);
+  for (const archived of [false, true]) {
+    resource.archived = archived;
+    assert.equal(await f.service.userHasViewDiscussionReplyPermission(moderator, f.reply, f.parent), true);
+    for (const reaction of [true, false]) assert.deepEqual(await f.controller.toggleReaction(moderator, {
+      type: DiscussionReactionType.DiscussionReply, id: f.reply.id, emoji: "👍", reaction
+    }), { error: ToggleReactionResponseError.PERMISSION_DENIED });
+  }
+  assert.deepEqual(f.writes, []);
+});
 for (const scenario of [{ name: "public reply", isPublic: true, user: { id: 3 } },
   { name: "hidden reply author", user: { id: 2 } }, { name: "hidden reply moderator", manage: true, user: { id: 1 } }]) {
   test(`F07 control: ${scenario.name} can add and remove reactions`, async () => {

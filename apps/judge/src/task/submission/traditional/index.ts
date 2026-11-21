@@ -30,6 +30,7 @@ import { runCustomChecker, validateCustomChecker } from "../../../checkers/custo
 import * as fsNative from "../../../fsNative";
 
 import { runCommonTask, getExtraSourceFiles } from "../common";
+import type { TestcaseResources } from "../testcaseResources";
 import { isRegularFile } from "../../../safeFile";
 
 export * from "./judgeInfo";
@@ -97,14 +98,14 @@ async function runTestcase(
   testcaseIndex: number,
   testcase: TestcaseConfig,
   extraParameters: ExtraParametersTraditional,
-  taskWorkingDirectory: string
+  taskWorkingDirectory: string,
+  resources: TestcaseResources
 ): Promise<TestcaseResultTraditional> {
   const [compileResult, customCheckerCompileResult] = extraParameters;
 
   const isSample = sampleId != null;
 
-  const timeLimit = isSample ? judgeInfo.timeLimit : testcase.timeLimit;
-  const memoryLimit = isSample ? judgeInfo.memoryLimit : testcase.memoryLimit;
+  const { timeLimit, memoryLimit } = resources.program;
 
   const result: TestcaseResultTraditional = {
     testcaseInfo: {
@@ -229,7 +230,7 @@ async function runTestcase(
             task.taskId,
             judgeInfo.checker,
             judgeInfo.checker.timeLimit || judgeInfo.timeLimit,
-            judgeInfo.checker.memoryLimit || judgeInfo.memoryLimit,
+            resources.checkerMemory,
             customCheckerCompileResult,
             inputFile,
             outputFile,

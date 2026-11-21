@@ -4,7 +4,8 @@ import { v4 as uuid } from "uuid";
 import { SandboxStatus } from "simple-sandbox";
 
 import { JudgeInfoInteraction, TestcaseConfig } from "./judgeInfo";
-import { interactorLimits } from "./limits";
+
+import type { TestcaseResources } from "../testcaseResources";
 
 import { SubmissionTask, SubmissionStatus, ProblemSample } from "..";
 import { compile, CompileResultSuccess } from "../../../compile";
@@ -95,6 +96,7 @@ export async function runTestcase(
   testcase: TestcaseConfig,
   extraParameters: ExtraParametersInteraction,
   taskWorkingDirectory: string,
+  resources: TestcaseResources,
   disposer: Disposer,
   session?: { stage: 1 | 2; managerDirectory: string },
   captureDiagnostics = false
@@ -103,8 +105,7 @@ export async function runTestcase(
 
   const isSample = sampleId != null;
 
-  const timeLimit = isSample ? judgeInfo.timeLimit : testcase.timeLimit;
-  const memoryLimit = isSample ? judgeInfo.memoryLimit : testcase.memoryLimit;
+  const { timeLimit, memoryLimit } = resources.program;
 
   const result: TestcaseResultInteraction = {
     testcaseInfo: {
@@ -180,12 +181,7 @@ export async function runTestcase(
     parameters: [],
     compileResultExtraInfo: compileResult.extraInfo
   });
-  // By default use the testcase's time limit.
-  const { timeLimit: interactorTimeLimit, memoryLimit: interactorMemoryLimit } = interactorLimits(
-    judgeInfo.interactor,
-    timeLimit,
-    judgeInfo.memoryLimit
-  );
+  const { timeLimit: interactorTimeLimit, memoryLimit: interactorMemoryLimit } = resources.interactor;
   const interactorRunConfig = interactorLanguageConfig.run({
     binaryDirectoryInside: interactorBinaryDirectory.inside,
     workingDirectoryInside: interactorWorkingDirectory.inside,

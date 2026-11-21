@@ -18,7 +18,11 @@ import { ProblemAccessService, ProblemPermissionLevel } from "./problem-access.s
 import { ProblemFileService } from "./problem-file.service";
 import { ProblemTagService } from "./problem-tag.service";
 import { ProblemLockService } from "./problem-lock.service";
-import { preprocessedJudgeInfoCacheKey } from "./problem-judge-info-cache";
+import {
+  invalidatePreprocessedJudgeInfo,
+  JUDGE_INFO_CACHE_SECONDS,
+  preprocessedJudgeInfoCacheKey
+} from "./problem-judge-info-cache";
 
 import {
   ProblemStatementDto,
@@ -34,7 +38,6 @@ import { LocalizedContentEntity, LocalizedContentType } from "../localized-conte
 import { Locale } from "../common/locale.type";
 import { PermissionService, PermissionObjectType } from "../permission/permission.service";
 import { UserService } from "../user/user.service";
-import { GroupService } from "../group/group.service";
 import { FileService } from "../file/file.service";
 import { RedisService } from "../redis/redis.service";
 import { SubmissionService } from "../submission/submission.service";
@@ -68,7 +71,6 @@ export class ProblemService {
     private readonly localizedContentService: LocalizedContentService,
     @Inject(forwardRef(() => UserService))
     private readonly userService: UserService,
-    private readonly groupService: GroupService,
     private readonly permissionService: PermissionService,
     private readonly fileService: FileService,
     @Inject(forwardRef(() => SubmissionService))
@@ -457,7 +459,7 @@ export class ProblemService {
       await this.problemJudgeInfoRepository.save(problemJudgeInfo);
     }
 
-    await this.redisService.cacheDelete(preprocessedJudgeInfoCacheKey(problem.id));
+    await invalidatePreprocessedJudgeInfo(this.redisService.generationCache, problem.id);
 
     return null;
   }
@@ -529,19 +531,17 @@ export class ProblemService {
   async getProblemPreprocessedJudgeInfo(
     problem: ProblemEntity
   ): Promise<[judgeInfo: ProblemJudgeInfo, submittable: boolean]> {
-    const key = preprocessedJudgeInfoCacheKey(problem.id);
-    const cachedResult: [judgeInfo: ProblemJudgeInfo, submittable: boolean] = JSON.parse(
-      await this.redisService.cacheGet(key)
+    const { id, type } = problem;
+    return await this.redisService.generationCache.read<[ProblemJudgeInfo, boolean]>(
+      preprocessedJudgeInfoCacheKey(id),
+      type,
+      JUDGE_INFO_CACHE_SECONDS,
+      async () => {
+        const [judgeInfo, submittable] = await this.getProblemJudgeInfo(problem);
+        const testData = await this.problemFiles.getProblemFiles(problem, ProblemFileType.TestData);
+        return [this.problemTypeFactoryService.type(type).preprocessJudgeInfo(judgeInfo, testData), submittable];
+      }
     );
-    if (cachedResult) return cachedResult;
-
-    const [judgeInfo, submittable] = await this.getProblemJudgeInfo(problem);
-    const preprocessed = this.problemTypeFactoryService
-      .type(problem.type)
-      .preprocessJudgeInfo(judgeInfo, await this.problemFiles.getProblemFiles(problem, ProblemFileType.TestData));
-    await this.redisService.cacheSet(key, JSON.stringify([preprocessed, submittable]));
-
-    return [preprocessed, submittable];
   }
 
   /**
@@ -585,25 +585,10 @@ export class ProblemService {
       [group: GroupEntity, permission: ProblemPermissionLevel][]
     ]
   > {
-    const [userPermissionList, groupPermissionList] = await this.getProblemPermissionsWithId(problem);
-    return [
-      await Promise.all(
-        userPermissionList.map(
-          async ([userId, permission]): Promise<[user: UserEntity, permission: ProblemPermissionLevel]> => [
-            await this.userService.findUserById(userId),
-            permission
-          ]
-        )
-      ),
-      await Promise.all(
-        groupPermissionList.map(
-          async ([groupId, permission]): Promise<[group: GroupEntity, problem: ProblemPermissionLevel]> => [
-            await this.groupService.findGroupById(groupId),
-            permission
-          ]
-        )
-      )
-    ];
+    return await this.permissionService.getVisiblePermissionsOfObject<ProblemPermissionLevel>(
+      problem.id,
+      PermissionObjectType.Problem
+    );
   }
 
   async setProblemDisplayId(problem: ProblemEntity, displayId: number): Promise<boolean> {
@@ -630,6 +615,7 @@ export class ProblemService {
    * @param problem Must be locked by `ProblemService.lockProblemById(id, "Write")`.
    */
   async deleteProblem(problem: ProblemEntity): Promise<void> {
+    const problemId = problem.id; // TypeORM clears the primary key on remove.
     let deleteFilesActually: () => void = null;
     await this.connection.transaction("REPEATABLE READ", async transactionalEntityManager => {
       // update user submission count and accepted problem count
@@ -661,7 +647,10 @@ export class ProblemService {
       await transactionalEntityManager.remove(problem);
     });
     if (deleteFilesActually) deleteFilesActually();
-    await this.submissionService.onProblemDeleted(problem.id);
+    await Promise.all([
+      this.submissionService.onProblemDeleted(problemId),
+      invalidatePreprocessedJudgeInfo(this.redisService.generationCache, problemId)
+    ]);
   }
 
   /**
@@ -671,18 +660,22 @@ export class ProblemService {
     if (await this.submissionService.problemHasAnySubmission(problem)) return false;
     await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
       await this.problemAccess.authorizeProblemMutation(transactionalEntityManager, problem, actingUser);
-      problem.type = type;
-      await transactionalEntityManager.update(ProblemEntity, problem.id, { type });
-      await transactionalEntityManager.update(
-        ProblemJudgeInfoEntity,
-        {
-          problemId: problem.id
-        },
-        {
-          judgeInfo: this.problemTypeFactoryService.type(type).getDefaultJudgeInfo()
-        }
-      );
+      await this.setProblemTypeDefaults(transactionalEntityManager, problem.id, type);
     });
+    problem.type = type;
+    await invalidatePreprocessedJudgeInfo(this.redisService.generationCache, problem.id);
     return true;
+  }
+
+  private async setProblemTypeDefaults(manager: EntityManager, problemId: number, type: ProblemType): Promise<void> {
+    await manager.update(ProblemEntity, problemId, { type });
+    // Conversion preserves the stored submittable flag. Updating only judgeInfo also preserves a concurrent flag edit.
+    await manager.update(
+      ProblemJudgeInfoEntity,
+      { problemId },
+      {
+        judgeInfo: this.problemTypeFactoryService.type(type).getDefaultJudgeInfo()
+      }
+    );
   }
 }

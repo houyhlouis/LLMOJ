@@ -32,7 +32,7 @@ const { scoreContest } = require("../contest/contest-scoring.ts");
 const { TeamEntity, TeamMemberEntity, TeamResourceEntity } = require("../team/team.entity.ts");
 
 test("fake retains evidence, updates statistics and resists judge races (real MariaDB)", {
-  skip: !process.env.LLMOJ_FAKE_TEST_DB_CONFIG, timeout: 60000
+  skip: !process.env.LLMOJ_FAKE_TEST_DB_CONFIG && "needs LLMOJ_FAKE_TEST_DB_CONFIG", timeout: 60000
 }, async t => {
   const cfg = require("js-yaml").load(fs.readFileSync(process.env.LLMOJ_FAKE_TEST_DB_CONFIG, "utf8")).services.database;
   const prefix = "qa_fake_" + crypto.randomBytes(8).toString("hex") + "_", n = { type: Number };
@@ -70,7 +70,14 @@ test("fake retains evidence, updates statistics and resists judge races (real Ma
     Object.assign(userService, { userRepository: users, submissionService: svc, lockService: locks });
     const cache = new Map(), stats = Object.create(SubmissionStatisticsService.prototype);
     Object.assign(stats, { connection: db, submissionService: svc, redisService: {
-      cacheGet: async key => cache.get(key) || null, cacheSet: async (key, value) => cache.set(key, value), cacheDelete: async key => cache.delete(key)
+      generationCache: {
+        async read(key, field, _ttl, load, refresh) {
+          const variant = key + ":" + field;
+          if (refresh || !cache.has(variant)) cache.set(variant, await load());
+          return cache.get(variant);
+        },
+        async invalidate(key, fields) { for (const field of fields) cache.delete(key + ":" + field); }
+      }
     }});
     const events = [], audits = [], canceled = [], queued = [];
     Object.assign(svc, { connection: db, submissionRepository: subs, submissionDetailRepository: details, problemService, userService, lockService: locks,

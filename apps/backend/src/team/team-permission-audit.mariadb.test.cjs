@@ -18,7 +18,7 @@ const { GroupEntity } = require("../group/group.entity.ts"), { GroupService } = 
 const { UserPermissionRuleEntity } = require("../access/user-permission-rule.entity.ts");
 const { UserPrivilegeEntity } = require("../user/user-privilege.entity.ts");
 test("team direct links, list counts, archival, disqualified work and removal respect the same ACL (real MariaDB)", {
-  skip: !process.env.LLMOJ_TEAM_AUDIT_DB_CONFIG, timeout: 60000
+  skip: !process.env.LLMOJ_TEAM_AUDIT_DB_CONFIG && "needs LLMOJ_TEAM_AUDIT_DB_CONFIG", timeout: 60000
 }, async t => {
   const cfg = require("js-yaml").load(fs.readFileSync(process.env.LLMOJ_TEAM_AUDIT_DB_CONFIG, "utf8")).services.database;
   const prefix = "qa_team_audit_" + crypto.randomBytes(8).toString("hex") + "_", n = { type: Number }, str = { type: String }, flag = { type: Boolean }, json = { type: "json" };
@@ -209,7 +209,7 @@ test("team direct links, list counts, archival, disqualified work and removal re
         findProblemTagsByExistingIds: async () => [], getProblemAllLocalizedContents: async () => [{ locale: "zh_CN", title: "original", contentSections: [] }],
         getProblemTagIdsByProblem: async () => [], getProblemSamples: async () => [],
         problemTypeFactoryService: { type: () => ({ validateAndFilterJudgeInfo: () => {}, getDefaultJudgeInfo: () => ({}) }) },
-        redisService: { cacheDelete: async () => {} }, submissionService: submissions,
+        redisService: { generationCache: { invalidate: async () => {} } }, submissionService: submissions,
         lockService: { lockReadWrite: async (_key, _kind, callback) => callback(), lock: async (_key, callback) => callback() },
         fileService: { processUploadRequest: async () => { throw Error("storage called before authorization"); }, deleteFile: async () => { throw Error("storage deletion before authorization"); } }
       });

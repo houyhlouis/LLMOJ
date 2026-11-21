@@ -19,6 +19,11 @@ require.extensions[".ts"] = (module, filename) =>
   );
 const { DiscussionController } = require("./discussion.controller.ts");
 const { DiscussionService } = require("./discussion.service.ts");
+const { DiscussionEntity } = require("./discussion.entity.ts");
+const { DiscussionReplyEntity } = require("./discussion-reply.entity.ts");
+const { ProblemEntity } = require("../problem/problem.entity.ts");
+const { TeamEntity, TeamMemberEntity, TeamResourceEntity } = require("../team/team.entity.ts");
+const { UserEntity } = require("../user/user.entity.ts");
 const { UserPrivilegeType } = require("../user/user-privilege.service.ts");
 const { AuditLogObjectType } = require("../audit/audit.service.ts");
 const { SetDiscussionReplyPublicResponseError } = require("./dto/set-discussion-reply-public-response.dto.ts");
@@ -53,10 +58,25 @@ function fixture({ parentProblem = 30, collisionProblem = null, canViewParent = 
   };
   service.problemAccess = service.problemFiles = service.problemTags = service.problemLocks = service.problemService;
   service.permissionService = { userOrItsGroupsHavePermission: async () => false };
-  service.setReplyPublic = async (target, value) => {
-    changes.push({ target, value });
-    target.isPublic = value;
-  };
+  service.connection.transaction = async (_isolation, write) =>
+    write({
+      getRepository: service.connection.getRepository,
+      findOne: async (entity, { where, lock }) => {
+        if (entity === UserEntity) {
+          assert.deepEqual(lock, { mode: "pessimistic_read" });
+          return where.id === currentUser.id ? currentUser : null;
+        }
+        if (entity === DiscussionEntity) return service.findDiscussionById(where.id);
+        if (entity === DiscussionReplyEntity) return service.findDiscussionReplyById(where.id);
+        assert.equal(entity, ProblemEntity);
+        return service.problemService.findProblemById(where.id);
+      },
+      update: async (entity, where, { isPublic }) => {
+        assert.equal(entity, DiscussionReplyEntity);
+        assert.deepEqual(where, { id: reply.id, discussionId: parent.id });
+        changes.push({ target: reply, value: isPublic });
+      }
+    });
   controller.discussionService = service;
   controller.auditService = { log: async (...args) => audit.push(args) };
   return { controller, service, reply, parent, discussionLookups, problemChecks, changes, audit };
@@ -103,6 +123,18 @@ test("viewing the parent alone does not grant reply moderation", async () => {
   assert.deepEqual(f.audit, []);
 });
 
+test("reply moderation checks the locked account when the request carries an old administrator flag", async () => {
+  const f = fixture({ parentProblem: null });
+  f.parent.isPublic = true;
+  f.service.userPrivilegeService.userHasPrivilege = async (user, type) =>
+    type === UserPrivilegeType.ViewDiscussion || (type === UserPrivilegeType.ManageDiscussion && !!user?.isAdmin);
+  assert.deepEqual(await f.controller.setDiscussionReplyPublic({ ...currentUser, isAdmin: true }, request), {
+    error: SetDiscussionReplyPublicResponseError.PERMISSION_DENIED
+  });
+  assert.deepEqual(f.changes, []);
+  assert.deepEqual(f.audit, []);
+});
+
 test("an absent reply returns NO_SUCH_DISCUSSION_REPLY without looking up or changing a discussion", async () => {
   const f = fixture();
   assert.deepEqual(await f.controller.setDiscussionReplyPublic(currentUser, { ...request, discussionReplyId: 99 }), {
@@ -124,6 +156,17 @@ test("an absent parent fails closed", async () => {
   assert.deepEqual(f.audit, []);
 });
 
+test("a reply deleted after the first lookup produces no moderation audit entry", async () => {
+  const f = fixture({ parentProblem: null });
+  let reads = 0;
+  f.service.findDiscussionReplyById = async () => (++reads === 1 ? f.reply : null);
+  assert.deepEqual(await f.controller.setDiscussionReplyPublic(currentUser, request), {
+    error: SetDiscussionReplyPublicResponseError.NO_SUCH_DISCUSSION_REPLY
+  });
+  assert.deepEqual(f.changes, []);
+  assert.deepEqual(f.audit, []);
+});
+
 test("an anonymous caller cannot moderate replies", async () => {
   const f = fixture({ parentProblem: null });
   assert.deepEqual(await f.controller.setDiscussionReplyPublic(null, request), {
@@ -131,4 +174,39 @@ test("an anonymous caller cannot moderate replies", async () => {
   });
   assert.deepEqual(f.changes, []);
   assert.deepEqual(f.audit, []);
+});
+
+test("team reply approval checks the moderator's current membership and preserves the parent visibility", async () => {
+  const f = fixture({ parentProblem: null, manage: false });
+  const team = { id: 5, ownerId: 8, archived: false };
+  const resource = { teamId: team.id, kind: "discussion", resourceId: f.parent.id, archived: false };
+  const member = { status: "member", permissions: ["discussions"] };
+  const rows = new Map([
+    [TeamEntity, team],
+    [TeamResourceEntity, resource],
+    [TeamMemberEntity, member]
+  ]);
+  f.service.connection.getRepository = entity => ({ findOne: async () => rows.get(entity) ?? null });
+  f.service.userPrivilegeService = {
+    userHasPrivilege: async (_user, type) =>
+      [UserPrivilegeType.ViewSite, UserPrivilegeType.ViewDiscussion].includes(type),
+    permissionDecision: async (_user, _type, fallback) => fallback
+  };
+  f.reply.isPublic = false;
+  const canApprove = async () =>
+    (await f.service.getUserPermissionsOfReply(currentUser, f.reply)).includes("ManagePublicness");
+  assert.equal(await f.service.userHasViewDiscussionReplyPermission(currentUser, f.reply), true);
+  assert.equal(await canApprove(), true);
+  assert.deepEqual(await f.controller.setDiscussionReplyPublic(currentUser, { ...request, isPublic: true }), {});
+  resource.archived = true;
+  assert.equal(await canApprove(), false);
+  assert.deepEqual(await f.controller.setDiscussionReplyPublic(currentUser, request), { error: "PERMISSION_DENIED" });
+  resource.archived = false;
+  rows.delete(TeamMemberEntity);
+  assert.equal(await f.service.userHasViewDiscussionReplyPermission(currentUser, f.reply), false);
+  assert.deepEqual(await f.controller.setDiscussionReplyPublic(currentUser, request), { error: "PERMISSION_DENIED" });
+  assert.equal(f.reply.isPublic, true);
+  assert.equal(f.parent.isPublic, false);
+  assert.equal(f.changes.length, 1);
+  assert.equal(f.audit.length, 1);
 });

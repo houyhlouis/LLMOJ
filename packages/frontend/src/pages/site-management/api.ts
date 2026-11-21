@@ -257,3 +257,56 @@ export async function updateTestDataRetention(policy: TestDataRetentionPolicy): 
   if (!isTestDataRetentionPolicy(result.response)) throw new InvalidSiteSettingsResponse();
   return result.response;
 }
+
+/* The diagnostic bundle: what an administrator sends to whoever supports the site (see the Runbook) */
+
+export type DiagnosticSelection = ApiTypes.DiagnosticBundleRequestDto;
+
+/** The most submissions, and AI jobs, one bundle describes (the server's limit) */
+export const DIAGNOSTIC_SELECTION_LIMIT = 50;
+
+export class DiagnosticBundleRequestError extends Error {
+  constructor(readonly result: ApiResponse<unknown>) {
+    super();
+  }
+}
+
+const diagnosticBundle = createPostApi<DiagnosticSelection, Record<string, unknown>>(
+  "site-management/diagnosticBundle",
+  {}
+);
+
+/** The bundle as the server made it. Only a bundle of the version this page knows is accepted. */
+export async function getDiagnosticBundle(selection: DiagnosticSelection): Promise<Record<string, any>> {
+  const result = await diagnosticBundle(selection);
+  if (result.requestError) throw new DiagnosticBundleRequestError(result);
+  const bundle = result.response as Record<string, any>;
+  if (!bundle || typeof bundle !== "object" || bundle.bundle?.bundleVersion !== 1)
+    throw new InvalidSiteSettingsResponse();
+  return bundle;
+}
+
+const splitIds = (text: string) => text.split(/[\s,，;；]+/).filter(Boolean);
+
+/** Submission IDs typed into a field, separated by spaces, commas or lines, each once; null if one isn't an ID */
+export function parseSubmissionIds(text: string): number[] | null {
+  const ids: number[] = [];
+  for (const part of splitIds(text)) {
+    if (!/^\d{1,10}$/.test(part)) return null;
+    const id = Number(part);
+    if (id < 1 || id > 2147483647) return null;
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+/** AI job IDs (UUIDs) typed into a field, each once; null if one isn't an AI job ID */
+export function parseAiJobIds(text: string): string[] | null {
+  const ids: string[] = [];
+  for (const part of splitIds(text)) {
+    const id = part.toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)) return null;
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}

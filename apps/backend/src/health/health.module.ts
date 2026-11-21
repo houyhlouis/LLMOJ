@@ -9,6 +9,7 @@ import { RedisModule } from "../redis/redis.module";
 @Module({
   imports: [FileModule, RedisModule],
   controllers: [HealthController],
-  providers: [HealthService]
+  providers: [HealthService],
+  exports: [HealthService]
 })
 export class HealthModule {}

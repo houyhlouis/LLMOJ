@@ -10,6 +10,7 @@ require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileMo
 const { HackService } = require('./hack.service.ts');
 const { CodeLanguageService } = require('../code-language/code-language.service.ts');
 const { HackProblemEntity } = require('./hack.entity.ts');
+const { ContestVirtualParticipationEntity } = require('../contest/contest-virtual-participation.entity.ts');
 const { UserEntity } = require('../user/user.entity.ts');
 const { createHash } = require('node:crypto');
 
@@ -40,6 +41,31 @@ function fixture() {
   return { service, user, problem, submission, content, options, calls, store,
     denyConfigure: () => configure = false, denyView: () => view = false };
 }
+
+test('virtual submissions are ineligible Hack targets even for managers after the run', async () => {
+  const f = fixture();
+  Object.assign(f.submission, { contestId: 3, submitterId: 5, submitTime: new Date(5000) });
+  f.service.contestAccess = { get: async () => ({ contest: { id: 3 }, manager: true, virtualRun: null }) };
+  f.service.contestSubmissions = { submissionDetail: async () => ({}) };
+  f.service.db.manager = { getRepository: entity => {
+    assert.equal(entity, ContestVirtualParticipationEntity);
+    return { existsBy: async where => {
+      assert.equal(where.contestId, 3);
+      assert.equal(where.userId, 5);
+      assert.deepEqual([where.startTime.type, where.endTime.type], ['lessThanOrEqual', 'moreThan']);
+      assert.equal(where.startTime.value, f.submission.submitTime);
+      assert.equal(where.endTime.value, f.submission.submitTime);
+      return true;
+    } };
+  } };
+  for (const result of [() => f.service.eligibility(f.user, 10), () => f.service.create(f.user, { submissionId: 10 })])
+    await assert.rejects(result, error => error.getResponse().error === 'VIRTUAL_HACK_TARGET');
+  assert.equal(await f.service.taskAuthorised({ hackerId: 7, submissionId: 10 }), false);
+  f.service.contestAccess.get = async () => ({ virtualRun: { startTime: new Date() } });
+  await assert.rejects(f.service.create(f.user, { submissionId: 10 }), /Hacks are unavailable during virtual participation/);
+  assert.equal(await f.service.canView(f.user, { submissionId: 10 }), false);
+  await assert.rejects(f.service.canView(f.user, { submissionId: 10 }, true), /Hacks are unavailable/);
+});
 
 test('managers can save STD code and options without a reference submission ID', async () => {
   const f = fixture();

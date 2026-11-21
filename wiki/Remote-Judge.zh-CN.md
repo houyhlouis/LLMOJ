@@ -5,7 +5,7 @@
 本教程在独立的服务器上安装评测机，不安装网站、数据库、Redis 或 MinIO。评测机使用自己的密钥主动连接站点，因此站点不需要访问评测机上的任何端口。
 
 需要：
-- amd64 或 arm64 上的 Ubuntu 24.04 或 26.04（见 [ARM64 服务器](ARM64.zh-CN.md)），systemd 254 或更高版本，cgroup v2。Ubuntu 26.04 尚未完整测试。限制命名空间、挂载或 cgroup 的容器无法使用。
+- amd64 或 arm64 上的 Ubuntu 24.04 或 26.04（见 [ARM64 服务器](ARM64.zh-CN.md)），systemd 254 或更高版本，cgroup v2（实际测试过的组合见[已测试的平台](Installation.zh-CN.md#已测试的平台)）。限制命名空间、挂载或 cgroup 的容器无法使用。
 - 一个评测槽至少需要 2 个 CPU 和 256 MiB 内存，以及 30 GiB 空闲磁盘空间。在评测机上构建需要更多内存，建议 8 GiB。
 - 一台已在站点上注册的评测机及其密钥（见[分布式评测](Distributed-Judging.zh-CN.md)）。
 

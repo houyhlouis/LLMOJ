@@ -140,6 +140,7 @@ export async function runTask(task: Task) {
         testcase,
         compiledPrograms,
         directory,
+        resources,
         disposer
       ) => {
         const interactionInfo = asInteraction(currentInfo);
@@ -157,6 +158,7 @@ export async function runTask(task: Task) {
             testcase,
             compiledPrograms,
             safelyJoinPath(directory, `run-${stage}`),
+            resources,
             disposer,
             { stage, managerDirectory: safelyJoinPath(directory, "manager-state") }
           );

@@ -15,6 +15,7 @@ import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.
 import { ContestEntity } from "../contest/contest.entity";
 import { isContestManager } from "../contest/contest-manager";
 import { contestEnded } from "../contest/contest-policy";
+import { findActiveVirtualRun } from "../contest/contest-virtual";
 import { teamResourceAccess } from "../team/team-access";
 
 export enum SubmissionPermissionType {
@@ -89,8 +90,18 @@ export class SubmissionAccessService {
         type === SubmissionPermissionType.Rejudge
       )
         return false;
-      if (type === SubmissionPermissionType.Cancel) return user.id === submission.submitterId && !contestEnded(contest);
-      return contestEnded(contest) && user.id === submission.submitterId;
+      if (user.id !== submission.submitterId) return false;
+      const now = Date.now();
+      const run = await findActiveVirtualRun(this.connection, user, contest, manager, now);
+      // A virtual run uses the contest's filtered feedback endpoint too. Raw details and live
+      // progress become available when the run ends. Only submissions inside it can be canceled.
+      if (run)
+        return (
+          type === SubmissionPermissionType.Cancel &&
+          +submission.submitTime >= +run.startTime &&
+          +submission.submitTime <= now
+        );
+      return type === SubmissionPermissionType.Cancel ? !contestEnded(contest, now) : contestEnded(contest, now);
     }
     switch (type) {
       // Everyone can read a public submission

@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <limits>
 #include <map>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -27,6 +28,7 @@
 #include <fmt/format.h>
 
 #include "cgroup.h"
+#include "utils.h"
 
 namespace fs = std::filesystem;
 using fmt::format;
@@ -273,8 +275,9 @@ bool IsPopulated(const fs::path &directory)
 void WaitUntilEmpty(const fs::path &directory)
 {
     const auto eventsPath = directory / "cgroup.events";
-    const auto descriptor = open(eventsPath.c_str(), O_RDONLY | O_CLOEXEC);
-    if (descriptor == -1)
+    // Linux's "e" mode keeps the polling descriptor close-on-exec.
+    std::unique_ptr<FILE, FileCloser> events(fopen(eventsPath.c_str(), "re"));
+    if (!events)
         ThrowSystemError("Cannot open", eventsPath);
 
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -282,25 +285,19 @@ void WaitUntilEmpty(const fs::path &directory)
     {
         const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
         if (remaining.count() <= 0)
-        {
-            close(descriptor);
             throw std::runtime_error(format("Timed out waiting for {} to become empty", directory.string()));
-        }
 
-        pollfd event = {descriptor, POLLPRI, 0};
+        pollfd event = {fileno(events.get()), POLLPRI, 0};
         const auto result = poll(&event, 1, static_cast<int>(remaining.count()));
         if (result == -1)
         {
             if (errno == EINTR)
                 continue;
-            const auto error = errno;
-            close(descriptor);
-            errno = error;
             ThrowSystemError("Cannot poll", eventsPath);
         }
     }
 
-    if (close(descriptor) == -1)
+    if (fclose(events.release()) != 0)
         ThrowSystemError("Cannot close", eventsPath);
 }
 }

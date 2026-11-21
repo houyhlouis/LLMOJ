@@ -766,10 +766,11 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
     if (!isFinalProgress(progress)) return await taskService.onTaskProgress(taskId, progress);
 
     const resultHash = sha256(JSON.stringify(progress));
-    const [job]: Pick<JudgeJobEntity, "state" | "fence" | "leaseOwner" | "resultHash">[] = await this.connection.query(
-      "SELECT state, fence, leaseOwner, resultHash FROM judge_job WHERE taskId = ?",
-      [taskId]
-    );
+    const [job]: Pick<JudgeJobEntity, "state" | "fence" | "leaseOwner" | "resultHash" | "judgeClientId">[] =
+      await this.connection.query(
+        "SELECT state, fence, leaseOwner, resultHash, judgeClientId FROM judge_job WHERE taskId = ?",
+        [taskId]
+      );
     if (job?.state === JudgeJobState.Finished && Number(job.fence) === lease.fence) {
       // Sent again, e.g. because its acknowledgement was lost
       if (job.resultHash === resultHash) return true;
@@ -788,6 +789,7 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
     let confirmed = false;
     const completion: JudgeTaskCompletion = {
       judgeRuntimeId: lease.judgeRuntimeId ?? null,
+      judgeClientId: job.judgeClientId,
       confirm: async manager => {
         confirmed = await this.endLease(
           manager,

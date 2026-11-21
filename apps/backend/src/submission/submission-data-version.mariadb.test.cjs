@@ -242,7 +242,9 @@ test(
       content.set(id, { judgeInfo, samples: [] });
       return await problems.findOneBy({ id });
     }
-    const submit = async (submitter, p, contest) => (await svc.createSubmission(submitter, p, code, null, contest))[1];
+    const submit = async (submitter, p, contest) => (await svc.createSubmission(
+      submitter, p, code, null, contest && { ...contest, admit: async () => new Date() }
+    ))[1];
     const load = async id => await ds.getRepository(SubmissionEntity).findOneBy({ id });
     const finish = async (id, status, judgeRuntimeId) =>
       assert.equal(
@@ -500,7 +502,7 @@ test(
       Object.assign(problemFiles, {
         connection: ds,
         fileService,
-        redisService: { cacheDelete: async () => {} },
+        redisService: { generationCache: { invalidate: async () => {} } },
         lockManageProblemFile: async (id, _type, callback) => await callback(await problems.findOneBy({ id })),
         authorizeProblemMutation: async () => {}
       });
@@ -542,7 +544,7 @@ test(
       Object.assign(problemFiles, {
         connection: ds,
         fileService,
-        redisService: { cacheDelete: async () => {} },
+        redisService: { generationCache: { invalidate: async () => {} } },
         lockManageProblemFile: async (id, _type, callback) => await callback(await problems.findOneBy({ id })),
         authorizeProblemMutation: async () => {}
       });

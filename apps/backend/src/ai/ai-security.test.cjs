@@ -22,7 +22,7 @@ require.extensions[".ts"] = (module, filename) =>
     filename
   );
 const { loadAiEncryptionKey, encryptAiConfiguration, decryptAiConfiguration } = require("./ai-crypto.ts");
-const { isAiRequest, AI_ERROR_REPORT_MESSAGE, AI_REQUEST_BODY_REDACTED } = require("./ai-security.ts");
+const { isAiRequest, AI_ERROR_REPORT_MESSAGE } = require("./ai-security.ts");
 const { EventReportService, EventReportType } = require("../event-report/event-report.service.ts");
 const { ErrorFilter } = require("../error.filter.ts");
 const { Logger, BadRequestException } = require("@nestjs/common");
@@ -181,23 +181,33 @@ test("AI exception reports remove body, query, custom details and exception secr
     }
   });
   assert.equal(messages.length, 1);
-  assert.equal(messages[0].fileContent, AI_REQUEST_BODY_REDACTED);
+  const context = JSON.parse(messages[0].fileContent);
+  assert.equal(context.errorMessage, AI_ERROR_REPORT_MESSAGE);
+  assert.equal(Object.hasOwn(context, "body"), false);
   assert(messages[0].message.includes(AI_ERROR_REPORT_MESSAGE));
   assert(!JSON.stringify(messages).includes("synthetic-"));
 });
 
-test("non-AI exception reports retain their diagnostic information", async () => {
+test("non-AI exception reports retain safe diagnostics and omit request values", async () => {
   const { service, messages } = reportFixture();
   await service.report({
     type: EventReportType.Error,
     error: new Error("ordinary-error"),
     message: "ordinary-message",
-    request: { originalUrl: "/api/problem/update?revision=3", body: { value: "ordinary-body" }, ip: "127.0.0.1" }
+    request: {
+      originalUrl: "/api/problem/update?revision=3",
+      route: { path: "/api/problem/update" },
+      body: { value: "ordinary-body" },
+      ip: "127.0.0.1"
+    }
   });
   assert(messages[0].message.includes("ordinary-error"));
   assert(messages[0].message.includes("ordinary-message"));
-  assert(messages[0].message.includes("revision=3"));
-  assert(messages[0].fileContent.includes("ordinary-body"));
+  const context = JSON.parse(messages[0].fileContent);
+  assert.equal(context.route, "/api/problem/update");
+  assert.deepEqual(context.queryKeys, ["revision"]);
+  assert(!JSON.stringify(messages).includes("revision=3"));
+  assert(!JSON.stringify(messages).includes("ordinary-body"));
 });
 
 test("global filter hides unhandled errors from HTTP, redacts AI logs and logs non-AI diagnostics", () => {
@@ -207,7 +217,7 @@ test("global filter hides unhandled errors from HTTP, redacts AI logs and logs n
   Logger.prototype.error = (...args) => logs.push(args);
   try {
     const filter = new ErrorFilter({ report: report => reports.push(report) }, { counter: () => ({ inc() {} }) });
-    function invoke(url, error) {
+    function invoke(url, error, requestBody = configuration) {
       let body, status;
       const response = {
         status(code) {
@@ -221,7 +231,12 @@ test("global filter hides unhandled errors from HTTP, redacts AI logs and logs n
       filter.catch(error, {
         getType: () => "http",
         switchToHttp: () => ({
-          getRequest: () => ({ originalUrl: url, body: configuration }),
+          getRequest: () => ({
+            originalUrl: url,
+            body: requestBody,
+            headers: { cookie: "session=fixture-session", authorization: "Bearer fixture-auth" },
+            session: { sessionKey: "fixture-session", user: { id: 17 } }
+          }),
           getResponse: () => response
         })
       });
@@ -234,9 +249,11 @@ test("global filter hides unhandled errors from HTTP, redacts AI logs and logs n
     assert.equal(ai.body.error, "INTERNAL_ERROR");
     assert.match(ai.body.requestId, requestId);
     assert(!JSON.stringify(logs).includes("synthetic-llm-secret"));
+    assert.equal(logs[0].length, 1, "AI errors remain class-only, without a stack");
     assert(JSON.stringify(logs).includes(ai.body.requestId));
     assert.equal(reports.length, 1);
-    const ordinary = invoke("/api/problem/update", new Error("ordinary-error"));
+    const ordinaryError = new Error("ordinary-error");
+    const ordinary = invoke("/api/problem/update", ordinaryError, { title: "ordinary-title" });
     assert.equal(ordinary.status, 500);
     assert.deepEqual(Object.keys(ordinary.body).sort(), ["error", "requestId"]);
     assert.equal(ordinary.body.error, "INTERNAL_ERROR");
@@ -246,6 +263,7 @@ test("global filter hides unhandled errors from HTTP, redacts AI logs and logs n
     // Server-side diagnostics are retained and can be found by the request ID shown to the client.
     assert(JSON.stringify(logs).includes("ordinary-error"));
     assert(JSON.stringify(logs).includes(ordinary.body.requestId));
+    assert(logs.some(([message, stack]) => message.includes(ordinary.body.requestId) && stack === ordinaryError.stack));
     assert.equal(invoke("/api/ai/saveConfiguration", new BadRequestException("validation-error")).status, 400);
   } finally {
     Logger.prototype.error = originalLogger;

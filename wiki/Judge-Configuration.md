@@ -82,7 +82,7 @@ The site sends some limits when the judge connects: `limit.compilerMessage`, `li
 ## How work is scheduled
 
 - The judge takes up to `taskConsumingThreads` submissions from the site at a time.
-- Compiling, running tests and local AI checks share the slots. A test reserves its program's memory limit plus the interactor's (or the checker's, if larger), a compilation 512 MiB, and anything else 256 MiB; work starts, in order of arrival, when both a slot and its memory are free. Work that needs more than the whole budget runs on its own.
+- Compiling, running tests and local AI checks share the slots. A test reserves the memory of the programs that run at the same time: for a traditional problem the larger of the program's limit and a custom checker's; for an interactive problem the program plus the interactor (or the checker, if larger); for a communication problem the program plus the manager (its two runs follow each other, so they aren't added up). A limit that isn't set comes from the test case, the subtask, then the problem, as when the programs run. A compilation reserves 512 MiB, and anything else 256 MiB; work starts, in order of arrival, when both a slot and its memory are free. Work that needs more than the whole budget runs on its own. A communication problem with a large manager (say a 64 MiB program and a 1,024 MiB manager: 1,088 MiB) therefore runs fewer tests at once than before this was counted; budgets and slot counts don't need to change.
 - AI checks, local or from the judge queue, use at most `aiExecutionSlots` slots and never hold up judging behind them.
 - Downloads have their own queue of `maxConcurrentDownloads`.
 - The AI worker also runs at most three AI pipelines at a time and accepts at most eight requests; these aren't extra slots and can't be configured.
@@ -121,6 +121,8 @@ Every compiler, program, checker and interactor runs in the sandbox:
 - as the unprivileged `sandbox.user`, unable to gain privileges (`no_new_privs`);
 - in its own mount, PID, network, UTS and IPC namespaces, with a read-only file system and only its own task's directories;
 - under cgroup v2 limits on memory, processes and CPU time.
+
+If the sandbox itself fails while a program runs (its statistics can't be read, or its cgroup can't be finished), the run is stopped and its cgroup removed, and the test gets a system error rather than a verdict about the program. The judge keeps serving its other work.
 
 A seccomp filter also refuses system calls that judged programs don't need (`sandbox.syscallFilter`, on by default):
 - creating or entering namespaces, mounting and changing the root directory;

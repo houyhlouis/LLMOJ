@@ -9,6 +9,9 @@ import { RequestWithId } from "./common/request-id.middleware";
 import { EventReportService, EventReportType } from "./event-report/event-report.service";
 import { MetricsService } from "./metrics/metrics.service";
 import { isAiRequest, AI_ERROR_REPORT_MESSAGE } from "./ai/ai-security";
+import { localErrorDiagnostics, reportErrorClass, reportErrorMessage } from "./event-report/report-redaction";
+
+import { unexpectedErrors } from "./event-report/unexpected-errors";
 
 const logger = new Logger("ErrorFilter");
 
@@ -25,7 +28,7 @@ export class ErrorFilter implements ExceptionFilter {
 
   private connectionErrorLoggedAt = -Infinity;
 
-  catch(error: Error, host: ArgumentsHost) {
+  catch(error: unknown, host: ArgumentsHost) {
     const contextType = host.getType();
     let request: RequestWithSession & RequestWithId;
     // Unhandled errors are only described in server logs; clients get a stable code and an ID to quote.
@@ -39,14 +42,16 @@ export class ErrorFilter implements ExceptionFilter {
     }
 
     if (!(error instanceof HttpException)) {
+      this.metricErrorCount.inc({ error: unexpectedErrors.record(error, requestId, request) });
       if (error instanceof Error) {
         // Lost or refused connections (a dependency restarting or overloaded) are counted and logged at most once a
         // minute, without event reports.
         if (this.isignoredError(error)) {
-          this.metricErrorCount.inc({ error: error.constructor.name });
           if (Date.now() - this.connectionErrorLoggedAt >= CONNECTION_ERROR_LOG_INTERVAL) {
             this.connectionErrorLoggedAt = Date.now();
-            const description = isAiRequest(request?.originalUrl) ? error.constructor.name : error.message;
+            const description = isAiRequest(request?.originalUrl)
+              ? reportErrorClass(error)
+              : localErrorDiagnostics(error, request).message;
             logger.warn(`[${requestId}] Connection error, not logged again for a minute: ${description}`);
           }
           return;
@@ -54,16 +59,19 @@ export class ErrorFilter implements ExceptionFilter {
 
         // The error's class (never its message) is safe to log for AI requests.
         if (isAiRequest(request?.originalUrl))
-          logger.error(`[${requestId}] ${AI_ERROR_REPORT_MESSAGE} (${error.constructor.name})`);
-        else logger.error(`[${requestId}] ${error.message}`, error.stack);
-      } else logger.error(isAiRequest(request?.originalUrl) ? `[${requestId}] ${AI_ERROR_REPORT_MESSAGE}` : error);
+          logger.error(`[${requestId}] ${AI_ERROR_REPORT_MESSAGE} (${reportErrorClass(error)})`);
+        else {
+          const { message, stack } = localErrorDiagnostics(error, request);
+          logger.error(`[${requestId}] ${message}`, stack);
+        }
+      } else logger.error(`[${requestId}] ${reportErrorMessage(error, request)} (${reportErrorClass(error)})`);
 
-      this.metricErrorCount.inc({ error: error.constructor.name });
       this.eventReportService.report({
         type: EventReportType.Error,
         error,
         request,
-        message: `ErrorFilter has caught a uncaught exception (request ${requestId}).`
+        requestId,
+        message: "ErrorFilter caught an unexpected exception."
       });
     }
   }

@@ -253,7 +253,7 @@ test("credential storage is owner-only, refuses symlinks and rejects readable fi
 });
 
 test("real backend entities and an isolated MariaDB accept the full administrator transaction", {
-  skip: !process.env.LIBREOJ_ADMIN_TEST_SOCKET
+  skip: !process.env.LIBREOJ_ADMIN_TEST_SOCKET && "needs LIBREOJ_ADMIN_TEST_SOCKET for a disposable local MariaDB"
 }, async () => {
   const socketPath = process.env.LIBREOJ_ADMIN_TEST_SOCKET;
   assert.match(socketPath, /^\/tmp\/libreoj-admin-test-[A-Za-z0-9_-]+\/mysql\.sock$/, "integration tests only accept an isolated temporary Unix socket");

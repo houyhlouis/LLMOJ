@@ -1,7 +1,7 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');const ts=require('typescript');
 require('reflect-metadata');require.extensions['.ts']=(module,filename)=>module._compile(ts.transpileModule(fs.readFileSync(filename,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,esModuleInterop:true,experimentalDecorators:true,emitDecoratorMetadata:true}}).outputText,filename);
 const {DataSource}=require('typeorm');const {HackService}=require('./hack.service.ts');const {HackEntity}=require('./hack.entity.ts');const {SubmissionEntity}=require('../submission/submission.entity.ts');const {UserEntity}=require('../user/user.entity.ts');const {ProblemEntity}=require('../problem/problem.entity.ts');const {ContestEntity}=require('../contest/contest.entity.ts');
-test('hack filters, access, counts and pagination use the same predicates (real MariaDB)',{skip:!process.env.LLMOJ_SELF_EVAL_TEST_DB_CONFIG,timeout:120000},async t=>{
+test('hack filters, access, counts and pagination use the same predicates (real MariaDB)',{skip:!process.env.LLMOJ_SELF_EVAL_TEST_DB_CONFIG && 'needs LLMOJ_SELF_EVAL_TEST_DB_CONFIG',timeout:120000},async t=>{
  const cfg=require('js-yaml').load(fs.readFileSync(process.env.LLMOJ_SELF_EVAL_TEST_DB_CONFIG,'utf8')).services.database;if(!/^llmoj_(?:features|test)_/.test(cfg.database))throw Error('Disposable database only');
  const db=new DataSource({...cfg,entities:[path.join(__dirname,'../**/*.entity.ts')],synchronize:false});let owned=false;
  try{

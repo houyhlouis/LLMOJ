@@ -35,7 +35,10 @@ const { EmailVerificationCodeType } = require("./auth-email-verification-code.se
 
 test(
   "private registration applications and transactional approval (real MariaDB)",
-  { skip: !process.env.LLMOJ_REGISTRATION_TEST_DATABASE, timeout: 90000 },
+  {
+    skip: !process.env.LLMOJ_REGISTRATION_TEST_DATABASE && "needs LLMOJ_REGISTRATION_TEST_DATABASE for a disposable MariaDB socket",
+    timeout: 90000
+  },
   async t => {
     const config = JSON.parse(fs.readFileSync(process.env.LLMOJ_REGISTRATION_TEST_DATABASE, "utf8"));
     assert.match(
@@ -693,7 +696,8 @@ test(
                   ).setUserPrivileges(manager.id, []);
             const connectionId = await writerAttempt.promise;
             let blocked = false;
-            for (let attempt = 0; attempt < 100; attempt++) {
+            const waitDeadline = performance.now() + 30_000;
+            while (performance.now() < waitDeadline) {
               const [{ n: waits }] = await db.query(
                 "SELECT COUNT(*) AS n FROM information_schema.INNODB_LOCK_WAITS w JOIN information_schema.INNODB_TRX t ON t.trx_id = w.requesting_trx_id WHERE t.trx_mysql_thread_id = ?",
                 [connectionId]
@@ -702,7 +706,7 @@ test(
                 blocked = true;
                 break;
               }
-              await new Promise(resolve => setTimeout(resolve, 20));
+              await new Promise(resolve => setTimeout(resolve, 200));
             }
             assert.equal(blocked, true, "real MariaDB must block the permission writer behind the review's actor lock");
             releaseApproval.resolve();

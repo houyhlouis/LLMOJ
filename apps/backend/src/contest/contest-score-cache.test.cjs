@@ -116,6 +116,60 @@ test("without Redis, or without the revision service, scores are computed every 
   assert.equal(none.reads.count, 2);
 });
 
+test("strict IOI projects only submissionId and result and scores exactly as a full detail read", async t => {
+  const { DatabaseSync } = require("node:sqlite");
+  const { DataSource, In } = require("typeorm");
+  const { SubmissionDetailEntity } = require("../submission/submission-detail.entity.ts");
+  const source = new DataSource({
+    type: "mariadb", database: "score_fixture", entities: [require("node:path").join(__dirname, "../**/*.entity.ts")]
+  });
+  await source.buildMetadatas();
+  const db = new DatabaseSync(":memory:");
+  t.after(() => db.close());
+  db.exec("CREATE TABLE submission_detail (submissionId INTEGER PRIMARY KEY, result TEXT, content TEXT, fileUuid TEXT)");
+  const insert = db.prepare("INSERT INTO submission_detail VALUES (?, ?, ?, NULL)");
+  const first = [50, 50], second = [40, 60];
+  const runs = [
+    // Same weights across versions, then a different layout within a version and a rounded non-AC.
+    [2, 1, 50, 1, first, [50, 0]], [2, 1, 50, 2, first, [0, 50]],
+    [2, 1, 40, 2, second, [40, 0]], [2, 1, 60, 2, second, [0, 59.6]],
+    [2, 1, 100, 2, second, [40, 60], "Fake"], [2, 1, 100, 2, second, [40, 60], "Hacked"],
+    // Result without subtasks, null result and a missing detail row (all accepted legacy shapes).
+    [2, 2, 30, null, [], []], [2, 2, 40, null, null, null], [3, 2, 100, null, null, null, "Accepted"]
+  ].map(([submitterId, contestProblemId, score, problemDataVersionId, weights, earned, status], i) => {
+    if (i !== 8) insert.run(i + 1, weights && JSON.stringify({
+      subtasks: weights.map((fullScore, j) => ({ score: earned[j], fullScore })), compile: { success: true }
+    }), JSON.stringify({ code: "x".repeat(16384) }));
+    return { id: i + 1, submitterId, contestProblemId, submitTime: at(i + 1), score, problemDataVersionId,
+      status: status || "PartiallyCorrect" };
+  });
+  const runner = source.createQueryRunner();
+  const queries = [];
+  runner.query = async (sql, args) => {
+    queries.push(sql);
+    return { records: db.prepare(sql).all(...args) };
+  };
+  const repo = runner.manager.getRepository(SubmissionDetailEntity);
+  const oldRows = await repo.findBy({ submissionId: In(runs.map(s => s.id)) });
+  assert.match(queries.pop(), /`content`/);
+  const expected = scoreContest("strictioi", start, problems, runs.map(s => ({
+    ...s, subtasks: oldRows.find(row => row.submissionId === s.id)?.result?.subtasks
+  })));
+  const { service, rows } = fixture();
+  rows.splice(0, rows.length, ...runs);
+  const submissions = service.db.getRepository();
+  service.db = { getRepository: entity => entity === SubmissionDetailEntity ? repo : submissions };
+  const actual = await service.contestScores({ ...contest, rule: "strictioi" }, problems);
+  assert.deepEqual(actual, expected);
+  assert.equal(actual[0].problems[1].score, 100);
+  assert.equal(actual[0].problems[1].status, "PartiallyCorrect");
+  assert.equal(actual[0].problems[1].versions, 2);
+  assert.equal(queries.length, 1);
+  assert.match(queries[0], /`submissionId`/);
+  assert.match(queries[0], /`result`/);
+  assert.doesNotMatch(queries[0], /`content`|`fileUuid`/);
+});
+
 test("a contest's revision moves on only once the transaction that changed its submission commits", async () => {
   const increments = [];
   let fail = false;

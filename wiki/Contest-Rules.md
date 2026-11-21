@@ -47,6 +47,28 @@ The site's permissions for contests, submissions and scoreboards always apply, a
 
 Neither gives bonus points or changes how scores are calculated, and Self Eval never reveals official scores or test data.
 
+## Writing your code
+
+A contest problem page has the same code editor as the problem set. What you write there is kept as a **draft in your browser**, so reloading the page, closing the tab or following a link doesn't lose it:
+
+- There is one draft for each account, contest, problem and language. Choosing another language brings back that language's draft; if it has none, the code in the editor moves to it.
+- The page opens with the draft you changed last. Submitting keeps the draft, so the code is still there to fix after a wrong answer.
+- The draft is saved when you pause typing for half a second, and at once when you leave the page. It stays in this browser: it isn't sent to the server, and it isn't a submission.
+- When submissions have closed, the page still shows your draft, read-only, so you can copy it.
+- **Discard draft** deletes the draft of the selected language, after asking, and empties the editor.
+- Drafts are deleted when you sign out, when another account signs in on that browser, and 14 days after their last change. On a shared computer, sign out when you leave.
+- A browser keeps at most 50 drafts, the most recently changed ones, and none longer than 1 MiB (the most code a submission takes). Where the browser can't keep a draft (its storage is full or turned off, as in some private windows), the page says so.
+
+## Virtual participation
+
+After a contest has ended, someone who didn't take part can take it later, as if it were live: a **virtual run**.
+
+- **Who:** any user who may open the contest and enter contests, if they made no submission in the contest while it ran (any submission counts, even one judged Fake or canceled; one an administrator deleted doesn't). The contest's managers can't. Each user gets one virtual run per contest.
+- **How long:** the run starts when you press **Start virtual participation** on the contest page and lasts as long as the contest did. It can't be paused.
+- **During the run** the contest behaves as if it were running, under its own rule: you submit, you get the feedback the rule gives contestants, and Hacks and Self Eval aren't available. Contests running live are judged first, so a virtual run's submissions can wait longer when the judges are busy. The scoreboard shows the contest as it stood at the same point in time: the official contestants' submissions made up to that moment, other virtual runs' submissions made up to the same point of theirs, and yours. A rule that hides the scoreboard during a contest (NOI / OI, Strict IOI) hides it during your run too.
+- **For managers:** once anyone has started a virtual run, the contest's start and end can't change any more (the rest of its settings can). Virtual submissions can't be hacked, but Fake moderation and rejudging apply to them as to any other.
+- **Afterwards** the contest is ended for you as for everyone. Your run counts nowhere officially: the scoreboard, its export and the statistics stay the official ones. **Show virtual participants** on the scoreboard adds the virtual runs, marked, ranked together with the official contestants by the same rule, with their times counted from the start of each run.
+
 ## Exports and summaries
 
 **Export** (on the scoreboard) downloads a CSV file for spreadsheets: UTF-8 with a byte order mark. Text that a spreadsheet could take for a formula gets a leading apostrophe, also when it follows spaces or control characters. Team assignment exports follow the same rules.

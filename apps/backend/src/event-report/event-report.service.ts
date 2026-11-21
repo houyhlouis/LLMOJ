@@ -1,14 +1,18 @@
+import { setTimeout as delay } from "timers/promises";
+
 import { Injectable, Logger } from "@nestjs/common";
 
 import moment from "moment";
 import { ProxyAgent } from "proxy-agent";
-import { Telegraf } from "telegraf";
+import { Telegram } from "telegraf";
 import randomstring from "randomstring";
+
+import { createReportContext, redactReportText, reportErrorClass } from "./report-redaction";
 
 import { ConfigService } from "../config/config.service";
 import { ClusterService } from "../cluster/cluster.service";
 import { RequestWithSession } from "../auth/auth.middleware";
-import { isAiRequest, AI_ERROR_REPORT_MESSAGE, AI_REQUEST_BODY_REDACTED } from "../ai/ai-security";
+import { requestContext } from "../common/request-context";
 
 const logger = new Logger("EventReporter");
 
@@ -33,6 +37,10 @@ interface EventMessage {
 }
 
 const IPC_CHANNEL = "event-report";
+const QUEUE_LIMIT = 64;
+const SEND_TIMEOUT_MS = 10_000;
+const INITIAL_BACKOFF_MS = 1000;
+const MAX_BACKOFF_MS = 30_000;
 
 export function escapeTelegramHtml(text: string) {
   return text.split("&").join("&amp;").split("<").join("&lt;").split(">").join("&gt;");
@@ -42,37 +50,30 @@ export function escapeTelegramHtml(text: string) {
 export class EventReportService {
   readonly enabled: boolean;
 
-  private readonly telegramBot: Telegraf;
+  private readonly telegram: Telegram;
+  private readonly queue: EventMessage[] = [];
+  private draining = false;
+  private dropped = 0;
+  private failures = 0;
 
   constructor(
     private readonly configService: ConfigService,
-    private readonly clusterSerivce: ClusterService
+    private readonly clusterService: ClusterService
   ) {
-    const eventReportConfig = this.configService.config.eventReport;
-    this.enabled = !!eventReportConfig.telegramBotToken;
-    if (!this.enabled) return;
+    const { telegramBotToken, proxyUrl, telegramApiRoot } = this.configService.config.eventReport ?? {};
+    this.enabled = !!telegramBotToken;
+    if (!this.enabled || !this.clusterService.isMaster) return;
 
-    // A telegram bot could only be logged-in on one client
-    // So login only on master process
-    if (this.clusterSerivce.isMaster) {
-      this.telegramBot = eventReportConfig.telegramBotToken
-        ? new Telegraf(eventReportConfig.telegramBotToken, {
-            telegram: {
-              agent: eventReportConfig.proxyUrl
-                ? new ProxyAgent({ getProxyForUrl: () => eventReportConfig.proxyUrl })
-                : null,
-              ...(eventReportConfig.telegramApiRoot
-                ? {
-                    apiRoot: eventReportConfig.telegramApiRoot
-                  }
-                : null)
-            }
-          })
-        : null;
-      if (this.telegramBot) this.telegramBot.launch();
-
-      // Listen worker process's message
-      this.clusterSerivce.onMessageFromWorker<EventMessage>(IPC_CHANNEL, message => this.doReport(message));
+    try {
+      // Outbound reports only need the Bot API client. Polling for incoming updates would start another network task.
+      this.telegram = new Telegram(telegramBotToken, {
+        agent: proxyUrl ? new ProxyAgent({ getProxyForUrl: () => proxyUrl }) : null,
+        apiRoot: telegramApiRoot || undefined
+      });
+      this.clusterService.onMessageFromWorker<EventMessage>(IPC_CHANNEL, message => this.enqueue(message));
+    } catch (error) {
+      this.enabled = false;
+      this.logFailure(error);
     }
   }
 
@@ -80,12 +81,13 @@ export class EventReportService {
     type,
     error,
     request,
+    requestId,
     message
   }: {
     type: EventReportType;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    error?: any;
+    error?: unknown;
     request?: RequestWithSession;
+    requestId?: string;
     message?: string;
   }) {
     if (!this.enabled) return;
@@ -94,60 +96,98 @@ export class EventReportService {
       const { siteName } = this.configService.config.preference;
       const now = moment().format("YYYY-MM-DD HH:mm:ss");
       const eventId = randomstring.generate({ length: 8, charset: "numeric" });
-      const sensitive = isAiRequest(request?.originalUrl);
-      const errorDisplayMessage =
-        error &&
-        (sensitive ? AI_ERROR_REPORT_MESSAGE : "stack" in error ? error.stack : JSON.stringify(error, null, 2));
+      const context = createReportContext({ eventId, requestId, request, error, message });
+      const fileContent = JSON.stringify(context, null, 2);
+      // Even if every character becomes a six-character HTML entity, the preview fits Telegram's 4096 limit.
+      // The attachment carries the complete, bounded safe context.
+      const finalMessage =
+        `[${redactReportText(siteName).slice(0, 80)}] ${emoji[type]} Event #${eventId} (${type}) at ${now}\n${fileContent}`.slice(
+          0,
+          600
+        );
 
-      let requestInfo = "";
-      let requestBody = "";
-      if (request) {
-        const url = sensitive ? request.originalUrl.split("?")[0] : request.originalUrl;
-        const { ip } = request;
-        const user = request.session?.user;
-        const userInfo = user ? `#${user.id} ${user.username}` : "";
+      // A local listener and its timers would otherwise inherit the entire HTTP request through AsyncLocalStorage.
+      requestContext.run(undefined, () =>
+        this.clusterService.postMessageToMaster<EventMessage>(
+          IPC_CHANNEL,
+          { message: finalMessage, filename: `Event_${eventId}.json`, fileContent },
+          ipcError => {
+            if (ipcError) this.logFailure(ipcError);
+          }
+        )
+      );
+    } catch (reportError) {
+      this.logFailure(reportError);
+    }
+  }
 
-        requestInfo = `\nRequest URL: ${url}\nClientIP: ${ip}\n`;
-        if (userInfo) requestInfo += `User: ${userInfo}\n`;
+  private logFailure(error: unknown) {
+    this.failures++;
+    // Sender errors may contain the bot token and the rejected attachment.
+    requestContext.run(undefined, () =>
+      logger.warn(`Event report failed (${reportErrorClass(error)}) failures=${this.failures} dropped=${this.dropped}`)
+    );
+  }
 
-        if (request.body) {
-          requestBody = sensitive
-            ? AI_REQUEST_BODY_REDACTED
-            : typeof request.body === "string"
-              ? request.body
-              : JSON.stringify(request.body, null, 2);
+  private enqueue(message: EventMessage) {
+    if (this.queue.length === QUEUE_LIMIT) {
+      this.queue.shift();
+      this.dropped++;
+    }
+    this.queue.push(message);
+    if (!this.draining) this.drainQueue().catch(error => this.logFailure(error));
+  }
+
+  private async drainQueue() {
+    this.draining = true;
+    let backoffMs = 0;
+    let loggedDrops = this.dropped;
+    try {
+      while (this.queue.length) {
+        try {
+          // eslint-disable-next-line no-await-in-loop -- One report at a time, including its attachment.
+          await this.doReport(this.queue.shift());
+          backoffMs = 0;
+        } catch (error) {
+          this.logFailure(error);
+          loggedDrops = this.dropped;
+          backoffMs = backoffMs ? Math.min(backoffMs * 2, MAX_BACKOFF_MS) : INITIAL_BACKOFF_MS;
+        }
+        if (loggedDrops !== this.dropped) {
+          logger.warn(`Event report queue overflow dropped=${this.dropped}`);
+          loggedDrops = this.dropped;
+        }
+        if (backoffMs) {
+          // Never retry a report. Telegram may already have accepted its preview or attachment.
+          // eslint-disable-next-line no-await-in-loop -- Hold off subsequent sends during an outage.
+          await delay(backoffMs, undefined, { ref: false });
         }
       }
-
-      let finalMessage = `[${siteName}] ${emoji[type]} Event #${eventId} (${type}) at ${now}\n${requestInfo}`;
-      if (message) finalMessage += `\n${sensitive ? AI_ERROR_REPORT_MESSAGE : message}\n`;
-      if (errorDisplayMessage) finalMessage += `\n${errorDisplayMessage}`;
-
-      this.clusterSerivce.postMessageToMaster(IPC_CHANNEL, <EventMessage>{
-        message: finalMessage,
-        filename: requestBody && `RequestBody_${eventId}.json`,
-        fileContent: requestBody
-      });
-    } catch (e) {
-      if (e instanceof Error) logger.error(e.message, e.stack);
-      else logger.error(e);
+    } finally {
+      this.draining = false;
     }
   }
 
   private async doReport(message: EventMessage) {
-    await this.telegramBot.telegram.sendMessage(
-      this.configService.config.eventReport.sentTo,
-      `<pre>${escapeTelegramHtml(message.message.trim())}</pre>`,
-      {
-        parse_mode: "HTML"
-      }
-    );
-
-    if (message.filename) {
-      await this.telegramBot.telegram.sendDocument(this.configService.config.eventReport.sentTo, {
-        filename: message.filename,
-        source: Buffer.from(message.fileContent)
-      });
+    const chatId = this.configService.config.eventReport.sentTo;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS).unref();
+    // Telegraf types callApi against the abort-controller shim. Its node-fetch transport accepts native signals.
+    const options = { signal: controller.signal } as Parameters<Telegram["callApi"]>[2];
+    try {
+      await this.telegram.callApi(
+        "sendMessage",
+        { chat_id: chatId, text: `<pre>${escapeTelegramHtml(message.message.trim())}</pre>`, parse_mode: "HTML" },
+        options
+      );
+      if (message.filename)
+        await this.telegram.callApi(
+          "sendDocument",
+          { chat_id: chatId, document: { filename: message.filename, source: Buffer.from(message.fileContent) } },
+          options
+        );
+    } finally {
+      clearTimeout(timeout);
     }
   }
 }

@@ -85,7 +85,7 @@ const generated = () => ({
 
 test(
   "AI action writes enforce current job, permissions and snapshot (real MariaDB)",
-  { skip: !process.env.HYHOJ_AI_TEST_DB_CONFIG, timeout: 60000 },
+  { skip: !process.env.HYHOJ_AI_TEST_DB_CONFIG && "needs HYHOJ_AI_TEST_DB_CONFIG", timeout: 60000 },
   async t => {
     const config = backendRequire("js-yaml").load(fs.readFileSync(process.env.HYHOJ_AI_TEST_DB_CONFIG, "utf8")).services
       .database;
@@ -261,7 +261,7 @@ test(
           error: null
         });
         const cache = new Map();
-        const redis = {cacheDelete: async key => cache.delete(key), cacheGet: async key => cache.get(key), cacheSet: async (key, value) => cache.set(key, value)};
+        const redis = {generationCache: {invalidate: async () => {}}, cacheDelete: async key => cache.delete(key), cacheGet: async key => cache.get(key), cacheSet: async (key, value) => cache.set(key, value)};
         const problems = bareProblemServices();
         Object.assign(problems, {
           connection: db,

@@ -1,6 +1,8 @@
 import toposort from "toposort";
 import winston from "winston";
 
+import { TestcaseResources, testcaseResources } from "./testcaseResources";
+
 import { Disposer } from "../../posixUtils";
 import { runTaskQueued } from "../../taskQueue";
 
@@ -38,22 +40,6 @@ interface TestcaseResultCommon {
   score: number;
 }
 
-// The most memory (MiB) a testcase's sandboxes use at the same time: the program (with an interactor beside it),
-// then a custom checker.
-function testcaseMemory(
-  judgeInfo: JudgeInfoCommon<TestcaseConfigCommon> & {
-    interactor?: { memoryLimit?: number };
-    checker?: { type?: string; memoryLimit?: number };
-  },
-  testcase: TestcaseConfigCommon
-) {
-  const program = testcase?.memoryLimit || judgeInfo.memoryLimit || 0;
-  const interactor = judgeInfo.interactor ? judgeInfo.interactor.memoryLimit || judgeInfo.memoryLimit || 0 : 0;
-  const checker =
-    judgeInfo.checker?.type === "custom" ? judgeInfo.checker.memoryLimit || judgeInfo.memoryLimit || 0 : 0;
-  return Math.max(program + interactor, checker);
-}
-
 function getSubtaskOrder(judgeInfo: JudgeInfoCommon<TestcaseConfigCommon>) {
   return toposort.array(
     [...judgeInfo.subtasks.keys()],
@@ -87,6 +73,7 @@ export async function runCommonTask<
     testcase: TestcaseConfig,
     extraParameters: ExtraParameters,
     taskWorkingDirectory: string,
+    resources: TestcaseResources,
     disposer?: Disposer
   ) => Promise<TestcaseResult>;
 }) {
@@ -133,10 +120,10 @@ export async function runCommonTask<
       ? await task.events.sampleTestcaseWillEnqueue(sampleId, sample, extraParameters)
       : await task.events.testcaseWillEnqueue(subtaskIndex, testcaseIndex, extraParameters);
 
-    const reservation = { memory: testcaseMemory(judgeInfo, testcase) };
+    const resources = testcaseResources(judgeInfo, testcase, isSample ? undefined : judgeInfo.subtasks[subtaskIndex]);
     const result =
       existingResult ||
-      (await runTaskQueued(reservation, async (taskWorkingDirectory, disposer) => {
+      (await runTaskQueued({ memory: resources.peakMemory }, async (taskWorkingDirectory, disposer) => {
         if (isSample) {
           winston.verbose(`Running sample testcase ${sampleId}`);
           task.events.sampleTestcaseRunning(sampleId);
@@ -155,6 +142,7 @@ export async function runCommonTask<
           testcase,
           extraParameters,
           taskWorkingDirectory,
+          resources,
           disposer
         );
       }));
@@ -224,9 +212,7 @@ export async function runCommonTask<
 
     const normalizedTestcases = subtask.testcases.map(testcase => ({
       ...testcase,
-      points: testcase.points == null ? defaultPercentagePointsForTestcases : testcase.points,
-      timeLimit: testcase.timeLimit || subtask.timeLimit || judgeInfo.timeLimit,
-      memoryLimit: testcase.memoryLimit || subtask.memoryLimit || judgeInfo.memoryLimit
+      points: testcase.points == null ? defaultPercentagePointsForTestcases : testcase.points
     }));
 
     let subtaskScore = 0;

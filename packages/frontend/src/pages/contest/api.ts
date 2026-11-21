@@ -9,12 +9,33 @@ export const submitContest = createPostApi<any, any>("contest/submit", { proofOf
 export const prepareContestUpload = createPostApi<any, any>("contest/prepareUpload", {
   proofOfWorkAction: "prepare_submission_file_upload"
 });
+// Why a virtual run can't start, or why a contest's times can't change once virtual runs exist
+const virtualRunMessages: Record<string, () => string> = {
+  VIRTUAL_ALREADY_USED: () =>
+    tr("你已经用过这场比赛的虚拟参赛机会。", "You've already taken this contest as a virtual run."),
+  VIRTUAL_PARTICIPATED: () =>
+    tr("你参加过这场比赛，不能再虚拟参赛。", "You took part in this contest, so you can't take it as a virtual run."),
+  VIRTUAL_NOT_ENDED: () => tr("比赛结束后才能开始虚拟参赛。", "Virtual runs start after the contest has ended."),
+  VIRTUAL_MANAGER: () => tr("比赛管理者不能虚拟参赛。", "Contest managers can't take a virtual run."),
+  VIRTUAL_NO_PERMISSION: () =>
+    tr(
+      "你没有参加比赛的权限，不能虚拟参赛。",
+      "You don't have permission to enter contests, so you can't take a virtual run."
+    ),
+  VIRTUAL_RUNS_EXIST: () =>
+    tr(
+      "这场比赛已有虚拟参赛，不能再修改开始和结束时间。",
+      "Virtual runs have started for this contest, so its start and end can't change."
+    )
+};
+
 export async function callContest(action: string, request: any = {}) {
   const result = await contestRequest(action)(request);
   if (result.requestError || result.response?.error) {
     const code = result.requestErrorCode ?? result.response?.error;
-    const message =
-      code === "CONTEST_NOT_STARTED"
+    const message = Object.prototype.hasOwnProperty.call(virtualRunMessages, code)
+      ? virtualRunMessages[code]()
+      : code === "CONTEST_NOT_STARTED"
         ? tr("比赛尚未开始，题目将在开始后公开。", "Problems will become available when the contest starts.")
         : code === "STATEMENTS_BUSY"
           ? tr(

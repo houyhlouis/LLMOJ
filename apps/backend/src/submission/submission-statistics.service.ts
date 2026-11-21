@@ -9,7 +9,6 @@ import { SubmissionEntity } from "./submission.entity";
 
 import { SubmissionService } from "./submission.service";
 
-import { logger } from "../logger";
 import { RedisService } from "../redis/redis.service";
 import { ProblemEntity } from "../problem/problem.entity";
 
@@ -46,13 +45,10 @@ const submissionStatisticsFields: Record<SubmissionStatisticsType, SubmissionSta
   }
 };
 
-// We use Redis to cache the result of submission statistics
-// Each time a submission is updated, if it's in the ranklist, or it should be inserted to the ranklist
-// the cache will be purged
 type SubmissionStatisticsCache = [submissionId: number, submitterId: number, fieldValue: number];
-const REDIS_KEY_SUBMISSION_STATISTICS = "submission-statistics:%d:%s";
-
-const REDIS_KEY_SUBMISSION_SCORE_STATISTICS = "submission-score-statistics:%d";
+const STATISTICS_CACHE_SECONDS = 60;
+const SCORE_HISTOGRAM = "scores";
+const statisticsCacheKey = (problemId: number) => `v2:practice-submission-statistics:${problemId}`;
 
 // Only top 100 users' submissions will be in the statistics
 const SUBMISSION_STATISTICS_TOP_COUNT = 100;
@@ -67,15 +63,6 @@ export class SubmissionStatisticsService {
     private readonly redisService: RedisService
   ) {}
 
-  private async parseFromRedis<T>(key: string): Promise<T> {
-    const str = await this.redisService.cacheGet(key);
-    try {
-      return JSON.parse(str);
-    } catch (e) {
-      return null;
-    }
-  }
-
   async querySubmissionStatisticsAndCount(
     problem: ProblemEntity,
     statisticsType: SubmissionStatisticsType,
@@ -84,10 +71,8 @@ export class SubmissionStatisticsService {
   ): Promise<[submissions: SubmissionEntity[], count: number]> {
     const { field, sort } = submissionStatisticsFields[statisticsType];
 
-    const key = REDIS_KEY_SUBMISSION_STATISTICS.format(problem.id, statisticsType);
-    let tuples = await this.parseFromRedis<SubmissionStatisticsCache[]>(key);
-
-    const rebuildCache = async () => {
+    const key = statisticsCacheKey(problem.id);
+    const load = async (): Promise<SubmissionStatisticsCache[]> => {
       const aggregateFunction = sort === "ASC" ? "MIN" : "MAX";
       const queryResult: { submissionId: number; submitterId: number; fieldValue: unknown }[] = await this.connection
         .createQueryBuilder()
@@ -120,11 +105,11 @@ export class SubmissionStatisticsService {
         .groupBy("submission.submitterId")
         .orderBy("fieldValue", sort)
         .getRawMany();
-      tuples = queryResult.map(result => [result.submissionId, result.submitterId, Number(result.fieldValue)]);
-      await this.redisService.cacheSet(key, JSON.stringify(tuples));
+      return queryResult.map(result => [result.submissionId, result.submitterId, Number(result.fieldValue)]);
     };
 
-    if (!tuples) await rebuildCache();
+    const cache = this.redisService.generationCache;
+    let tuples = await cache.read(key, statisticsType, STATISTICS_CACHE_SECONDS, load);
 
     const query = async () => {
       const ids = tuples.filter((_, i) => i >= skipCount && i < skipCount + takeCount).map(([id]) => id);
@@ -133,7 +118,7 @@ export class SubmissionStatisticsService {
 
     let submissions = await query();
     if (submissions.some(submission => !submission)) {
-      await rebuildCache();
+      tuples = await cache.read(key, statisticsType, STATISTICS_CACHE_SECONDS, load, true);
       submissions = await query();
     }
 
@@ -144,16 +129,21 @@ export class SubmissionStatisticsService {
    * Return how many submissions with each score (0 ~ 100) are there.
    */
   async querySubmissionScoreStatistics(problem: ProblemEntity): Promise<number[]> {
-    const key = REDIS_KEY_SUBMISSION_SCORE_STATISTICS.format(problem.id);
-    const cachedResult = await this.parseFromRedis<number[]>(key);
-    if (cachedResult) return cachedResult;
+    return await this.redisService.generationCache.read(
+      statisticsCacheKey(problem.id),
+      SCORE_HISTOGRAM,
+      STATISTICS_CACHE_SECONDS,
+      () => this.countSubmissionsByScore(problem.id)
+    );
+  }
 
+  private async countSubmissionsByScore(problemId: number): Promise<number[]> {
     const queryResult: { score: string; count: string }[] = await this.connection
       .createQueryBuilder()
       .select("submission.score", "score")
       .addSelect("COUNT(*)", "count")
       .from(SubmissionEntity, "submission")
-      .where("submission.problemId = :problemId", { problemId: problem.id })
+      .where("submission.problemId = :problemId", { problemId })
       .andWhere("submission.contestId IS NULL")
       .andWhere("submission.score IS NOT NULL")
       .andWhere("submission.status NOT IN (:...invalidStatuses)", {
@@ -163,8 +153,6 @@ export class SubmissionStatisticsService {
       .getRawMany();
     const result = new Array(101).fill(0);
     for (const item of queryResult) result[item.score] = Number(item.count);
-
-    await this.redisService.cacheSet(key, JSON.stringify(result));
 
     return result;
   }
@@ -178,75 +166,32 @@ export class SubmissionStatisticsService {
     // Contest submissions don't count in a problem's statistics
     if (oldSubmission.contestId) return;
 
-    // Submission score statistics
+    const fields: string[] = [];
     if (
       !submission ||
       oldSubmission.score !== submission.score ||
       [SubmissionStatus.Fake, SubmissionStatus.Hacked].includes(oldSubmission.status) !==
         [SubmissionStatus.Fake, SubmissionStatus.Hacked].includes(submission.status)
-    ) {
-      await this.redisService.cacheDelete(REDIS_KEY_SUBMISSION_SCORE_STATISTICS.format(oldSubmission.problemId));
-    }
-
-    // Submission statistics
-    if (
-      oldSubmission.status !== SubmissionStatus.Accepted &&
-      (!submission || submission.status !== SubmissionStatus.Accepted)
     )
-      return;
-    await Promise.all(
-      Object.values(SubmissionStatisticsType).map(async statisticsType => {
-        const { field, sort } = submissionStatisticsFields[statisticsType];
-        const key = REDIS_KEY_SUBMISSION_STATISTICS.format(oldSubmission.problemId, statisticsType);
-        const tuples = await this.parseFromRedis<SubmissionStatisticsCache[]>(key);
+      fields.push(SCORE_HISTOGRAM);
 
-        if (!tuples) return;
+    // An empty cache can have a ranking query in flight. Fence it even if no current tuple names this submission.
+    if (oldSubmission.status === SubmissionStatus.Accepted || submission?.status === SubmissionStatus.Accepted)
+      fields.push(...Object.values(SubmissionStatisticsType));
 
-        const isFirstBetter = (value: number, anotherValue: number) =>
-          (sort === "ASC" && value < anotherValue) || (sort === "DESC" && value > anotherValue);
-
-        const shouldCacheBePurged = () => {
-          const oldSubmissionInList = tuples.some(([id]) => id === oldSubmission.id);
-
-          // If the old value is in the list
-          const oldValue = Number(oldSubmission[field]);
-          const newValue = submission && Number(submission[field]);
-          if (oldSubmissionInList) {
-            return oldValue !== newValue || !submission || submission.status !== SubmissionStatus.Accepted;
-          }
-          if (!submission || submission.status !== SubmissionStatus.Accepted) return false;
-
-          // If the new submission is Accepted, check if it's better than the submitter's best
-          const submitterBest = tuples.find(([, submitterId]) => submitterId === oldSubmission.submitterId);
-          if (submitterBest != null) {
-            const [, , submitterBestValue] = submitterBest;
-            return newValue != null && isFirstBetter(newValue, submitterBestValue);
-          }
-
-          // If the ranklist is not full
-          if (tuples.length < SUBMISSION_STATISTICS_TOP_COUNT) return true;
-
-          // If the ranklist is full, but new value is better than the last of the ranklist
-          const [, , lastValue] = tuples[tuples.length - 1];
-          return newValue != null && isFirstBetter(newValue, lastValue);
-        };
-
-        if (shouldCacheBePurged()) {
-          logger.log(
-            `Purging submission statistics cache: problemId = ${oldSubmission.problemId}, statisticsType = ${statisticsType}`
-          );
-          await this.redisService.cacheDelete(key);
-        }
-      })
-    );
+    if (fields.length)
+      await this.redisService.generationCache.invalidate(
+        statisticsCacheKey(oldSubmission.problemId),
+        fields,
+        STATISTICS_CACHE_SECONDS
+      );
   }
 
   async onProblemDeleted(problemId: number): Promise<void> {
-    await Promise.all([
-      ...Object.values(SubmissionStatisticsType).map(type =>
-        this.redisService.cacheDelete(REDIS_KEY_SUBMISSION_STATISTICS.format(problemId, type))
-      ),
-      this.redisService.cacheDelete(REDIS_KEY_SUBMISSION_SCORE_STATISTICS.format(problemId))
-    ]);
+    await this.redisService.generationCache.invalidate(
+      statisticsCacheKey(problemId),
+      [SCORE_HISTOGRAM, ...Object.values(SubmissionStatisticsType)],
+      STATISTICS_CACHE_SECONDS
+    );
   }
 }

@@ -19,6 +19,7 @@ import { AI_EVIDENCE_SQL, validateAiEvidenceSchema } from './ai-evidence-schema.
 import { AI_OPERATION_SQL, validateAiOperationSchema } from './ai-operation-schema.mjs';
 import { AI_USAGE_IDENTITY_SQL, validateAiUsageIdentitySchema } from './ai-usage-identity-schema.mjs';
 import { AI_LIFECYCLE_SQL, validateAiLifecycleSchema, recordSchemaMigration } from './ai-lifecycle-schema.mjs';
+import { CONTEST_VIRTUAL_SQL, validateContestVirtualSchema } from './contest-virtual-schema.mjs';
 export { AI_LIFECYCLE_SQL, AI_LIFECYCLE_COLUMNS } from './ai-lifecycle-schema.mjs';
 export { FILE_SIZE_BIGINT_SQL, TEAM_FILE_SIZE_BIGINT_SQL, TEAM_QUOTA_DEFAULT_SQL } from './team-storage.mjs';
 export { TWO_FACTOR_SQL, TWO_FACTOR_TABLES } from './two-factor-schema.mjs';
@@ -215,7 +216,7 @@ export function validateQueries(queries) {
         sql !== DISCUSSION_TYPE_INDEX_SQL && !TEAM_STORAGE_SQL.includes(sql) && !TWO_FACTOR_SQL.includes(sql) && !JUDGE_QUEUE_SQL.includes(sql) && sql !== JUDGE_CLIENT_DRAINING_SQL &&
         !DATA_VERSION_SQL.includes(sql) && !AI_BUDGET_SQL.includes(sql) && !RUNTIME_IDENTITY_SQL.includes(sql) && !AI_EXECUTION_SQL.includes(sql) && !SEALED_UPLOAD_SQL.includes(sql) &&
         !DATA_RETENTION_SQL.includes(sql) && !AI_EVIDENCE_SQL.includes(sql) && !AI_OPERATION_SQL.includes(sql) && !AI_USAGE_IDENTITY_SQL.includes(sql) && !AI_LIFECYCLE_SQL.includes(sql) &&
-        !communityCreateSql.has(normalizeGeneratedIndexes(sql))) {
+        !CONTEST_VIRTUAL_SQL.includes(sql) && !communityCreateSql.has(normalizeGeneratedIndexes(sql))) {
       throw new SchemaCompatibilityError('Existing schema is outside this upgrader compatibility contract');
     }
   }
@@ -283,6 +284,7 @@ export async function auditSchema(connection) {
   await validateAiOperationSchema(connection, queries, SchemaCompatibilityError);
   await validateAiUsageIdentitySchema(connection, queries, SchemaCompatibilityError);
   await validateAiLifecycleSchema(connection, queries, SchemaCompatibilityError);
+  await validateContestVirtualSchema(connection, queries, SchemaCompatibilityError);
   const migration = await inspectLegacyRegistration(connection);
   const solutions = await inspectVerifiedSolutions(connection);
   const teamStorage = await inspectTeamStorage(connection);
@@ -312,6 +314,7 @@ export async function applySchema(connection) {
   await validateAiOperationSchema(connection, [], SchemaCompatibilityError);
   await validateAiUsageIdentitySchema(connection, [], SchemaCompatibilityError);
   await validateAiLifecycleSchema(connection, [], SchemaCompatibilityError);
+  await validateContestVirtualSchema(connection, [], SchemaCompatibilityError);
   const migration = await migrateLegacyRegistration(connection);
   const remaining = await inspectLegacyRegistration(connection);
   if (remaining.pending || remaining.rejected || remaining.approvedHistory)

@@ -6,6 +6,10 @@ import { createGetApi, createPostApi } from "@/api";
 
 export const list = createPostApi<ApiTypes.ContestRequestDto, void>("contest/list", {});
 export const detail = createPostApi<ApiTypes.ContestRequestDto, void>("contest/detail", {});
+export const startVirtual = createPostApi<ApiTypes.StartVirtualRequestDto, ApiTypes.StartVirtualResponseDto>(
+  "contest/startVirtual",
+  {}
+);
 export const save = createPostApi<ApiTypes.ContestRequestDto, void>("contest/save", {});
 export const delete_ = createPostApi<ApiTypes.ContestRequestDto, void>("contest/delete", {});
 export const saveProblem = createPostApi<ApiTypes.ContestRequestDto, void>("contest/saveProblem", {});

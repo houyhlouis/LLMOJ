@@ -23,7 +23,11 @@ const { UserPermissionRuleEntity } = require('../access/user-permission-rule.ent
 const { GroupEntity } = require('../group/group.entity.ts');
 const { GroupMembershipEntity } = require('../group/group-membership.entity.ts');
 const { GroupService } = require('../group/group.service.ts');
+const { PermissionForUserEntity } = require('../permission/permission-for-user.entity.ts');
+const { PermissionForGroupEntity } = require('../permission/permission-for-group.entity.ts');
+const { PermissionService } = require('../permission/permission.service.ts');
 const { ProblemEntity, ProblemType } = require('../problem/problem.entity.ts');
+const { ProblemController } = require('../problem/problem.controller.ts');
 const { ProblemPermissionType } = require('../problem/problem-access.service.ts');
 const { bareProblemServices } = require("../problem/problem-test-services.cjs");
 const { ProblemFileEntity, ProblemFileType } = require('../problem/problem-file.entity.ts');
@@ -33,9 +37,12 @@ const { ProblemTagMapEntity } = require('../problem/problem-tag-map.entity.ts');
 const { ProblemTagEntity } = require('../problem/problem-tag.entity.ts');
 const { LocalizedContentEntity } = require('../localized-content/localized-content.entity.ts');
 const { DiscussionService, DiscussionPermissionType } = require('../discussion/discussion.service.ts');
+const { DiscussionController } = require('../discussion/discussion.controller.ts');
 const { DiscussionEntity } = require('../discussion/discussion.entity.ts');
 const { DiscussionContentEntity } = require('../discussion/discussion-content.entity.ts');
 const { DiscussionReplyEntity } = require('../discussion/discussion-reply.entity.ts');
+const { DiscussionReactionEntity } = require('../discussion/discussion-reaction.entity.ts');
+const { DiscussionReplyReactionEntity } = require('../discussion/discussion-reply-reaction.entity.ts');
 const { ContestService } = require('../contest/contest.service.ts');
 const { ContestAccessService } = require('../contest/contest-access.service.ts');
 const { ContestProblemService } = require('../contest/contest-problem.service.ts');
@@ -47,7 +54,7 @@ const { FileService, MinioSignFor } = require('../file/file.service.ts');
 const { FileEntity } = require('../file/file.entity.ts');
 
 test('team creation, membership, private resources, assignments and files (real MariaDB)', {
-  skip: !process.env.LLMOJ_TEAM_TEST_DB_CONFIG, timeout: 120000
+  skip: !process.env.LLMOJ_TEAM_TEST_DB_CONFIG && "needs LLMOJ_TEAM_TEST_DB_CONFIG", timeout: 120000
 }, async t => {
   const cfg = require('js-yaml').load(fs.readFileSync(process.env.LLMOJ_TEAM_TEST_DB_CONFIG, 'utf8')).services.database;
   if (!/^llmoj_(?:features|test)_/.test(cfg.database)) throw new Error('This test resets a disposable llmoj_features_* or llmoj_test_* database only.');
@@ -533,6 +540,189 @@ test('team creation, membership, private resources, assignments and files (real 
       await assert.rejects(teams.get(member, teamId));
       await teams.save(applicant, { teamId, name: 'Workflow Team', description: '', announcement: '', joinPolicy: 'closed', groupChangeLocked: true, archived: false });
       assert.equal((await teams.get(member, teamId)).team.archived, false);
+    });
+    await run('hidden-by-default team replies follow the viewer through posting, paging, moderation and archival', async () => {
+      const { teamId: reviewTeamId } = await teams.create(owner, { name: 'Reply review', joinPolicy: 'open' });
+      for (const user of [member, applicant, moderator]) await teams.join(user, { teamId: reviewTeamId });
+      await teams.manageMembers(owner, { teamId: reviewTeamId, action: 'permissions', userIds: [moderator.id], permissions: ['discussions'] });
+      const { discussionId } = await teams.createDiscussion(member, { teamId: reviewTeamId, title: 'Review fixture', content: 'Topic' });
+      const discussion = await discussions.findDiscussionById(discussionId);
+      await userRepo.update(newcomer.id, { isAdmin: true });
+      const admin = await userRepo.findOneBy({ id: newcomer.id });
+      config.config.preference.security.discussionReplyDefaultPublic = false;
+      discussions.discussionReactionRepository = db.getRepository(DiscussionReactionEntity);
+      discussions.discussionReplyReactionRepository = db.getRepository(DiscussionReplyReactionEntity);
+      const controller = Object.assign(Object.create(DiscussionController.prototype), {
+        discussionService: discussions, userPrivilegeService: privilege, auditService: audit,
+        userService: { ...userService, findUserById: id => userRepo.findOneBy({ id }) },
+        configService: { config: { queryLimit: { discussionReplies: 10 }, preference: { misc: { discussionReactionEmojis: ['👍'] } } } }
+      });
+      const { reply } = await controller.createDiscussionReply(member, { discussionId, content: 'Pending reply' });
+      assert.equal(reply.isPublic, false);
+      assert(!reply.permissions.includes('ManagePublicness'));
+      const setPublic = (user, isPublic) => controller.setDiscussionReplyPublic(user, { discussionReplyId: reply.id, isPublic });
+      const react = (user, reaction, type = 'DiscussionReply') =>
+        controller.toggleReaction(user, { type, id: type === 'DiscussionReply' ? reply.id : discussionId, emoji: '👍', reaction });
+      const denied = { error: 'PERMISSION_DENIED' };
+      const page = (user, request) => controller.getDiscussionAndReplies(user, { discussionId, locale: 'en_US', ...request });
+      const headTail = { queryRepliesType: 'HeadTail', headTakeCount: 1, tailTakeCount: 1, getDiscussion: true };
+      async function checkReply(user, visible, mayModerate) {
+        const head = await page(user, headTail);
+        const range = await page(user, { queryRepliesType: 'IdRange', beforeId: reply.id + 1, afterId: reply.id - 1, idRangeTakeCount: 1 });
+        assert.equal(head.repliesTotalCount, visible ? 1 : 0);
+        assert.equal(range.repliesCountInRange, visible ? 1 : 0);
+        assert.deepEqual([...head.repliesHead, ...head.repliesTail], range.repliesInRange);
+        assert.deepEqual(range.repliesInRange.map(row => row.id), visible ? [reply.id] : []);
+        if (visible) assert.equal(range.repliesInRange[0].permissions.includes('ManagePublicness'), mayModerate);
+        assert.equal(head.discussion.meta.replyCount, 1);
+        assert.equal(head.discussion.meta.isPublic, false);
+        assert(!head.discussion.permissions.includes('ManagePublicness'));
+        const stored = await discussions.findDiscussionReplyById(reply.id);
+        assert.equal(await discussions.userHasViewDiscussionReplyPermission(user, stored, discussion), visible);
+      }
+      await checkReply(member, true, false);       // author
+      await checkReply(applicant, false, false);   // ordinary peer
+      await checkReply(moderator, true, true);
+      await checkReply(owner, true, true);
+      await checkReply(admin, true, true);
+      for (const reaction of [true, false]) {
+        assert.deepEqual(await react(moderator, reaction), denied);
+        assert.deepEqual(await react(member, reaction), {});
+      }
+      for (const user of [member, applicant, outsider]) assert.deepEqual(await setPublic(user, true), denied);
+      assert.deepEqual(await page(outsider, headTail), denied);
+      for (const permission of [P.ManageDiscussion, P.ManageDiscussionReplies]) {
+        await ruleRepo.save({ userId: moderator.id, permission, allowed: false });
+        await checkReply(moderator, false, false);
+        assert.deepEqual(await setPublic(moderator, true), denied);
+        await ruleRepo.delete({ userId: moderator.id, permission });
+      }
+      await ruleRepo.save({ userId: moderator.id, permission: P.ViewTeam, allowed: false });
+      assert.deepEqual(await page(moderator, headTail), denied);
+      assert.deepEqual(await setPublic(moderator, true), denied);
+      await ruleRepo.delete({ userId: moderator.id, permission: P.ViewTeam });
+
+      const grants = db.getRepository(UserPrivilegeEntity);
+      await grants.save({ userId: outsider.id, privilegeType: P.ManageDiscussion });
+      assert.deepEqual(await page(outsider, headTail), denied);
+      assert.deepEqual(await setPublic(outsider, true), denied);
+      await grants.save({ userId: applicant.id, privilegeType: P.ManageDiscussion });
+      await checkReply(applicant, true, true);
+      await grants.delete({ userId: applicant.id, privilegeType: P.ManageDiscussion });
+      await grants.save({ userId: outsider.id, privilegeType: P.ManageTeams });
+      await checkReply(outsider, true, true);
+      await grants.delete({ userId: outsider.id });
+
+      assert.deepEqual(await setPublic(moderator, true), {});
+      await checkReply(applicant, true, false);
+      for (const reaction of [true, false]) assert.deepEqual(await react(applicant, reaction), {});
+      assert.deepEqual(await page(outsider, headTail), denied);
+      assert.deepEqual(await setPublic(owner, false), {});
+      await checkReply(applicant, false, false);
+      assert.deepEqual(await setPublic(admin, true), {});
+      assert.deepEqual(await setPublic(admin, false), {});
+      assert.deepEqual(await controller.setDiscussionPublic(admin, { discussionId, isPublic: true }), denied);
+      const team = await teamRepo.findOneBy({ id: reviewTeamId });
+      assert.equal(await groups.findGroupById(team.permissionGroupId), null);
+
+      // Commit the archive between approval's ordinary resource lookup and its subsequent locked reread.
+      const resourceLocated = Promise.withResolvers();
+      let pending;
+      try {
+        discussions.connection = { transaction: (level, write) => db.transaction(level, manager => {
+          const resources = manager.getRepository(TeamResourceEntity);
+          const findOne = resources.findOne.bind(resources);
+          resources.findOne = async options => {
+            const resource = await findOne(options);
+            if (!options.lock) resourceLocated.resolve(resource);
+            return resource;
+          };
+          return write(manager);
+        }) };
+        await db.transaction(async manager => {
+          await manager.findOne(TeamEntity, { where: { id: reviewTeamId }, lock: { mode: 'pessimistic_write' } });
+          await manager.update(TeamResourceEntity, { teamId: reviewTeamId, kind: 'discussion', resourceId: discussionId }, { archived: true });
+          pending = setPublic(moderator, true);
+          const located = await Promise.race([resourceLocated.promise, pending]);
+          assert.equal(located?.resourceId, discussionId, 'approval must locate this resource before the archive commits');
+          assert.equal(located.archived, false, 'the uncommitted archive must still be invisible to the locator');
+        });
+        assert.deepEqual(await pending, denied);
+        assert.equal((await discussions.findDiscussionReplyById(reply.id)).isPublic, false);
+      } finally {
+        discussions.connection = db;
+        if (pending) await Promise.allSettled([pending]);
+        await teams.archiveResource(owner, { teamId: reviewTeamId, kind: 'discussion', resourceId: discussionId, archived: false });
+      }
+
+      for (const archived of [
+        value => teams.archiveResource(owner, { teamId: reviewTeamId, kind: 'discussion', resourceId: discussionId, archived: value }),
+        value => teams.save(owner, { teamId: reviewTeamId, name: team.name, joinPolicy: team.joinPolicy, archived: value })
+      ]) {
+        await archived(true);
+        for (const reviewer of [moderator, owner, admin]) {
+          await checkReply(reviewer, true, false);
+          assert.deepEqual(await setPublic(reviewer, true), denied);
+        }
+        for (const reaction of [true, false]) {
+          assert.deepEqual(await react(moderator, reaction), denied);
+          assert.deepEqual(await react(admin, reaction), {});
+          assert.deepEqual(await react(moderator, reaction, 'Discussion'), {});
+        }
+        assert.deepEqual(await page(applicant, headTail), denied);
+        await archived(false);
+      }
+      // Removal commits after the UI received its flag. The later write must read membership again.
+      await checkReply(moderator, true, true);
+      const membership = { teamId: reviewTeamId, userId: moderator.id };
+      await membershipRepo.update(membership, { status: 'applicant' });  // stale delegated permissions still present
+      assert.deepEqual(await page(moderator, headTail), denied);
+      assert.deepEqual(await setPublic(moderator, true), denied);
+      await membershipRepo.update(membership, { status: 'member' });
+      await teams.manageMembers(owner, { teamId: reviewTeamId, action: 'remove', userIds: [moderator.id] });
+      assert.deepEqual(await page(moderator, headTail), denied);
+      assert.deepEqual(await setPublic(moderator, true), denied);
+      assert.equal((await discussions.findDiscussionReplyById(reply.id)).isPublic, false);
+    });
+    await run('legacy permission views hide team grants and cannot replace them', async () => {
+      const { teamId } = await teams.create(owner, { name: 'Permission views', joinPolicy: 'open' });
+      await teams.join(member, { teamId });
+      const { problemId } = await teams.createProblem(owner, { teamId });
+      const { discussionId } = await teams.createDiscussion(member, { teamId, title: 'Private topic', problemId });
+      const team = await teamRepo.findOneBy({ id: teamId });
+      await userRepo.update(newcomer.id, { isAdmin: true });
+      const admin = await userRepo.findOneBy({ id: newcomer.id });
+
+      const permissionService = new PermissionService(db, db.getRepository(PermissionForUserEntity),
+        db.getRepository(PermissionForGroupEntity), groups);
+      const lockService = { lockReadWrite: (_key, _mode, read) => read() };
+      Object.assign(problems, { permissionService, lockService, userService, groupService: groups });
+      Object.assign(discussions, { permissionService, lockService, userService, groupService: groups });
+      const problemController = Object.assign(Object.create(ProblemController.prototype), {
+        problemService: problems, problemAccess: problems, problemLocks: problems, groupService: groups, userService
+      });
+      const discussionController = Object.assign(Object.create(DiscussionController.prototype), {
+        discussionService: discussions, groupService: groups, userService
+      });
+
+      const empty = { userPermissions: [], groupPermissions: [] };
+      const denied = { error: 'PERMISSION_DENIED' };
+      const readProblem = user => problemController.getProblem(user, { id: problemId, permissions: true });
+      const readDiscussion = user => discussionController.getDiscussionPermissions(user, { id: discussionId });
+      for (const viewer of [owner, member, admin]) {
+        assert.deepEqual((await readProblem(viewer)).permissions, empty);
+        assert.deepEqual(await readDiscussion(viewer), { permissions: empty, haveManagePermissionsPermission: false });
+      }
+      assert.deepEqual(await readProblem(outsider), denied);
+      assert.deepEqual(await readDiscussion(outsider), denied);
+      for (const user of [owner, member, admin, outsider]) {
+        assert.deepEqual(await problemController.setProblemPermissions(user, { problemId, ...empty }), denied);
+        assert.deepEqual(await discussionController.setDiscussionPermissions(user, { discussionId, ...empty }), denied);
+      }
+      for (const [kind, id] of [['Problem', problemId], ['Discussion', discussionId]]) {
+        assert.deepEqual(await permissionService.getUserAndGroupPermissionListOfObject(id, kind),
+          [[], [[team.permissionGroupId, 1]]], 'team registration must retain its actual read grant');
+      }
     });
     if (process.env.LLMOJ_TEAM_TEST_REPORT) fs.writeFileSync(process.env.LLMOJ_TEAM_TEST_REPORT, JSON.stringify(report, null, 2));
   } finally {

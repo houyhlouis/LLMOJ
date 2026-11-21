@@ -53,7 +53,7 @@ function enteredConnection(db, base) {
 }
 
 test("discussion pagination and serialized sort/count mutations (real MariaDB)",
-  { skip: !process.env.HYHOJ_DISCUSSION_TEST_DB_CONFIG, timeout: 60000 }, async t => {
+  { skip: !process.env.HYHOJ_DISCUSSION_TEST_DB_CONFIG && "needs HYHOJ_DISCUSSION_TEST_DB_CONFIG", timeout: 60000 }, async t => {
   const config = require("js-yaml").load(fs.readFileSync(process.env.HYHOJ_DISCUSSION_TEST_DB_CONFIG, "utf8")).services.database;
   const prefix = `qa_discussion_final_${crypto.randomBytes(8).toString("hex")}_`;
   const integer = { type: Number }, dt = { type: "datetime" };

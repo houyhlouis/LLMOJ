@@ -73,7 +73,16 @@ Variables used only by tests are listed in the [development guide](../README-DEV
 
 ## Migrating from old LibreOJ
 
-`LIBREOJ_MIGRATION_CONFIG_FILE` names a file with the old site's settings: `database.host` (text), `database.port` (number), `database.username`, `database.password` and `database.database` (text), and `uploads` (the old attachment directory). None has a default. The migration writes to the database; remove the variable once it's done. It isn't how you upgrade LLMOJ itself: use the [upgrader](Upgrade.md) for that.
+`LIBREOJ_MIGRATION_CONFIG_FILE` names a YAML file with the old site's settings: `database.host` (text), `database.port` (number), `database.username`, `database.password` and `database.database` (text), and `uploads` (the old attachment directory). None has a default. With it set, the backend copies the old site into a new one instead of serving the site, and exits. It isn't how you upgrade LLMOJ itself: use the [upgrader](Upgrade.md) for that.
+
+The migration is a one-off copy, not a job that can resume. Plan it like this:
+
+1. **Back up** the old database and its `uploads` directory, and stop the old site, or work on a copy of both. The migration only reads them, but it reads each table page by page, so rows that change meanwhile can be skipped or copied twice.
+2. **Prepare an empty target.** The migration refuses a database that has any user, and a new installation creates its `admin` account. Use a database of its own that has LLMOJ's tables and no accounts: for example, create it with `node deploy/initialize-schema.mjs --root <built source checkout> --config <backend configuration naming that database>` and don't create an administrator (the old site's administrators come along).
+3. **Give it its own Redis database.** At the start and at the end, the migration empties (`FLUSHDB`) the Redis database in the backend configuration: use one that no running site uses (another database number, or a separate Redis).
+4. **Run it** from `apps/backend`, after building it: `LIBREOJ_CONFIG_FILE=<backend configuration> LIBREOJ_MIGRATION_CONFIG_FILE=<migration file> node dist/main.js`. It copies users, problems (with their test data and attachments from `uploads` into the configured object storage), submissions (with answer files) and discussions, logs its progress for each table, and exits when it's done.
+5. **If it stops partway** (an error, a lost connection, an interruption), the target isn't empty any more and the migration can't continue: drop and recreate the target database, use an empty bucket (files it already copied stay behind in the old one), fix the cause, and start again from step 2.
+6. **Afterwards**, remove the variable, start the site normally on the new database, check it, and make a [backup](Operations-Configuration.md#backups). Users sign in with their old user name and password; the first sign-in completes their account's migration, and asks for a new user name where the old one isn't allowed any more. Keep the old database and `uploads` until you're sure.
 
 ## Maintenance scripts
 

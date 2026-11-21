@@ -480,6 +480,15 @@ declare namespace ApiTypes {
      */
     uri?: string;
   }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface BundleHeaderDto {
+    bundleVersion: 1;
+    generatedAt: string; // date-time
+    requestId: string; // uuid
+    administratorId: number;
+  }
   export interface CancelSubmissionRequestDto {
     submissionId: number;
   }
@@ -534,6 +543,10 @@ declare namespace ApiTypes {
     submissionId?: number;
     page?: number;
     data?: {};
+  }
+  export interface ContestVirtualRunDto {
+    startTime: string; // date-time
+    endTime: string; // date-time
   }
   export interface CreateDiscussionReplyRequestDto {
     discussionId: number;
@@ -620,6 +633,212 @@ declare namespace ApiTypes {
   export interface DeleteSubmissionResponseDto {
     error?: "NO_SUCH_SUBMISSION" | "PERMISSION_DENIED";
   }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface DiagnosticAiDto {
+    paused: boolean;
+    userDailyTokens: number;
+    userDailyRequests: number;
+    jobRequests: number;
+    concurrentRequests: number;
+    jobCounts: ApiTypes.DiagnosticJobCountsDto;
+    recentFailed: ApiTypes.DiagnosticJobDto[];
+  }
+  export interface DiagnosticBundleRequestDto {
+    submissionIds?: number[];
+    aiJobIds?: string /* uuid ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ */[]; // uuid
+  }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface DiagnosticBundleResponseDto {
+    bundle: ApiTypes.BundleHeaderDto;
+    deployment: ApiTypes.DiagnosticDeploymentDto;
+    health: ApiTypes.DiagnosticHealthDto;
+    judging: ApiTypes.DiagnosticJudgingDto;
+    errors: ApiTypes.DiagnosticErrorsDto;
+    ai: ApiTypes.DiagnosticAiDto;
+    selected?: ApiTypes.DiagnosticSelectionDto;
+    excluded: string[];
+  }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface DiagnosticDeploymentDto {
+    serverVersion: string;
+    revision: string | null;
+    backendBuild: string | null;
+    nodeVersion: string;
+    platform: string;
+    architecture: string;
+    uptimeSeconds: number;
+    workerCount: number;
+    aiExecutionMode: "local" | "judges";
+    settings: ApiTypes.DiagnosticSettingsDto;
+  }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface DiagnosticErrorCountDto {
+    errorClass: string;
+    count: number;
+  }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface DiagnosticErrorsDto {
+    scope: "responding_process";
+    recent: ApiTypes.DiagnosticHttpErrorDto[];
+    totals: ApiTypes.DiagnosticErrorCountDto[];
+  }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface DiagnosticHealthCheckDto {
+    status: "ok" | "failed";
+    durationMs: number;
+  }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface DiagnosticHealthDto {
+    status: "ready" | "unavailable";
+    database: ApiTypes.DiagnosticHealthCheckDto;
+    redis: ApiTypes.DiagnosticHealthCheckDto;
+    storage: ApiTypes.DiagnosticHealthCheckDto;
+  }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface DiagnosticHttpErrorDto {
+    requestId: string; // uuid
+    time: string; // date-time
+    method: string | null;
+    route: string | null;
+    status: 500;
+    errorClass: string;
+  }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface DiagnosticJobCountsDto {
+    queued: number;
+    running: number;
+    completed: number;
+    failed: number;
+    cancelled: number;
+  }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface DiagnosticJobDto {
+    id: string; // uuid
+    problemId: number | null;
+    revision: number;
+    action: string | null;
+    status: string | null; // ^(?:queued|running|completed|failed|cancelled)$
+    stage: string;
+    attempt: number;
+    errorCode: string | null;
+    failureRole: string | null;
+    createdAt: string; // date-time
+    updatedAt: string; // date-time
+    stageStartedAt: string | null; // date-time
+    stageEndedAt: string | null; // date-time
+  }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface DiagnosticJudgeMachineDto {
+    id: number;
+    online: boolean | null;
+    draining: boolean;
+    revoked: boolean | null;
+    protocolVersion: number | null;
+    architecture: string | null;
+    consumerThreads: number | null;
+    executionSlots: number | null;
+    aiExecutionSlots: number | null;
+    memoryBudget: number | null;
+    nodeVersion: string | null;
+    judgeProgram: string | null;
+    sandboxImage: string | null;
+    lastSeenAgeSeconds: number | null;
+  }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface DiagnosticJudgingDto {
+    machines: ApiTypes.DiagnosticJudgeMachineDto[];
+    machineCount: number;
+    queue: ApiTypes.DiagnosticQueueCountDto[];
+    oldestWaitingAgeSeconds: number | null;
+  }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface DiagnosticQueueCountDto {
+    kind: "Submission" | "Hack" | "SelfEvalPrepare" | "SelfEval" | "AiExecution";
+    queued: number;
+    leased: number;
+  }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface DiagnosticSelectionDto {
+    submissions: ApiTypes.DiagnosticSubmissionDto[];
+    aiJobs: ApiTypes.DiagnosticJobDto[];
+    missingSubmissionIds: number[];
+    missingAiJobIds: string[];
+  }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface DiagnosticSettingsDto {
+    registrationMode: "open" | "approval" | "closed";
+    requireEmailVerification: boolean;
+    mailConfigured: boolean;
+    captchaConfigured: boolean;
+    crossOriginEnabled: boolean;
+    metricsConfigured: boolean;
+    rateLimitMaxRequests: number | null;
+    rateLimitDurationSeconds: number | null;
+    proofOfWorkDifficulty: number | null;
+    expensiveActionDifficulty: number | null;
+    problemTestcases: number | null;
+    problemTimeLimit: number | null;
+    problemMemoryLimit: number | null;
+    submissionFileSize: number | null;
+    submissionQueryLimit: number | null;
+    problemSetQueryLimit: number | null;
+  }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface DiagnosticSubmissionDto {
+    id: number;
+    problemId: number;
+    contestId: number | null;
+    status: string | null; // ^(?:Pending|ConfigurationError|SystemError|Canceled|CompilationError|FileError|RuntimeError|TimeLimitExceeded|MemoryLimitExceeded|OutputLimitExceeded|PartiallyCorrect|WrongAnswer|Accepted|JudgementFailed|Fake|Hacked)$
+    score: number | null;
+    timeUsed: number | null;
+    memoryUsed: number | null;
+    submitTime: string; // date-time
+    judgedAt: string | null; // date-time
+    problemDataVersionId: number | null;
+    judgeMachineId: number | null;
+    testcaseCount: number;
+    testcases: ApiTypes.DiagnosticTestcaseDto[];
+  }
+  /**
+   * Allowlisted site diagnostic metadata.
+   */
+  export interface DiagnosticTestcaseDto {
+    status: string | null; // ^(?:Pending|ConfigurationError|SystemError|Canceled|CompilationError|FileError|RuntimeError|TimeLimitExceeded|MemoryLimitExceeded|OutputLimitExceeded|PartiallyCorrect|WrongAnswer|Accepted|JudgementFailed|Fake|Hacked)$
+    timeLimit: number | null;
+    memoryLimit: number | null;
+  }
   export interface DiscussionDto {
     meta: ApiTypes.DiscussionMetaDto;
     content: string;
@@ -663,9 +882,9 @@ declare namespace ApiTypes {
     publisher: ApiTypes.UserMetaDto;
     reactions: ApiTypes.DiscussionOrReplyReactionsDto;
     /**
-     * ManagePermission is not valid for replies.
+     * ManagePublicness permits approving or hiding this reply.
      */
-    permissions: ("View" | "Modify" | "ManagePermission" | "ManagePublicness" | "Delete")[];
+    permissions: ("Modify" | "ManagePublicness" | "Delete")[];
   }
   export interface DiscussionUserPermissionDto {
     user: ApiTypes.UserMetaDto;
@@ -2402,6 +2621,12 @@ declare namespace ApiTypes {
     automatic?: boolean;
     problemType?: "Traditional" | "Interaction" | "Communication";
     communicationMode?: "run-twice" | "grader";
+  }
+  export interface StartVirtualRequestDto {
+    id: number;
+  }
+  export interface StartVirtualResponseDto {
+    run: ApiTypes.ContestVirtualRunDto;
   }
   export interface StudyListIdDto {}
   export interface SubmissionBasicMetaDto {

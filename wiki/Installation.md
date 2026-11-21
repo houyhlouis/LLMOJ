@@ -10,9 +10,24 @@
 - **Disk space:** 30 GiB free for a full installation, 10 GiB for a web-only one.
 - **Network:** the first installation downloads from the Ubuntu repositories, GitHub, npm, Node.js and Go, and, for a full installation, Docker images and the judge's sandbox files.
 
-Full installations have been tested on Ubuntu 24.04. Ubuntu 26.04 passes the installer's checks, but a complete fresh installation on it hasn't been tested yet.
+Which of these have actually been tested, and how, is listed in [Tested platforms](#tested-platforms).
 
 New installations go to `/opt/LLMOJ`. Installations made when the default was `/opt/LibreOJ` stay there; pass `--prefix /opt/LibreOJ` when running the installer for them.
+
+## Tested platforms
+
+The requirements above are what LLMOJ is meant to run on. This table records what has been tested, on what, and when. *Not recorded* means that no test was written down, not that it fails. The table was last revised on 2026-11-20; when you test another combination, add it with the date and the revision you installed.
+
+| System | What was tested | Environment | Recorded (revision) |
+| --- | --- | --- | --- |
+| Ubuntu 24.04, amd64 | A full installation (`--role all`) and part of the site's features | A real server | 2026-10-09 (`20dec6f`) |
+| Ubuntu 26.04, amd64 | The installer's checks, and the [capacity measurement](Capacity.md) with MariaDB, Redis and MinIO on the same server. No complete fresh installation had been recorded by 2026-10-17. | A machine with an Intel Core i7-11370H and 3.3 GiB of memory | 2026-10-17 (`33948ed`), 2026-10-18 (`5a1d5cf`) |
+| Ubuntu 26.04, arm64 | A full installation with the installer, the sandbox self-test, judged submissions in every language, an upgrade (and rollbacks of failed attempts), a backup checked with `verify-backup.sh`, and `doctor.sh`. That machine also judged for an amd64 site as a [remote judge](Remote-Judge.md), next to an amd64 judge machine. | A virtual machine with an emulated Neoverse-N1 processor (QEMU), not physical arm64 hardware | 2026-11-02 (`65bdb11`) |
+| Ubuntu 24.04, arm64 | Not recorded | | |
+| A website-only installation (`--role web`) | Not recorded on its own | | |
+| Restoring a backup onto a server | Not recorded. [`verify-backup.sh`](Operations-Configuration.md#verifying-a-backup), which restores a backup into temporary servers to check it, ran on the arm64 machine above. | | |
+
+Continuous integration builds and tests every change on GitHub's runners: the test suites on Ubuntu amd64 (`ubuntu-latest`), the native sandbox on amd64 and on arm64 (`ubuntu-24.04-arm`), and each architecture's sandbox image on an Ubuntu 24.04 runner of that architecture. CI doesn't run the installer, upgrades or restores.
 
 ## Installing
 

@@ -1,3 +1,15 @@
+import { AI_ACTIONS, AI_JOB_STATUSES, type AiJobEntity } from "./ai.entity";
+
+/** The shared job identity in both AI diagnostics and site administrator bundles. */
+export function diagnosticJobIdentity(job: Pick<AiJobEntity, "id" | "revision" | "action" | "status">, id = job.id) {
+  return {
+    id,
+    revision: job.revision,
+    action: AI_ACTIONS.includes(job.action) ? job.action : null,
+    status: AI_JOB_STATUSES.includes(job.status) ? job.status : null
+  };
+}
+
 /** Export is an allowlisted metadata projection; never serialize a job/configuration entity. */
 export const AI_EXPORT_VERSION = 1;
 export function redactDiagnostic(value: unknown, depth = 0, field = ""): unknown {

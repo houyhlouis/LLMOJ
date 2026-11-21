@@ -33,7 +33,7 @@ const { StudyListService } = require("./study-list.service.ts");
 const { StudyListEntity } = require("./study-list.entity.ts");
 
 test("study lists: owner only, saved on top of the loaded version, notes kept (real MariaDB)", {
-  skip: !process.env.HYHOJ_PROBLEM_TEST_DB_CONFIG,
+  skip: !process.env.HYHOJ_PROBLEM_TEST_DB_CONFIG && "needs HYHOJ_PROBLEM_TEST_DB_CONFIG",
   timeout: 60000
 }, async () => {
   const cfg = require("js-yaml").load(fs.readFileSync(process.env.HYHOJ_PROBLEM_TEST_DB_CONFIG, "utf8")).services.database;

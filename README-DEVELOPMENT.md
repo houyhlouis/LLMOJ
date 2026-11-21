@@ -50,19 +50,25 @@ node packages/frontend/scripts/generate-api.js --from-backend-build
 
 The judge's sandbox image is built with Docker, and submissions run in the native `simple-sandbox`. The English and Chinese installers share the same code and differ only in their messages; a test checks that their download scripts stay identical apart from that. See [Docker sources](wiki/Docker-Sources.md).
 
+## Running it locally
+
+`deploy/dev/stack.mjs` starts a disposable MariaDB, Redis and MinIO for the backend and the frontend's development server, adds sample data if you want, and removes it all again, without root: see [Local development](wiki/Development.md). [Using the API](wiki/API.md) describes the HTTP API's conventions, and [Capacity](wiki/Capacity.md#repeating-the-measurement) the benchmark kit in `deploy/benchmark`.
+
 ## Tests
 
 ```bash
 pnpm test
 ```
 
-runs every suite, through [deploy/test/run-tests.mjs](deploy/test/run-tests.mjs), and ends with a summary. Name groups to run only those, for example `pnpm test backend frontend`: `ai`, `judge`, `backend`, `frontend`, `deploy` and `wiki`. Build first (`pnpm build`): the schema and API contract suites read the built backend. CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the same lists with `--ci`, except the deployment suites that need Ubuntu 26.04's Python and system tools; those run with `pnpm test` on such a machine.
+runs every suite, through [deploy/test/run-tests.mjs](deploy/test/run-tests.mjs), and ends with a summary. Name groups to run only those, for example `pnpm test backend frontend`: `ai`, `judge`, `backend`, `frontend`, `deploy` and `wiki`. Build first (`pnpm build`): the schema and API contract suites read the built backend. CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the same groups with `--ci`.
+
+Before any suite starts, the runner checks that every test file in the repository belongs to exactly one group or to an exclusion with a written reason ([deploy/test/suite-inventory.mjs](deploy/test/suite-inventory.mjs)): a new test file that isn't registered, or one registered twice, stops the run. Register a new suite in `deploy/test/run-tests.mjs` (a MariaDB suite also needs its database in `deploy/test/setup-community-ci.mjs`). The deployment suites are classified there, each with its reason: portable ones run as a normal user, those that need root run through `sudo` (in CI too), and host acceptance tests that need a real installation stay out of CI. With `--ci`, a missing database variable or `redis-server` that CI provides stops the run instead of letting suites skip. The summary lists, for each suite, how many cases ran and were skipped, and why.
 
 Suites that need something this machine lacks skip those cases, and the summary says what was missing:
 
 - **MariaDB:** the [database tests](#database-tests) below need their variables;
 - **redis-server**, for the judge queue and Redis suites;
-- **root**, for the deployment suites' cases that create accounts, mount file systems or run services. The runner uses passwordless `sudo` when it can, as CI does, and runs Python with `-B` so that no root-owned cache files appear in the tree;
+- **root**, for the deployment suites' cases that create accounts, mount file systems or run services. The runner uses passwordless `sudo` when it can, as CI does (set `LLMOJ_TEST_NO_SUDO=1` to stop it even trying), and runs Python with `-B` so that no root-owned cache files appear in the tree;
 - **MinIO** (`LLMOJ_MINIO_BINARY`, or an installation's `runtime/minio`), for the upload sealing test and the backup verifier's content check;
 - **2 GiB in `TMPDIR`**, for the AI suites' ZIP archives. The runner uses `/var/tmp` when the temporary directory is smaller;
 - **Chrome or Chromium** (`LLMOJ_TEST_CHROME`, or `google-chrome` or `chromium` on `PATH`), for the test that the site removes the old bootstrap service worker. It runs the browser headless and without its sandbox, on local test pages only.
@@ -93,6 +99,11 @@ Tests named `*.mariadb.test.*` (and a few others) use a real MariaDB. Each is sk
 | `LLMOJ_AI_BUDGET_TEST_DB_CONFIG` | `ai/ai-budget.mariadb.test.cjs` (empty database) |
 | `LLMOJ_ACCESS_MATRIX_TEST_DB_CONFIG` | `access/permission-matrix.mariadb.test.cjs` (empty database) |
 | `LLMOJ_OPERATIONS_TEST_DB_CONFIG` | `metrics/operational-metrics.mariadb.test.cjs`, `contest/contest-score-revision.mariadb.test.cjs`, `ai/ai-execution.mariadb.test.cjs` (drops all its tables) |
+| `LLMOJ_JUDGE_INFO_CACHE_TEST_DB_CONFIG` | `problem/problem-judge-info-cache.mariadb.test.cjs` (cached judge settings after a type change; also needs `redis-server`) |
+| `LLMOJ_STATISTICS_CACHE_TEST_DB_CONFIG` | `submission/submission-statistics-cache.mariadb.test.cjs` (practice statistics cache against late reads; also needs `redis-server`) |
+| `LLMOJ_CONTEST_VIRTUAL_TEST_DB_CONFIG` | `contest/contest-virtual-start.mariadb.test.cjs` (starting virtual runs against concurrent submissions and edits; database `llmoj_test_contest_virtual`, empty) |
+| `LLMOJ_DIAGNOSTIC_BUNDLE_TEST_DB_CONFIG` | `site-management/diagnostic-bundle.mariadb.test.cjs` (the diagnostic bundle's stored jobs, queue and judge state; database `llmoj_test_diagnostic_bundle`, empty; also needs `redis-server`) |
+| `LLMOJ_NARROW_WRITES_TEST_DB_CONFIG` | `user/user-narrow-writes.mariadb.test.cjs`, `submission/submission-visibility.mariadb.test.cjs` (concurrent changes during profile, email and visibility updates; their own random tables) |
 | `LLMOJ_SCHEMA_TEST_DB_CONFIG` | `deploy/test/initialize-schema.test.mjs` |
 | `LLMOJ_REGISTRATION_TEST_DATABASE` | `auth/registration-review.mariadb.test.cjs`, `site-management/registration-settings.mariadb.test.cjs` |
 
@@ -119,7 +130,10 @@ The socket must match the pattern above, and dumps that switch databases or run 
 
 ```bash
 pnpm --filter @libreoj/judge test:native
+node --test packages/simple-sandbox/test/cgroup-events.test.mjs
 ```
+
+The second builds a small C++ program around the sandbox's cgroup event waiter and checks that it closes its descriptors, also when the events file is malformed (it needs g++ and libfmt, and skips without them). The judge group of `pnpm test` runs it too, with `packages/simple-sandbox/test/sandbox-process.test.cjs`, which checks the sandbox's cleanup when its native calls fail.
 
 To run the sandbox's own checks, and the judge self-test against an installation:
 

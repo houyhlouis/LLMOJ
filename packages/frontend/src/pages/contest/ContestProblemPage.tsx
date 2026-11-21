@@ -5,18 +5,33 @@ import { defineRoute } from "@/AppRouter";
 import { appState } from "@/appState";
 import { useNavigationChecked, Link, useLocalizer } from "@/utils/hooks";
 import MarkdownContent from "@/markdown/MarkdownContent";
+import CodeEditor from "@/components/LazyCodeEditor";
 import { callApiWithFileUpload } from "@/utils/callApiWithFileUpload";
 import {
   CodeLanguage,
   compileAndRunOptions,
+  filterValidCompileAndRunOptions,
   getPreferredCompileAndRunOptions,
   normalizeContestLanguages
 } from "@/interfaces/CodeLanguage";
+import {
+  DRAFT_RETENTION_DAYS,
+  DraftOwner,
+  latestDraftLanguage,
+  loadDraft,
+  removeDraft,
+  saveDraft
+} from "@/utils/contestDrafts";
+import formatDateTime from "@/utils/formatDateTime";
 import { callContest, contestRequest, submitContest, prepareContestUpload, tr } from "./api";
 import ContestFrame from "./ContestFrame";
+import { virtualRunActive } from "./VirtualRun";
 import style from "./ContestPages.module.less";
 import SelfEvalButton from "@/pages/self-eval/SelfEvalButton";
 import { saveBlob } from "@/utils/downloadFile";
+
+/** How long typing pauses before the draft is saved; leaving the page saves it at once. */
+const DRAFT_SAVE_DELAY = 500;
 
 function initialOptions(value: string) {
   const [language, variant] = value.split(":");
@@ -31,16 +46,62 @@ function problemLanguages(data: any) {
     ? languages.filter(language => language.split(":")[0] === CodeLanguage.Cpp)
     : languages;
 }
-function ContestProblemPage({ detail, initial }: { detail: any; initial: any }) {
+/** The values of an option this contest allows: C++ standards and Python versions are chosen per contest. */
+function allowedOptionValues(selectedLanguages: string[], language: string, name: string, values: string[]) {
+  if (
+    selectedLanguages.includes(language) ||
+    !((language === "cpp" && name === "std") || (language === "python" && name === "version"))
+  )
+    return values;
+  return values.filter(v => selectedLanguages.includes(`${language}:${v}`));
+}
+/** A draft's options, where they are still valid and allowed in this contest; the defaults otherwise. */
+function draftOptions(selectedLanguages: string[], language: CodeLanguage, saved: Record<string, unknown>) {
+  const defaults = initialOptions(selectedLanguages.find(l => l.split(":")[0] === language) || language);
+  const valid = filterValidCompileAndRunOptions(language, saved);
+  return Object.fromEntries(
+    Object.entries(defaults).map(([name, value]) => {
+      const option = compileAndRunOptions[language]?.find(o => o.name === name);
+      const allowed = option ? allowedOptionValues(selectedLanguages, language, name, option.values) : [];
+      return [name, name in saved && allowed.includes(valid[name] as string) ? valid[name] : value];
+    })
+  );
+}
+type DraftStatus = { savedAt: number; restored?: boolean } | "not-kept" | null;
+
+export function ContestProblemPage({ detail, initial }: { detail: any; initial: any }) {
   const navigation = useNavigationChecked(),
     _ = useLocalizer("code_language");
   const initialLanguages = problemLanguages(initial);
+  // Code is kept as a draft in this browser, per account, contest, problem and language
+  const draftOwner: DraftOwner =
+    appState.currentUser && initial.type !== "SubmitAnswer"
+      ? { userId: appState.currentUser.id, contestId: initial.contest.id, problemId: initial.problem.id }
+      : null;
+  // The page opens with the draft changed last, in a language the contest still allows
+  const [start] = useState(() => {
+    const languages = [...new Set(initialLanguages.map(l => l.split(":")[0]))];
+    const draftLanguage = latestDraftLanguage(draftOwner, languages) as CodeLanguage;
+    const draft = draftLanguage && loadDraft(draftOwner, draftLanguage);
+    if (draft)
+      return {
+        language: draftLanguage,
+        code: draft.code,
+        options: draftOptions(initialLanguages, draftLanguage, draft.options),
+        status: { savedAt: draft.savedAt, restored: true } as DraftStatus
+      };
+    return {
+      language: (initialLanguages[0] || CodeLanguage.Cpp).split(":")[0] as CodeLanguage,
+      code: "",
+      options: initialOptions(initialLanguages[0] || CodeLanguage.Cpp),
+      status: null as DraftStatus
+    };
+  });
   const [data, setData] = useState(initial),
-    [code, setCode] = useState(""),
-    [language, setLanguage] = useState<CodeLanguage>(
-      (initialLanguages[0] || CodeLanguage.Cpp).split(":")[0] as CodeLanguage
-    ),
-    [options, setOptions] = useState(initialOptions(initialLanguages[0] || CodeLanguage.Cpp));
+    [code, setCode] = useState(start.code),
+    [language, setLanguage] = useState<CodeLanguage>(start.language),
+    [options, setOptions] = useState<Record<string, unknown>>(start.options),
+    [draftStatus, setDraftStatus] = useState<DraftStatus>(start.status);
   const [error, setError] = useState(""),
     [pending, setPending] = useState(false),
     [file, setFile] = useState<File>(null),
@@ -51,20 +112,84 @@ function ContestProblemPage({ detail, initial }: { detail: any; initial: any }) 
     problemId = data.problem.id;
   const selectedLanguages = problemLanguages(data);
   const allowedLanguages = [...new Set<string>(selectedLanguages.map(l => l.split(":")[0]))];
+
+  // The draft waiting to be saved: typing saves it after a pause, and leaving the page right away
+  const pendingDraft = useRef<{ language: string; code: string; options: Record<string, unknown> }>(null);
+  const draftTimer = useRef<ReturnType<typeof setTimeout>>(null);
+  function saveDraftNow() {
+    if (draftTimer.current != null) clearTimeout(draftTimer.current);
+    draftTimer.current = null;
+    const next = pendingDraft.current;
+    pendingDraft.current = null;
+    if (!next || !draftOwner) return;
+    const result = saveDraft(draftOwner, next.language, next.code, next.options);
+    setDraftStatus(result === "saved" ? { savedAt: Date.now() } : result === "not-kept" ? "not-kept" : null);
+  }
+  function keepDraft(next: { language: string; code: string; options: Record<string, unknown> }) {
+    if (!draftOwner) return;
+    pendingDraft.current = next;
+    if (draftTimer.current != null) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(() => saveDraftNow(), DRAFT_SAVE_DELAY);
+  }
+  const saveDraftOnExit = useRef(saveDraftNow);
+  saveDraftOnExit.current = saveDraftNow;
   useEffect(() => {
-    if (allowedLanguages.length && !allowedLanguages.includes(language)) {
-      setLanguage(allowedLanguages[0] as CodeLanguage);
-      setOptions(initialOptions(selectedLanguages[0]));
+    const save = () => saveDraftOnExit.current();
+    const saveWhenHidden = () => document.visibilityState === "hidden" && save();
+    window.addEventListener("pagehide", save);
+    document.addEventListener("visibilitychange", saveWhenHidden);
+    return () => {
+      window.removeEventListener("pagehide", save);
+      document.removeEventListener("visibilitychange", saveWhenHidden);
+      save();
+    };
+  }, []);
+
+  function changeCode(value: string) {
+    setCode(value);
+    keepDraft({ language, code: value, options });
+  }
+  function changeOptions(value: Record<string, unknown>) {
+    setOptions(value);
+    if (code) keepDraft({ language, code, options: value });
+  }
+  // Each language has its own draft. Choosing a language without one keeps the code in the editor, and its draft moves
+  // to that language.
+  function changeLanguage(next: CodeLanguage) {
+    if (next === language) return;
+    saveDraftNow();
+    const draft = loadDraft(draftOwner, next);
+    setLanguage(next);
+    if (draft) {
+      setCode(draft.code);
+      setOptions(draftOptions(selectedLanguages, next, draft.options));
+      setDraftStatus({ savedAt: draft.savedAt, restored: true });
+      return;
     }
+    const nextOptions = initialOptions(selectedLanguages.find(l => l.split(":")[0] === next) || next);
+    setOptions(nextOptions);
+    if (draftOwner && code) {
+      removeDraft(draftOwner, language);
+      pendingDraft.current = { language: next, code, options: nextOptions };
+      saveDraftNow();
+    }
+  }
+  function discardDraft() {
+    if (!window.confirm(tr("删除这份草稿并清空编辑器？", "Delete this draft and empty the editor?"))) return;
+    if (draftTimer.current != null) clearTimeout(draftTimer.current);
+    draftTimer.current = null;
+    pendingDraft.current = null;
+    removeDraft(draftOwner, language);
+    setCode("");
+    setDraftStatus(null);
+  }
+
+  useEffect(() => {
+    if (allowedLanguages.length && !allowedLanguages.includes(language))
+      changeLanguage(allowedLanguages[0] as CodeLanguage);
   }, [language, selectedLanguages.join(",")]);
-  const allowedOptions = (name: string, values: string[]) => {
-    if (
-      selectedLanguages.includes(language) ||
-      !((language === "cpp" && name === "std") || (language === "python" && name === "version"))
-    )
-      return values;
-    return values.filter(v => selectedLanguages.includes(`${language}:${v}`));
-  };
+  const allowedOptions = (name: string, values: string[]) =>
+    allowedOptionValues(selectedLanguages, language, name, values);
   const refresh = async () =>
     setData(await callContest("problem", { id, problemId, data: { locale: appState.locale } }));
   async function submit() {
@@ -90,6 +215,8 @@ function ContestProblemPage({ detail, initial }: { detail: any; initial: any }) 
             "Submission failed. Check the language or answer file and retry."
           )
         );
+      // The draft stays, to fix after a wrong answer
+      saveDraftNow();
       await navigation.navigate(`/contest/${id}/submission/${result.response.submissionId}`);
     } catch (e) {
       setError(e.message);
@@ -252,7 +379,8 @@ function ContestProblemPage({ detail, initial }: { detail: any; initial: any }) 
       <Header as="h2">{tr("提交", "Submit")}</Header>
       {data.type === "Traditional" &&
         data.contest.rule === "noi" &&
-        data.contest.ruleOptions?.selfEvalEnabled === true && (
+        data.contest.ruleOptions?.selfEvalEnabled === true &&
+        !virtualRunActive(detail) && (
           <SelfEvalButton
             problemId={data.problem.problemId}
             contestId={id}
@@ -272,7 +400,23 @@ function ContestProblemPage({ detail, initial }: { detail: any; initial: any }) 
           <Link href="/login">{tr("请先登录", "Please sign in")}</Link>
         </Message>
       ) : !data.submittable || !allowedLanguages.length ? (
-        <Message>{tr("当前不能提交此题", "Submissions are currently unavailable")}</Message>
+        <>
+          <Message>{tr("当前不能提交此题", "Submissions are currently unavailable")}</Message>
+          {draftOwner && code && (
+            // A draft written before submissions closed can still be read and copied
+            <Form>
+              <Form.Field>
+                <label>
+                  {tr("你在此浏览器中的草稿", "Your draft in this browser")} ({_(`.${language}.name`)})
+                </label>
+                <div className={style.codeEditor}>
+                  <CodeEditor language={language} value={code} options={{ readOnly: true }} />
+                </div>
+              </Form.Field>
+              <DraftNotice status={draftStatus} onDiscard={discardDraft} />
+            </Form>
+          )}
+        </>
       ) : (
         <Form onSubmit={submit} loading={pending}>
           {data.type === "SubmitAnswer" ? (
@@ -286,10 +430,7 @@ function ContestProblemPage({ detail, initial }: { detail: any; initial: any }) 
                 label={tr("语言", "Language")}
                 value={language}
                 options={allowedLanguages.map((l: string) => ({ value: l, text: _(`.${l}.name`) }))}
-                onChange={(_, v) => {
-                  setLanguage(v.value as CodeLanguage);
-                  setOptions(initialOptions(selectedLanguages.find(l => l.split(":")[0] === v.value)));
-                }}
+                onChange={(_, v) => changeLanguage(v.value as CodeLanguage)}
               />
               <Form.Group widths="equal">
                 {compileAndRunOptions[language]?.map(option => (
@@ -301,17 +442,17 @@ function ContestProblemPage({ detail, initial }: { detail: any; initial: any }) 
                       value,
                       text: _(`.${language}.options.${option.name}.values.${value}`)
                     }))}
-                    onChange={(_, v) => setOptions({ ...options, [option.name]: v.value })}
+                    onChange={(_, v) => changeOptions({ ...options, [option.name]: v.value })}
                   />
                 ))}
               </Form.Group>
-              <Form.TextArea
-                label={tr("源代码", "Source code")}
-                rows={18}
-                value={code}
-                onChange={(_, v) => setCode(String(v.value))}
-                style={{ fontFamily: "monospace" }}
-              />
+              <Form.Field required>
+                <label>{tr("源代码", "Source code")}</label>
+                <div className={style.codeEditor}>
+                  <CodeEditor language={language} value={code} onChange={changeCode} />
+                </div>
+              </Form.Field>
+              <DraftNotice status={draftStatus} onDiscard={discardDraft} />
             </>
           )}
           <Button primary type="submit" disabled={data.type === "SubmitAnswer" ? !file : !code}>
@@ -322,6 +463,35 @@ function ContestProblemPage({ detail, initial }: { detail: any; initial: any }) 
     </ContestFrame>
   );
 }
+/** Where the code is kept: its draft in this browser, with the rules for deleting it and a way to delete it now */
+function DraftNotice(props: { status: DraftStatus; onDiscard: () => void }) {
+  if (!props.status) return null;
+  if (props.status === "not-kept")
+    return (
+      <Message warning size="small">
+        {tr(
+          "此浏览器无法保存这段代码的草稿：代码超过 1 MiB，或浏览器的存储已满或已停用。",
+          "This browser can't keep a draft of this code: it's over 1 MiB, or the browser's storage is full or turned off."
+        )}
+      </Message>
+    );
+  const time = formatDateTime(props.status.savedAt)[1];
+  return (
+    <p className={style.draftNotice}>
+      {props.status.restored
+        ? tr(`已恢复你在此浏览器中保存的草稿（${time}）。`, `Restored your draft from this browser (saved ${time}).`)
+        : tr(`草稿已保存在此浏览器中（${time}）。`, `Draft saved in this browser at ${time}.`)}{" "}
+      {tr(
+        `退出登录、其他账号在此浏览器登录，或 ${DRAFT_RETENTION_DAYS} 天未修改时，草稿会被删除。`,
+        `It's deleted when you sign out, when another account signs in on this browser, or after ${DRAFT_RETENTION_DAYS} days without changes.`
+      )}{" "}
+      <Button type="button" basic compact size="mini" onClick={props.onDiscard}>
+        {tr("删除草稿", "Discard draft")}
+      </Button>
+    </p>
+  );
+}
+
 export default defineRoute(async req => {
   const id = Number(req.params.contestId),
     problemId = Number(req.params.problemId);

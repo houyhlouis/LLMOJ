@@ -23,6 +23,8 @@ function generateKey(): string {
 
 const REDIS_KEY_JUDGE_CLIENT_SESSION_ID = "judge-client-session-id:%d";
 const REDIS_KEY_JUDGE_CLIENT_SYSTEM_INFO = "judge-client-system-info:%s";
+const lastSeenKey = (id: number) => `judge-client-last-seen:${id}`;
+const revokedKey = (id: number) => `judge-client-session-revoked:${id}`;
 const REDIS_KEY_JUDGE_CLIENT_CAPABILITIES = "judge-client-capabilities:%d";
 
 // The judge clients' architectures are read again after this long
@@ -100,7 +102,12 @@ export class JudgeClientService {
   async resetJudgeClientKey(judgeClient: JudgeClientEntity): Promise<void> {
     judgeClient.key = generateKey();
     await this.judgeClientRepository.save(judgeClient);
-    await this.disconnectJudgeClient(judgeClient);
+    const replies = await this.redis
+      .multi()
+      .del(REDIS_KEY_JUDGE_CLIENT_SESSION_ID.format(judgeClient.id))
+      .set(revokedKey(judgeClient.id), "1")
+      .exec();
+    if (replies[0][0]) throw replies[0][0]; // Preserve failure reporting if invalidating the old session failed.
     await this.publishChange({ id: judgeClient.id, revoked: true });
   }
 
@@ -108,7 +115,11 @@ export class JudgeClientService {
     await this.judgeClientRepository.delete({
       id: judgeClient.id
     });
-    await this.disconnectJudgeClient(judgeClient);
+    await this.redis.del(
+      REDIS_KEY_JUDGE_CLIENT_SESSION_ID.format(judgeClient.id),
+      lastSeenKey(judgeClient.id),
+      revokedKey(judgeClient.id)
+    );
     await this.publishChange({ id: judgeClient.id, revoked: true });
   }
 
@@ -123,7 +134,14 @@ export class JudgeClientService {
   }
 
   async setJudgeClientOnlineSessionId(judgeClient: JudgeClientEntity, sessionId: string): Promise<void> {
-    await this.redis.set(REDIS_KEY_JUDGE_CLIENT_SESSION_ID.format(judgeClient.id), sessionId);
+    await this.redis.mset(
+      REDIS_KEY_JUDGE_CLIENT_SESSION_ID.format(judgeClient.id),
+      sessionId,
+      revokedKey(judgeClient.id),
+      "0",
+      lastSeenKey(judgeClient.id),
+      String(Date.now())
+    );
   }
 
   async disconnectJudgeClient(judgeClient: JudgeClientEntity): Promise<void> {
@@ -174,6 +192,53 @@ export class JudgeClientService {
       });
     }
     return await this.fleetArchitectures.value;
+  }
+
+  private samplingPresence = false;
+
+  /** Last observed open connection, refreshed by the same timer that renews its task leases. */
+  async noteConnected(ids: number[]): Promise<void> {
+    if (!ids.length || this.samplingPresence) return;
+    this.samplingPresence = true;
+    try {
+      const now = String(Date.now());
+      const pipeline = this.redis.pipeline();
+      // A stale socket snapshot must not recreate a deleted machine's key.
+      for (const id of ids) pipeline.set(lastSeenKey(id), now, "XX");
+      await pipeline.exec();
+    } finally {
+      this.samplingPresence = false;
+    }
+  }
+
+  /** Read one bounded batch, without accessing machine keys, allowed hosts, names or raw system info. */
+  async diagnosticStates(ids: number[]) {
+    const pipeline = this.redis.pipeline();
+    for (const id of ids) {
+      pipeline.exists(REDIS_KEY_JUDGE_CLIENT_SESSION_ID.format(id));
+      pipeline.get(REDIS_KEY_JUDGE_CLIENT_CAPABILITIES.format(id));
+      pipeline.get(lastSeenKey(id));
+      pipeline.get(revokedKey(id));
+    }
+    const values = await pipeline.exec();
+    const at = (i: number) => (values[i][0] ? null : values[i][1]);
+    return ids.map((id, i) => {
+      let caps: JudgeClientCapabilities = null;
+      try {
+        caps = JSON.parse(at(i * 4 + 1) as string);
+      } catch {
+        // No valid announcement available.
+      }
+      const online = at(i * 4);
+      const revoked = at(i * 4 + 3);
+      return {
+        id,
+        online: online == null ? null : !!online,
+        capabilities: caps,
+        seenAt: Number(at(i * 4 + 2)) || null,
+        revoked: revoked == null ? null : revoked === "1"
+      };
+    });
   }
 
   async getJudgeClientSystemInfo(judgeClient: JudgeClientEntity): Promise<JudgeClientSystemInfo> {

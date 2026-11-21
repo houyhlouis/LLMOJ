@@ -5,6 +5,7 @@ import { AnsiUp } from "ansi_up";
 import style from "./CodeBox.module.less";
 import { useLocalizer, useMaybeAsyncFunctionResult } from "@/utils/hooks";
 import { EmojiRenderer } from "./EmojiRenderer";
+import { RenderFailedNotice } from "./RenderFailedNotice";
 
 export type OmittableString =
   | string
@@ -107,7 +108,7 @@ interface HighlightedCodeBoxProps {
 let CodeHighlighter: typeof import("@/utils/CodeHighlighter");
 
 export const HighlightedCodeBox = React.forwardRef<HTMLPreElement, HighlightedCodeBoxProps>((props, ref) => {
-  const [html, pending] = useMaybeAsyncFunctionResult(
+  const [html, pending, renderError, retryRender] = useMaybeAsyncFunctionResult(
     async (code: string, language: string, callback: (result: string) => void) => {
       CodeHighlighter ||= await import("@/utils/CodeHighlighter");
       const loadPrismPromise = CodeHighlighter.loadPrism();
@@ -123,9 +124,12 @@ export const HighlightedCodeBox = React.forwardRef<HTMLPreElement, HighlightedCo
       segmentClassName={props.segmentClassName}
       segment={props.segment}
       title={props.title}
-      html={pending ? "" : html}
+      html={pending || renderError ? "" : html}
       content={
-        pending ? (
+        // Highlighting failed: the code as plain text (React escapes it)
+        renderError ? (
+          props.code
+        ) : pending ? (
           <Placeholder>
             {[...Array(props.placeholderLines || 4).keys()].map(i => (
               <Placeholder.Line key={i} />
@@ -139,6 +143,7 @@ export const HighlightedCodeBox = React.forwardRef<HTMLPreElement, HighlightedCo
       fontLigaturesOverride={props.fontLigaturesOverride}
       ref={ref}
     >
+      {renderError && <RenderFailedNotice onRetry={retryRender} />}
       {!pending && props.children}
     </CodeBox>
   );

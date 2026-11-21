@@ -1,4 +1,4 @@
-import { Injectable, Inject, forwardRef, ForbiddenException } from "@nestjs/common";
+import { Injectable, ForbiddenException } from "@nestjs/common";
 import { InjectRepository, InjectDataSource } from "@nestjs/typeorm";
 
 import { Repository, DataSource, EntityManager, Brackets } from "typeorm";
@@ -15,16 +15,16 @@ import { DiscussionReactionEntity } from "./discussion-reaction.entity";
 
 import { DiscussionReplyReactionEntity } from "./discussion-reply-reaction.entity";
 
+import { SetDiscussionReplyPublicResponseError } from "./dto/set-discussion-reply-public-response.dto";
+
 import { DiscussionMetaDto } from "./dto";
 
-import { UserService } from "../user/user.service";
 import { UserEntity } from "../user/user.entity";
 import { AuditLogObjectType, AuditService } from "../audit/audit.service";
 import { ConfigService } from "../config/config.service";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
 import { PermissionObjectType, PermissionService } from "../permission/permission.service";
 import { GroupEntity } from "../group/group.entity";
-import { GroupService } from "../group/group.service";
 import { ProblemEntity } from "../problem/problem.entity";
 import { LockService } from "../redis/lock.service";
 import { escapeLike } from "../database/database.utils";
@@ -58,6 +58,12 @@ export enum DiscussionReplyPermissionType {
 
 type GetReactionsResult = [reactionsCount: Record<string, number>, currentUserReactions: string[]];
 
+interface ReplyModeration {
+  canViewDiscussion: boolean;
+  viewHidden: boolean;
+  managePublicness: boolean;
+}
+
 @Injectable()
 export class DiscussionService {
   constructor(
@@ -73,9 +79,6 @@ export class DiscussionService {
     private readonly discussionReactionRepository: Repository<DiscussionReactionEntity>,
     @InjectRepository(DiscussionReplyReactionEntity)
     private readonly discussionReplyReactionRepository: Repository<DiscussionReplyReactionEntity>,
-    @Inject(forwardRef(() => UserService))
-    private readonly userService: UserService,
-    private readonly groupService: GroupService,
     private readonly configService: ConfigService,
     private readonly auditService: AuditService,
     private readonly userPrivilegeService: UserPrivilegeService,
@@ -139,21 +142,40 @@ export class DiscussionService {
     user: UserEntity,
     discussion: DiscussionEntity,
     type: DiscussionPermissionType,
-    discussionProblem?: ProblemEntity
+    discussionProblem?: ProblemEntity,
+    manager?: EntityManager
   ): Promise<boolean> {
-    if (!discussion || !(await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ViewDiscussion)))
+    if (
+      !discussion ||
+      !(await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ViewDiscussion, manager))
+    )
       return false;
     if (discussion.problemId) {
-      const problem = discussionProblem ?? (await this.problemService.findProblemById(discussion.problemId));
-      if (!(await this.problemAccess.userHasPermission(user, problem, ProblemPermissionType.View))) return false;
+      discussionProblem ??= manager
+        ? await manager.findOne(ProblemEntity, {
+            where: { id: discussion.problemId },
+            lock: { mode: "pessimistic_read" }
+          })
+        : await this.problemService.findProblemById(discussion.problemId);
+      if (
+        !(await this.problemAccess.userHasPermission(
+          user,
+          discussionProblem,
+          ProblemPermissionType.View,
+          undefined,
+          manager
+        ))
+      )
+        return false;
     }
-    const teamRead = await teamResourceAccess(this.connection, user, "discussion", discussion.id);
+    const db = manager ?? this.connection;
+    const teamRead = await teamResourceAccess(db, user, "discussion", discussion.id);
     if (teamRead !== null) {
       if (!teamRead) return false;
       if (type === DiscussionPermissionType.View) return true;
       if (type === DiscussionPermissionType.Modify) {
-        const canManage = await teamResourceAccess(this.connection, user, "discussion", discussion.id, "discussions");
-        const active = await teamResourceAccess(this.connection, user, "discussion", discussion.id, "post");
+        const canManage = await teamResourceAccess(db, user, "discussion", discussion.id, "discussions");
+        const active = await teamResourceAccess(db, user, "discussion", discussion.id, "post");
         const own = user?.id === discussion.publisherId;
         return (
           active &&
@@ -161,18 +183,27 @@ export class DiscussionService {
           (await this.userPrivilegeService.permissionDecision(
             user,
             own ? UserPrivilegeType.EditOwnDiscussion : UserPrivilegeType.EditAnyDiscussion,
-            true
+            true,
+            manager
           ))
         );
       }
       return false;
     }
     if (type === DiscussionPermissionType.View)
-      return await this.userHasPermissionOriginal(user, discussion, type, discussionProblem);
-    if (!(await this.userHasPermissionOriginal(user, discussion, DiscussionPermissionType.View, discussionProblem)))
+      return await this.userHasPermissionOriginal(user, discussion, type, discussionProblem, manager);
+    if (
+      !(await this.userHasPermissionOriginal(
+        user,
+        discussion,
+        DiscussionPermissionType.View,
+        discussionProblem,
+        manager
+      ))
+    )
       return false;
     const own = user?.id === discussion.publisherId;
-    const legacy = await this.userHasPermissionOriginal(user, discussion, type, discussionProblem);
+    const legacy = await this.userHasPermissionOriginal(user, discussion, type, discussionProblem, manager);
     const permission = {
       [DiscussionPermissionType.View]: UserPrivilegeType.ViewDiscussion,
       [DiscussionPermissionType.Modify]: own
@@ -182,74 +213,80 @@ export class DiscussionService {
         ? UserPrivilegeType.DeleteOwnDiscussion
         : UserPrivilegeType.DeleteAnyDiscussion
     }[type];
-    return permission ? await this.userPrivilegeService.permissionDecision(user, permission, legacy) : legacy;
+    return permission ? await this.userPrivilegeService.permissionDecision(user, permission, legacy, manager) : legacy;
   }
 
   private async userHasPermissionOriginal(
     user: UserEntity,
     discussion: DiscussionEntity,
     type: DiscussionPermissionType,
-    discussionProblem?: ProblemEntity
+    discussionProblem?: ProblemEntity,
+    manager?: EntityManager
   ): Promise<boolean> {
-    const hasViewProblemPermission = async () => {
-      if (discussion.problemId) {
-        if (!discussionProblem) discussionProblem = await this.problemService.findProblemById(discussion.problemId);
-        return await this.problemAccess.userHasPermission(user, discussionProblem, ProblemPermissionType.View);
-      }
-      return true;
-    };
-
+    const hasViewProblemPermission = async () =>
+      !discussion.problemId ||
+      (await this.problemAccess.userHasPermission(
+        user,
+        discussionProblem,
+        ProblemPermissionType.View,
+        undefined,
+        manager
+      ));
     switch (type) {
       // Everyone can view a public discussion
       // Owner, admins and those who has read permission can view a non-public discussion
       case DiscussionPermissionType.View:
         if (discussion.isPublic) return true;
         if (user && user.id === discussion.publisherId) return true;
-        if (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageDiscussion)) return true;
-        else
-          return (
-            await Promise.all([
-              hasViewProblemPermission(),
-              this.permissionService.userOrItsGroupsHavePermission(
-                user,
-                discussion.id,
-                PermissionObjectType.Discussion,
-                DiscussionPermissionLevel.Read
-              )
-            ])
-          ).every(f => f);
+        if (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageDiscussion, manager))
+          return true;
+        return (
+          await Promise.all([
+            hasViewProblemPermission(),
+            this.permissionService.userOrItsGroupsHavePermission(
+              user,
+              discussion.id,
+              PermissionObjectType.Discussion,
+              DiscussionPermissionLevel.Read,
+              manager
+            )
+          ])
+        ).every(Boolean);
 
       // Owner, admins and those who has write permission can modify a discussion
       case DiscussionPermissionType.Modify:
         if (user && user.id === discussion.publisherId) return true;
-        if (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageDiscussion)) return true;
-        else
-          return (
-            await Promise.all([
-              hasViewProblemPermission(),
-              this.permissionService.userOrItsGroupsHavePermission(
-                user,
-                discussion.id,
-                PermissionObjectType.Discussion,
-                DiscussionPermissionLevel.Write
-              )
-            ])
-          ).every(f => f);
+        if (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageDiscussion, manager))
+          return true;
+        return (
+          await Promise.all([
+            hasViewProblemPermission(),
+            this.permissionService.userOrItsGroupsHavePermission(
+              user,
+              discussion.id,
+              PermissionObjectType.Discussion,
+              DiscussionPermissionLevel.Write,
+              manager
+            )
+          ])
+        ).every(Boolean);
 
       // Admins can manage a discussion's permission
       case DiscussionPermissionType.ManagePermission:
-        if (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageDiscussion)) return true;
+        if (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageDiscussion, manager))
+          return true;
         else return false;
 
       // Admins can manage a discussion's publicness
       case DiscussionPermissionType.ManagePublicness:
-        if (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageDiscussion)) return true;
+        if (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageDiscussion, manager))
+          return true;
         else return false;
 
       // Admins and the publisher can delete a discussion
       case DiscussionPermissionType.Delete:
         if (user && user.id === discussion.publisherId) return true;
-        else if (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageDiscussion))
+        else if (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageDiscussion, manager))
           return true;
         else return false;
 
@@ -302,19 +339,64 @@ export class DiscussionService {
     );
   }
 
+  async getReplyModeration(
+    user: UserEntity,
+    discussion: DiscussionEntity,
+    problem?: ProblemEntity,
+    manager?: EntityManager
+  ): Promise<ReplyModeration> {
+    const canViewDiscussion = await this.userHasPermission(
+      user,
+      discussion,
+      DiscussionPermissionType.View,
+      problem,
+      manager
+    );
+    const ordinary = { canViewDiscussion, viewHidden: false, managePublicness: false };
+    if (!canViewDiscussion || !user) return ordinary;
+
+    const db = manager ?? this.connection;
+    const delegated = await teamResourceAccess(db, user, "discussion", discussion.id, "reviewReplies");
+    if (delegated === null) {
+      const manage = await this.userPrivilegeService.userHasPrivilege(
+        user,
+        UserPrivilegeType.ManageDiscussion,
+        manager
+      );
+      return { canViewDiscussion, viewHidden: manage, managePublicness: manage };
+    }
+    if (!(await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ViewSite, manager)))
+      return { ...ordinary, canViewDiscussion: false };
+    if (
+      !(await this.userPrivilegeService.permissionDecision(
+        user,
+        UserPrivilegeType.ManageDiscussion,
+        delegated,
+        manager
+      )) ||
+      !(await this.userPrivilegeService.permissionDecision(
+        user,
+        UserPrivilegeType.ManageDiscussionReplies,
+        true,
+        manager
+      ))
+    )
+      return ordinary;
+    // Archived teams and discussions allow review, but require restoration before a write.
+    const active = await teamResourceAccess(db, user, "discussion", discussion.id, "post");
+    return { canViewDiscussion, viewHidden: true, managePublicness: active === true };
+  }
+
   async userHasViewDiscussionReplyPermission(
     user: UserEntity,
     discussionReply: DiscussionReplyEntity,
     discussion?: DiscussionEntity
   ): Promise<boolean> {
     if (!discussionReply) return false;
-    discussion ??= await this.findDiscussionById(discussionReply.discussionId);
-    if (!(await this.userHasPermission(user, discussion, DiscussionPermissionType.View))) return false;
-    return (
-      discussionReply.isPublic ||
-      user?.id === discussionReply.publisherId ||
-      (await this.userPrivilegeService.userHasPrivilege(user, UserPrivilegeType.ManageDiscussion))
-    );
+    if (discussion?.id !== discussionReply.discussionId)
+      discussion = await this.findDiscussionById(discussionReply.discussionId);
+    const { canViewDiscussion, viewHidden } = await this.getReplyModeration(user, discussion);
+    return canViewDiscussion && (discussionReply.isPublic || user?.id === discussionReply.publisherId || viewHidden);
   }
 
   async getUserPermissionsOfReply(
@@ -326,32 +408,27 @@ export class DiscussionService {
     return (await this.getUserPermissionsOfReplies(user, discussion, [discussionReply], hasPrivilege))[0];
   }
 
-  /**
-   * `getUserPermissionsOfReply` of replies of one discussion, already loaded with its problem: the discussion's own
-   * permission is checked once, and whether it belongs to a team is read once.
-   */
+  /** A page can reuse its moderation decision for every reply from the same discussion. */
   async getUserPermissionsOfReplies(
     user: UserEntity,
     discussion: DiscussionEntity,
     discussionReplies: DiscussionReplyEntity[],
     hasPrivilege?: boolean,
-    discussionProblem?: ProblemEntity
+    discussionProblem?: ProblemEntity,
+    moderation?: ReplyModeration
   ): Promise<DiscussionReplyPermissionType[][]> {
+    if (!discussion) return discussionReplies.map(() => []);
     await prefetchTeamResources(this.connection, "discussion", [discussion.id]);
     if (discussionProblem) await prefetchTeamResources(this.connection, "problem", [discussionProblem.id]);
-    const managePublicness = await this.userHasPermission(
-      user,
-      discussion,
-      DiscussionPermissionType.ManagePublicness,
-      discussionProblem
-    );
+    moderation ??= await this.getReplyModeration(user, discussion, discussionProblem);
+    if (!moderation.canViewDiscussion) return discussionReplies.map(() => []);
     const loaded = { discussion, problem: discussionProblem };
     return await Promise.all(
       discussionReplies.map(async reply => [
         ...((await this.userHasModifyDiscussionReplyPermission(user, reply, hasPrivilege, loaded))
           ? [DiscussionReplyPermissionType.Modify, DiscussionReplyPermissionType.Delete]
           : []),
-        ...(managePublicness ? [DiscussionReplyPermissionType.ManagePublicness] : [])
+        ...(moderation.managePublicness ? [DiscussionReplyPermissionType.ManagePublicness] : [])
       ])
     );
   }
@@ -553,7 +630,7 @@ export class DiscussionService {
   private getDiscussionRepliesQueryBuilder(
     currentUser: UserEntity,
     discussion: DiscussionEntity,
-    hasPrivilege: boolean,
+    viewHidden: boolean,
     order: "ASC" | "DESC" = "ASC",
     transactionalEntityManager: EntityManager = null
   ) {
@@ -563,7 +640,7 @@ export class DiscussionService {
 
     queryBuilder.where("reply.discussionId = :discussionId", { discussionId: discussion.id });
 
-    if (!hasPrivilege) {
+    if (!viewHidden) {
       if (currentUser)
         queryBuilder.andWhere(
           new Brackets(brackets =>
@@ -583,12 +660,12 @@ export class DiscussionService {
   async queryDiscussionRepliesInIdRange(
     currentUser: UserEntity,
     discussion: DiscussionEntity,
-    hasPrivilege: boolean,
+    viewHidden: boolean,
     beforeId: number,
     afterId: number,
     takeCount: number
   ): Promise<[replies: DiscussionReplyEntity[], count: number]> {
-    const query = this.getDiscussionRepliesQueryBuilder(currentUser, discussion, hasPrivilege)
+    const query = this.getDiscussionRepliesQueryBuilder(currentUser, discussion, viewHidden)
       .andWhere("reply.id > :afterId", { afterId })
       .andWhere("reply.id < :beforeId", { beforeId });
     if (takeCount <= 0) return [[], await query.getCount()];
@@ -598,18 +675,18 @@ export class DiscussionService {
   async queryDiscussionRepliesByHeadTail(
     currentUser: UserEntity,
     discussion: DiscussionEntity,
-    hasPrivilege: boolean,
+    viewHidden: boolean,
     headTakeCount: number,
     tailTakeCount: number
   ): Promise<[head: DiscussionReplyEntity[], tail: DiscussionReplyEntity[], count: number]> {
-    const headQuery = this.getDiscussionRepliesQueryBuilder(currentUser, discussion, hasPrivilege, "ASC");
+    const headQuery = this.getDiscussionRepliesQueryBuilder(currentUser, discussion, viewHidden, "ASC");
     // TypeORM take(0) removes LIMIT. An omitted count requests no rows.
     const [head, count]: [DiscussionReplyEntity[], number] =
       headTakeCount > 0 ? await headQuery.take(headTakeCount).getManyAndCount() : [[], await headQuery.getCount()];
 
     if (count <= head.length || tailTakeCount <= 0) return [head, [], count];
 
-    const tail = await this.getDiscussionRepliesQueryBuilder(currentUser, discussion, hasPrivilege, "DESC")
+    const tail = await this.getDiscussionRepliesQueryBuilder(currentUser, discussion, viewHidden, "DESC")
       .take(Math.min(tailTakeCount, count - head.length))
       .getMany();
 
@@ -676,25 +753,10 @@ export class DiscussionService {
       [group: GroupEntity, permission: DiscussionPermissionLevel][]
     ]
   > {
-    const [userPermissionList, groupPermissionList] = await this.getDiscussionPermissionsWithId(discussion);
-    return [
-      await Promise.all(
-        userPermissionList.map(
-          async ([userId, permission]): Promise<[user: UserEntity, permission: DiscussionPermissionLevel]> => [
-            await this.userService.findUserById(userId),
-            permission
-          ]
-        )
-      ),
-      await Promise.all(
-        groupPermissionList.map(
-          async ([groupId, permission]): Promise<[group: GroupEntity, discussion: DiscussionPermissionLevel]> => [
-            await this.groupService.findGroupById(groupId),
-            permission
-          ]
-        )
-      )
-    ];
+    return await this.permissionService.getVisiblePermissionsOfObject<DiscussionPermissionLevel>(
+      discussion.id,
+      PermissionObjectType.Discussion
+    );
   }
 
   private async lockDiscussionForReplyChange(discussionId: number, manager: EntityManager): Promise<void> {
@@ -829,9 +891,42 @@ export class DiscussionService {
     });
   }
 
-  async setReplyPublic(discussionReply: DiscussionReplyEntity, isPublic: boolean): Promise<void> {
-    discussionReply.isPublic = isPublic;
-    await this.discussionReplyRepository.update(discussionReply.id, { isPublic });
+  async setReplyPublic(
+    discussionReply: DiscussionReplyEntity,
+    isPublic: boolean,
+    user: UserEntity
+  ): Promise<SetDiscussionReplyPublicResponseError | null> {
+    if (!user) return SetDiscussionReplyPublicResponseError.PERMISSION_DENIED;
+    // Team access first locates the resource, then locks it after its team. An intervening archive must be visible.
+    const error = await this.connection.transaction("READ COMMITTED", async manager => {
+      // Both site-permission editors lock the user before changing rules, including inserting a first explicit deny.
+      const actor = await manager.findOne(UserEntity, {
+        where: { id: user.id },
+        select: { id: true, isAdmin: true },
+        lock: { mode: "pessimistic_read" }
+      });
+      if (!actor) return SetDiscussionReplyPublicResponseError.PERMISSION_DENIED;
+      const active = await teamResourceAccess(manager, actor, "discussion", discussionReply.discussionId, "post");
+      if (active === false) return SetDiscussionReplyPublicResponseError.PERMISSION_DENIED;
+      const discussion = await manager.findOne(DiscussionEntity, {
+        where: { id: discussionReply.discussionId },
+        lock: { mode: "pessimistic_read" }
+      });
+      if (!(await this.getReplyModeration(actor, discussion, undefined, manager)).managePublicness)
+        return SetDiscussionReplyPublicResponseError.PERMISSION_DENIED;
+      // A delete may have committed since the controller located the parent. An unchanged flag is a successful retry.
+      const where = { id: discussionReply.id, discussionId: discussion.id };
+      const reply = await manager.findOne(DiscussionReplyEntity, {
+        where,
+        select: { id: true, isPublic: true },
+        lock: { mode: "pessimistic_write" }
+      });
+      if (!reply) return SetDiscussionReplyPublicResponseError.NO_SUCH_DISCUSSION_REPLY;
+      if (reply.isPublic !== isPublic) await manager.update(DiscussionReplyEntity, where, { isPublic });
+      return null;
+    });
+    if (!error) discussionReply.isPublic = isPublic;
+    return error;
   }
 
   async deleteReply(discussionReply: DiscussionReplyEntity, actingUser?: UserEntity): Promise<void> {

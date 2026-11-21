@@ -4,6 +4,7 @@ import { TypeOrmModule } from "@nestjs/typeorm";
 import { ContestEntity } from "./contest.entity";
 import { ContestProblemEntity } from "./contest-problem.entity";
 import { ContestSummaryEntity } from "./contest-summary.entity";
+import { ContestVirtualParticipationEntity } from "./contest-virtual-participation.entity";
 import { ContestService } from "./contest.service";
 import { ContestAccessService } from "./contest-access.service";
 import { ContestScoreService } from "./contest-score.service";
@@ -20,7 +21,12 @@ import { StatementExportModule } from "../statement-export/statement-export.modu
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ContestEntity, ContestProblemEntity, ContestSummaryEntity]),
+    TypeOrmModule.forFeature([
+      ContestEntity,
+      ContestProblemEntity,
+      ContestSummaryEntity,
+      ContestVirtualParticipationEntity
+    ]),
     forwardRef(() => ProblemModule),
     forwardRef(() => SubmissionModule),
     forwardRef(() => UserModule),

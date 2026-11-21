@@ -6,6 +6,7 @@ import { ContestProblemService } from "./contest-problem.service";
 import { ContestSubmissionService } from "./contest-submission.service";
 import { ContestStatementService } from "./contest-statement.service";
 import { ContestRequestDto } from "./contest-request.dto";
+import { StartVirtualRequestDto, StartVirtualResponseDto } from "./contest-virtual.dto";
 
 import { CurrentUser } from "../common/user.decorator";
 import { UserEntity } from "../user/user.entity";
@@ -29,6 +30,14 @@ export class ContestController {
 
   @Post("detail") detail(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
     return this.service.detail(u, r.id);
+  }
+
+  @Post("startVirtual")
+  async startVirtual(
+    @CurrentUser() user: UserEntity,
+    @Body() request: StartVirtualRequestDto
+  ): Promise<StartVirtualResponseDto> {
+    return await this.service.startVirtual(user, request.id);
   }
 
   @Post("save") save(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
@@ -94,7 +103,7 @@ export class ContestController {
   }
 
   @Post("ranklist") ranklist(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {
-    return this.service.ranklist(u, r.id);
+    return this.service.ranklist(u, r.id, r.data?.virtual === true);
   }
 
   @Post("export") export(@CurrentUser() u: UserEntity, @Body() r: ContestRequestDto) {

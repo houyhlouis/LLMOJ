@@ -20,6 +20,39 @@ const {
   publishedSubtasks,
   scoringDigest
 } = require("./ai-judging-contract.ts");
+const { aiRunProfiles } = require("./ai-run-profiles.ts");
+
+test("runner request budgets and role profiles for a legacy plan and a traditional file-based reference", () => {
+  const plan = { timeLimitMs: 1250, memoryLimitMiB: 80 };
+  const solution = {
+    language: "cpp", compileAndRunOptions: { compiler: "g++", std: "c++17", O: "2", m: "64" },
+    ...plan, cpu: "UserProgram", testlib: true, extraSources: true, origin: "ai"
+  };
+  const auxiliary = { ...solution, timeLimitMs: 5000, memoryLimitMiB: 512, extraSources: false };
+  const roles = {
+    std: solution, alternative: solution, challenge: solution,
+    generator: auxiliary, validator: auxiliary, oracle: auxiliary
+  };
+  const budgets = { timeLimitMs: 5000, memoryLimitMiB: 512, stdTimeLimitMs: 1250, stdMemoryLimitMiB: 80 };
+  // Older plans may omit needsSpj, and their references may have no file I/O settings.
+  assert.deepEqual(aiRunProfiles("Traditional", {}, plan, null), { ...budgets, profiles: { version: 1, roles } });
+  const files = { inputFilename: "sample.in", outputFilename: "sample.out" };
+  const options = { compiler: "clang++", std: "c++20", O: "1", m: "64" };
+  const judgeInfo = { checker: { type: "custom", filename: "check.cpp", language: "cpp", compileAndRunOptions: options, timeLimit: 120, memoryLimit: 32 } };
+  assert.deepEqual(aiRunProfiles("Traditional", judgeInfo, { ...plan, needsSpj: true }, files), {
+    ...budgets,
+    profiles: { version: 1, roles: {
+      ...roles, std: { ...solution, fileIo: files },
+      checker: { ...auxiliary, compileAndRunOptions: options, timeLimitMs: 120, memoryLimitMiB: 32, cpu: "Checker", origin: "problem" }
+    } }
+  });
+  assert.deepEqual(aiRunProfiles("Interaction", {}, plan, files), {
+    ...budgets,
+    profiles: { version: 1, roles: {
+      ...roles, interactor: { ...solution, timeLimitMs: 5000, memoryLimitMiB: 256, cpu: "Interactor" }
+    } }
+  });
+});
 
 const cases = (subtask, count) => Array.from({ length: count }, () => ({ subtask }));
 const testcase = (subtask, index) => ({ inputFile: `old-${subtask}-${index}.in`, outputFile: `old-${subtask}-${index}.out` });

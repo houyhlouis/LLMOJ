@@ -30,6 +30,33 @@ return {
   invalid_response: "The server returned unrecognized settings. Reload and try again.",
   save_unconfirmed:
     "Could not confirm the save result: {error} Reload settings to check; your current selection has been kept.",
+  diagnostics: {
+    title: "Diagnostic bundle",
+    introduction:
+      "One JSON file with what someone supporting this site needs to look into a problem. It's built from a fixed list of facts:",
+    includes: {
+      deployment: "the site's version, Node.js version, platform, uptime and a summary of its non-secret settings",
+      health: "the health of the database, Redis and storage",
+      judging: "the judge machines (state, protocol, architecture, capacity) and the judge queue",
+      errors:
+        "recent unexpected errors of the backend process that answers: request IDs, times, routes and error classes",
+      ai: "the AI pause and limits, and the status of recent failed AI jobs",
+      selected: "if you name them below, the metadata of particular submissions and AI jobs"
+    },
+    never:
+      "It never contains code, test data, inputs or outputs, compiler or checker messages, prompts, passwords, keys or other secrets, not even for the submissions and jobs you name. Each download is recorded in the audit log.",
+    submission_ids: "Submission IDs (optional)",
+    submission_ids_note:
+      "Separated by spaces or commas; at most {limit}. Their status, timings, data version and judge machine, without code or test data.",
+    ai_job_ids: "AI job IDs (optional)",
+    ai_job_ids_note:
+      "Separated by spaces or commas; at most {limit}. Their status, stage and failure codes, without prompts or results.",
+    download: "Download diagnostic bundle",
+    downloaded: "Bundle saved ({size}).",
+    missing: "Not found: {ids}.",
+    invalid_ids: "Submission IDs are numbers, and AI job IDs look like 1b4e28ba-2fa1-4d2b-883f-0016d3cca427.",
+    too_many: "Name at most {limit} submissions and {limit} AI jobs."
+  },
   test_data: {
     title: "Removed test data",
     introduction:

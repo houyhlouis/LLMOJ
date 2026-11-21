@@ -55,6 +55,10 @@ The contest's own timing, scoring and rules about code, submissions and scoreboa
 
 Team discussions work like site discussions, and every list and link checks team membership: marking a discussion public, having written it in the past, or knowing its link doesn't reveal it to non-members. [Solutions](Solutions.md) are discussions too.
 
+Team problems and discussions get their access from the team. The old per-problem and per-discussion **Permissions** editor shows only ordinary user and group grants for them (never the team's internal group) and refuses changes, also for site administrators: manage access through the team.
+
+**Hidden replies.** When the site makes new replies hidden until approved (`discussionReplyDefaultPublic: false`, see [Backend configuration](Backend-Configuration.md)), a reply in a team discussion is seen only by its author and by the team's moderators until one of them approves it: members with the **Discussions** permission, the owner, users with **Manage all teams and private resources**, and members who may moderate discussions site-wide. A site-wide deny of moderating discussions or their replies still applies to them. Approving a reply (or hiding it again) publishes it to the team's members only; it never makes the discussion visible outside the team. In an archived team or discussion, moderators can still read hidden replies but nobody can approve or hide them until it's restored.
+
 Problems, contests, discussions and assignments can be archived and restored. Archived items are hidden from ordinary members; managers restore them through **Show archived**. A whole team can be archived with all its content, and its owner or a site-wide team manager can restore it.
 
 ## Study lists and assignments

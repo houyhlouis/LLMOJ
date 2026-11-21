@@ -5,7 +5,7 @@
 This guide sets up a judge on its own server, without the website, database, Redis or MinIO. The judge connects to the site itself, using its own key, so the site needs no open port on the judge.
 
 You need:
-- Ubuntu 24.04 or 26.04 on amd64 or arm64 (see [ARM64 servers](ARM64.md)), systemd 254 or later and cgroup v2. Ubuntu 26.04 hasn't been tested end to end yet. Containers that restrict namespaces, mounts or cgroups won't work.
+- Ubuntu 24.04 or 26.04 on amd64 or arm64 (see [ARM64 servers](ARM64.md)), systemd 254 or later and cgroup v2 (what has been tested is listed in [Tested platforms](Installation.md#tested-platforms)). Containers that restrict namespaces, mounts or cgroups won't work.
 - At least 2 CPUs and 256 MiB of memory for one judge slot, and 30 GiB of free disk. Building on the judge needs more memory: 8 GiB is recommended.
 - A judge registered on the site, with its key (see [Distributed judging](Distributed-Judging.md)).
 

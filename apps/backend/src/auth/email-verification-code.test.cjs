@@ -315,7 +315,7 @@ test("an email change code works for the account that asked for it, and failures
   const users = Object.assign(Object.create(UserService.prototype), {
     configService: { config: { preference: { security: { requireEmailVerification: true } } } },
     authEmailVerificationCodeService: main.codes,
-    userRepository: { save: async user => saved.push({ id: user.id, email: user.email }) }
+    userRepository: { update: async (criteria, patch) => saved.push({ id: criteria.id, ...patch }) }
   });
   const audit = [];
   const api = Object.assign(Object.create(UserController.prototype), {

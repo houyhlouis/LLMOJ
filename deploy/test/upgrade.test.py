@@ -158,6 +158,10 @@ class BuildingUpgrade(u.Upgrade):
 @unittest.skipUnless(os.geteuid()==0, 'Run with sudo; ownership checks use root-owned temporary fixtures')
 class UpgradeTests(unittest.TestCase):
     def setUp(self):
+        try:
+            backend_gid = grp.getgrnam('libreoj').gr_gid
+        except KeyError:
+            self.skipTest('root-owned upgrade fixtures need the libreoj group')
         # This is a tiny synthetic fixture, not a deployment disk-budget check.
         # Keep the suite independent of the host's available storage; the low-disk
         # case below explicitly overrides this and exercises the real guard.
@@ -174,7 +178,7 @@ class UpgradeTests(unittest.TestCase):
             (self.root/'config'/name).write_text(json.dumps(state)); (self.root/'config'/name).chmod(0o600)
         backend=self.root/'config/backend.yaml'
         backend.write_text('server:\n  hostname: 127.0.0.1\n  port: 2002\n  clusters: null\nservices:\n  database:\n    type: mariadb\n    host: 127.0.0.1\n    port: 13306\n    database: libreoj\n    username: libreoj\n')
-        backend.chmod(0o640); os.chown(backend,0,grp.getgrnam('libreoj').gr_gid)
+        backend.chmod(0o640); os.chown(backend,0,backend_gid)
         (self.root/'config/judge.yaml').write_text('preserve key and slots'); (self.root/'config/judge.yaml').chmod(0o600)
         for name in ('runtime/node/bin/node','runtime/tooling/node_modules/.bin/pnpm'): (self.root/name).write_text('runtime')
         (self.root/'data/ai/master.key').write_text('synthetic key'); (self.root/'data/ai/master.key').chmod(0o600)

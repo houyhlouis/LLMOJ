@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "crypto";
-import { constants, createReadStream, promises as fs, statSync } from "fs";
+import { constants, createReadStream, promises as fs } from "fs";
 import { createConnection } from "net";
 import os from "os";
 import path from "path";
@@ -31,6 +31,7 @@ import {
 
 import { DataSource, In, IsNull, LessThan, Not } from "typeorm";
 
+import { AiExecutionMode, defaultAiExecutionMode, localRunnerSocket } from "./ai-execution-mode";
 import { AiExecutionEntity, AiExecutionState } from "./ai-execution.entity";
 import { AiJobEntity } from "./ai.entity";
 import { AiError } from "./ai.types";
@@ -51,7 +52,7 @@ import { JudgeGateway } from "../judge/judge.gateway";
 import { RedisService } from "../redis/redis.service";
 
 /** Where an AI job's programs run: the local AI runner of this server's judge, or any judge machine. */
-export type AiExecutionMode = "local" | "judges";
+export type { AiExecutionMode } from "./ai-execution-mode";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The versioned runner wire payload is checked by the AI service's consumers.
 type RunnerRequest = any;
@@ -76,7 +77,6 @@ export interface AiReplayTransfer {
 // How a job's result was come by: the operation, and where the result came from (see AiExecutionProvenance)
 type RunnerOperation = Pick<AiExecutionProvenance, "origin" | "result" | "task" | "judgeRuntimeId"> & { key: string };
 
-const localSocket = () => process.env.HYHOJ_AI_RUNNER_SOCKET || "/opt/LLMOJ/data/judge/ai-runner.sock";
 const OBJECT_PREFIX = `${TEMPORARY_OBJECT_PREFIX}ai-execution/`;
 const MAX_REQUEST = 16 * 1024 * 1024;
 const MAX_FILE = 16 * 1024 * 1024;
@@ -162,10 +162,9 @@ async function hashLocalFile(filename: string): Promise<string> {
 
 /**
  * Runs the programs of AI jobs (generators, reference solutions, validators, checkers) to make or check test data.
- * With a local AI runner (the `all` role), through its socket as before. Otherwise, as AiExecution tasks in the judge
- * queue, which any judge machine of protocol version 4 takes: the request and the generated files go through
- * storage, and the AI job gets the same result as from the local runner. LLMOJ_AI_EXECUTION=local|judges chooses
- * explicitly.
+ * By default a job uses the local runner if its socket exists. Otherwise it queues an AiExecution task for a judge
+ * advertising the required protocol, capabilities, quality policy and receipt version. Remote runs transfer files
+ * through storage. LLMOJ_AI_EXECUTION=local|judges selects the mode explicitly.
  */
 @Injectable()
 export class AiExecutionService
@@ -218,15 +217,7 @@ export class AiExecutionService
   mode(jobId: string): AiExecutionMode {
     let mode = this.modes.get(jobId);
     if (!mode) {
-      const forced = process.env.LLMOJ_AI_EXECUTION;
-      if (forced === "local" || forced === "judges") mode = forced;
-      else {
-        try {
-          mode = statSync(localSocket()).isSocket() ? "local" : "judges";
-        } catch {
-          mode = "judges";
-        }
-      }
+      mode = defaultAiExecutionMode();
       this.modes.set(jobId, mode);
     }
     return mode;
@@ -522,7 +513,7 @@ export class AiExecutionService
 
   private cleanupLocal(jobId: string): Promise<void> {
     return new Promise(resolve => {
-      const socket = createConnection(localSocket());
+      const socket = createConnection(localRunnerSocket());
       const timer = setTimeout(() => {
         socket.destroy();
         resolve();
@@ -561,7 +552,7 @@ export class AiExecutionService
         reject(new AiError("SAMPLES_TOO_LARGE"));
         return;
       }
-      const socket = createConnection(localSocket());
+      const socket = createConnection(localRunnerSocket());
       let buffer = "";
       let settled = false;
       let chain = Promise.resolve();
@@ -1124,13 +1115,14 @@ export class AiExecutionService
       total += file.size;
     }
     if (total > MAX_TOTAL) return [];
+    const requested = files.map(({ name, size }) => ({ name, size }));
     const uploads = [
       ...(execution.uploads || []).filter(upload => upload.name.startsWith(EVIDENCE_UPLOAD)),
-      ...files.map(({ name, size }) => ({ name, size }))
+      ...requested
     ];
     await this.repository.update({ taskId, state: AiExecutionState.Running }, { uploads });
     return await Promise.all(
-      uploads.map(async ({ name, size }) => {
+      requested.map(async ({ name, size }) => {
         const signed = await this.fileService.signJudgeUpload(fileObject(taskId, name), size);
         return {
           name,

@@ -30,7 +30,10 @@ function fixture(rule = "strictioi") {
       createQueryBuilder: () => { const q = { select: () => q, where: () => q, andWhere: () => q, getMany: async () => runs }; return q; },
       findOneBy: async query => runs.find(run => run.id === query.id && run.contestId === query.contestId)
     };
-    if (entity.name === "SubmissionDetailEntity") return { findBy: async () => details };
+    if (entity.name === "SubmissionDetailEntity") return {
+      find: async ({ select, where }) => details.filter(row => where.submissionId.value.includes(row.submissionId))
+        .map(row => Object.fromEntries(Object.keys(select).map(key => [key, row[key]])))
+    };
     if (entity.name === "UserEntity") return { findBy: async () => [{ id: 7, username: "owner" }] };
     throw new Error("Unexpected repository: " + entity.name);
   } };

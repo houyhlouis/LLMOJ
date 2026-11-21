@@ -6,6 +6,7 @@ import { Link } from "@/utils/hooks";
 import { tr, formatDate } from "./api";
 import style from "./ContestPages.module.less";
 import { ruleLabel } from "./contest-rules";
+import { VirtualRunBanner, virtualRunActive } from "./VirtualRun";
 
 export default observer(function ContestFrame({
   detail,
@@ -29,6 +30,7 @@ export default observer(function ContestFrame({
           <Label>{ruleLabel(contest.rule)}</Label> {formatDate(contest.startTime)} — {formatDate(contest.endTime)}
         </Header.Subheader>
       </Header>
+      <VirtualRunBanner run={detail.virtualParticipation?.run} />
       <Menu pointing secondary stackable>
         <Menu.Item as={Link} href={base} active={tab === "overview"}>
           {tr("概览", "Overview")}
@@ -41,9 +43,12 @@ export default observer(function ContestFrame({
         <Menu.Item as={Link} href={`${base}/submissions`} active={tab === "submissions"}>
           {tr("提交记录", "Submissions")}
         </Menu.Item>
-        <Menu.Item as={Link} href={`${base}/hacks`} active={tab === "hacks"}>
-          Hack
-        </Menu.Item>
+        {/* No hacks during a virtual run */}
+        {!virtualRunActive(detail) && (
+          <Menu.Item as={Link} href={`${base}/hacks`} active={tab === "hacks"}>
+            Hack
+          </Menu.Item>
+        )}
         {appState.currentUser && (
           <Menu.Item as={Link} href={`${base}/summary`} active={tab === "summary"}>
             {tr("比赛总结", "Summary")}

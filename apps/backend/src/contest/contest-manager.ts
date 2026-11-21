@@ -1,4 +1,4 @@
-import type { DataSource } from "typeorm";
+import type { DataSource, EntityManager } from "typeorm";
 
 import type { ContestEntity } from "./contest.entity";
 
@@ -18,15 +18,17 @@ export async function isContestManager(
   db: DataSource,
   privileges: UserPrivilegeService,
   user: UserEntity,
-  contest: Pick<ContestEntity, "id" | "ownerId" | "adminIds">
+  contest: Pick<ContestEntity, "id" | "ownerId" | "adminIds">,
+  transaction?: EntityManager
 ): Promise<boolean> {
-  const team = await teamResourceAccess(db, user, "contest", contest.id, "contests");
-  if (team !== null) return team && (await privileges.permissionDecision(user, UserPrivilegeType.EditContest, true));
+  const team = await teamResourceAccess(transaction ?? db, user, "contest", contest.id, "contests");
+  if (team !== null)
+    return team && (await privileges.permissionDecision(user, UserPrivilegeType.EditContest, true, transaction));
   return (
     !!user &&
     (user.isAdmin ||
-      (await privileges.userHasPrivilege(user, UserPrivilegeType.ManageContest)) ||
-      ((await privileges.userHasPrivilege(user, UserPrivilegeType.EditContest)) &&
+      (await privileges.userHasPrivilege(user, UserPrivilegeType.ManageContest, transaction)) ||
+      ((await privileges.userHasPrivilege(user, UserPrivilegeType.EditContest, transaction)) &&
         (contest.ownerId === user.id || contest.adminIds.includes(user.id))))
   );
 }

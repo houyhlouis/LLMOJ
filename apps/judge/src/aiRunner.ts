@@ -20,7 +20,7 @@ import {
   type AiCorpusCase,
   type AiExecutionMeasure,
   type AiExecutionProfiles,
-  type AiExecutionRecord,
+  type CurrentAiExecutionRecord,
   type AiFailureKind,
   type AiOutputComparison,
   type AiReplayRequest,
@@ -44,6 +44,7 @@ import {
   TestcaseStatusInteraction,
   ExtraParametersInteraction
 } from "./task/submission/interaction";
+import { testcaseResources } from "./task/submission/testcaseResources";
 import { Disposer } from "./posixUtils";
 import { CompileResultSuccess } from "./compile";
 import { AiQuality, QualityRequest, QualityVerdict, qualitySources, validateQuality } from "./aiQuality";
@@ -86,8 +87,7 @@ export interface Request {
   boundaryCases?: { subtask: number; seed: number; family: string }[];
   requiredQualityPolicy?: number;
   requiredReceiptVersion?: number;
-  // The backend's key of the logical operation (judge protocol version 8): a run of one replays the inputs its
-  // generators made in an earlier run of the job (see aiCheckpoint.ts)
+  // The backend's key for this logical operation lets later attempts reuse the job's saved inputs (see aiCheckpoint.ts).
   operationKey?: string;
   // Operation "replay": the kept failure to run again
   replay?: AiReplayRequest;
@@ -137,6 +137,20 @@ const runMeasures = new WeakMap<Request, Map<string, AiExecutionMeasure>>();
 const MAX_DIAGNOSTICS = 1024 * 1024;
 
 export type Emit = (event: Record<string, unknown>) => void;
+
+/** One physical attempt, under the complete current contract, for every execution operation. */
+function executionRecord(
+  details: Pick<CurrentAiExecutionRecord, "runtime" | "startedAt" | "reuse" | "receipts">
+): CurrentAiExecutionRecord {
+  return {
+    ...details,
+    contract: AI_EXECUTION_PROTOCOL_VERSION,
+    qualityPolicy: AI_QUALITY_POLICY_VERSION,
+    receiptVersion: AI_RECEIPT_VERSION,
+    attemptId: crypto.randomUUID(),
+    finishedAt: new Date().toISOString()
+  };
+}
 
 /** Where a generation reads its sample files and writes its output. */
 export interface GenerationLayout {
@@ -815,25 +829,23 @@ async function executeProtocol(binaryDirectory: string, request: Request, input:
   const program = communication ? "manager" : "interactor";
   const solution = roleProfile(request.profiles, "std");
   const helper = roleProfile(request.profiles, program);
-  // The program and its interactor or manager run together
-  const reservation = { memory: helper.memoryLimitMiB + solution.memoryLimitMiB, ai: true };
-  return await runTaskQueued(reservation, async directory => {
+  const judgeInfo = {
+    timeLimit: solution.timeLimitMs,
+    memoryLimit: solution.memoryLimitMiB,
+    subtasks: [],
+    interactor: {
+      interface: "stdio" as const,
+      filename: `${program}.cpp`,
+      language: "cpp",
+      compileAndRunOptions: helper.compileAndRunOptions,
+      timeLimit: helper.timeLimitMs,
+      memoryLimit: helper.memoryLimitMiB,
+      ...(helper.sharedMemorySize ? { sharedMemorySize: helper.sharedMemorySize } : {})
+    }
+  };
+  const resources = testcaseResources(judgeInfo);
+  return await runTaskQueued({ memory: resources.peakMemory, ai: true }, async directory => {
     const disposer = new Disposer();
-    // As the published judging settings give them (the judge takes the larger time limit of the two for the helper)
-    const judgeInfo = {
-      timeLimit: solution.timeLimitMs,
-      memoryLimit: solution.memoryLimitMiB,
-      subtasks: [],
-      interactor: {
-        interface: "stdio" as const,
-        filename: `${program}.cpp`,
-        language: "cpp",
-        compileAndRunOptions: helper.compileAndRunOptions,
-        timeLimit: helper.timeLimitMs,
-        memoryLimit: helper.memoryLimitMiB,
-        ...(helper.sharedMemorySize ? { sharedMemorySize: helper.sharedMemorySize } : {})
-      }
-    };
     const task = {
       taskId: null,
       extraInfo: {
@@ -865,6 +877,7 @@ async function executeProtocol(binaryDirectory: string, request: Request, input:
           null,
           compiled,
           path.join(directory, `run-${stage}`),
+          resources,
           disposer,
           communication ? { stage, managerDirectory: path.join(directory, "manager-state") } : undefined,
           true
@@ -1499,14 +1512,11 @@ async function generateWithSamples(
     }
     if (quality) await quality.runDifferential();
     if (request.operation === "qualify") {
-      const execution: AiExecutionRecord = {
-        contract: AI_EXECUTION_PROTOCOL_VERSION,
-        attemptId: crypto.randomUUID(),
+      const execution = executionRecord({
         runtime,
         startedAt,
-        finishedAt: new Date().toISOString(),
         reuse: { builds: builds.reused, inputs: [...inputs.values()].reduce((n, input) => n + input.reused, 0) }
-      };
+      });
       emit({
         type: "complete",
         files: [],
@@ -1675,18 +1685,12 @@ async function generateWithSamples(
       }
     }
     const qualityResult = quality?.result();
-    const execution: AiExecutionRecord = {
-      contract: AI_EXECUTION_PROTOCOL_VERSION,
-      qualityPolicy: AI_QUALITY_POLICY_VERSION,
-      receiptVersion: AI_RECEIPT_VERSION,
-      // This physical attempt: a judge task run again after a restart is another attempt of the same task
-      attemptId: crypto.randomUUID(),
+    const execution = executionRecord({
       runtime,
       startedAt,
-      finishedAt: new Date().toISOString(),
       receipts: receipts.counts,
       reuse: { builds: builds.reused, inputs: [...inputs.values()].reduce((sum, kept) => sum + kept.reused, 0) }
-    };
+    });
     const result = {
       type: "complete",
       directory,
@@ -1841,17 +1845,11 @@ async function replayFailure(
       }
       emit({ type: "progress", phase: "replay", completed: attempt + 1, total: replay.repeat });
     }
-    const execution: AiExecutionRecord = {
-      contract: AI_EXECUTION_PROTOCOL_VERSION,
-      qualityPolicy: AI_QUALITY_POLICY_VERSION,
-      receiptVersion: AI_RECEIPT_VERSION,
-      // This physical attempt: a judge task run again after a restart is another attempt of the same task
-      attemptId: crypto.randomUUID(),
+    const execution = executionRecord({
       runtime,
       startedAt,
-      finishedAt: new Date().toISOString(),
       reuse: { builds: builds.reused, inputs: 0 }
-    };
+    });
     emit({
       type: "complete",
       files: [],

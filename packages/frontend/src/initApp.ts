@@ -2,6 +2,7 @@ import { appState, initAppStateStore } from "@/appState";
 import { loadGoogleAnalytics, loadPlausible } from "@/misc/analytics";
 import { apiSameOrigin, isSessionMarker } from "@/utils/session";
 import api from "@/api";
+import { keepOnlyDraftsOf } from "@/utils/contestDrafts";
 
 interface SessionSwrInfo {
   version: number;
@@ -50,6 +51,8 @@ async function waitForSessionInitialization() {
 
   delete window.sessionInfo;
   applySessionInfo(sessionInfo);
+  // A browser keeps the contest drafts of one account: those of an account no longer signed in here go
+  if (sessionInfo.userMeta) keepOnlyDraftsOf(sessionInfo.userMeta.id);
   // On the API's origin the session cookie is what counts: keep its marker, or forget a marker whose session is gone
   if (sessionInfo.sessionMarker) appState.token = sessionInfo.sessionMarker;
   else if (isSessionMarker(appState.token) && !sessionInfo.userMeta) appState.token = "";

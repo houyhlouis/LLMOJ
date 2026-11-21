@@ -7,6 +7,8 @@ import { ContestEntity } from "./contest.entity";
 import { ContestProblemEntity } from "./contest-problem.entity";
 import { ContestAccessService } from "./contest-access.service";
 import { contestSubmissionFeedback } from "./contest-feedback";
+import { contestViewerTime } from "./contest-virtual";
+import { applyContestElapsedCutoff } from "./contest-virtual-timeline";
 import {
   contestEnded,
   contestSubmissionsOpen,
@@ -46,12 +48,12 @@ export class ContestSubmissionService {
 
   async submit(user: UserEntity, id: number, problemId: number, data: ContestRequestData, prepare = false) {
     await this.access.requirePrivilege(user, UserPrivilegeType.ParticipateContest);
-    const { contest, manager } = await this.access.get(user, id, true);
-    if (!manager && contestEnded(contest)) throw new ForbiddenException("Contest has ended");
+    await this.access.requirePrivilege(user, UserPrivilegeType.SubmitProblem);
+    const { contest, manager, virtualRun, now } = await this.access.get(user, id, true);
+    if (!manager && contestEnded(contest, now)) throw new ForbiddenException("Contest has ended");
     const row = await this.db.getRepository(ContestProblemEntity).findOneBy({ id: problemId, contestId: id });
     if (!row) throw new NotFoundException();
     return await this.problemLocks.lockProblemById(row.problemId, "Read", async problem => {
-      if (!contestSubmissionsOpen(contest, manager)) throw new ForbiddenException("Contest is not running");
       if (!problem || !(await this.problems.getProblemJudgeInfo(problem))[1])
         throw new BadRequestException("Problem cannot be submitted");
       const payload = data.content as Partial<SubmissionContentTraditional> & {
@@ -69,6 +71,8 @@ export class ContestSubmissionService {
         throw new ForbiddenException("Language is not allowed in this contest");
       const errors = await this.submissions.validateSubmissionContent(problem, data.content);
       if (errors.length) throw new BadRequestException(errors);
+      if (!contestSubmissionsOpen(contest, manager, contestViewerTime(contest, virtualRun)))
+        throw new ForbiddenException("Contest has ended");
       if (prepare) {
         if (!Number.isInteger(data.fileSize) || data.fileSize < 0) throw new BadRequestException();
         const result = await this.submissions.prepareSubmissionFileUpload(problem, data.fileSize);
@@ -84,7 +88,8 @@ export class ContestSubmissionService {
           contestProblemId: row.id,
           contestInputFilename: row.inputFilename,
           contestOutputFilename: row.outputFilename,
-          contestSubtaskAllOrNothing: row.subtaskAllOrNothing
+          contestSubtaskAllOrNothing: row.subtaskAllOrNothing,
+          admit: transaction => this.access.admitSubmission(user, id, transaction)
         }
       );
       if (error) return typeof error === "string" ? { error } : { signedUploadRequest: error };
@@ -93,9 +98,10 @@ export class ContestSubmissionService {
   }
 
   async submissionList(user: UserEntity, id: number, page = 1, data: ContestRequestData = {}) {
-    const { contest, manager } = await this.access.get(user, id, true);
+    const { contest, manager, virtualRun, now } = await this.access.get(user, id, true);
     const query = this.db.getRepository(SubmissionEntity).createQueryBuilder("s").where("s.contestId = :id", { id });
-    if (!contestSubmissionsPublic(contest, manager))
+    if (virtualRun) applyContestElapsedCutoff(query, contest, now - +contest.startTime);
+    if (!contestSubmissionsPublic(contest, manager, now))
       query.andWhere("s.submitterId = :userId", { userId: user?.id ?? -1 });
     if (data.userId && Number.isSafeInteger(data.userId))
       query.andWhere("s.submitterId = :filterUser", { filterUser: data.userId });
@@ -111,21 +117,29 @@ export class ContestSubmissionService {
       submissions: await Promise.all(
         rows.map(async s => {
           const submitter = await s.submitter;
-          return { ...this.safeSubmission(s, contest, manager), username: submitter.username };
+          return { ...this.safeSubmission(s, contest, manager, now), username: submitter.username };
         })
       )
     };
   }
 
-  private safeSubmission(s: SubmissionEntity, contest: ContestEntity, manager: boolean) {
-    return contestSubmissionFeedback(s, contest.rule, contestEnded(contest), manager);
+  private safeSubmission(s: SubmissionEntity, contest: ContestEntity, manager: boolean, now: number) {
+    return contestSubmissionFeedback(s, contest.rule, contestEnded(contest, now), manager);
   }
 
   async submissionDetail(user: UserEntity, id: number, submissionId: number) {
-    const { contest, manager } = await this.access.get(user, id, true);
-    const s = await this.db.getRepository(SubmissionEntity).findOneBy({ id: submissionId, contestId: id });
+    const { contest, manager, virtualRun, now } = await this.access.get(user, id, true);
+    if (!Number.isSafeInteger(submissionId) || submissionId < 1) throw new BadRequestException();
+    const repository = this.db.getRepository(SubmissionEntity);
+    const s = virtualRun
+      ? await applyContestElapsedCutoff(
+          repository.createQueryBuilder("s").where("s.contestId = :id AND s.id = :submissionId", { id, submissionId }),
+          contest,
+          now - +contest.startTime
+        ).getOne()
+      : await repository.findOneBy({ id: submissionId, contestId: id });
     if (!s) throw new NotFoundException();
-    const see = contestSubmissionVisibility(contest, s, { manager, userId: user?.id });
+    const see = contestSubmissionVisibility(contest, s, { manager, userId: user?.id }, now);
     if (!see.visible) throw new ForbiddenException();
     const detail = await this.submissions.getSubmissionDetail(s);
     // Full judge results contain filenames and checker output, which are never public contest metadata.
@@ -141,7 +155,7 @@ export class ContestSubmissionService {
         }))
       : undefined;
     return {
-      submission: this.safeSubmission(s, contest, manager),
+      submission: this.safeSubmission(s, contest, manager, now),
       content: see.code ? detail.content : null,
       compile: see.compile ? result?.compile : undefined,
       subtasks,

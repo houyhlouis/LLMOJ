@@ -73,7 +73,16 @@ AI 相关变量 `HYHOJ_AI_STATE_DIR`、`HYHOJ_AI_GENERATED_DIR`、`HYHOJ_AI_SAMP
 
 ## 从旧版 LibreOJ 迁移
 
-`LIBREOJ_MIGRATION_CONFIG_FILE` 指向一个包含旧站点设置的文件：`database.host`（文本）、`database.port`（数字）、`database.username`、`database.password` 和 `database.database`（文本），以及 `uploads`（旧附件目录）。它们都没有默认值。迁移会写入数据库；完成后请删除该变量。它不是升级 LLMOJ 本身的方式：升级请使用[升级器](Upgrade.zh-CN.md)。
+`LIBREOJ_MIGRATION_CONFIG_FILE` 指向一个包含旧站点设置的 YAML 文件：`database.host`（文本）、`database.port`（数字）、`database.username`、`database.password` 和 `database.database`（文本），以及 `uploads`（旧附件目录）。它们都没有默认值。设置该变量后，后端不提供网站服务，而是把旧站点复制到新站点中，完成后退出。它不是升级 LLMOJ 本身的方式：升级请使用[升级器](Upgrade.zh-CN.md)。
+
+迁移是一次性的复制，中断后不能继续。请按以下步骤进行：
+
+1. **备份**旧数据库及其 `uploads` 目录，并停止旧站点，或者对两者的副本进行迁移。迁移只读取它们，但会逐页读取每张表，期间发生变化的行可能被跳过或复制两次。
+2. **准备一个空的目标。** 只要数据库中有任何用户，迁移就会拒绝；而新安装会创建 `admin` 账号。请使用一个单独的、有 LLMOJ 的表但没有任何账号的数据库：例如用 `node deploy/initialize-schema.mjs --root <已构建的源码目录> --config <指向该数据库的后端配置>` 创建它，并且不要创建管理员（旧站点的管理员会一起迁移过来）。
+3. **给它单独的 Redis 数据库。** 迁移开始和结束时都会清空（`FLUSHDB`）后端配置中的 Redis 数据库：请使用没有任何运行中站点在用的数据库（另一个数据库编号，或单独的 Redis）。
+4. 构建后在 `apps/backend` 中**运行**：`LIBREOJ_CONFIG_FILE=<后端配置> LIBREOJ_MIGRATION_CONFIG_FILE=<迁移配置> node dist/main.js`。它会复制用户、题目（测试数据和附件从 `uploads` 复制到配置的对象存储）、提交（含答案文件）和讨论，逐表记录进度，完成后退出。
+5. **中途停止时**（出错、连接断开或被中断），目标已经不再为空，迁移无法继续：删除并重新创建目标数据库，换用一个空的存储桶（已复制的文件会留在原来的桶中），排除原因后从第 2 步重新开始。
+6. **完成后**删除该变量，在新数据库上正常启动站点，检查无误后进行[备份](Operations-Configuration.zh-CN.md#备份)。用户用旧的用户名和密码登录；首次登录时完成账号的迁移，旧用户名不再符合要求时会要求选择新的用户名。在确认无误之前，请保留旧数据库和 `uploads`。
 
 ## 维护脚本
 

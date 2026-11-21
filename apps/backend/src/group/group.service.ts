@@ -20,6 +20,11 @@ import { escapeLike } from "../database/database.utils";
 import { UserEntity } from "../user/user.entity";
 import { AuditLogObjectType, AuditService } from "../audit/audit.service";
 
+/** Legacy group views and ACL editors expose only groups outside the team permission system. */
+export function visibleGroupSql(groupIdExpression: string): string {
+  return `NOT EXISTS (SELECT 1 FROM team t WHERE t.permissionGroupId = ${groupIdExpression})`;
+}
+
 @Injectable()
 export class GroupService {
   constructor(
@@ -47,14 +52,18 @@ export class GroupService {
     return await this.groupRepository
       .createQueryBuilder("g")
       .where("g.id = :id", { id })
-      .andWhere("NOT EXISTS (SELECT 1 FROM team t WHERE t.permissionGroupId = g.id)")
+      .andWhere(visibleGroupSql("g.id"))
       .getOne();
   }
 
   async findGroupsByExistingIds(groupIds: number[]): Promise<GroupEntity[]> {
     if (groupIds.length === 0) return [];
     const uniqueIds = Array.from(new Set(groupIds));
-    const records = await this.groupRepository.findByIds(uniqueIds);
+    const records = await this.groupRepository
+      .createQueryBuilder("g")
+      .where("g.id IN (:...ids)", { ids: uniqueIds })
+      .andWhere(visibleGroupSql("g.id"))
+      .getMany();
     const map = Object.fromEntries(records.map(record => [record.id, record]));
     return groupIds.map(groupId => map[groupId]);
   }
@@ -188,7 +197,7 @@ export class GroupService {
     return await this.groupRepository
       .createQueryBuilder("g")
       .where("g.name LIKE :query", { query })
-      .andWhere("NOT EXISTS (SELECT 1 FROM team t WHERE t.permissionGroupId = g.id)")
+      .andWhere(visibleGroupSql("g.id"))
       .orderBy("g.name", "ASC")
       .take(maxTakeCount)
       .getMany();
@@ -203,7 +212,7 @@ export class GroupService {
       ? await this.groupRepository
           .createQueryBuilder("g")
           .where("g.id IN (:...ids)", { ids })
-          .andWhere("NOT EXISTS (SELECT 1 FROM team t WHERE t.permissionGroupId = g.id)")
+          .andWhere(visibleGroupSql("g.id"))
           .getMany()
       : [];
     return [
@@ -217,10 +226,7 @@ export class GroupService {
   }
 
   async getAllGroups(): Promise<GroupEntity[]> {
-    return await this.groupRepository
-      .createQueryBuilder("g")
-      .where("NOT EXISTS (SELECT 1 FROM team t WHERE t.permissionGroupId = g.id)")
-      .getMany();
+    return await this.groupRepository.createQueryBuilder("g").where(visibleGroupSql("g.id")).getMany();
   }
 
   async getGroupMemberList(group: GroupEntity): Promise<GroupMembershipEntity[]> {
@@ -233,7 +239,7 @@ export class GroupService {
     return await this.groupMembershipRepository
       .createQueryBuilder("m")
       .where("m.userId = :userId", { userId: user.id })
-      .andWhere("NOT EXISTS (SELECT 1 FROM team t WHERE t.permissionGroupId = m.groupId)")
+      .andWhere(visibleGroupSql("m.groupId"))
       .getCount();
   }
 }

@@ -14,13 +14,13 @@
 | `HYHOJ_AI_GENERATED_DIR` | 后端 | `/opt/LLMOJ/data/ai-generated` | 后端读取 AI 任务结果的目录。必须与本机 `judge.yaml` 中的 `aiGeneratedDirectory` 一致 |
 | `HYHOJ_AI_SAMPLE_INPUTS_DIR` | 后端和评测机 | `/opt/LLMOJ/data/ai-sample-inputs` | 交给 AI 任务的私有样例和输入文件。两个服务必须使用同一个目录 |
 | `HYHOJ_AI_RUNNER_SOCKET` | 后端 | `/opt/LLMOJ/data/judge/ai-runner.sock` | 本机 AI 任务的 socket。必须与本机 `judge.yaml` 中的 `aiRunnerSocket` 一致 |
-| `LLMOJ_AI_EXECUTION` | 后端 | 自动 | AI 任务在哪里运行程序：`local`（本机 AI 任务的 socket）或 `judges`（评测队列，任意协议版本 4 的评测机；见[分布式评测](Distributed-Judging.zh-CN.md#ai)）。未设置时，socket 存在则为 `local`，否则为 `judges`。评测机生成的文件在发布前先下载到后端的 `TMPDIR`（`data/tmp`），每个任务最多 8 GiB |
+| `LLMOJ_AI_EXECUTION` | 后端 | 自动 | AI 任务在哪里运行程序：`local`（本机 AI 任务的 socket）或 `judges`（评测队列，由声明质量策略 2 和回执版本 1 的判题协议 9 评测机运行；见[分布式评测](Distributed-Judging.zh-CN.md#ai)）。未设置时，socket 存在则为 `local`，否则为 `judges`。评测机生成的文件在发布前先下载到后端的 `TMPDIR`（`data/tmp`），每个任务最多 8 GiB |
 | `HYHOJ_ARCHIVE_WORK_DIRECTORY` | 后端 | `/opt/LLMOJ/data/backend-archives` | 压缩包的临时空间，包括检查中的 AI ZIP 附件 |
 | `HYHOJ_AI_PRIVATE_HOSTS` | 后端 | 无 | 在[站点管理中批准的地址](AI.zh-CN.md#账号可以使用哪些地址)之外，为所有账号批准的主机，用逗号或空格分隔，可带端口，例如 `llm.lan, 10.0.0.5:8000, [fd00::5]:8080`。建议使用站点管理：无需重启，并能看到谁在使用哪些地址 |
 
 这些都是绝对的文件系统路径，不是 URL。设置它们不会移动已有数据，也不会修改另一个服务的配置；`HYHOJ_ROOT` 在运行时不会改变它们。
 
-模型和搜索请求由后端发出；本机评测机负责编译和运行生成的程序。只有 `all` 模式有本机 AI 任务：远程评测机会关闭它，`web` 站点则没有。见[分布式评测](Distributed-Judging.zh-CN.md)。
+模型和搜索请求由后端发出；本机评测机负责编译和运行生成的程序。只有 `all` 模式有本机 AI 任务：远程评测机会关闭它，`web` 站点则没有，而是把 AI 运行任务交给远程评测机。见[分布式评测](Distributed-Judging.zh-CN.md)。
 
 ## 目录、密钥与 socket
 
@@ -31,7 +31,7 @@
 | `data/ai` | `libreoj:libreoj`，`0700` | 后端启动时会检查所有者并收紧权限 |
 | `data/ai/master.key` | 后端用户，`0600` | 只有一个链接的 32 字节普通文件；拒绝符号链接。如果已有加密配置但密钥缺失，后端不会启动 |
 | `data/ai/two-factor.key` | 后端用户，`0600` | 规则相同。用于加密[两步验证](Two-Factor-Sign-In.zh-CN.md)的身份验证器密钥，首次需要时创建。如果有用户设置了身份验证器，缺失的密钥永远不会被替换，他们的验证码将无法使用 |
-| `data/ai-generated` | `root:libreoj`，`0750` | 由 AI 任务（root）写入，由后端读取。必须是真实目录，不能是链接 |
+| `data/ai-generated` | 评测机账号和后端的组（`libreoj-judge:libreoj`），`2750` | 由本机 AI 任务写入，它以评测机的无特权账号运行；评测机启动时由 root 沙箱启动器准备该目录。set-group-ID 位让新文件属于后端的组（`aiRunnerGid`），后端因此可以读取。必须是真实目录，不能是链接 |
 | `data/ai-sample-inputs` | `libreoj:libreoj`，`0700` | 由后端写入；AI 任务读取前会检查路径、所有者和大小 |
 | `data/judge/ai-runner.sock` | `root:libreoj`，`0660` | 其所属组为 `judge.yaml` 中的 `aiRunnerGid`。这是本机 socket，不是网络端口 |
 | `backend-archives` 下的 AI 目录 | 后端用户，`0700` | 临时目录，操作结束后删除 |

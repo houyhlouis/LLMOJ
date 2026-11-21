@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Post, Req } from "@nestjs/common";
-import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { Body, Controller, Get, Header, Post, Req } from "@nestjs/common";
+import { ApiBearerAuth, ApiCreatedResponse, ApiOperation, ApiTags } from "@nestjs/swagger";
 
 import { Request } from "express";
 
@@ -13,6 +13,10 @@ import {
   UpdateRegistrationModeRequestDto
 } from "./site-management.dto";
 
+import { DiagnosticBundleRequestDto, DiagnosticBundleResponseDto } from "./diagnostic-bundle.dto";
+import { DiagnosticBundleService } from "./diagnostic-bundle.service";
+
+import { RequestWithId } from "../common/request-id.middleware";
 import { RegistrationSettingsService } from "../settings/registration-settings.service";
 import { AiPolicyService } from "../settings/ai-policy.service";
 import { JudgePolicyService } from "../settings/judge-policy.service";
@@ -35,7 +39,8 @@ export class SiteManagementController {
     private readonly aiEndpoints: AiEndpointPolicyService,
     private readonly sessions: AuthSessionService,
     private readonly testDataRetentionPolicy: TestDataRetentionPolicyService,
-    private readonly testDataRetention: TestDataRetentionService
+    private readonly testDataRetention: TestDataRetentionService,
+    private readonly diagnosticBundles: DiagnosticBundleService
   ) {}
 
   /** Site settings change for everyone at once, so administrators confirm their password first. */
@@ -43,6 +48,18 @@ export class SiteManagementController {
     // Others are refused by the settings services, without being asked for a password.
     if (user?.isAdmin)
       await this.sessions.requireRecentAuthentication(user, (request as RequestWithSession)?.session?.sessionId);
+  }
+
+  @Post("diagnosticBundle")
+  @Header("Cache-Control", "no-store")
+  @ApiOperation({ summary: "Export bounded diagnostic metadata (site administrators only)." })
+  @ApiCreatedResponse({ type: DiagnosticBundleResponseDto })
+  async diagnosticBundle(
+    @CurrentUser() user: UserEntity,
+    @Body() body: DiagnosticBundleRequestDto,
+    @Req() request: RequestWithId
+  ): Promise<DiagnosticBundleResponseDto> {
+    return await this.diagnosticBundles.export(user, body, request.requestId);
   }
 
   @Get("getSettings")

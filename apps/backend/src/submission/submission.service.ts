@@ -234,7 +234,7 @@ export class SubmissionService {
     contestContext?: Pick<
       SubmissionEntity,
       "contestId" | "contestProblemId" | "contestInputFilename" | "contestOutputFilename" | "contestSubtaskAllOrNothing"
-    >
+    > & { admit: (transaction: EntityManager) => Promise<Date> }
   ): Promise<
     [
       fileUploadErrorOrRequest:
@@ -253,6 +253,16 @@ export class SubmissionService {
         submission: SubmissionEntity
       ]
     >("READ COMMITTED", async transactionalEntityManager => {
+      // Check the contest's window before consuming an answer-file upload. The admitted timestamp and
+      // the user/contest locks stay with this transaction even if sealing the upload runs past the deadline.
+      // eslint-disable-next-line @typescript-eslint/no-shadow
+      const submission = new SubmissionEntity();
+      submission.isPublic = contestContext ? false : problem.isPublic;
+      if (contestContext) {
+        const { admit, ...metadata } = contestContext;
+        Object.assign(submission, metadata);
+        submission.submitTime = await admit(transactionalEntityManager);
+      }
       let file: FileEntity = null;
       if (problemTypeService.shouldUploadAnswerFile()) {
         const result = await this.fileService.processUploadRequest(
@@ -265,16 +275,12 @@ export class SubmissionService {
         else return [result, null];
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-shadow
-      const submission = new SubmissionEntity();
-      submission.isPublic = contestContext ? false : problem.isPublic;
-      if (contestContext) Object.assign(submission, contestContext);
       const pair = await problemTypeService.getCodeLanguageAndAnswerSizeFromSubmissionContentAndFile(content, file);
       submission.codeLanguage = pair.language;
       submission.answerSize = pair.answerSize;
       submission.score = null;
       submission.status = SubmissionStatus.Pending;
-      submission.submitTime = new Date();
+      submission.submitTime ??= new Date();
       submission.problemId = problem.id;
       submission.submitterId = submitter.id;
       submission.problemDataVersionId = dataVersion?.id ?? null;
@@ -376,9 +382,13 @@ export class SubmissionService {
     return result;
   }
 
-  async setSubmissionPublic(submission: SubmissionEntity, isPublic: boolean): Promise<void> {
-    submission.isPublic = isPublic;
-    await this.submissionRepository.save(submission);
+  async setSubmissionPublic(submission: SubmissionEntity, isPublic: boolean): Promise<boolean> {
+    // Match only a real transition, including when the controller's visibility snapshot is stale.
+    const { affected } = await this.submissionRepository.update(
+      { id: submission.id, isPublic: !isPublic },
+      { isPublic }
+    );
+    return affected > 0;
   }
 
   async fakeSubmission(submission: SubmissionEntity, actingUserId: number): Promise<boolean> {

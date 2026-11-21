@@ -8,29 +8,46 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const require = createRequire(path.join(root, 'apps/backend/package.json'));
-const mysql = require('mysql2/promise');
+// Each variable names the runner groups whose suites consume that configuration.
 const fixtures = [
-  ['team', 'llmoj_test_team', 'LLMOJ_TEAM_TEST_DB_CONFIG'],
-  ['team_audit', 'llmoj_test_team_audit', 'LLMOJ_TEAM_AUDIT_DB_CONFIG'],
-  ['fake', 'llmoj_test_fake', 'LLMOJ_FAKE_TEST_DB_CONFIG'],
-  ['discussion', 'llmoj_features_discussion', 'HYHOJ_DISCUSSION_TEST_DB_CONFIG'],
-  ['problem', 'llmoj_test_problem', 'HYHOJ_PROBLEM_TEST_DB_CONFIG'],
-  ['submission', 'llmoj_test_submission', 'HYHOJ_SUBMISSION_TEST_DB_CONFIG'],
-  ['schema', 'llmoj_test_schema', 'LLMOJ_SCHEMA_TEST_DB_CONFIG'],
-  ['two_factor', 'llmoj_test_two_factor', 'LLMOJ_TWO_FACTOR_TEST_DB_CONFIG'],
-  ['judge_queue', 'llmoj_test_judge_queue', 'LLMOJ_JUDGE_QUEUE_TEST_DB_CONFIG'],
-  ['data_version', 'llmoj_test_data_version', 'LLMOJ_DATA_VERSION_TEST_DB_CONFIG'],
-  ['ai_budget', 'llmoj_test_ai_budget', 'LLMOJ_AI_BUDGET_TEST_DB_CONFIG'],
-  ['access_matrix', 'llmoj_test_access_matrix', 'LLMOJ_ACCESS_MATRIX_TEST_DB_CONFIG'],
-  ['operations', 'llmoj_test_operations', 'LLMOJ_OPERATIONS_TEST_DB_CONFIG']
+  ['team', 'llmoj_test_team', { LLMOJ_TEAM_TEST_DB_CONFIG: ['backend'] }],
+  ['team_audit', 'llmoj_test_team_audit', { LLMOJ_TEAM_AUDIT_DB_CONFIG: ['backend'] }],
+  ['fake', 'llmoj_test_fake', { LLMOJ_FAKE_TEST_DB_CONFIG: ['backend', 'deploy'] }],
+  ['discussion', 'llmoj_features_discussion', {
+    HYHOJ_DISCUSSION_TEST_DB_CONFIG: ['backend'],
+    HYHOJ_COMMUNITY_SCHEMA_TEST_DB_CONFIG: ['deploy'],
+    LLMOJ_SELF_EVAL_TEST_DB_CONFIG: ['backend']
+  }],
+  ['counts', 'llmoj_test_counts', { HYHOJ_COUNT_TEST_DB_CONFIG: ['backend'] }],
+  ['problem', 'llmoj_test_problem', { HYHOJ_PROBLEM_TEST_DB_CONFIG: ['backend'] }],
+  ['submission', 'llmoj_test_submission', { HYHOJ_SUBMISSION_TEST_DB_CONFIG: ['backend'] }],
+  ['schema', 'llmoj_test_schema', { LLMOJ_SCHEMA_TEST_DB_CONFIG: ['deploy'] }],
+  ['two_factor', 'llmoj_test_two_factor', { LLMOJ_TWO_FACTOR_TEST_DB_CONFIG: ['backend'] }],
+  ['judge_queue', 'llmoj_test_judge_queue', { LLMOJ_JUDGE_QUEUE_TEST_DB_CONFIG: ['backend'] }],
+  ['data_version', 'llmoj_test_data_version', { LLMOJ_DATA_VERSION_TEST_DB_CONFIG: ['backend'] }],
+  ['ai', 'llmoj_test_ai', { HYHOJ_AI_TEST_DB_CONFIG: ['ai'] }],
+  ['ai_budget', 'llmoj_test_ai_budget', { LLMOJ_AI_BUDGET_TEST_DB_CONFIG: ['ai'] }],
+  ['access_matrix', 'llmoj_test_access_matrix', { LLMOJ_ACCESS_MATRIX_TEST_DB_CONFIG: ['backend'] }],
+  ['operations', 'llmoj_test_operations', { LLMOJ_OPERATIONS_TEST_DB_CONFIG: ['ai', 'backend'] }],
+  ['narrow_writes', 'llmoj_test_narrow_writes', { LLMOJ_NARROW_WRITES_TEST_DB_CONFIG: ['backend'] }],
+  ['judge_info_cache', 'llmoj_test_judge_info_cache', { LLMOJ_JUDGE_INFO_CACHE_TEST_DB_CONFIG: ['backend'] }],
+  ['statistics_cache', 'llmoj_test_statistics_cache', { LLMOJ_STATISTICS_CACHE_TEST_DB_CONFIG: ['backend'] }],
+  ['contest_virtual', 'llmoj_test_contest_virtual', { LLMOJ_CONTEST_VIRTUAL_TEST_DB_CONFIG: ['backend'] }],
+  ['diagnostic_bundle', 'llmoj_test_diagnostic_bundle', { LLMOJ_DIAGNOSTIC_BUNDLE_TEST_DB_CONFIG: ['backend'] }]
 ];
+
+export function requiredDatabaseConfigs(groups) {
+  return fixtures.flatMap(([, , variables]) => Object.keys(variables)
+    .filter(name => variables[name].some(group => groups.includes(group)))).sort();
+}
 
 async function main() {
   if (process.env.CI !== 'true' || process.env.GITHUB_ACTIONS !== 'true' ||
       process.env.LLMOJ_CI_DATABASE_SETUP !== '1' || !process.env.RUNNER_TEMP ||
       !process.env.GITHUB_ENV || !process.env.LLMOJ_CI_MARIADB_PASSWORD)
     throw new Error('Use only the explicit disposable GitHub Actions fixture');
+  const require = createRequire(path.join(root, 'apps/backend/package.json'));
+  const mysql = require('mysql2/promise');
   const temporary = fs.realpathSync(process.env.RUNNER_TEMP);
   const directory = fs.mkdtempSync(path.join(temporary, 'llmoj-community-db-'));
   fs.chmodSync(directory, 0o700);
@@ -47,7 +64,7 @@ async function main() {
       if (databases.length || users.length) throw new Error('Test fixture must start empty');
     }
     const environment = [];
-    for (const [name, database, variable] of fixtures) {
+    for (const [name, database, variables] of fixtures) {
       const username = 'qa_' + name;
       const password = crypto.randomBytes(24).toString('hex');
       // All identifiers are fixed above; backslashes keep underscores literal in database grants.
@@ -62,8 +79,7 @@ async function main() {
       fs.writeFileSync(config, JSON.stringify({ services: { database: {
         type: 'mariadb', host: '127.0.0.1', port: 3307, database, username, password, charset: 'utf8mb4'
       } } }) + '\n', { mode: 0o600, flag: 'wx' });
-      environment.push(variable + '=' + config);
-      if (name === 'discussion') environment.push('HYHOJ_COMMUNITY_SCHEMA_TEST_DB_CONFIG=' + config, 'LLMOJ_SELF_EVAL_TEST_DB_CONFIG=' + config);
+      for (const variable of Object.keys(variables)) environment.push(variable + '=' + config);
     }
     // Verify the effective grants rather than trusting account-creation syntax.
     for (let index = 0; index < fixtures.length; index++) {
@@ -111,7 +127,7 @@ async function main() {
   }
 }
 
-main().catch(() => {
+if (import.meta.main) main().catch(() => {
   // Driver errors and connection options can contain credentials.
   process.stderr.write('Disposable CI database setup failed; connection details withheld.\n');
   process.exitCode = 1;

@@ -237,6 +237,7 @@ for (const outcome of ["success", "initialization fails", "cancelled before cont
         }
       },
       "./config": config,
+      "./cancelScope": { currentCancelScope: () => null },
       "./utils": { safelyJoinPath: (a, b) => a + "/" + b, merge: (a, b) => Object.assign({}, a, b) },
       "./rpc": {
         ensureNotCanceled() {

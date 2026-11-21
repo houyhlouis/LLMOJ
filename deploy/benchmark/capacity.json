@@ -1,0 +1,111 @@
+{
+  "description": "Backend requests for SPA page opens. Capacity records the first seven weights. Its remaining 16% named other contests, discussions, users and study lists without recording their individual weights. This reconstruction gives each 4%.",
+  "pages": [
+    {
+      "name": "running contest",
+      "weight": 20,
+      "requests": [{ "route": "contest/detail", "params": { "id": "$runningContest" } }]
+    },
+    {
+      "name": "standings",
+      "weight": 10,
+      "requests": [
+        { "route": "contest/detail", "params": { "id": "$runningContest" } },
+        { "route": "contest/ranklist", "params": { "id": "$runningContest", "page": 1, "data": {} } }
+      ]
+    },
+    {
+      "name": "problem",
+      "weight": 20,
+      "requests": [
+        {
+          "route": "problem/getProblem",
+          "params": {
+            "id": "$problemId",
+            "localizedContentsOfLocale": "en_US",
+            "tagsOfLocale": "en_US",
+            "samples": true,
+            "judgeInfo": true,
+            "judgeInfoToBePreprocessed": true,
+            "statistics": true,
+            "discussionCount": true,
+            "permissionOfCurrentUser": true,
+            "lastSubmissionAndLastAcceptedSubmission": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "submission list",
+      "weight": 12,
+      "requests": [
+        { "route": "submission/querySubmission", "params": { "locale": "en_US", "takeCount": "$submissionsPerPage" } }
+      ]
+    },
+    {
+      "name": "submission",
+      "weight": 8,
+      "requests": [
+        {
+          "route": "submission/getSubmissionDetail",
+          "params": { "submissionId": "$submissionIdString", "locale": "en_US" }
+        },
+        {
+          "route": "hack/eligibility",
+          "when": "signedInAcceptedSubmission",
+          "params": { "submissionId": "$submissionId" }
+        }
+      ]
+    },
+    {
+      "name": "problem set",
+      "weight": 8,
+      "requests": [
+        {
+          "route": "problem/queryProblemSet",
+          "params": { "locale": "en_US", "skipCount": "$problemSkipCount", "takeCount": "$problemsPerPage" }
+        }
+      ]
+    },
+    {
+      "name": "home",
+      "weight": 6,
+      "requests": [{ "route": "homepage/getHomepage", "method": "GET", "params": { "locale": "en_US" } }]
+    },
+    {
+      "name": "other contest",
+      "weight": 4,
+      "requests": [{ "route": "contest/detail", "params": { "id": "$endedContest" } }]
+    },
+    {
+      "name": "discussion",
+      "weight": 4,
+      "requests": [
+        {
+          "route": "discussion/getDiscussionAndReplies",
+          "params": {
+            "locale": "en_US",
+            "queryRepliesType": "HeadTail",
+            "discussionId": "$discussionId",
+            "getDiscussion": true,
+            "headTakeCount": "$discussionHead",
+            "tailTakeCount": "$discussionTail"
+          }
+        }
+      ]
+    },
+    {
+      "name": "user",
+      "weight": 4,
+      "requests": [
+        { "route": "user/getUserDetail", "params": { "userId": "$userId", "timezone": "UTC", "now": "$now" } }
+      ]
+    },
+    {
+      "name": "study list",
+      "weight": 4,
+      "ownerOnly": true,
+      "requests": [{ "route": "studyList/get", "params": { "id": "$studyListId" } }]
+    }
+  ]
+}

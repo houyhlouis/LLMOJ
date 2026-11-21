@@ -380,7 +380,10 @@ export class SubmissionJudgingService implements JudgeTaskService<SubmissionProg
     const oldSubmission = { ...submission };
 
     const submissionDetail = await this.getSubmissionDetail(submission);
-    submissionDetail.result = progress;
+    submissionDetail.result = {
+      ...progress,
+      completion: { judgedAt: new Date().toISOString(), judgeMachineId: completion?.judgeClientId ?? null }
+    };
 
     submission.taskId = null;
     submission.status = progress.status;
@@ -581,7 +584,7 @@ export class SubmissionJudgingService implements JudgeTaskService<SubmissionProg
         totalOccupiedTime: 0,
         systemMessage: message
       };
-      submissionDetail.result = result;
+      submissionDetail.result = { ...result, completion: { judgedAt: new Date().toISOString(), judgeMachineId: null } };
       submission.taskId = null;
       submission.status = SubmissionStatus.SystemError;
       submission.score = 0;

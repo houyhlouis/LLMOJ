@@ -24,12 +24,17 @@ const { DataSource } = require("typeorm");
 const { StatisticsOutboxEntity } = require("../submission/statistics-outbox.entity.ts");
 const { StatisticsOutboxService } = require("../submission/statistics-outbox.service.ts");
 const { ContestScoreRevisionService } = require("../submission/contest-score-revision.service.ts");
+const { ContestVirtualParticipationEntity } = require("./contest-virtual-participation.entity.ts");
+const { ContestEntity } = require("./contest.entity.ts");
+const { UserEntity } = require("../user/user.entity.ts");
+const { UserAuthEntity } = require("../auth/user-auth.entity.ts");
 
 const configPath = process.env.LLMOJ_OPERATIONS_TEST_DB_CONFIG;
 
 test("contest score revisions follow commits", { skip: !configPath && "needs LLMOJ_OPERATIONS_TEST_DB_CONFIG" }, async t => {
   const { database } = JSON.parse(fs.readFileSync(configPath, "utf8")).services;
-  const ds = new DataSource({ ...database, entities: [StatisticsOutboxEntity], synchronize: true, dropSchema: true, logging: false });
+  const entities = [StatisticsOutboxEntity, ContestVirtualParticipationEntity, ContestEntity, UserEntity, UserAuthEntity];
+  const ds = new DataSource({ ...database, entities, synchronize: true, dropSchema: true, logging: false });
   await ds.initialize();
   t.after(() => ds.destroy());
 
@@ -42,7 +47,9 @@ test("contest score revisions follow commits", { skip: !configPath && "needs LLM
   revisions.onModuleInit();
   const outbox = Object.assign(Object.create(StatisticsOutboxService.prototype), { connection: ds, contestScores: revisions });
   const settle = () => new Promise(resolve => setTimeout(resolve, 20));
-  const submission = (contestId, status) => ({ problemId: 1, submitterId: 2, contestId, status });
+  const start = new Date("2026-01-01T12:00:00Z");
+  const end = new Date(+start + 3600000);
+  const submission = (contestId, status, submitTime = start) => ({ problemId: 1, submitterId: 2, contestId, status, submitTime });
 
   assert.equal(await revisions.revision(29), "0");
   await ds.transaction(async manager => {
@@ -78,4 +85,31 @@ test("contest score revisions follow commits", { skip: !configPath && "needs LLM
   assert.equal(ids.length, 2);
   await settle();
   assert.deepEqual([...counters.keys()].sort(), ["contest-score-revision:12", "contest-score-revision:29"]);
+
+  // A real virtual submission, including its subsequent moderation/rejudge, advances only the virtual revision.
+  await ds.manager.insert(UserEntity, {
+    id: 2, username: "runner", email: "runner@example.test", nickname: "", bio: "", avatarInfo: "",
+    isAdmin: false, acceptedProblemCount: 0, submissionCount: 0, rating: 0, publicEmail: false
+  });
+  await ds.manager.insert(ContestEntity, {
+    id: 29, title: "race", subtitle: "", description: "", rule: "ioi", startTime: start, endTime: end,
+    ownerId: 1, adminIds: [], isPublic: true, hideStatistics: false, languages: [], createdAt: start
+  });
+  await ds.manager.insert(ContestVirtualParticipationEntity, {
+    contestId: 29, userId: 2, startTime: end, endTime: new Date(+end + 3600000), createdAt: end
+  });
+  await ds.transaction(async manager => {
+    await outbox.record(manager, null, submission(29, "Pending", end));
+    await outbox.record(manager, submission(29, "Pending", end), submission(29, "Fake", end));
+    assert.equal(await revisions.revision(29, true), "0");
+  });
+  await settle();
+  assert.equal(await revisions.revision(29), "1");
+  assert.equal(await revisions.revision(29, true), "1");
+  await assert.rejects(ds.transaction(async manager => {
+    await outbox.record(manager, submission(29, "Fake", end), submission(29, "Pending", end));
+    throw new Error("rollback virtual");
+  }), /rollback virtual/);
+  await settle();
+  assert.equal(await revisions.revision(29, true), "1");
 });

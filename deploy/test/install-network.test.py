@@ -3,12 +3,14 @@
 import argparse
 import base64
 import contextlib
+import grp
 import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import importlib.util
 import io
 import os
 from pathlib import Path
+import pwd
 import shutil
 import socket
 import subprocess
@@ -28,6 +30,12 @@ spec.loader.exec_module(support)
 @unittest.skipUnless(os.geteuid() == 0 and Path("/usr/sbin/nginx").exists(), "root and nginx required")
 class LoopbackConfiguration(unittest.TestCase):
     def setUp(self):
+        for name in ("libreoj", "mysql", "redis", "www-data"):
+            try:
+                pwd.getpwnam(name)
+                grp.getgrnam(name)
+            except KeyError:
+                self.skipTest(f"nginx configuration fixture needs the {name} service user and group")
         self.temporary = tempfile.TemporaryDirectory(prefix="libreoj-network-test-", dir="/var/tmp")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)

@@ -8,6 +8,6 @@
 
 The local English entry is `sudo bash deploy/install.sh`. All mode prompts for execution slots when first creating `judge.yaml` without `--judge-slots`, using `min(effective CPUs-1, effective RAM MiB//256, 511)` for both default and maximum, with no extra memory reservation. A local judge needs at least 2 effective CPUs and 256 MiB RAM; otherwise use `--role web`. Use the maintained [resize guide](../wiki/Judge-Configuration.md) for existing installations rather than changing installer metadata.
 
-数据库初始化修复以 mysql 身份进行，并校验系统表；AppArmor 故障的隔离复现及安全重试见安装教程。真实 Ubuntu 24.04 部署与部分业务已验证；Ubuntu 26.04 的完整全新安装及真实多机仍未验收。新增容量/数据库/resize 功能属于待提交修订，部署前确认所用源码包含匹配文件。
+数据库初始化修复以 mysql 身份进行，并校验系统表；AppArmor 故障的隔离复现及安全重试见安装教程。实际测试过的系统与环境（含日期和版本）见[已测试的平台](../wiki/Installation.zh-CN.md#已测试的平台)。What has been tested, where and when: [Tested platforms](../wiki/Installation.md#tested-platforms).
 
 See [distributed judging](../wiki/Distributed-Judging.md), [remote judges](../wiki/Remote-Judge.md), [Docker sources](../wiki/Docker-Sources.md) and [AI execution](../wiki/AI.md). Services retain `libreoj-*` names; new installations default to `/opt/LLMOJ`; existing/custom paths remain available through an explicit prefix. Configuration generators write files without starting services, while the maintained resize tool deliberately manages the judge during an approved maintenance window.

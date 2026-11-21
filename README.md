@@ -11,7 +11,7 @@
 ### 题库、比赛与社区
 
 - 中英文界面，浏览器内代码编辑器；题库管理、题单、讨论和提交记录。
-- [比赛赛制](wiki/Contest-Rules.zh-CN.md)：NOI / OI、IOI、ICPC 和严格 IOI（每个子任务取历次提交的最高分），支持排行榜和重测。
+- [比赛赛制](wiki/Contest-Rules.zh-CN.md)：NOI / OI、IOI、ICPC 和严格 IOI（每个子任务取历次提交的最高分），支持排行榜和重测。比赛结束后，没赶上的人可以[虚拟参赛](wiki/Contest-Rules.zh-CN.md#虚拟参赛)；比赛题目页会在浏览器中保存代码草稿。
 - 用户、用户组和细粒度权限：题目与讨论可单独授权，比赛和管理功能可分别授予。
 - [私人团队](wiki/Teams.zh-CN.md)：在个人主页的“我的团队”中通过团队编号加入，不公开团队列表；团队内有分组与权限、题库、比赛、题单作业、讨论和共享文件（共 10 GiB，大文件自动分块上传）。
 - [题解](wiki/Solutions.zh-CN.md)：在题目页内阅读和撰写，也可由 AI 生成。
@@ -34,10 +34,10 @@
 - **出处查找：** 结合搜索结果和语义比对，帮助找到题目的原始出处。
 - **测试数据：** 传统题先用独立的参考算法对拍至少 64 组小数据，再用另一份正解交叉检验全部数据，并要求预先准备的错误或低效程序确实被数据卡掉，之后才安装数据，同时保存验证报告。交互题和通信题通过模拟交互协议检验。
 - **任务管理：** 查看进度，取消或重试；写入题目前会重新检查权限和题目是否已被修改。
-- **自备服务：** 用户填写自己的模型与搜索服务（Tavily / MCP），API Key 加密保存。内网和本机地址只供站点管理员使用，或由服务器管理员通过 `HYHOJ_AI_PRIVATE_HOSTS` 开放。
+- **自备服务：** 用户填写自己的模型与搜索服务（Tavily / MCP），API Key 加密保存。站点管理员在**站点管理** → **AI 地址**中批准账号可用的地址，也可以只允许已批准的地址；内网和本机地址需要其批准（或在服务器上用 `HYHOJ_AI_PRIVATE_HOSTS` 开放）。
 - **站点限制：** 管理员可以暂停全站的 AI，并限制每个账号 24 小时内的 token 数和请求数、每个任务的请求数，以及同时进行的 AI 请求数。每个请求在发出前都会经过检查。
 
-AI 生成的内容需要人工审核。验证标程和生成测试数据需要在网页服务器上运行本机沙箱，详见 [AI 文档](wiki/AI.zh-CN.md)。
+AI 生成的内容需要人工审核。模型和搜索请求总是由后端发出。验证标程和生成测试数据时，AI 写出的程序（标程、生成器、校验器、检查器）在沙箱中运行：完整安装（`all`）由本机评测机通过本机 AI 执行器运行；仅网站安装（`web`）则交给判题协议 9 及以上的远程评测机。详见 [AI 文档](wiki/AI.zh-CN.md)和[分布式评测](wiki/Distributed-Judging.zh-CN.md#ai)。
 
 ## 安装
 
@@ -45,7 +45,7 @@ AI 生成的内容需要人工审核。验证标程和生成测试数据需要�
 
 | 项目 | 要求 |
 | --- | --- |
-| 系统 | Ubuntu 24.04 / 26.04，amd64（已验证）或 arm64（见 [ARM64 服务器](wiki/ARM64.zh-CN.md)），虚拟机或物理机 |
+| 系统 | Ubuntu 24.04 / 26.04，amd64 或 arm64（见 [ARM64 服务器](wiki/ARM64.zh-CN.md)），虚拟机或物理机；实际测试过的组合见[已测试的平台](wiki/Installation.zh-CN.md#已测试的平台) |
 | 处理器与内存 | 至少 2 个逻辑 CPU；每个评测执行槽需 256 MiB 内存；编译构建建议 8 GiB 内存 |
 | 磁盘 | 完整安装至少 30 GiB 可用空间（建议 40 GiB），仅网页模式至少 10 GiB |
 | 其他 | systemd 254 以上、cgroup v2；能访问软件源、GitHub 和构建依赖的下载源 |
@@ -86,10 +86,10 @@ curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/upgrade.zh-CN
 
 | 模式 | 内容 |
 | --- | --- |
-| `--role all`（默认） | 网站、存储、本机评测和 AI 执行环境；可再接入远程评测机分担评测 |
-| `--role web` | 只有网站和存储，不构建 rootfs；提交需由远程评测机评测 |
+| `--role all`（默认） | 网站、存储、本机评测和本机 AI 执行器；可再接入远程评测机分担评测 |
+| `--role web` | 只有网站和存储，不构建 rootfs；提交由远程评测机评测，AI 任务的程序也在远程评测机上运行 |
 
-需要 AI 验证标程和生成测试数据时，网页服务器请使用 `all` 模式；远程评测机不能代替本机的 AI 执行环境。架构图、评测机注册和部署步骤见[分布式评测](wiki/Distributed-Judging.zh-CN.md)。
+两种模式都能用 AI 生成测试数据和验证标程。`web` 站点需要至少一台判题协议 9、声明质量策略 2 和回执版本 1 的远程评测机（当前版本的评测机都满足），并有两个或更多任务线程；旧版评测机仍会评测提交，但不会收到 AI 运行任务。`all` 站点可用 `LLMOJ_AI_EXECUTION` 选择在哪里运行。架构图、评测机注册和部署步骤见[分布式评测](wiki/Distributed-Judging.zh-CN.md)。
 
 ## 文档
 
@@ -98,9 +98,10 @@ curl -fsSL https://raw.githubusercontent.com/houyhlouis/LLMOJ/main/upgrade.zh-CN
 | [安装教程](wiki/Installation.zh-CN.md) · [Docker 源](wiki/Docker-Sources.zh-CN.md) | 安装参数、镜像源、服务管理与重试 |
 | [分布式评测](wiki/Distributed-Judging.zh-CN.md) · [远程评测机](wiki/Remote-Judge.zh-CN.md) · [评测机配置](wiki/Judge-Configuration.zh-CN.md) | 架构、评测机接入、沙箱与容量 |
 | [注册审核](wiki/Registration-Approval.zh-CN.md) · [两步验证](wiki/Two-Factor-Sign-In.zh-CN.md) · [升级](wiki/Upgrade.zh-CN.md) | 注册设置、登录安全、升级与回滚 |
-| [比赛赛制](wiki/Contest-Rules.zh-CN.md) · [Hack](wiki/Hacks.zh-CN.md) · [自测](wiki/Self-Evaluation.zh-CN.md) | 计分规则、Hack 与自测 |
+| [比赛赛制](wiki/Contest-Rules.zh-CN.md) · [Hack](wiki/Hacks.zh-CN.md) · [自测](wiki/Self-Evaluation.zh-CN.md) | 计分规则、Hack、自测、代码草稿与虚拟参赛 |
+| [出题指南](wiki/Problem-Authoring.zh-CN.md) · [权限](wiki/Permissions.zh-CN.md) · [题单与讨论](wiki/Study-Lists-and-Discussions.zh-CN.md) | 各类题目的出题方法、谁可以做什么、题单与讨论管理 |
 | [AI 功能](wiki/AI.zh-CN.md) · [HTTPS](wiki/HTTPS.zh-CN.md) | 模型配置、执行环境、加密访问 |
-| [开发说明](README-DEVELOPMENT.zh-CN.md) · [源码包](deploy/SOURCE-PACKAGE.zh-CN.md) | 构建、测试与源码发布范围 |
+| [开发说明](README-DEVELOPMENT.zh-CN.md) · [本地开发](wiki/Development.zh-CN.md) · [API](wiki/API.zh-CN.md) · [源码包](deploy/SOURCE-PACKAGE.zh-CN.md) | 构建、测试、一次性的本地环境、使用 API 与源码发布范围 |
 
 完整文档见 [中文 Wiki](wiki/Home.md) / [English Wiki](wiki/Home.en.md)。
 

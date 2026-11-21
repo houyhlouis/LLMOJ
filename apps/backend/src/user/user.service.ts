@@ -190,28 +190,28 @@ export class UserService {
   ): Promise<UpdateUserProfileResponseError> {
     const changingUsername = username != null;
     const changingEmail = email != null && !this.configService.config.preference.security.requireEmailVerification;
+    const profile: Partial<UserEntity> = { publicEmail, avatarInfo, nickname, bio };
+    if (changingUsername) profile.username = username;
+    if (changingEmail) profile.email = email;
 
     try {
-      if (changingUsername) user.username = username;
-      if (changingEmail) user.email = email;
-
-      user.publicEmail = publicEmail;
-      user.avatarInfo = avatarInfo;
-      user.nickname = nickname;
-      user.bio = bio;
-
-      const userInformation = await this.findUserInformationByUserId(user.id);
-      userInformation.organization = information.organization;
-      userInformation.location = information.location;
-      userInformation.url = information.url;
-      userInformation.telegram = information.telegram;
-      userInformation.qq = information.qq;
-      userInformation.github = information.github;
-
       await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
-        await transactionalEntityManager.save(userInformation);
-        await transactionalEntityManager.save(user);
+        await transactionalEntityManager.update(
+          UserInformationEntity,
+          { userId: user.id },
+          {
+            organization: information.organization,
+            location: information.location,
+            url: information.url,
+            telegram: information.telegram,
+            qq: information.qq,
+            github: information.github
+          }
+        );
+        // The identity may predate a demotion, a rating update or a judge result. Only write profile fields.
+        await transactionalEntityManager.update(UserEntity, { id: user.id }, profile);
       });
+      Object.assign(user, profile);
     } catch (e) {
       if (changingUsername && !(await this.checkUsernameAvailability(username)))
         return UpdateUserProfileResponseError.DUPLICATE_USERNAME;
@@ -246,8 +246,8 @@ export class UserService {
     }
 
     try {
+      await this.userRepository.update({ id: user.id }, { email });
       user.email = email;
-      await this.userRepository.save(user);
     } catch (e) {
       if (!(await this.checkEmailAvailability(email))) return UpdateUserSelfEmailResponseError.DUPLICATE_EMAIL;
       throw e;

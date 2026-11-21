@@ -76,4 +76,4 @@ sudo env BUILDX_BUILDER=default ROOTFS_ARCHITECTURE=arm64 bash deploy/sandbox/bu
 
 ## 测试情况
 
-arm64 支持在 arm64 版 Ubuntu 26.04 上测试过：虚拟机使用模拟的 Neoverse-N1 处理器（QEMU，比真实处理器慢很多倍），测试了用安装脚本完整安装、自检、每种语言的提交评测、升级（以及失败尝试的回滚）、用 `verify-backup.sh` 检查过的备份和 `doctor.sh`。还测试了 arm64 评测机与 amd64 评测机一起为 amd64 网站评测。CI 会在 GitHub 的 arm64 运行器上构建并测试沙箱和 arm64 镜像。尚未在 arm64 物理服务器上测试。
+arm64 支持在 arm64 版 Ubuntu 26.04 上测试过：虚拟机使用模拟的 Neoverse-N1 处理器（QEMU，比真实处理器慢很多倍），测试了用安装脚本完整安装、自检、每种语言的提交评测、升级（以及失败尝试的回滚）、用 `verify-backup.sh` 检查过的备份和 `doctor.sh`。还测试了 arm64 评测机与 amd64 评测机一起为 amd64 网站评测。CI 会在 GitHub 的 arm64 运行器上构建并测试沙箱和 arm64 镜像。尚未在 arm64 物理服务器上测试。[已测试的平台](Installation.zh-CN.md#已测试的平台)把这次测试与其他测试列在一起。

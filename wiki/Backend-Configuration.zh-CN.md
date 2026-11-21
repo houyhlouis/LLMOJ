@@ -27,7 +27,7 @@
 | `server.hostname` | `127.0.0.1` | 后端监听的 IP 地址（必须是地址，不能是主机名）。安装后保持为 `127.0.0.1`，由 Nginx 对外提供服务 |
 | `server.port` | `2002` | 后端监听的端口。修改时需同时修改 Nginx 和本机评测机的 `serverUrl` |
 | `server.trustProxy` | `["loopback"]` | 可信代理列表，可以是地址、网段或 `loopback` 等名称。它决定后端看到的客户端 IP 和协议，限流依赖于此。只列出实际使用的代理 |
-| `server.clusters` | `null` | **可选。** 后端工作进程数：省略或 `null` 为单进程，`0` 为每个 CPU 一个。进程越多，占用的内存和监控端口越多。它与评测能力无关 |
+| `server.clusters` | `null` | **可选。** 后端工作进程数：省略或 `null` 为单进程，`0` 为每个 CPU 一个。进程越多，占用的内存和监控端口越多。它与评测能力无关。意外退出的工作进程会在同一位置被替换，等待时间从 250 毫秒起每次翻倍，最多 4 秒（工作进程运行满一分钟后重新计算）。一分钟内失败 9 次时，主进程会停止工作进程并以错误退出，由 systemd 重启后端。安装和升级工具使用单进程 |
 
 ## `metrics`：Prometheus 监控指标
 
@@ -36,7 +36,7 @@
 | 设置 | 示例 | 含义 |
 | --- | --- | --- |
 | `metrics.hostname` | `127.0.0.1` | 提供监控指标的 IP 地址。请使用 `127.0.0.1` 或受保护的网络 |
-| `metrics.basePort` | `2020` | 主进程的端口；工作进程使用该端口加上各自的编号，因此请保留这一段端口 |
+| `metrics.basePort` | `2020` | 主进程的端口；工作进程使用该端口加上各自的位置编号（1、2……），替换的工作进程沿用该编号，因此请保留这一段端口 |
 | `metrics.allowedIps` | `[]` | **可选。** 允许读取指标的 IP 地址，与连接地址精确比较（不支持网段，也不看代理头）。为空或省略时允许所有人。安装器写入 `[127.0.0.1]` |
 
 ## `services`：数据库、文件存储、Redis 与邮件
@@ -136,7 +136,7 @@ LLMOJ 不会检查邮件能否真正发出。开启邮箱验证之前，请先�
 | `preference.security.allowOwnerManageProblemPermission` | `false` | 题目所有者可以修改谁能访问该题（公开题目还需开启上一项） |
 | `preference.security.allowOwnerDeleteProblem` | `true` | 题目所有者可以删除该题（公开题目还需允许编辑公开题目） |
 | `preference.security.discussionDefaultPublic` | `true` | 新讨论默认公开 |
-| `preference.security.discussionReplyDefaultPublic` | `true` | 新回复默认公开 |
+| `preference.security.discussionReplyDefaultPublic` | `true` | 新回复默认公开。设为 `false` 时，新回复在被批准之前只有作者和管理者能看到；团队中的回复由团队的讨论管理者批准（见[团队](Teams.zh-CN.md)）。 |
 | `preference.security.allowEveryoneCreateDiscussion` | `true` | 已登录用户可以发起讨论，除非权限规则另有规定 |
 
 以 “allow” 开头的设置只是默认值：**权限管理** 页面中明确的权限规则仍然优先。不要在这里设置 `captchaEnabled` 或 `turnstileSiteKey`：后端会根据 `security.captcha` 自动填写。
@@ -200,7 +200,7 @@ LLMOJ 不会检查邮件能否真正发出。开启邮箱验证之前，请先�
 | `resourceLimit.problemSamplesToRun` | `10` | 评测提交时在测试点之前运行的样例数；`0` 表示不运行 |
 | `resourceLimit.problemTestcases` | `1000` | 每道题的测试点数（至少 1） |
 | `resourceLimit.problemTimeLimit` | `2000` | 题目可设置的最大时间限制（毫秒） |
-| `resourceLimit.problemMemoryLimit` | `512` | 题目可设置的最大内存限制（MiB） |
+| `resourceLimit.problemMemoryLimit` | `512` | 题目可设置的最大内存限制（MiB）。新题目和更改类型的题目，初始内存限制为 512 MiB 与此值中较小者（时间限制为 1 秒与 `problemTimeLimit` 中较小者） |
 | `resourceLimit.submissionFileSize` | `10485760`（10 MiB） | 提交文件的最大大小（字节）。Nginx、前面的代理或题目类型可能允许得更少 |
 
 在合理的地方可以填 `0`，它表示“没有”，而不是“不限制”。有权忽略限制的用户可以超出其中部分限制。AI 导入和生成有各自的限制，这些设置不会改变它们。
@@ -241,6 +241,25 @@ LLMOJ 不会检查邮件能否真正发出。开启邮箱验证之前，请先�
 | `eventReport.telegramApiRoot` | `null` | **可选。** 非默认的 Telegram API 地址 |
 | `eventReport.sentTo` | `@example` | **可选。** 聊天 ID，或机器人可以发消息的频道 |
 | `eventReport.proxyUrl` | `null` | **可选。** 仅用于 Telegram 的代理。包含密码时属于密钥 |
+
+### 报告的内容
+
+请求因意外的服务器错误失败时（用户看到 `INTERNAL_ERROR` 和请求 ID），后端向 `sentTo` 发送一条简短消息，并附上 `Event_<事件编号>.json`。两者只包含：
+
+| 字段 | 内容 |
+| --- | --- |
+| `eventId`、`requestId` | 事件编号，以及用户看到的请求 ID |
+| `method`、`route` | HTTP 方法和匹配到的路由，例如 `/api/submission/setSubmissionPublic`（没有匹配时为 `[unmatched route]`） |
+| `queryKeys` | 查询参数的名称，不含参数值 |
+| `userId` | 已登录用户的数字 ID |
+| `errorClass` | 异常的类名 |
+| `errorMessage`、`message` | 异常信息，其中请求携带的所有值都已删除。请求中有密码、验证码、令牌、密钥、源代码或其他私密字段时显示为 `[REDACTED]`；AI 请求只显示固定文字。 |
+
+报告中不会出现请求体、请求头的值、Cookie、查询参数的值、调用栈、IP 地址、用户名或完整的异常对象。完整的异常信息和调用栈保留在服务器上后端自己的日志里，对应同一个请求 ID（请求中的值已删除）：按报告中的 ID 搜索日志即可。
+
+旧版本会把请求体附在报告中，因此有人登录、重置密码、确认两步验证码或保存 AI 密钥时出错，这些值可能已发到聊天中。如果在本版本之前使用过 Telegram 报告，建议清除该聊天的历史记录。
+
+报告尽力发送，绝不会使网站停止。报告逐条发送，每条最多 10 秒。Telegram 很慢、无法连接、限流或拒绝令牌时，最多 64 条报告等待发送（再有新报告时丢弃最早的一条），发送失败的报告不会重发，失败后暂停 1 秒再发送，持续失败时每次翻倍，最多 30 秒。后端日志会记录发送失败和被丢弃的报告数量，但不记录其内容。
 
 ## `vendor`：IP 地址归属地
 

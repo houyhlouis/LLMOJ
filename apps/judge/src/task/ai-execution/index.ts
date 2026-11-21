@@ -20,7 +20,7 @@ export interface AiExecutionExtraInfo {
   request: Request;
   // The stored files the request's sample files are, by name
   sampleFiles?: { name: string; uuid: string }[];
-  // A replay's kept files (judge protocol version 8): where to download each, signed for this task, and its content
+  // Each replay file's task-signed download URL, expected size and content hash
   transfers?: { name: string; url: string; size: number; sha256: string }[];
 }
 

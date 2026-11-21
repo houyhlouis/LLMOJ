@@ -29,7 +29,7 @@ const { ProblemService } = require('../problem/problem.service.ts');
 const { bareProblemServices } = require("../problem/problem-test-services.cjs");
 
 test('deleted submissions keep owner counts atomic (real MariaDB)',
-  { skip: !process.env.HYHOJ_SUBMISSION_TEST_DB_CONFIG, timeout: 60000 }, async t => {
+  { skip: !process.env.HYHOJ_SUBMISSION_TEST_DB_CONFIG && "needs HYHOJ_SUBMISSION_TEST_DB_CONFIG", timeout: 60000 }, async t => {
   const cfg = require('js-yaml').load(fs.readFileSync(process.env.HYHOJ_SUBMISSION_TEST_DB_CONFIG,'utf8')).services.database;
   const prefix = 'qa_submission_finalfix_' + crypto.randomBytes(8).toString('hex') + '_';
   const int = { type: Number };

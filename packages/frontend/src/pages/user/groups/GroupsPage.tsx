@@ -102,7 +102,7 @@ let GroupItem: React.FC<GroupItemProps> = props => {
       return;
     }
 
-    if (!isValidGroupName(name)) return toast.error(_(".invalid_group_name"));
+    if (!isValidGroupName(renameInputValue)) return toast.error(_(".invalid_group_name"));
 
     if (pending) return;
     setPending(true);

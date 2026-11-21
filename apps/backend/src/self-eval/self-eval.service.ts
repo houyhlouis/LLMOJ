@@ -80,6 +80,7 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
     if (!Number.isSafeInteger(request.contestId) || request.contestId < 1)
       throw new BadRequestException("Self evaluation is available only in enabled NOI contests");
     const access = await this.contestAccess.get(user, request.contestId, true);
+    if (access.virtualRun) throw new ForbiddenException("Self Eval is unavailable during virtual participation");
     const options = access.contest.ruleOptions || {};
     if (access.contest.rule !== "noi" || options.selfEvalEnabled !== true)
       throw new BadRequestException("Self evaluation is available only in enabled NOI contests");
@@ -504,7 +505,8 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
       if (request[key] != null && (!Number.isSafeInteger(request[key]) || request[key] < 1))
         throw new BadRequestException("A valid filter ID is required");
     if (!request.contestId) throw new BadRequestException("Self evaluation is available only in enabled NOI contests");
-    const { contest } = await this.contestAccess.get(user, request.contestId);
+    const { contest, virtualRun } = await this.contestAccess.get(user, request.contestId);
+    if (virtualRun) throw new ForbiddenException("Self Eval is unavailable during virtual participation");
     if (contest.rule !== "noi" || contest.ruleOptions?.selfEvalEnabled !== true)
       throw new BadRequestException("Self evaluation is available only in enabled NOI contests");
     const page = request.page ?? 1;

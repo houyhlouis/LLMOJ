@@ -41,6 +41,7 @@ import { EmojiRenderer } from "@/components/EmojiRenderer";
 import { detailPreviewCloseMessage, detailPreviewFocusMessage, embeddedDetailMode } from "@/utils/embeddedDetail";
 import { actsAsButton, installKeyboardMenus, keyboardMenu } from "@/utils/keyboard";
 import { announce, initAnnouncer } from "@/utils/announce";
+import { removeAllDrafts as removeAllContestDrafts } from "@/utils/contestDrafts";
 
 export type NavButtonName =
   | "home"
@@ -177,6 +178,8 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
     } else {
       appState.token = null;
       appState.logout = true;
+      // What this browser kept for the account goes with the session (shared computers)
+      removeAllContestDrafts();
       location.reload();
     }
   }

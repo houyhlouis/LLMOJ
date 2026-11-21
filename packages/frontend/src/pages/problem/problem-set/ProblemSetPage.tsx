@@ -203,7 +203,8 @@ let ProblemSetPage: React.FC<ProblemSetPageProps> = props => {
   }
 
   function onAddFilterTag(tagId: number) {
-    if (props.searchQuery.tagIds.includes(tagId) && props.searchQuery.tagIds.length < 20) return;
+    // The server accepts at most 20 distinct tags: adding one already chosen, or a 21st, would only fail there
+    if (props.searchQuery.tagIds.includes(tagId) || props.searchQuery.tagIds.length >= 20) return;
     redirectWithFilter({
       tagIds: props.searchQuery.tagIds.concat(tagId).sort()
     });

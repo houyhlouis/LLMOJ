@@ -7,7 +7,7 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const yaml = require("../apps/backend/node_modules/js-yaml");
 test("Fake SQL migration preserves enum positions, is repeatable and rejects unknown definitions", {
-  skip: !process.env.LLMOJ_FAKE_TEST_DB_CONFIG, timeout: 60000
+  skip: !process.env.LLMOJ_FAKE_TEST_DB_CONFIG && "needs LLMOJ_FAKE_TEST_DB_CONFIG", timeout: 60000
 }, () => {
   const cfg = yaml.load(fs.readFileSync(process.env.LLMOJ_FAKE_TEST_DB_CONFIG, "utf8")).services.database;
   assert.match(cfg.database, /(?:^|_)fake(?:_|$)/i, "Use an explicitly named Fake isolation database");

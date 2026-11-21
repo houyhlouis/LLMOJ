@@ -18,7 +18,7 @@ jobs:
   code:
     name: Code
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     services:
       mariadb:
         image: mariadb:10.11
@@ -43,14 +43,33 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
-      - name: Prepare disposable community test databases
+      - name: Check extracted source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_check_dir="$(mktemp -d "$RUNNER_TEMP/llmoj-source-check.XXXXXX")"
+          source_check_store="$(pnpm store path)"
+          python3 -B deploy/prepare-github.py --archive "$source_check_dir/source.tar.gz"
+          tar -xzf "$source_check_dir/source.tar.gz" -C "$source_check_dir"
+          cd "$source_check_dir/LibreOJ"
+          pnpm install --frozen-lockfile --offline --store-dir "$source_check_store"
+          # Legacy bootstrap types require a Git commit in the extracted tree.
+          git init -q -b main
+          git add -A
+          git -c user.name=source-check -c user.email=source-check@localhost commit -qm "Source archive"
+          # Judge type-checking consumes simple-sandbox's generated declarations.
+          pnpm --filter simple-sandbox build
+          pnpm check-types
+          pnpm lint
+      - name: Prepare disposable databases and deployment test prerequisites
         env:
           LLMOJ_CI_DATABASE_SETUP: '1'
           LLMOJ_CI_MARIADB_PASSWORD: llmoj-ci-disposable-root
         run: |
           sudo groupadd --force libreoj
+          id -u libreoj >/dev/null 2>&1 || sudo useradd --system --gid libreoj --no-create-home --shell /usr/sbin/nologin libreoj
           sudo apt-get update
-          sudo apt-get install --yes mariadb-client redis-server
+          sudo apt-get install --yes mariadb-client mariadb-server nginx python3-cryptography python3-yaml redis-server
           node deploy/test/setup-community-ci.mjs
       # The suites are listed in deploy/test/run-tests.mjs, which `pnpm test` runs locally
       - name: Run test-data generation regressions
@@ -59,7 +78,10 @@ jobs:
         run: node deploy/test/run-tests.mjs --ci judge
       - name: Run community and moderation regressions
         timeout-minutes: 15
-        run: node deploy/test/run-tests.mjs --ci backend frontend deploy
+        run: node deploy/test/run-tests.mjs --ci backend frontend
+      - name: Run deployment regressions and root-owned fixtures
+        timeout-minutes: 20
+        run: node deploy/test/run-tests.mjs --ci deploy
       - name: Check Wiki export and navigation
         run: node deploy/test/run-tests.mjs --ci wiki
 
@@ -124,6 +146,10 @@ jobs:
             packages/simple-sandbox/demo \
             packages/simple-sandbox/native \
             packages/simple-sandbox/package.json \
+            packages/simple-sandbox/test/cgroup-events.cc \
+            packages/simple-sandbox/test/cgroup-events.test.mjs \
+            packages/simple-sandbox/test/io-redirection.cc \
+            packages/simple-sandbox/test/io-redirection.test.mjs \
             packages/simple-sandbox/src; then
             echo "native=false" >> "$GITHUB_OUTPUT"
           else
@@ -145,6 +171,9 @@ jobs:
         run: pnpm --filter simple-sandbox build
       - if: steps.changes.outputs.native == 'true'
         run: pnpm build:native
+      - if: steps.changes.outputs.native == 'true'
+        name: Check cgroup events and redirected file descriptors
+        run: node --test packages/simple-sandbox/test/cgroup-events.test.mjs packages/simple-sandbox/test/io-redirection.test.mjs
       - if: steps.changes.outputs.native == 'true'
         run: pnpm --filter @libreoj/judge test:native
       - if: steps.changes.outputs.native == 'true'

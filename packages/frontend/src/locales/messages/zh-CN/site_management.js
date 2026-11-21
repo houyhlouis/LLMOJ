@@ -26,6 +26,30 @@ return {
   request_failed: "请求未完成，请重试。",
   invalid_response: "服务器返回了无法识别的设置，请重新加载后重试。",
   save_unconfirmed: "未能确认保存结果：{error} 请重新加载设置核对，当前选择暂未清除。",
+  diagnostics: {
+    title: "诊断包",
+    introduction: "一个 JSON 文件，包含为本站提供支持的人排查问题所需的信息。它只由一份固定的事实清单组成：",
+    includes: {
+      deployment: "站点版本、Node.js 版本、平台、运行时长，以及非机密设置的概要",
+      health: "数据库、Redis 和存储的健康状况",
+      judging: "评测机（状态、协议、架构、容量）和评测队列",
+      errors: "响应请求的后端进程最近的意外错误：请求编号、时间、路由和错误类别",
+      ai: "AI 暂停状态与限额，以及最近失败的 AI 任务的状态",
+      selected: "如果在下方指定，还包括这些提交和 AI 任务的元数据"
+    },
+    never:
+      "它从不包含代码、测试数据、输入或输出、编译器或校验器的消息、提示词、密码、密钥或其他机密，即使是你指定的提交和任务也一样。每次下载都会记入审计日志。",
+    submission_ids: "提交编号（可选）",
+    submission_ids_note:
+      "用空格或逗号分隔，最多 {limit} 个。包括它们的状态、用时、数据版本和评测机，不含代码和测试数据。",
+    ai_job_ids: "AI 任务编号（可选）",
+    ai_job_ids_note: "用空格或逗号分隔，最多 {limit} 个。包括它们的状态、阶段和失败代码，不含提示词和结果。",
+    download: "下载诊断包",
+    downloaded: "诊断包已保存（{size}）。",
+    missing: "未找到：{ids}。",
+    invalid_ids: "提交编号是数字，AI 任务编号形如 1b4e28ba-2fa1-4d2b-883f-0016d3cca427。",
+    too_many: "最多指定 {limit} 个提交和 {limit} 个 AI 任务。"
+  },
   test_data: {
     title: "已移除的测试数据",
     introduction:
