@@ -1,56 +1,64 @@
-import { createHash } from "crypto";
 import fs from "fs";
 import path from "path";
 
 import { AI_EXECUTION_PROTOCOL_VERSION, AI_QUALITY_POLICY_VERSION, AI_RECEIPT_VERSION } from "@libreoj/judge-protocol";
 
-/** Identity of loaded artifacts, captured at process start. Never a git checkout/branch/HEAD guess. */
-export function artifactIdentity(root: string): {
-  sha256: string | null;
-  status: "available" | "missing" | "truncated";
-} {
-  const hash = createHash("sha256");
-  let files = 0;
-  let bytes = 0;
-  const visit = (relative: string) => {
-    const name = path.join(root, relative);
-    const stat = fs.lstatSync(name);
-    if (stat.isSymbolicLink()) return;
-    if (stat.isDirectory()) {
-      for (const child of fs.readdirSync(name).sort()) visit(path.join(relative, child));
-    } else if (stat.isFile() && /\.(?:js|mjs|cjs|json|ts)$/.test(name) && !/\.test\./.test(name)) {
-      bytes += stat.size;
-      files++;
-      if (files > 10000 || bytes > 128 * 1024 * 1024) throw new Error("truncated");
-      hash.update(relative).update("\0").update(fs.readFileSync(name)).update("\0");
+import { artifactIdentity, frontendBuildIdentity as offlineManifest } from "./artifact-identity";
+import { releaseManifest, unknownProvenance, verifyArtifact } from "./release-provenance";
+
+export { artifactIdentity } from "./artifact-identity";
+
+function readRelease(root: string) {
+  const file = path.join(root, "deploy/release-manifest.json");
+  try {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.size > 4096) return null;
+    return releaseManifest(JSON.parse(fs.readFileSync(file, "utf8")));
+  } catch {
+    return null;
+  }
+}
+
+export type WorkerProvenance = {
+  status: "server_release" | "unknown";
+  commit: string | null;
+  treeSha256: string | null;
+};
+
+/** Capture the manifest and loaded backend together. A running process never borrows the next release's identity. */
+export function captureDeployment(root: string, backendDirectory: string) {
+  const manifest = readRelease(root);
+  const backend = artifactIdentity(backendDirectory);
+  const provenance = verifyArtifact(backend.sha256, manifest?.artifacts.backend, manifest?.source);
+  return {
+    backend: { ...backend, basis: "loaded_program_artifacts", capturedAt: new Date().toISOString(), provenance },
+    frontend(directory: string) {
+      const frontend = offlineManifest(directory);
+      return {
+        ...frontend,
+        basis: "deployed_offline_manifest",
+        provenance:
+          provenance.status === "verified"
+            ? verifyArtifact(frontend.sha256, manifest.artifacts.frontend, manifest.source)
+            : unknownProvenance
+      };
+    },
+    worker(digest: string | null): WorkerProvenance {
+      if (digest && provenance.status === "verified" && digest === manifest.artifacts.judgeProgram)
+        return { status: "server_release", commit: provenance.commit, treeSha256: provenance.treeSha256 };
+      return { status: "unknown", commit: null, treeSha256: null };
     }
   };
-  try {
-    visit("");
-    return { sha256: files ? hash.digest("hex") : null, status: files ? "available" : "missing" };
-  } catch (error) {
-    return { sha256: null, status: error.message === "truncated" ? "truncated" : "missing" };
-  }
 }
-const backend = artifactIdentity(path.resolve(__dirname, ".."));
-export function frontendBuildIdentity() {
-  try {
-    const manifest = fs.readFileSync(
-      path.join(
-        process.env.HYHOJ_PUBLIC_DIR || path.resolve(__dirname, "../../../..", "public"),
-        "offline-manifest.json"
-      )
-    );
-    if (manifest.length > 4 * 1024 * 1024) return { sha256: null, status: "truncated" };
-    return { sha256: createHash("sha256").update(manifest).digest("hex"), status: "available" };
-  } catch {
-    return { sha256: null, status: "missing" };
-  }
-}
+
+const root = path.resolve(__dirname, "../../../..");
+const release = captureDeployment(root, path.resolve(__dirname, ".."));
+export const workerProvenance = release.worker;
+export const frontendBuildIdentity = () => offlineManifest(process.env.HYHOJ_PUBLIC_DIR || path.join(root, "public"));
 export const deploymentBuildIdentity = Object.freeze({
-  backend: { ...backend, basis: "loaded_program_artifacts", capturedAt: new Date().toISOString() },
+  backend: release.backend,
   get frontend() {
-    return { ...frontendBuildIdentity(), basis: "deployed_offline_manifest" };
+    return release.frontend(process.env.HYHOJ_PUBLIC_DIR || path.join(root, "public"));
   },
   qualityPolicyVersion: AI_QUALITY_POLICY_VERSION,
   receiptVersion: AI_RECEIPT_VERSION,

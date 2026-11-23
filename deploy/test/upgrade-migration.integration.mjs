@@ -7,11 +7,11 @@ import {createRequire} from 'node:module';
 import {execFileSync} from 'node:child_process';
 import assert from 'node:assert/strict';
 import {validateQueries,normalizeCommunitySchemaQueries,validateCommunitySchema,validatePrivilegeSchema,LEGACY_PRIVILEGES,REVIEW_PRIVILEGE,PRIVILEGE_EXPANSION_SQL} from '../upgrade-schema.mjs';
+import {normalizeTeamStorageQueries} from '../team-storage.mjs';
 import {inspectLegacyRegistration,migrateLegacyRegistration} from '../upgrade-registration.mjs';
 // Opt-in integration test. Only isolated, disposable MariaDB servers are allowed.
-// Example (the socket/server and pristine baseline dump must already exist):
-// sudo env UPGRADE_TEST_ALLOW_DATABASE_CREATION=1 UPGRADE_TEST_MARIADB_SOCKET=/var/tmp/llmoj-registration-fixture/mariadb/mysql.sock \
-//   UPGRADE_TEST_BASELINE_SQL=/var/tmp/llmoj-registration-fixture/baseline.sql node deploy/test/upgrade-migration.integration.mjs
+// From a built checkout, the host wrapper creates the dedicated server and disposes of it afterwards:
+// python3 -B deploy/test/with-service-fixture.py --baseline /var/tmp/llmoj-registration-fixture/baseline.sql migration
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const SOCKET=process.env.UPGRADE_TEST_MARIADB_SOCKET;
 const BASELINE=process.env.UPGRADE_TEST_BASELINE_SQL;
@@ -41,7 +41,7 @@ if (/\b(?:CREATE|DROP)\s+(?:DATABASE|SCHEMA)\b|\bUSE\s+[`A-Za-z_]/i.test(sqlText
 }
 let ddl;
 async function schemaQueries(ds) {
- const queries=validateQueries(await normalizeCommunitySchemaQueries(ds,(await ds.driver.createSchemaBuilder().log()).upQueries));
+ const queries=validateQueries(await normalizeTeamStorageQueries(ds,await normalizeCommunitySchemaQueries(ds,(await ds.driver.createSchemaBuilder().log()).upQueries)));
  await validateCommunitySchema(ds,queries);
  return queries;
 }

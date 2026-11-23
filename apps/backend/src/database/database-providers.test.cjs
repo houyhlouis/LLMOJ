@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const ts = require("typescript");
+class LockLeaseSubscriber {}
 
 const source = ts.transpileModule(fs.readFileSync(path.join(__dirname, "database.providers.ts"), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
@@ -13,6 +14,7 @@ new Function("require", "module", "exports", "__dirname", source)(
     ({
       "@nestjs/typeorm": { TypeOrmModule: { forRootAsync: options => options } },
       "../config/config.service": { ConfigService: class ConfigService {} },
+      "../redis/lock-lease.subscriber": { LockLeaseSubscriber },
       "./query-metrics": {
         QueryMetricsLogger: class QueryMetricsLogger {
           constructor(printAll) {
@@ -55,6 +57,7 @@ test("the TypeORM options follow the process environment", () => {
     // Every query goes through the query counter (database/query-metrics.ts), which times those over 1 ms
     assert.equal(options().logger.constructor.name, "QueryMetricsLogger");
     assert.equal(options().maxQueryExecutionTime, 1);
+    assert.deepEqual(options().subscribers, [LockLeaseSubscriber]);
   } finally {
     for (const [key, value] of Object.entries(previous))
       if (value === undefined) delete process.env[key];

@@ -18,6 +18,7 @@ import { FileUploadInfoDto, SignedFileUploadRequestDto } from "./dto";
 import { TeamFileUploadEntity } from "../team/team.entity";
 import { logger } from "../logger";
 import { ConfigService } from "../config/config.service";
+import { assertLockLeasesCurrent, assertLockLeasesHeld, LockLeaseLostError } from "../redis/lock-lease";
 
 // 10 minutes upload expire time
 const FILE_UPLOAD_EXPIRE_TIME = 10 * 60;
@@ -49,6 +50,13 @@ const isDuplicateEntry = (error: unknown) =>
   (error as { code?: string })?.code === "ER_DUP_ENTRY" ||
   (error as { driverError?: { code?: string } })?.driverError?.code === "ER_DUP_ENTRY";
 
+/** Recheck remote ownership and the local deadline immediately before dispatch to object storage. */
+async function writeWithCurrentLease<T>(write: () => Promise<T>): Promise<T> {
+  await assertLockLeasesCurrent();
+  assertLockLeasesHeld();
+  return await write();
+}
+
 /** Where an upload's form writes. */
 export const stagingObject = (uploadUuid: string) => STAGING_PREFIX + uploadUuid;
 
@@ -62,6 +70,9 @@ export interface SealedUpload {
   size: number;
   sha256: string;
 }
+
+type UploadResponse<E extends string> = SignedFileUploadRequestDto | E | "FILE_UUID_EXISTS" | "FILE_NOT_UPLOADED";
+export type RegisterUpload<E extends string> = (manager: EntityManager) => Promise<FileEntity | UploadResponse<E>>;
 
 // Passes a stream through, updating `hash` with its content
 const hashing = (hash: Hash) =>
@@ -211,23 +222,26 @@ export class FileService implements OnModuleInit {
    */
   async uploadFile(uuid: string, streamOrBufferOrFile: string | Buffer | Readable, retryCount = 10): Promise<string> {
     for (let i = 0; i < retryCount; i++) {
+      assertLockLeasesHeld();
       try {
         /* eslint-disable no-await-in-loop */
         if (typeof streamOrBufferOrFile === "string") {
           const sha256 = await hashLocalFile(streamOrBufferOrFile);
-          await this.minioClient.fPutObject(this.bucket, uuid, streamOrBufferOrFile, {});
+          await writeWithCurrentLease(() => this.minioClient.fPutObject(this.bucket, uuid, streamOrBufferOrFile, {}));
           return sha256;
         }
         if (Buffer.isBuffer(streamOrBufferOrFile)) {
-          await this.minioClient.putObject(this.bucket, uuid, streamOrBufferOrFile);
+          await writeWithCurrentLease(() => this.minioClient.putObject(this.bucket, uuid, streamOrBufferOrFile));
           return createHash("sha256").update(streamOrBufferOrFile).digest("hex");
         }
         const hash = createHash("sha256");
-        await this.minioClient.putObject(this.bucket, uuid, streamOrBufferOrFile.pipe(hashing(hash)));
+        await writeWithCurrentLease(() =>
+          this.minioClient.putObject(this.bucket, uuid, streamOrBufferOrFile.pipe(hashing(hash)))
+        );
         return hash.digest("hex");
         /* eslint-enable no-await-in-loop */
       } catch (e) {
-        if (i === retryCount - 1) throw e;
+        if (i === retryCount - 1 || e instanceof LockLeaseLostError) throw e;
         else {
           // eslint-disable-next-line no-await-in-loop
           await new Promise(resolve => setTimeout(resolve, 1000));
@@ -319,21 +333,29 @@ export class FileService implements OnModuleInit {
     if (!Number.isSafeInteger(meta.size) || meta.size < 0 || meta.size > maximumBytes)
       throw new Error("FILE_SIZE_LIMIT");
     let received = 0;
+    const source = await this.minioClient.getObject(this.bucket, uuid);
+    let file: fs.promises.FileHandle;
     try {
+      assertLockLeasesHeld();
+      file = await fs.promises.open(destination, "wx", 0o600);
       await pipeline(
-        await this.minioClient.getObject(this.bucket, uuid),
+        source,
         new Transform({
           transform(chunk: Buffer, encoding, callback) {
             received += chunk.length;
             callback(received > maximumBytes || received > meta.size ? new Error("FILE_SIZE_LIMIT") : null, chunk);
           }
         }),
-        fs.createWriteStream(destination, { flags: "wx", mode: 0o600 })
+        file.createWriteStream()
       );
       if (received !== meta.size) throw new Error("FILE_SIZE_MISMATCH");
       return received;
     } catch (error) {
-      await fs.promises.unlink(destination).catch(() => undefined);
+      source.destroy();
+      if (file) {
+        await file.close();
+        await fs.promises.unlink(destination).catch(() => undefined);
+      }
       throw error;
     }
   }
@@ -389,16 +411,72 @@ export class FileService implements OnModuleInit {
     recordContentHash = true,
     expectedSha256?: string
   ): Promise<FileEntity | SignedFileUploadRequestDto | LimitCheckErrorType | "FILE_UUID_EXISTS" | "FILE_NOT_UPLOADED"> {
-    if (!uploadInfo.uuid) return await this.prepareUploadRequest(uploadInfo.size, checkLimit);
+    const prepared = await this.prepareUploadForRegistration(
+      uploadInfo,
+      checkLimit,
+      transactionalEntityManager,
+      recordContentHash,
+      expectedSha256
+    );
+    if ("response" in prepared) return prepared.response;
+    const { sealed } = prepared;
+    const file = await this.registerSealedUpload(sealed, transactionalEntityManager);
+    if (file === "FILE_UUID_EXISTS") await this.discardSealedUpload(sealed);
+    else await this.discardUploads([uploadInfo.uuid]).catch(e => logger.error(`Failed to delete upload: ${e}`));
+    return file;
+  }
 
-    if (await this.isUploadRegistered(uploadInfo.uuid, transactionalEntityManager)) return "FILE_UUID_EXISTS";
+  /** Seal before taking SQL locks. The caller registers the copy after admission and returns only after commit. */
+  async withPreparedUpload<E extends string, T>(
+    uploadInfo: FileUploadInfoDto,
+    checkLimit: (size: number) => E,
+    transact: (register: RegisterUpload<E>) => Promise<T>
+  ): Promise<T> {
+    const prepared = await this.prepareUploadForRegistration(uploadInfo, checkLimit, this.fileRepository.manager).catch(
+      (error: unknown) => ({ error })
+    );
+    // Surface storage errors only after the caller's admission and duplicate checks, just as for a missing upload.
+    if ("error" in prepared)
+      return await transact(async () => {
+        throw prepared.error;
+      });
+    if ("response" in prepared) return await transact(async () => prepared.response);
+    const { sealed } = prepared;
+    let registered = false;
+    try {
+      const result = await transact(async manager => {
+        const file = await this.registerSealedUpload(sealed, manager);
+        registered = file instanceof FileEntity;
+        return file;
+      });
+      if (registered)
+        await this.discardUploads([sealed.uploadUuid]).catch(e => logger.error(`Failed to delete upload: ${e}`));
+      else await this.discardSealedUpload(sealed);
+      return result;
+    } catch (error) {
+      // This also checks for a commit whose acknowledgement was lost.
+      await this.discardSealedUpload(sealed);
+      throw error;
+    }
+  }
+
+  private async prepareUploadForRegistration<E extends string>(
+    uploadInfo: FileUploadInfoDto,
+    checkLimit: (size: number) => Promise<E> | E,
+    manager: EntityManager,
+    recordContentHash = true,
+    expectedSha256?: string
+  ): Promise<{ sealed: SealedUpload } | { response: UploadResponse<E> }> {
+    if (!uploadInfo.uuid) return { response: await this.prepareUploadRequest(uploadInfo.size, checkLimit) };
+
+    if (await this.isUploadRegistered(uploadInfo.uuid, manager)) return { response: "FILE_UUID_EXISTS" };
 
     const upload = await this.findUpload(uploadInfo.uuid);
-    if (!upload) return "FILE_NOT_UPLOADED";
+    if (!upload) return { response: "FILE_NOT_UPLOADED" };
     if (!Number.isSafeInteger(upload.size) || upload.size < 0 || upload.size !== uploadInfo.size)
       throw new BadRequestException("FILE_SIZE_MISMATCH");
     const limitCheckError = await checkLimit(upload.size);
-    if (limitCheckError) return limitCheckError;
+    if (limitCheckError) return { response: limitCheckError };
 
     // A file judges don't use may leave its hash to the background (FileContentHashService), so that a large one
     // isn't read while the caller holds its locks. Its sealed copy can't change meanwhile.
@@ -407,12 +485,7 @@ export class FileService implements OnModuleInit {
       await this.discardSealedUpload(sealed);
       throw new BadRequestException("FILE_HASH_MISMATCH");
     }
-    const file = await this.registerSealedUpload(sealed, transactionalEntityManager);
-    if (file === "FILE_UUID_EXISTS") await this.discardSealedUpload(sealed);
-    // What the form wrote isn't needed any more: deleted now, rather than taking space twice until maintenance runs.
-    // Should the caller's transaction fail after all, the file is uploaded again.
-    else await this.discardUploads([uploadInfo.uuid]).catch(e => logger.error(`Failed to delete upload: ${e}`));
-    return file;
+    return { sealed };
   }
 
   /** Whether the upload was registered as a file: sealed (Part 25), or under its own UUID before that. */
@@ -477,13 +550,16 @@ export class FileService implements OnModuleInit {
     recordContentHash: boolean
   ): Promise<SealedUpload> {
     const uuid = UUID();
+    assertLockLeasesHeld();
     try {
       // A single source is copied only if it's still what was measured (If-Match). minio-js composes several
       // sources with the versions it measures itself. Either way, what's checked below is the copy.
-      await this.minioClient.composeObject(
-        new CopyDestinationOptions({ Bucket: this.bucket, Object: uuid }),
-        sources.map(
-          source => new CopySourceOptions({ Bucket: this.bucket, Object: source.name, MatchETag: source.etag })
+      await writeWithCurrentLease(() =>
+        this.minioClient.composeObject(
+          new CopyDestinationOptions({ Bucket: this.bucket, Object: uuid }),
+          sources.map(
+            source => new CopySourceOptions({ Bucket: this.bucket, Object: source.name, MatchETag: source.etag })
+          )
         )
       );
       if ((await this.minioClient.statObject(this.bucket, uuid)).size !== size)
@@ -564,6 +640,7 @@ export class FileService implements OnModuleInit {
     }
     const policyResult = await signer.client.presignedPostPolicy(policy);
 
+    assertLockLeasesHeld();
     return {
       uuid,
       method: "POST",
@@ -674,43 +751,37 @@ export class FileService implements OnModuleInit {
     if (!uuids.length) return;
     const registered = await this.fileRepository.findBy({ uuid: In(uuids) });
     const retained = new Set(registered.map(file => file.uuid));
-    await this.minioClient.removeObjects(this.bucket, [
-      ...uuids.map(stagingObject),
-      ...uuids.filter(uuid => !retained.has(uuid))
-    ]);
+    await writeWithCurrentLease(() =>
+      this.minioClient.removeObjects(this.bucket, [
+        ...uuids.map(stagingObject),
+        ...uuids.filter(uuid => !retained.has(uuid))
+      ])
+    );
   }
 
   /**
    * @return A function to run after transaction, to delete the file(s) actually.
    */
-  async deleteFile(uuid: string | string[], transactionalEntityManager: EntityManager): Promise<() => void> {
-    if (typeof uuid === "string") {
-      await transactionalEntityManager.delete(FileEntity, { uuid });
-      return () =>
-        this.minioClient.removeObject(this.bucket, uuid).catch(e => {
+  async deleteFile(uuid: string | string[], transactionalEntityManager: EntityManager): Promise<() => Promise<void>> {
+    if (Array.isArray(uuid) && uuid.length === 0) return () => Promise.resolve();
+    await transactionalEntityManager.delete(FileEntity, { uuid: typeof uuid === "string" ? uuid : In(uuid) });
+    return () =>
+      writeWithCurrentLease(async () => {
+        try {
+          if (typeof uuid === "string") await this.minioClient.removeObject(this.bucket, uuid);
+          else await this.minioClient.removeObjects(this.bucket, uuid);
+        } catch (e) {
           logger.error(`Failed to delete file ${uuid}: ${e}`);
-        });
-    }
-    if (uuid.length > 0) {
-      await transactionalEntityManager.delete(FileEntity, { uuid: In(uuid) });
-      return () =>
-        this.minioClient.removeObjects(this.bucket, uuid).catch(e => {
-          logger.error(`Failed to delete file [${uuid}]: ${e}`);
-        });
-    }
-    return () => {
-      /* do nothing */
-    };
+        }
+      });
   }
 
   /**
    * Delete an object the backend stored itself (`uploadFile`) and didn't register after all
    */
   deleteUnfinishedUploadedFile(uuid: string): void {
-    this.minioClient.removeObject(this.bucket, uuid).catch(e => {
-      if (isMissingObject(e)) return;
-      logger.error(`Failed to delete unfinished uploaded file ${uuid}: ${e}`);
-    });
+    // A lost commit acknowledgement can look like a registration failure to the caller.
+    this.discardSealedUpload({ uuid }).catch(e => logger.error(`Failed to discard unfinished upload ${uuid}: ${e}`));
   }
 
   async getFileSizes(uuids: string[], transcationalEntityManager: EntityManager): Promise<number[]> {
@@ -783,7 +854,9 @@ export class FileService implements OnModuleInit {
         (await this.fileRepository.find({ select: ["uuid"], where: { uuid: In(names) } })).map(file => file.uuid)
       );
       const unused = names.filter(name => !used.has(name));
-      if (unused.length) await this.minioClient.removeObjects(this.bucket, unused);
+      if (unused.length) {
+        await writeWithCurrentLease(() => this.minioClient.removeObjects(this.bucket, unused));
+      }
       deleted += unused.length;
     };
     // The listing waits while a batch is checked.

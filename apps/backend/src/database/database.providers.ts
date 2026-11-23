@@ -3,6 +3,7 @@ import { TypeOrmModule } from "@nestjs/typeorm";
 import { QueryMetricsLogger, QUERY_TIMING_THRESHOLD_MS } from "./query-metrics";
 
 import { ConfigService } from "../config/config.service";
+import { LockLeaseSubscriber } from "../redis/lock-lease.subscriber";
 
 /**
  * Whether the backend may change the database schema at startup. Production never does so implicitly:
@@ -26,6 +27,7 @@ export const databaseProviders = [
       password: configService.config.services.database.password,
       database: configService.config.services.database.database,
       entities: [`${__dirname}/../**/*.entity{.ts,.js}`],
+      subscribers: [LockLeaseSubscriber],
       logger: new QueryMetricsLogger(!!process.env.LIBREOJ_LOG_SQL),
       maxQueryExecutionTime: QUERY_TIMING_THRESHOLD_MS,
       synchronize: isSchemaSyncEnabled()

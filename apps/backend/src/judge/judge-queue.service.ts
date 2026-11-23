@@ -22,6 +22,7 @@ import { taskArchitectures } from "./judge-architecture";
 
 import { logger } from "../logger";
 import { RedisService } from "../redis/redis.service";
+import { assertLockLeasesHeld, LockLeaseLostError } from "../redis/lock-lease";
 import { MetricsService, sharedReading } from "../metrics/metrics.service";
 import { FileService } from "../file/file.service";
 
@@ -339,6 +340,7 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
    * resource so that both are committed together, then call `notifyJobsAvailable` once it has committed.
    */
   async enqueue(taskId: string, type: JudgeTaskType, priority: number, manager?: EntityManager): Promise<void> {
+    assertLockLeasesHeld();
     logger.verbose(`New judge task: { taskId: ${taskId}, type: ${type}, priority: ${priority} }`);
     await (manager ?? this.connection.manager)
       .createQueryBuilder()
@@ -356,6 +358,7 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
         preparationFailures: 0
       })
       .orIgnore()
+      .useTransaction(true)
       .execute();
     if (!manager) this.notifyJobsAvailable();
   }
@@ -684,14 +687,11 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
       await this.fail(taskId, `Judging was interrupted ${unfinishedLeases} times`, { fence, connectionId, outcome });
       return;
     }
-    const released = await this.endLease(
-      this.connection.manager,
-      taskId,
-      fence,
-      connectionId,
-      JudgeJobState.Queued,
-      outcome,
-      { unfinishedLeases, availableAt: () => "NOW(3)" }
+    const released = await this.connection.transaction("READ COMMITTED", manager =>
+      this.endLease(manager, taskId, fence, connectionId, JudgeJobState.Queued, outcome, {
+        unfinishedLeases,
+        availableAt: () => "NOW(3)"
+      })
     );
     if (released) {
       logger.log(`Judge task ${taskId} is queued again (${outcome})`);
@@ -745,7 +745,7 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
       await taskService.onTaskFailed(taskId, message);
     } catch (e) {
       // Retried by the next recovery scan
-      logger.error(`Failed to mark judge task ${taskId} as failed: ${e}`);
+      if (!LockLeaseLostError.isShutdown(e)) logger.error(`Failed to mark judge task ${taskId} as failed: ${e}`);
     }
   }
 
@@ -936,7 +936,8 @@ export class JudgeQueueService implements OnModuleInit, OnModuleDestroy {
                 job.state === JudgeJobState.Failed && job.lastError ? job.lastError : "The task was not judged"
               );
             } catch (e) {
-              logger.error(`Failed to mark judge task ${taskId} as failed: ${e}`);
+              if (!LockLeaseLostError.isShutdown(e))
+                logger.error(`Failed to mark judge task ${taskId} as failed: ${e}`);
             }
           }
         }

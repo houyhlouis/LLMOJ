@@ -9,8 +9,9 @@ import { createHash } from "crypto";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 
-import { DataSource } from "typeorm";
+import { DataSource, EntityManager } from "typeorm";
 
+import { ContestEntity } from "./contest.entity";
 import { ContestProblemEntity } from "./contest-problem.entity";
 import { ContestAccessService } from "./contest-access.service";
 import { contestSubmissionsOpen } from "./contest-policy";
@@ -28,6 +29,7 @@ import { SubmissionEntity } from "../submission/submission.entity";
 import { FileService, MinioSignFor } from "../file/file.service";
 import { FileEntity } from "../file/file.entity";
 import { Locale } from "../common/locale.type";
+import { logger } from "../logger";
 
 import type { ProblemJudgeInfoTraditional } from "../problem-type/types/traditional/problem-judge-info.interface";
 import type { ProblemJudgeInfoCommunication } from "../problem-type/types/communication/problem-judge-info.interface";
@@ -75,17 +77,25 @@ export class ContestProblemService {
     );
   }
 
+  /** Serialize slot changes with admission, settings and deletion. Always lock the contest before its slot. */
+  private changeProblems<T>(id: number, change: (manager: EntityManager) => Promise<T>): Promise<T> {
+    return this.db.transaction("READ COMMITTED", async manager => {
+      const contest = await manager.findOne(ContestEntity, {
+        select: { id: true },
+        where: { id },
+        lock: { mode: "pessimistic_write" }
+      });
+      if (!contest) throw new NotFoundException();
+      return await change(manager);
+    });
+  }
+
   async saveProblem(user: UserEntity, id: number, data: ContestRequestData) {
-    const { manager } = await this.access.get(user, id);
-    if (!manager) throw new ForbiddenException();
+    if (!(await this.access.get(user, id)).manager) throw new ForbiddenException();
     const problemId = Number(data.problemId);
     const problem = await this.problems.findProblemById(problemId);
     if (!problem || !(await this.problemAccess.userHasPermission(user, problem, ProblemPermissionType.Modify)))
       throw new ForbiddenException("Problem modification permission required");
-    const repository = this.db.getRepository(ContestProblemEntity);
-    const row =
-      (await repository.findOneBy({ contestId: id, problemId })) ??
-      repository.create({ contestId: id, problemId, attachments: [] });
     if (
       !Number.isInteger(data.position) ||
       data.position < 1 ||
@@ -101,45 +111,51 @@ export class ContestProblemService {
     const outputFilename = filename(data.outputFilename);
     if (!!inputFilename !== !!outputFilename || (inputFilename && inputFilename === outputFilename))
       throw new BadRequestException("Specify both input and output filenames");
-    Object.assign(row, {
+    const settings = {
       position: data.position,
       weight: data.weight,
-      subtaskAllOrNothing: data.subtaskAllOrNothing ?? row.subtaskAllOrNothing ?? false,
+      subtaskAllOrNothing: data.subtaskAllOrNothing,
       title: text(data.title ?? "", 160),
       inputFilename,
       outputFilename
+    };
+    return await this.changeProblems(id, async manager => {
+      const row = await manager.findOne(ContestProblemEntity, {
+        where: { contestId: id, problemId },
+        lock: { mode: "pessimistic_write" }
+      });
+      if (row) {
+        await manager.update(ContestProblemEntity, row.id, settings);
+        return { id: row.id };
+      }
+      const added = await manager.save(ContestProblemEntity, {
+        contestId: id,
+        problemId,
+        attachments: [],
+        ...settings
+      });
+      return { id: added.id };
     });
-    if (row.id)
-      await repository.update(
-        { id: row.id },
-        {
-          position: row.position,
-          weight: row.weight,
-          subtaskAllOrNothing: row.subtaskAllOrNothing,
-          title: row.title,
-          inputFilename: row.inputFilename,
-          outputFilename: row.outputFilename
-        }
-      );
-    else await repository.save(row);
-    return { id: row.id };
   }
 
   async removeProblem(user: UserEntity, id: number, problemId: number) {
     if (!(await this.access.get(user, id)).manager) throw new ForbiddenException();
-    const row = await this.db.getRepository(ContestProblemEntity).findOneBy({ id: problemId, contestId: id });
-    if (!row) throw new NotFoundException();
-    if (await this.db.getRepository(SubmissionEntity).countBy({ contestProblemId: row.id }))
-      throw new BadRequestException("Problem already has contest submissions");
-    let remove: () => void;
-    await this.db.transaction(async manager => {
-      remove = await this.files.deleteFile(
+    const remove = await this.changeProblems(id, async manager => {
+      const row = await manager.findOne(ContestProblemEntity, {
+        where: { id: problemId, contestId: id },
+        lock: { mode: "pessimistic_write" }
+      });
+      if (!row) throw new NotFoundException();
+      if (await manager.existsBy(SubmissionEntity, { contestProblemId: row.id }))
+        throw new BadRequestException("Problem already has contest submissions");
+      const cleanup = await this.files.deleteFile(
         row.attachments.map(a => a.uuid),
         manager
       );
       await manager.remove(row);
+      return cleanup;
     });
-    remove();
+    remove().catch(e => logger.error(`Failed to remove attachments for contest problem ${problemId}: ${e}`));
     return {};
   }
 
@@ -274,25 +290,26 @@ export class ContestProblemService {
     const name = filename(data.filename);
     if (!name || !data.uploadInfo || !Number.isInteger(data.uploadInfo.size) || data.uploadInfo.size < 0)
       throw new BadRequestException();
-    return await this.db.transaction(async manager => {
-      const locked = await manager.findOne(ContestProblemEntity, {
-        where: { id: problemId, contestId: id },
-        lock: { mode: "pessimistic_write" }
-      });
-      if (!locked) throw new NotFoundException();
-      if (locked.attachments.some(a => a.filename === name) || locked.attachments.length >= 50)
-        throw new BadRequestException("Duplicate attachment or too many attachments");
-      const result = await this.files.processUploadRequest(
-        data.uploadInfo,
-        size => (size > 50 * 1024 * 1024 ? "FILE_TOO_LARGE" : null),
-        manager
-      );
-      if (typeof result === "string") return { error: result };
-      if (!(result instanceof FileEntity)) return { signedUploadRequest: result };
-      locked.attachments.push({ filename: name, uuid: result.uuid, size: result.size });
-      await manager.save(locked);
-      return {};
-    });
+    return await this.files.withPreparedUpload(
+      data.uploadInfo,
+      size => (size > 50 * 1024 * 1024 ? "FILE_TOO_LARGE" : null),
+      register =>
+        this.changeProblems(id, async manager => {
+          const locked = await manager.findOne(ContestProblemEntity, {
+            where: { id: problemId, contestId: id },
+            lock: { mode: "pessimistic_write" }
+          });
+          if (!locked) throw new NotFoundException();
+          if (locked.attachments.some(a => a.filename === name) || locked.attachments.length >= 50)
+            throw new BadRequestException("Duplicate attachment or too many attachments");
+          const result = await register(manager);
+          if (typeof result === "string") return { error: result };
+          if (!(result instanceof FileEntity)) return { signedUploadRequest: result };
+          locked.attachments.push({ filename: name, uuid: result.uuid, size: result.size });
+          await manager.save(locked);
+          return {};
+        })
+    );
   }
 
   async download(user: UserEntity, id: number, problemId: number, name: string) {
@@ -319,8 +336,8 @@ export class ContestProblemService {
 
   async removeAttachment(user: UserEntity, id: number, problemId: number, name: string) {
     if (!(await this.access.get(user, id)).manager) throw new ForbiddenException();
-    let remove: () => void;
-    await this.db.transaction(async manager => {
+    let remove: () => Promise<void>;
+    await this.changeProblems(id, async manager => {
       const row = await manager.findOne(ContestProblemEntity, {
         where: { id: problemId, contestId: id },
         lock: { mode: "pessimistic_write" }
@@ -331,7 +348,7 @@ export class ContestProblemService {
       await manager.save(row);
       remove = await this.files.deleteFile(file.uuid, manager);
     });
-    remove();
+    remove().catch(e => logger.error(`Failed to remove an attachment for contest problem ${problemId}: ${e}`));
     return {};
   }
 }

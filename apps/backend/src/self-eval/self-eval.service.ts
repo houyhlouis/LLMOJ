@@ -626,18 +626,26 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
     const set = await this.db.getRepository(SelfEvalSetEntity).findOneBy({ taskId });
     if (set) {
       await this.locks.lock(`SelfEvalSet_${set.scope}`, async () => {
-        await this.db
-          .getRepository(SelfEvalSetEntity)
-          .update({ scope: set.scope, taskId }, { taskId: null, status: "SystemError", cases: null, message });
+        await this.db.transaction("READ COMMITTED", manager =>
+          manager.update(
+            SelfEvalSetEntity,
+            { scope: set.scope, taskId },
+            { taskId: null, status: "SystemError", cases: null, message }
+          )
+        );
       });
       return;
     }
     const record = await this.db.getRepository(SelfEvalEntity).findOneBy({ taskId });
     if (!record) return;
     await this.locks.lock(`SelfEval_${record.id}`, async () => {
-      await this.db
-        .getRepository(SelfEvalEntity)
-        .update({ id: record.id, taskId }, { taskId: null, status: "SystemError", finishTime: new Date() });
+      await this.db.transaction("READ COMMITTED", manager =>
+        manager.update(
+          SelfEvalEntity,
+          { id: record.id, taskId },
+          { taskId: null, status: "SystemError", finishTime: new Date() }
+        )
+      );
     });
   }
 
@@ -687,7 +695,9 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
       const current = await this.db.getRepository(SelfEvalEntity).findOneBy({ id: record.id });
       if (!current || current.taskId !== taskId) return false;
       if (!progress.finished) {
-        await this.db.getRepository(SelfEvalEntity).update(current.id, { status: "Running" });
+        await this.db.transaction("READ COMMITTED", manager =>
+          manager.update(SelfEvalEntity, current.id, { status: "Running" })
+        );
         return true;
       }
       if (!Object.values(SubmissionStatus).includes(progress.status as SubmissionStatus)) return false;
@@ -700,9 +710,9 @@ export class SelfEvalService implements JudgeTaskService<SelfEvalProgress, Recor
         )
           throw new ForbiddenException();
       } catch {
-        await this.db
-          .getRepository(SelfEvalEntity)
-          .update(current.id, { taskId: null, status: "Canceled", finishTime: new Date() });
+        await this.db.transaction("READ COMMITTED", manager =>
+          manager.update(SelfEvalEntity, current.id, { taskId: null, status: "Canceled", finishTime: new Date() })
+        );
         return false;
       }
       current.status = progress.status;

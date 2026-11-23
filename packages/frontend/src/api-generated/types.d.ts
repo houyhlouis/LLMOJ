@@ -57,6 +57,12 @@ declare namespace ApiTypes {
      */
     baseUrl: string;
   }
+  export interface AiArtifactIdentityDto {
+    sha256: string | null;
+    status: "available" | "missing" | "truncated";
+    basis: string;
+    provenance: ApiTypes.BuildProvenanceDto;
+  }
   export interface AiAttentionDto {
     data?: {
       [name: string]: any;
@@ -66,6 +72,13 @@ declare namespace ApiTypes {
     retryable: boolean;
     kind?: string;
   }
+  export interface AiBackendIdentityDto {
+    sha256: string | null;
+    status: "available" | "missing" | "truncated";
+    basis: string;
+    provenance: ApiTypes.BuildProvenanceDto;
+    capturedAt: string; // date-time
+  }
   export interface AiCaseCountersDto {
     planned: number | null;
     generated: number | null;
@@ -74,19 +87,15 @@ declare namespace ApiTypes {
     requested: number;
   }
   export interface AiDeploymentIdentityResponseDto {
-    backend?: {
-      [name: string]: any;
-    };
-    frontend?: {
-      [name: string]: any;
-    };
+    backend?: ApiTypes.AiBackendIdentityDto;
+    frontend?: ApiTypes.AiArtifactIdentityDto;
     schema?: {
       [name: string]: any;
     };
     usageIdentityColumns?: {
       [name: string]: boolean;
     };
-    workers?: {}[];
+    workers?: ApiTypes.AiWorkerIdentityDto[];
     qualityPolicyVersion?: number;
     receiptVersion?: number;
     executionProtocolVersion?: number;
@@ -421,6 +430,19 @@ declare namespace ApiTypes {
   export interface AiUsageQueryDto {
     days?: number;
   }
+  export interface AiWorkerIdentityDto {
+    id: number;
+    online: boolean;
+    build: string | null;
+    provenance: ApiTypes.WorkerProvenanceDto;
+    sandboxImage: string | null;
+    protocolVersion: number | null;
+    qualityPolicies: number[];
+    receiptVersions: number[];
+    taskCapabilities: {
+      [name: string]: any;
+    } | null;
+  }
   export interface ArchiveNameMapDto {
     archivePath: string;
     filename: string;
@@ -481,10 +503,18 @@ declare namespace ApiTypes {
     uri?: string;
   }
   /**
+   * Source identity of a runtime artifact.
+   */
+  export interface BuildProvenanceDto {
+    status: "verified" | "mismatch" | "unknown";
+    commit: string | null; // ^[0-9a-f]{40}$
+    treeSha256: string | null; // ^[0-9a-f]{64}$
+  }
+  /**
    * Allowlisted site diagnostic metadata.
    */
   export interface BundleHeaderDto {
-    bundleVersion: 1;
+    bundleVersion: 2;
     generatedAt: string; // date-time
     requestId: string; // uuid
     administratorId: number;
@@ -668,6 +698,7 @@ declare namespace ApiTypes {
   export interface DiagnosticDeploymentDto {
     serverVersion: string;
     revision: string | null;
+    backendProvenance: ApiTypes.BuildProvenanceDto;
     backendBuild: string | null;
     nodeVersion: string;
     platform: string;
@@ -762,6 +793,7 @@ declare namespace ApiTypes {
     aiExecutionSlots: number | null;
     memoryBudget: number | null;
     nodeVersion: string | null;
+    provenance: ApiTypes.WorkerProvenanceDto;
     judgeProgram: string | null;
     sandboxImage: string | null;
     lastSeenAgeSeconds: number | null;
@@ -1602,6 +1634,14 @@ declare namespace ApiTypes {
     architectures?: string[];
   }
   export interface JudgeClientInfoDto {
+    /**
+     * Source identity of a runtime artifact.
+     */
+    provenance?: {
+      status: "server_release" | "unknown";
+      commit: string | null; // ^[0-9a-f]{40}$
+      treeSha256: string | null; // ^[0-9a-f]{64}$
+    };
     id: number;
     name: string;
     key: string;
@@ -3236,5 +3276,13 @@ declare namespace ApiTypes {
     userAgent: string;
     loginTime: number;
     lastAccessTime: number;
+  }
+  /**
+   * Source identity of a runtime artifact.
+   */
+  export interface WorkerProvenanceDto {
+    status: "server_release" | "unknown";
+    commit: string | null; // ^[0-9a-f]{40}$
+    treeSha256: string | null; // ^[0-9a-f]{64}$
   }
 }

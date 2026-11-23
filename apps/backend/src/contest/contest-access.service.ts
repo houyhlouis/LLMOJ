@@ -4,6 +4,8 @@ import { InjectDataSource } from "@nestjs/typeorm";
 import { Brackets, DataSource, EntityManager, SelectQueryBuilder } from "typeorm";
 
 import { ContestEntity } from "./contest.entity";
+import { ContestProblemEntity } from "./contest-problem.entity";
+import { requireContestSubmissionLanguage } from "./contest-languages";
 import { ContestVirtualParticipationEntity } from "./contest-virtual-participation.entity";
 import { activeVirtualRun, contestViewerTime, VirtualRun } from "./contest-virtual";
 import {
@@ -19,6 +21,7 @@ import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
 import { teamResourceAccess, teamResourceVisibilitySql } from "../team/team-access";
 import { SubmissionEntity } from "../submission/submission.entity";
+import type { SubmissionContent } from "../submission/submission-content.interface";
 
 const virtualStartErrors = {
   NOT_ENDED: "The official contest has not ended",
@@ -53,7 +56,7 @@ export class ContestAccessService {
    * The contest, if the user may open it, and whether they manage it. With `problemAccess`, only managers may open a
    * contest that hasn't started.
    */
-  async get(user: UserEntity, id: number, problemAccess = false, transaction?: EntityManager) {
+  async get(user: UserEntity, id: number, problemAccess = false, transaction?: EntityManager, at?: number) {
     if (!Number.isSafeInteger(id) || id < 1) throw new BadRequestException();
     const contest = transaction
       ? await transaction.findOne(ContestEntity, { where: { id }, lock: { mode: "pessimistic_read" } })
@@ -61,13 +64,14 @@ export class ContestAccessService {
     if (!contest) throw new NotFoundException();
     const access = await this.viewAccess(user, contest, transaction);
     if (!access) throw new ForbiddenException();
+    // Read a run that started during upload sealing, even when evaluating the earlier upload time.
     const participation =
       user && contestEnded(contest)
         ? await (transaction ?? this.db)
             .getRepository(ContestVirtualParticipationEntity)
             .findOneBy({ contestId: id, userId: user.id })
         : null;
-    const wallNow = Date.now();
+    const wallNow = at ?? Date.now();
     const virtualRun = activeVirtualRun(participation, access.manager, wallNow);
     const now = contestViewerTime(contest, virtualRun, wallNow);
     if (problemAccess && !contestProblemsOpen(contest, access.manager, now))
@@ -151,17 +155,45 @@ export class ContestAccessService {
     return contest;
   }
 
-  /** Runs inside the submission insert transaction. Its timestamp is the timestamp stored with the submission. */
-  async admitSubmission(user: UserEntity, id: number, transaction: EntityManager) {
+  /** The insert transaction locks user, contest and slot in order, then stores this decision with the submission. */
+  async admitSubmission(
+    user: UserEntity,
+    requestedSlot: Pick<ContestProblemEntity, "id" | "contestId" | "problemId">,
+    content: SubmissionContent,
+    transaction: EntityManager,
+    uploadStartedAt?: number
+  ) {
     const actor = await transaction.findOne(UserEntity, { where: { id: user.id }, lock: { mode: "pessimistic_read" } });
     if (!actor) throw new ForbiddenException();
-    const { contest, manager, participation } = await this.get(actor, id, true, transaction);
+    const { contest, manager, participation } = await this.get(
+      actor,
+      requestedSlot.contestId,
+      true,
+      transaction,
+      uploadStartedAt
+    );
     await this.requirePrivilege(actor, UserPrivilegeType.ParticipateContest, transaction);
     await this.requirePrivilege(actor, UserPrivilegeType.SubmitProblem, transaction);
-    const wallNow = Date.now();
+    const slot = await transaction.findOne(ContestProblemEntity, {
+      where: { id: requestedSlot.id, contestId: contest.id },
+      lock: { mode: "pessimistic_read" }
+    });
+    if (!slot || slot.problemId !== requestedSlot.problemId) throw new NotFoundException();
+    requireContestSubmissionLanguage(contest.languages, content);
+    const wallNow = uploadStartedAt ?? Date.now();
+    // A virtual start can commit while an official answer is being sealed. That start already won the user lock.
+    if (uploadStartedAt !== undefined && participation && contestSubmissionsOpen(contest, false, wallNow))
+      throw new ForbiddenException("Contest has ended");
     const now = contestViewerTime(contest, activeVirtualRun(participation, manager, wallNow), wallNow);
     if (!contestSubmissionsOpen(contest, manager, now)) throw new ForbiddenException("Contest has ended");
-    return new Date(Math.floor(wallNow / 1000) * 1000);
+    return {
+      submitTime: new Date(Math.floor(wallNow / 1000) * 1000),
+      contestId: contest.id,
+      contestProblemId: slot.id,
+      contestInputFilename: slot.inputFilename,
+      contestOutputFilename: slot.outputFilename,
+      contestSubtaskAllOrNothing: slot.subtaskAllOrNothing
+    };
   }
 
   /** A query of the contests the user may see in the contest list. */

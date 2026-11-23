@@ -65,12 +65,19 @@ test('the requested groups require the same database variables CI provisions and
   assert.deepEqual(missingRequiredServices(['ai'], env),
     ['HYHOJ_AI_TEST_DB_CONFIG', 'LLMOJ_AI_BUDGET_TEST_DB_CONFIG', 'LLMOJ_OPERATIONS_TEST_DB_CONFIG']);
   assert.deepEqual(missingRequiredServices(['deploy'], env),
-    ['HYHOJ_COMMUNITY_SCHEMA_TEST_DB_CONFIG', 'LLMOJ_FAKE_TEST_DB_CONFIG', 'LLMOJ_SCHEMA_TEST_DB_CONFIG']);
+    ['HYHOJ_COMMUNITY_SCHEMA_TEST_DB_CONFIG', 'LLMOJ_FAKE_TEST_DB_CONFIG', 'LLMOJ_SCHEMA_TEST_DB_CONFIG',
+      'LIBREOJ_ADMIN_TEST_SOCKET', 'LLMOJ_MINIO_BINARY']);
   const backend = requiredDatabaseConfigs(['backend']);
   assert.ok(backend.includes('HYHOJ_COUNT_TEST_DB_CONFIG'));
-  assert.deepEqual(missingRequiredServices(['backend'], env), [...backend, 'redis-server']);
+  const services = ['redis-server', 'LLMOJ_REGISTRATION_TEST_DATABASE', 'LLMOJ_MINIO_BINARY'];
+  assert.deepEqual(missingRequiredServices(['backend'], env), [...backend, ...services]);
   for (const name of backend) env[name] = 'synthetic-config';
-  assert.deepEqual(missingRequiredServices(['backend'], env), ['redis-server']);
+  assert.deepEqual(missingRequiredServices(['backend'], env), services);
+  env.LLMOJ_REGISTRATION_TEST_DATABASE = 'synthetic-registration';
+  env.LLMOJ_MINIO_BINARY = path.join(directory, 'minio');
+  fs.writeFileSync(env.LLMOJ_MINIO_BINARY, '', { mode: 0o600 });
+  assert.deepEqual(missingRequiredServices(['backend'], env), ['redis-server', 'LLMOJ_MINIO_BINARY']);
+  fs.chmodSync(env.LLMOJ_MINIO_BINARY, 0o755);
   fs.writeFileSync(path.join(directory, 'redis-server'), '#!/bin/sh\n[ "$1" = "--version" ]\n', { mode: 0o755 });
   assert.deepEqual(missingRequiredServices(['backend'], env), []);
 });
@@ -78,7 +85,7 @@ test('the requested groups require the same database variables CI provisions and
 test('the real runner owns every repository suite and CI provisions its MariaDB configuration', () => {
   const registered = validateSuiteInventory(root, suiteGroups);
   for (const name of ['config/config-privacy.test.cjs', 'group/group-discussion-counts.mariadb.test.cjs',
-    'problem-type/common/checker.test.cjs'])
+    'problem-type/common/checker.test.cjs', 'contest/contest-admission.mariadb.test.cjs'])
     assert.ok(registered.backend.includes('apps/backend/src/' + name), name);
   for (const [group, files] of Object.entries(registered)) {
     const required = requiredDatabaseConfigs([group]);
@@ -99,7 +106,7 @@ test('the runner fails before starting suites on inventory errors or missing CI 
     fs.copyFileSync(path.join(root, relative), path.join(directory, relative));
   }
   const env = { PATH: directory, LLMOJ_TEST_NO_SUDO: '1' };
-  function failure(argv) {
+  function failedOutput(argv) {
     const log = path.join(directory, 'preflight.log');
     const fd = fs.openSync(log, 'w');
     let result;
@@ -110,12 +117,33 @@ test('the runner fails before starting suites on inventory errors or missing CI 
     }
     const output = fs.readFileSync(log, 'utf8');
     assert.equal(result.status, 1, result.error?.message || output);
+    return output;
+  }
+  function failure(argv) {
+    const output = failedOutput(argv);
     assert.doesNotMatch(output, /^▶ |^Summary$/m);
     return output;
   }
   assert.match(failure(['--ci', 'ai']), /CI setup missing: .*HYHOJ_AI_TEST_DB_CONFIG/);
   for (const name of requiredDatabaseConfigs(['backend'])) env[name] = 'synthetic-unused-path';
-  assert.match(failure(['--ci', 'backend']), /CI setup missing: redis-server/);
+  assert.match(failure(['--ci', 'backend']), /CI setup missing: redis-server, LLMOJ_REGISTRATION_TEST_DATABASE, LLMOJ_MINIO_BINARY/);
+  assert.match(failure(['--ci', 'deploy']), /LIBREOJ_ADMIN_TEST_SOCKET, LLMOJ_MINIO_BINARY/);
+  fs.writeFileSync(path.join(directory, 'redis-server'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  env.LLMOJ_MINIO_BINARY = process.execPath;
+  assert.match(failure(['--ci', 'backend']), /^CI setup missing: LLMOJ_REGISTRATION_TEST_DATABASE$/m);
+  env.LLMOJ_REGISTRATION_TEST_DATABASE = 'synthetic-unused-path';
+  delete env.LLMOJ_MINIO_BINARY;
+  assert.match(failure(['--ci', 'backend']), /^CI setup missing: LLMOJ_MINIO_BINARY$/m);
+  env.LLMOJ_MINIO_BINARY = process.execPath;
+  // Exercise the real CI exit status for a promised case that skipped despite a successful process.
+  fs.writeFileSync(path.join(directory, 'deploy/test/suite-report.mjs'), `
+export async function runSuite(_program, args) {
+  return { ok: true, status: 0, executed: 1, skipped: Number(args.at(-1).endsWith('file-sealing.minio.test.cjs')), reasons: [] };
+}
+`);
+  const report = failedOutput(['--ci', 'backend']);
+  assert.match(report, /FAIL {2}apps\/backend\/src\/file\/file-sealing.minio.test.cjs/);
+  assert.match(report, /Promised service cases must execute without skips/);
   fs.writeFileSync(path.join(directory, 'stray.test.cjs'), '');
   for (const args of [['wiki'], ['--ci', 'wiki']])
     assert.match(failure(args), /Unregistered test file: stray\.test\.cjs/);

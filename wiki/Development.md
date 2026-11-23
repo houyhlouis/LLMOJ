@@ -2,7 +2,7 @@
 
 [简体中文](Development.zh-CN.md) | English | [Wiki home](Home.en.md)
 
-This page runs LLMOJ from a source checkout for development: a disposable MariaDB, Redis and MinIO of its own, the backend, the frontend's development server, optional sample data, and how to stop and remove it all. Nothing is installed on the system and nothing needs root. To install a site, see [Installation](Installation.md) instead; building and the test suites are described in the [development guide](../README-DEVELOPMENT.md).
+This page runs LLMOJ from a source checkout for development: a disposable MariaDB, Redis and MinIO of its own, the backend, the frontend's development server, optional sample data, and how to stop and remove it all. Nothing is installed on the system and nothing needs root. To install a site, see [Installation](Installation.md) instead; building, [Redis locks](../README-DEVELOPMENT.md#redis-locks) and the test suites are described in the [development guide](../README-DEVELOPMENT.md).
 
 ## What you need
 

@@ -230,3 +230,33 @@ test("online judge machines with different judge programs or sandbox images are 
     assert.equal(warning.props.header, ".runtime_mismatch");
   }
 });
+
+// Review 2026-11-20 RV-08: whether a judge machine runs this server's verified release, for administrators only
+test("an administrator sees whether a judge machine runs this server's verified release", () => {
+  const release = provenance => {
+    const h = componentHarness(page, {
+      props: {
+        hasManagePermission: true,
+        judgeClients: [
+          client(1, { online: true, ...(provenance && { provenance }), capabilities: { ...capabilities, protocolVersion: 3, runtime: runtime() } })
+        ]
+      },
+      deps: {
+        "@/components/EmojiRenderer": { EmojiRenderer: { name: "EmojiRenderer" } },
+        "@/utils/formatDateTime": { __esModule: true, default: () => ["", ""] }
+      }
+    });
+    const capacity = rows(h)[0].props.children[5].props.children[0];
+    const found = h
+      .all(node => node.type === "tr", capacity.props.content)
+      .find(row => JSON.stringify(row.props.children[0]).includes('".capabilities.release"'));
+    return found && JSON.stringify(found.props.children[1].props.children);
+  };
+  const commit = "c".repeat(40);
+  const same = release({ status: "server_release", commit, treeSha256: "d".repeat(64) });
+  assert.match(same, /\.capabilities\.release_server/);
+  assert.match(same, new RegExp(`"title":"${commit}"`));
+  assert.match(same, /"children":\["c{12}"\]/, "the commit is shown shortened, in full only in its title");
+  assert.match(release({ status: "unknown", commit: null, treeSha256: null }), /\.capabilities\.release_unknown/);
+  assert.equal(release(undefined), undefined, "viewers without the field see no release row");
+});

@@ -135,10 +135,6 @@ export class SubmissionJudgingService implements JudgeTaskService<SubmissionProg
   ): Promise<void> {
     const oldSubmission = { ...submission };
 
-    if (submission.taskId) {
-      this.judgeGateway.cancelTask(submission.taskId);
-    }
-
     const dataVersion = problem ? await this.dataVersionToPin(problem) : null;
 
     let countChanges: number[] = [];
@@ -149,10 +145,10 @@ export class SubmissionJudgingService implements JudgeTaskService<SubmissionProg
       if (isRejudge) await this.retainResult(transactionalEntityManager, oldSubmission, actingUserId);
       countChanges = await this.statisticsOutboxService.record(transactionalEntityManager, oldSubmission, submission);
     });
+    await this.submissionStatisticsService.onSubmissionUpdated(oldSubmission, submission);
+    if (oldSubmission.taskId) await this.judgeGateway.cancelTask(oldSubmission.taskId);
     this.judgeQueueService.notifyJobsAvailable();
     await this.statisticsOutboxService.apply(countChanges);
-
-    await this.submissionStatisticsService.onSubmissionUpdated(oldSubmission, submission);
   }
 
   /**
@@ -337,8 +333,6 @@ export class SubmissionJudgingService implements JudgeTaskService<SubmissionProg
     const canceled = await this.lockSubmission(submission, true, async submission => {
       if (!submission || !submission.taskId) return false;
 
-      this.judgeGateway.cancelTask(submission.taskId);
-
       const oldSubmission = { ...submission };
 
       submission.taskId = null;
@@ -356,9 +350,9 @@ export class SubmissionJudgingService implements JudgeTaskService<SubmissionProg
         await transactionalEntityManager.save(submissionDetail);
         countChanges = await this.statisticsOutboxService.record(transactionalEntityManager, oldSubmission, submission);
       });
-      await this.statisticsOutboxService.apply(countChanges);
-
       await this.submissionStatisticsService.onSubmissionUpdated(oldSubmission, submission);
+      await this.judgeGateway.cancelTask(oldSubmission.taskId);
+      await this.statisticsOutboxService.apply(countChanges);
 
       return true;
     });
@@ -414,9 +408,8 @@ export class SubmissionJudgingService implements JudgeTaskService<SubmissionProg
     }
 
     logger.log(`Submission ${submission.id} finished with status ${submission.status}`);
-    await this.statisticsOutboxService.apply(countChanges);
-
     await this.submissionStatisticsService.onSubmissionUpdated(oldSubmission, submission);
+    await this.statisticsOutboxService.apply(countChanges);
     return true;
   }
 
@@ -598,9 +591,9 @@ export class SubmissionJudgingService implements JudgeTaskService<SubmissionProg
         await transactionalEntityManager.save(submissionDetail);
         countChanges = await this.statisticsOutboxService.record(transactionalEntityManager, oldSubmission, submission);
       });
+      await this.submissionStatisticsService.onSubmissionUpdated(oldSubmission, submission);
       await this.statisticsOutboxService.apply(countChanges);
       logger.error(`Submission ${submission.id} could not be judged: ${message}`);
-      await this.submissionStatisticsService.onSubmissionUpdated(oldSubmission, submission);
       await this.submissionProgressService.emitSubmissionEvent(submission.id, SubmissionEventType.Progress, result);
     });
   }

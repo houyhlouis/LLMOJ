@@ -24,11 +24,14 @@ export const SUITE_EXCLUSIONS = {
   'deploy/sandbox/smoke-test-host.sh': 'Probes installed rootfs toolchains during build and staging.',
   'deploy/test/fixtures/legacy-service-worker.js': 'Browser fixture served by service-worker-retirement.test.mjs.',
   'deploy/test/run-tests.mjs': 'Repository test runner.',
+  'deploy/test/build-minio.sh': 'Builds the installer MinIO executable for the Code job.',
+  'deploy/test/with-service-fixture.py': 'Runs a command on a new disposable MariaDB socket.',
   'deploy/test/setup-community-ci.mjs': 'Provisions the disposable MariaDB service for CI.',
   'deploy/test/suite-inventory.mjs': 'Suite registration and CI service checks used by the runner.',
   'deploy/test/suite-report.mjs': 'Collects case counts and skip reasons for the runner summary.',
   'infra/sandbox-rootfs/arm64/smoke-test.sh': 'Build and staging acceptance inside the arm64 rootfs.',
   'infra/sandbox-rootfs/smoke-test.sh': 'Build and staging acceptance inside the amd64 rootfs.',
+  'packages/frontend/test/helpers/chrome.cjs': 'Headless Chrome driver shared by the frontend browser suites.',
   'packages/frontend/test/helpers/component-harness.cjs': 'Component loader shared by the frontend suites.',
   'packages/simple-sandbox/demo/demo.js': 'The Native CI job runs the sandbox demo as root with delegated cgroups.',
   'packages/simple-sandbox/demo/fixture.c': 'Helper executable compiled by the sandbox demo.',
@@ -124,5 +127,15 @@ export function missingRequiredServices(groups, env = process.env) {
   const missing = requiredDatabaseConfigs(groups).filter(name => !env[name]?.trim());
   if (groups.includes('backend') && spawnSync('redis-server', ['--version'], { env, stdio: 'ignore' }).status !== 0)
     missing.push('redis-server');
+  if (groups.includes('backend') && !env.LLMOJ_REGISTRATION_TEST_DATABASE?.trim())
+    missing.push('LLMOJ_REGISTRATION_TEST_DATABASE');
+  if (groups.includes('deploy') && !env.LIBREOJ_ADMIN_TEST_SOCKET?.trim()) missing.push('LIBREOJ_ADMIN_TEST_SOCKET');
+  if (groups.some(group => group === 'backend' || group === 'deploy')) {
+    try {
+      const binary = env.LLMOJ_MINIO_BINARY;
+      if (!path.isAbsolute(binary) || !fs.statSync(binary).isFile()) throw new Error();
+      fs.accessSync(binary, fs.constants.X_OK);
+    } catch { missing.push('LLMOJ_MINIO_BINARY'); }
+  }
   return missing;
 }

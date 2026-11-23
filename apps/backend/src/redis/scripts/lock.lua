@@ -34,4 +34,6 @@ elseif ARGV[1] == "unlock" then
   return unlock(ARGV[2])
 elseif ARGV[1] == "refresh" then
   return refresh(ARGV[2], ARGV[3])
+elseif ARGV[1] == "check" then
+  return redis.call("get", key_lock) == ARGV[2]
 end

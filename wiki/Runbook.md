@@ -23,6 +23,8 @@ Doctor only reads. Each section below names doctor's message, what it means, and
 
 **"The certificate … expires in N days"** or **"expired"**: renew it ([HTTPS](HTTPS.md)). Browsers refuse an expired certificate.
 
+**Stopping or restarting the backend** (`systemctl stop`, `systemctl restart`, or an upgrade): the backend shuts down in an orderly way and quickly. It closes open HTTP and judge connections and ends its active lock leases. With several cluster workers (`server.clusters`), each worker gets up to 5 seconds to finish before it is stopped forcefully, and anything still left is forced to exit after 10 seconds. Judges reconnect to the backend by themselves once it is back, and work they hadn't finished is queued again.
+
 ## Redis
 
 **"Redis doesn't answer"**: `sudo systemctl status libreoj-redis`. Users are signed out and live updates stop until it's back; queued judging is kept in the database.
@@ -32,6 +34,8 @@ Doctor only reads. Each section below names doctor's message, what it means, and
 **"Redis evicts keys when full"**: set `maxmemory-policy noeviction` in `config/redis.conf`, as installed ([Redis](Operations-Configuration.md#redis-configredisconf)), and restart Redis. Eviction can drop sessions and queued work.
 
 **"Redis has N connections"**: something keeps opening connections. `sudo systemctl restart libreoj-backend` releases them; report it, with the version, because it's a bug.
+
+**`LOCK_LEASE_LOST` in responses or the backend log**: an operation lost the Redis lock that protected it (Redis became unreachable, slow, restarted or evicted the lock, or the backend process paused past the lock's 5-second lease). Each response carries a request ID; search the backend log for that ID to see the cause. Check Redis reachability and latency, whether Redis is evicting keys, the server's memory pressure or swapping, and whether the backend is paused or overloaded. While Redis is unreachable, operations that need a lock fail at once instead of waiting: lock commands time out after 2.5 seconds and aren't queued for a reconnect.
 
 ## Database and object storage
 
@@ -78,6 +82,13 @@ Doctor only reads. Each section below names doctor's message, what it means, and
 
 **Users get "A private or local API address can be used only once a site administrator approves it"** or **"…allows only API addresses a site administrator approved"**: check the address in **Site management** → **AI addresses** → **Addresses in use**, and approve it if it's meant to be used ([Which addresses accounts may use](AI.md#which-addresses-accounts-may-use)).
 
+**An AI job failed at `testdata.candidate-preflight` with `INVALID_SANDBOX_RESPONSE: The runner didn't report how it made its result`** (on the job page, `INVALID_SANDBOX_RESPONSE` shows **"The sandbox response or test-data validation is incomplete."**): a runner built before the qualification-record fix returns results without the complete record of how they were made, and the backend rightly rejects them. That runner still announces the same execution protocol, quality-policy and receipt versions (`9` / `2` / `1`), so it stays eligible: versions don't distinguish an old runner from a fixed one, and an artifact digest is not a commit.
+1. Identify the backend and every runner eligible for AI jobs, local and remote: check **Deployment identity** on the AI configuration page (the backend's digest and source — `source <commit>` or `source tree <treeSha256>` **(verified)**, **differs from its release manifest**, or **source unknown** — and each judge's **Build** and whether it is **(this server's release)** or **source unknown**) and the **Release** row under **Capacity** on **Judge Machine** (**This server's release** or **Not this server's verified release; its source isn't known**). Record each one's digest and source; don't infer what is running from a checkout.
+2. Update and restart every runner that isn't shown as **(this server's release)** / **This server's release** (for remote judges, see [Updating a remote judge](Remote-Judge.md#updating-a-remote-judge)), or take it out of service until it is. Keep strict validation on; there is nothing to relax.
+3. Retry the job with its ordinary **Retry** (**Retry failed step** on the job page or **My AI jobs**; an empty list of alternative retry modes doesn't disable it). It keeps the job's source and program artifacts, clears generated test data and quality results, and qualifies the existing candidate again. A changed runner may recompile programs, and later steps may call the provider again.
+4. Watch the new attempt: it should pass `testdata.candidate-preflight` on an identified, updated runner.
+5. Record two outcomes separately: whether `testdata.candidate-preflight` passed (which confirms the defect is fixed in the deployment) and the job's final outcome. Only a completed job means the job recovered; a later, different failure is a new problem to investigate on its own, not the old defect returning. Use **Export diagnostics** on the job page to keep the evidence.
+
 ## The server
 
 **Disk space or file entries (inodes) running out**: old upgrade backups in `backups/upgrade` are the usual cause (doctor says how much they take); delete those you no longer need. Then old backups in `backups/` (`backup.sh --keep` deletes them for you), then logs (`sudo journalctl --vacuum-time=30d`).
@@ -102,13 +113,21 @@ Doctor only reads. Each section below names doctor's message, what it means, and
 
 ## Collecting a diagnostic bundle
 
-To send whoever supports your site what it needs to look into a problem, download a **diagnostic bundle**: **Site management** → **Diagnostic bundle** (site administrators only). It's one JSON file with:
+To send whoever supports your site what it needs to look into a problem, download a **diagnostic bundle**: **Site management** → **Diagnostic bundle** (site administrators only). It's one JSON file (format version 2, `bundleVersion: 2`) with:
 
-- the site's version, Node.js version, platform, uptime and a summary of its non-secret settings;
+- the site's version, backend artifact digest (`backendBuild`), verified build provenance (`backendProvenance` and full commit in `revision`, or `null` when no commit is verified), Node.js version, platform, uptime and a summary of its non-secret settings;
 - the health checks of the database, Redis and storage;
-- the judge machines (state, protocol, architecture, capacity) and the judge queue;
+- the judge machines (state, protocol, architecture, capacity, announced judge program digest and provenance) and the judge queue;
 - recent unexpected errors of the backend process that answered: their request IDs, times, routes and error classes;
 - the AI pause, limits and the status of recent failed AI jobs;
 - if you name them, the metadata of particular submissions and AI jobs.
+
+Next to each artifact digest, diagnostics (the bundle, **Judge Machine**, and the AI page's **Deployment identity** and **Export diagnostics** download, export version 2 / `exportVersion: 2`) show the source it was built from only when that was verified at build time from `deploy/release-manifest.json` (see [Upgrading](Upgrade.md#release-manifest)). A digest is never presented as a commit:
+
+- `verified`: the source commit, or the source tree's SHA-256 when upgraded from a trusted local source tree;
+- `mismatch`: the files on disk differ from what was recorded when the release was built;
+- `unknown`: no manifest or an invalid one, or a modified or unattributed build.
+
+The backend keeps the last 20 verified backend builds in the database (`deployment.buildHistory`), so an older AI job's diagnostic export can name the source of the backend that ran an earlier timeline step; older digest-only entries and entries that have aged out stay `unknown`, while a recorded mismatch stays `mismatch`. For judge machines, provenance shows **This server's release** (`server_release`) only when the judge's announced judge program digest equals this server's verified release, otherwise `unknown`.
 
 It never contains code, test data, inputs or outputs, compiler or checker messages, prompts, passwords, keys or other secrets, even for the submissions and jobs you name. Each download is recorded in the audit log. A user's report with a request ID (see [Using the API](API.md#answers-and-errors)) and the bundle's recent errors can be matched by that ID.

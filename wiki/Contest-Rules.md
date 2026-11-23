@@ -53,11 +53,16 @@ A contest problem page has the same code editor as the problem set. What you wri
 
 - There is one draft for each account, contest, problem and language. Choosing another language brings back that language's draft; if it has none, the code in the editor moves to it.
 - The page opens with the draft you changed last. Submitting keeps the draft, so the code is still there to fix after a wrong answer.
-- The draft is saved when you pause typing for half a second, and at once when you leave the page. It stays in this browser: it isn't sent to the server, and it isn't a submission.
+- The draft is saved half a second after you stop typing, and at once when the tab is hidden or you leave the page. It stays in this browser: it isn't sent to the server, and it isn't a submission.
 - When submissions have closed, the page still shows your draft, read-only, so you can copy it.
-- **Discard draft** deletes the draft of the selected language, after asking, and empties the editor.
-- Drafts are deleted when you sign out, when another account signs in on that browser, and 14 days after their last change. On a shared computer, sign out when you leave.
+- **Discard draft** deletes the draft of the selected language, after asking, and empties the editor; any save that was still waiting is cancelled, so the draft stays deleted.
+- Signing out deletes all drafts kept in that browser, including any save that was still waiting, and nothing waiting is written back afterwards. When you sign out in one tab, or another account signs in on that browser, contest pages open in other tabs stop keeping drafts and show a notice ("This page has stopped keeping drafts: someone signed out, or another account signed in, on this browser. Reload the page."). Code still in such a page's editor isn't saved as a draft; copy it before reloading if you need it.
+- If your login session merely ends (it expired, or was ended on another device) without signing out in this browser, your drafts stay, so you find them after signing in again with the same account. If another account signs in on that browser, your drafts are deleted. Drafts are also deleted 14 days after their last change. On a shared computer, sign out when you leave.
 - A browser keeps at most 50 drafts, the most recently changed ones, and none longer than 1 MiB (the most code a submission takes). Where the browser can't keep a draft (its storage is full or turned off, as in some private windows), the page says so.
+
+## Submitting
+
+A submission is checked when it is accepted, against the contest as it is at that moment. If a manager removes the problem from the contest, or stops allowing the submission's language or standard, before it is accepted, the submission is refused (a removed problem as "not found", a disallowed language as "not allowed in this contest") and nothing is judged; a submission accepted first stays, and the problem can no longer be removed once it has submissions. Changes to a problem's input/output file names or "subtask all or nothing" setting apply to submissions accepted afterwards. An answer-file submission counts from when it was sent: one sent before the end is accepted even if storing the file finishes after it, and a refused answer file can be submitted again. The same rules hold in official contests and in virtual runs.
 
 ## Virtual participation
 

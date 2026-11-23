@@ -148,9 +148,11 @@ To stop the judge: `sudo systemctl stop libreoj-judge.target`. To stop it starti
 
 ## Updating a remote judge
 
-Update a remote judge to the site's version after the site:
+Upgrading the site doesn't update remote judges: update and restart each remote judge separately after upgrading the site:
 1. On the site's **Judge Machine** page, [drain](Distributed-Judging.md#draining-keys-and-capabilities) it and wait until it shows **Drained**. Then stop it: `sudo systemctl stop libreoj-judge.target`.
 2. In `/opt/LLMOJ`, check out the site's version as in [step 1](#1-download-the-same-version-as-the-site). Remove the native build directories, so that the add-ons are configured again with the new build tools: `sudo rm -rf apps/judge/build packages/simple-sandbox/build`. Then install and build as in [step 2](#2-install-nodejs-and-pnpm-and-build-the-judge); `pnpm install` installs the dependencies the new version locks.
 3. Run `configure-judge.py` again with the same variables as in [step 4](#4-save-the-key-and-write-the-configuration). It keeps the configuration, and creates the judge's account if it's missing. Versions from before the sandbox launcher ran the whole judge as root and had no account.
 4. Make the files readable and check the sandbox as in [step 5](#5-install-the-service-and-check-the-sandbox) (`chmod`, then the sandbox check), and run `sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh`.
 5. Start it with `sudo systemctl start libreoj-judge.target`, and **Resume** it on the **Judge Machine** page.
+
+On the **Judge Machine** page (under **Capacity** → **Release**, visible to site administrators, as well as in **Deployment identity** and diagnostic downloads), a judge's **Release** shows **This server's release** (with the commit when the site has one) only if its announced judge program digest equals this server's verified release (which requires an `all` site with a verified `deploy/release-manifest.json`; on a `web`-only site, an unverified site build, a different judge build, or an older judge without a digest, it shows **Not this server's verified release; its source isn't known**). This display shows only what each judge announces now, not what build ran an earlier submission or AI job. An AI-capable remote judge that isn't this server's release can fail AI jobs at candidate preflight (`testdata.candidate-preflight`); see the [Runbook](Runbook.md#ai).

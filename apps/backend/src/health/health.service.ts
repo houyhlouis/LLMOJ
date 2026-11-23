@@ -1,8 +1,9 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 
 import { DataSource } from "typeorm";
 
+import { recordBackendBinding } from "./deployment-history";
 import { deploymentBuildIdentity } from "./deployment-identity";
 
 import { JudgeRuntimeEntity } from "../judge/judge-runtime.entity";
@@ -55,7 +56,7 @@ export async function withTimeout<T>(promise: Promise<T>, milliseconds: number):
 
 /** Whether this backend process can serve requests: the database, Redis and object storage answer. */
 @Injectable()
-export class HealthService {
+export class HealthService implements OnModuleInit {
   checkTimeout = CHECK_TIMEOUT;
 
   private readiness: { at: number; result: Promise<TimedReadiness> } = null;
@@ -77,13 +78,23 @@ export class HealthService {
     }
   };
 
+  async onModuleInit() {
+    await recordBackendBinding(this.connection, deploymentBuildIdentity.backend);
+  }
+
   async identity() {
     const schema = await this.connection.getRepository(SettingsEntity).findOneBy({ key: "deployment.schema" });
     const recorded = await this.connection
       .getRepository(JudgeRuntimeEntity)
       .find({ order: { firstSeenAt: "DESC" }, take: 20 });
+    const { backend, frontend, qualityPolicyVersion, receiptVersion, executionProtocolVersion } =
+      deploymentBuildIdentity;
     return {
-      ...deploymentBuildIdentity,
+      backend: { sha256: backend.sha256, status: backend.status, basis: backend.basis, capturedAt: backend.capturedAt },
+      frontend: { sha256: frontend.sha256, status: frontend.status, basis: frontend.basis },
+      qualityPolicyVersion,
+      receiptVersion,
+      executionProtocolVersion,
       schema: schema?.value || { version: null, status: "unrecorded" },
       recordedJudgeBuilds: recorded.map(row => ({
         id: row.id,

@@ -8,6 +8,7 @@ import { SubmissionProgressGateway } from "./submission-progress.gateway";
 
 import { logger } from "../logger";
 import { RedisService } from "../redis/redis.service";
+import { writeWithLockLeases } from "../redis/lease-redis-command";
 
 export enum SubmissionEventType {
   Progress,
@@ -59,13 +60,20 @@ export class SubmissionProgressService {
   ): Promise<void> {
     logger.log(`Progress for submission ${submissionId} received, pushing to Redis`);
     if (type === SubmissionEventType.Progress && progress.progressType !== SubmissionProgressType.Finished) {
-      await this.redis.set(REDIS_KEY_SUBMISSION_PROGRESS.format(submissionId), JSON.stringify(progress));
+      await writeWithLockLeases(
+        this.redis,
+        "set",
+        REDIS_KEY_SUBMISSION_PROGRESS.format(submissionId),
+        JSON.stringify(progress)
+      );
     } else {
-      await this.redis.del(REDIS_KEY_SUBMISSION_PROGRESS.format(submissionId));
+      await writeWithLockLeases(this.redis, "del", REDIS_KEY_SUBMISSION_PROGRESS.format(submissionId));
     }
 
     // This will call this.onSubmissionEvent
-    await this.redis.publish(
+    await writeWithLockLeases(
+      this.redis,
+      "publish",
       REDIS_CHANNEL_SUBMISSION_EVENT,
       JSON.stringify({
         submissionId,

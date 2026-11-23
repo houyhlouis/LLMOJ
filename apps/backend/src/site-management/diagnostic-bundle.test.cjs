@@ -161,7 +161,12 @@ test("the exported JSON conforms to the closed Swagger response schema and conta
   const check = await schemaTools();
   check(bundle);
   assert.doesNotMatch(JSON.stringify(bundle), /PRIVATE_FIXTURE_/);
-  assert.deepEqual(bundle.bundle, { bundleVersion: 1, generatedAt: bundle.bundle.generatedAt, requestId, administratorId: admin.id });
+  assert.deepEqual(bundle.bundle, { bundleVersion: 2, generatedAt: bundle.bundle.generatedAt, requestId, administratorId: admin.id });
+  const { deploymentBuildIdentity } = require("../health/deployment-identity.ts");
+  assert.deepEqual(bundle.deployment.backendProvenance, deploymentBuildIdentity.backend.provenance);
+  assert.equal(bundle.deployment.backendBuild, deploymentBuildIdentity.backend.sha256);
+  assert.equal(bundle.deployment.revision, bundle.deployment.backendProvenance.commit);
+  assert.deepEqual(bundle.judging.machines[0].provenance, { status: "unknown", commit: null, treeSha256: null });
   assert.equal(bundle.deployment.aiExecutionMode, "judges");
   assert.equal(bundle.deployment.settings.registrationMode, "approval");
   assert.equal(bundle.deployment.settings.rateLimitDurationSeconds, 60);
@@ -185,6 +190,26 @@ test("the exported JSON conforms to the closed Swagger response schema and conta
   assert.ok(queries.every(sql => !/SELECT \*|\bd.content\b|\bj.input\b|\bj.state\b/i.test(sql)));
   bundle.selected.aiJobs[0].unexpected = true;
   assert.throws(() => check(bundle), /unknown field .*unexpected/);
+});
+
+test("the bundle revision follows the verified startup binding and disappears on a mismatched deployment", async t => {
+  const identity = require("../health/deployment-identity.ts");
+  const startup = identity.deploymentBuildIdentity;
+  t.after(() => { identity.deploymentBuildIdentity = startup; });
+  const { controller } = setup();
+  const check = await schemaTools();
+  for (const provenance of [
+    { status: "verified", commit: "d".repeat(40), treeSha256: "e".repeat(64) },
+    { status: "mismatch", commit: null, treeSha256: null }
+  ]) {
+    identity.deploymentBuildIdentity = { ...startup, backend: { ...startup.backend, provenance } };
+    const bundle = await controller.diagnosticBundle(admin, {}, { requestId });
+    check(bundle);
+    assert.equal(bundle.deployment.revision, provenance.commit);
+    assert.deepEqual(bundle.deployment.backendProvenance, provenance);
+    assert.equal(bundle.deployment.backendBuild, startup.backend.sha256);
+    assert.doesNotMatch(JSON.stringify(bundle), /PRIVATE_FIXTURE_/);
+  }
 });
 
 test("every delegable permission and a stale admin snapshot both fail a fresh administrator check; visitors are forbidden", async () => {

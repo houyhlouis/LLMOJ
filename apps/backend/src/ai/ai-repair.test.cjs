@@ -267,7 +267,7 @@ test("a repair replaces one program of the state and of the request, and nothing
   assert.equal("checkerCode" in plain, false);
 });
 
-test("the model is never sent the bytes of the problem's own sample files", () => {
+test("the default repair policy withholds the problem's sample files and reveals generated evidence", () => {
   const artifact = (role, classification, preview) => ({
     role,
     classification,
@@ -301,6 +301,31 @@ test("the model is never sent the bytes of the problem's own sample files", () =
   assert.deepEqual(shown.artifacts[0], { role: "input", size: 8, preview: "3\n1 2 3\n", truncated: false });
   assert.equal(shown.difference.actual, "secret-actual");
 });
+
+for (const policy of ["private", "summaries", "model_visible"]) {
+  test(`sample input validation uses the ${policy} repair policy`, () => {
+    const preview = "input-preview-marker", summary = "validator-summary-marker", diagnostics = "stderr-marker";
+    const context = failureContext({
+      kind: "validator_rejection", phase: "validate-sample-inputs", summary,
+      artifacts: [{ role: "input", classification: "author-private", originalSize: 32, preview }]
+    }, diagnostics, policy);
+    const serialized = JSON.stringify(context);
+    for (const marker of [preview, summary, diagnostics])
+      assert.equal(serialized.includes(marker), policy === "model_visible", marker);
+
+    if (policy === "model_visible") {
+      assert.deepEqual(context.artifacts, [{ role: "input", size: 32, preview, truncated: false }]);
+      assert.equal(context.summary, summary);
+      assert.equal(context.diagnostics, diagnostics);
+    } else {
+      assert.match(context.withheld, /isn't shared/);
+      assert.deepEqual(context, {
+        kind: "validator_rejection", phase: "validate-sample-inputs", artifacts: [], withheld: context.withheld,
+        ...(policy === "summaries" && { structuralSummary: [{ role: "input", bytes: 32 }] })
+      });
+    }
+  });
+}
 
 // An input outside the oracle's small domain is small-make.cpp's: repaired at once (no replay, the oracle isn't
 // rewritten, no solution is blamed); if that repair doesn't help, the owner chooses between it and the oracle

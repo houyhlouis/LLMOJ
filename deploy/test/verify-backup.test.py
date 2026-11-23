@@ -27,7 +27,7 @@ spec = importlib.util.spec_from_file_location('verify_backup', MODULE)
 v = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(v)
 
-NODE = next((str(path) for path in (Path('/opt/LLMOJ/runtime/node/bin/node'),) if os.access(path, os.X_OK)), None) or shutil.which('node')
+NODE = shutil.which('node') or next((str(path) for path in (Path('/opt/LLMOJ/runtime/node/bin/node'),) if os.access(path, os.X_OK)), None)
 SECRETS = ('session-secret-5e1d', 'database-password-0a7b', 'minio-secret-9f22')
 # A real MinIO makes the fixture's storage readable, so the files' contents are compared; without it the storage is
 # only a directory layout. It runs on the test's own temporary copy.
@@ -165,6 +165,8 @@ class FullCheckTests(unittest.TestCase):
         os.chmod(cls.base, 0o711)
         cls.prefix = cls.base/'prefix'
         (cls.prefix/'runtime/node/bin').mkdir(parents=True)
+        for directory in (cls.prefix, cls.prefix/'runtime'):
+            directory.chmod(0o711)
         (cls.prefix/'runtime/node/bin/node').symlink_to(NODE)
         cls.site = cls.base/'site'
         site = cls.site
@@ -192,7 +194,9 @@ security:
         cls.contents = {uuid: os.urandom(1000 * (i + 1)) + b'end' for i, uuid in enumerate(cls.files)}
         if MINIO:
             (site/'config/minio.env').write_text(f'MINIO_ROOT_USER=llmojtest\nMINIO_ROOT_PASSWORD={SECRETS[2]}\n')
-            (cls.prefix/'runtime/minio').symlink_to(MINIO)
+            # The service account can execute the copy even when the runner's cache is private.
+            shutil.copyfile(MINIO, cls.prefix/'runtime/minio')
+            (cls.prefix/'runtime/minio').chmod(0o755)
             cls.store(site/'data/minio', {**cls.contents, 'ffffffff-0000-4000-8000-000000000000': b'unfinished upload'})
         else:
             (site/'config/minio.env').write_text('private\n')

@@ -2,7 +2,7 @@
 
 简体中文 | [English](Development.md) | [Wiki 首页](Home.md)
 
-本页介绍如何从源码目录运行 LLMOJ 进行开发：一套自己专用、用完即弃的 MariaDB、Redis 和 MinIO，后端，前端开发服务器，可选的示例数据，以及如何停止并全部删除。不会在系统中安装任何东西，也不需要 root。要安装站点，请看[安装教程](Installation.zh-CN.md)；构建和测试见[开发说明](../README-DEVELOPMENT.zh-CN.md)。
+本页介绍如何从源码目录运行 LLMOJ 进行开发：一套自己专用、用完即弃的 MariaDB、Redis 和 MinIO，后端，前端开发服务器，可选的示例数据，以及如何停止并全部删除。不会在系统中安装任何东西，也不需要 root。要安装站点，请看[安装教程](Installation.zh-CN.md)；构建、[Redis 锁](../README-DEVELOPMENT.zh-CN.md#redis-锁)和测试见[开发说明](../README-DEVELOPMENT.zh-CN.md)。
 
 ## 需要什么
 

@@ -33,6 +33,7 @@ import { isVirtualContestSubmission } from "../contest/contest-virtual-timeline"
 import { JudgeQueueService, JudgeTask, JudgeTaskPriorityType } from "../judge/judge-queue.service";
 import { JudgeTaskCompletion, JudgeTaskService } from "../judge/judge-task-service.interface";
 import { LockService } from "../redis/lock.service";
+import { LockLeaseLostError } from "../redis/lock-lease";
 import { teamResourceVisibilitySql } from "../team/team-access";
 import { CodeLanguage } from "../code-language/code-language.type";
 import { CodeLanguageService } from "../code-language/code-language.service";
@@ -464,11 +465,15 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
         try {
           await this.queue.enqueue(hack.taskId, JudgeTaskType.Hack, JudgeTaskPriorityType.Low + hack.id / 1e9);
         } catch (error) {
-          await repository.update(hack.id, {
-            taskId: null,
-            status: HackStatus.SystemError,
-            message: "Could not enqueue hack; a manager can retry"
-          });
+          // Recovery finds the committed active task and inserts its missing job once under a fresh lease.
+          if (error instanceof LockLeaseLostError) throw error;
+          await this.db.transaction("READ COMMITTED", manager =>
+            manager.update(HackEntity, hack.id, {
+              taskId: null,
+              status: HackStatus.SystemError,
+              message: "Could not enqueue hack; a manager can retry"
+            })
+          );
           throw error;
         }
         return { id: hack.id };
@@ -710,12 +715,13 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
     const hack = await this.db.getRepository(HackEntity).findOneBy({ taskId });
     if (!hack) return;
     await this.locks.lock(`Hack_${hack.id}`, async () => {
-      await this.db
-        .getRepository(HackEntity)
-        .update(
+      await this.db.transaction("READ COMMITTED", manager =>
+        manager.update(
+          HackEntity,
           { id: hack.id, taskId },
           { taskId: null, status: HackStatus.SystemError, message: message.slice(0, 4096), finishTime: new Date() }
-        );
+        )
+      );
     });
   }
 
@@ -729,17 +735,21 @@ export class HackService implements JudgeTaskService<HackProgress, HackSnapshot 
       if (!fresh || fresh.taskId !== taskId) return false;
       if (!progress.finished) {
         if (progress.status !== HackStatus.Running) return false;
-        await this.db.getRepository(HackEntity).update(fresh.id, { status: HackStatus.Running });
+        await this.db.transaction("READ COMMITTED", manager =>
+          manager.update(HackEntity, fresh.id, { status: HackStatus.Running })
+        );
         return true;
       }
       if ([HackStatus.Pending, HackStatus.Running].includes(progress.status)) return false;
       if (!(await this.taskAuthorised(fresh))) {
-        await this.db.getRepository(HackEntity).update(fresh.id, {
-          taskId: null,
-          status: HackStatus.Canceled,
-          message: "Hack access or the trusted judging configuration changed",
-          finishTime: new Date()
-        });
+        await this.db.transaction("READ COMMITTED", manager =>
+          manager.update(HackEntity, fresh.id, {
+            taskId: null,
+            status: HackStatus.Canceled,
+            message: "Hack access or the trusted judging configuration changed",
+            finishTime: new Date()
+          })
+        );
         return false;
       }
       fresh.status = progress.status;

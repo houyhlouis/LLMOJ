@@ -14,6 +14,7 @@ import { logger } from "../logger";
 import { ProblemEntity } from "../problem/problem.entity";
 import { UserEntity } from "../user/user.entity";
 import { RedisService } from "../redis/redis.service";
+import { LockLeaseLostError } from "../redis/lock-lease";
 import { MetricsService, sharedReading } from "../metrics/metrics.service";
 
 // Records left by a process that stopped before applying them are applied by the others after this long
@@ -121,6 +122,7 @@ export class StatisticsOutboxService implements OnModuleInit, OnModuleDestroy {
         // eslint-disable-next-line no-await-in-loop -- Each record in its own short transaction.
         await this.applyOne(id);
       } catch (e) {
+        if (e instanceof LockLeaseLostError) throw e;
         logger.warn(`Failed to apply recorded count change ${id}, retrying later: ${e}`);
       }
     }

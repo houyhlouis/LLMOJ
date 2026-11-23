@@ -5,6 +5,7 @@ const path = require("node:path");
 const util = require("node:util");
 const ts = require("typescript");
 const protocol = require("@libreoj/judge-protocol");
+require("../redis/register-typescript.cjs");
 
 // Installed globally by main.ts.
 // eslint-disable-next-line no-extend-native
@@ -36,6 +37,7 @@ function load(file, overrides) {
 }
 
 const warnings = [];
+const gatewayLogger = { log: noop, verbose: noop, error: noop, warn: message => warnings.push(message) };
 const judgeRuntimeModule = load("judge-runtime.service.ts", {
   crypto: require("node:crypto"),
   "@nestjs/common": { Injectable: decorator },
@@ -61,12 +63,14 @@ const { JudgeGateway, aiExecutionLimit } = load("judge.gateway.ts", {
   "./judge-queue.service": { LEASE_RENEW_INTERVAL: 30000, JudgeTaskPriorityType: { LiveContest: 0 } },
   "../settings/judge-policy.service": { JudgePolicyService: class JudgePolicyService {} },
   "./judge-client.service": { REDIS_CHANNEL_JUDGE_CLIENT_CHANGED: "judge-client-changed" },
+  "../redis/lock-lease": require("../redis/lock-lease.ts"),
+  "../redis/lease-redis-command": require("../redis/lease-redis-command.ts"),
   "./judge-job.entity": {
     JudgeJobAttemptOutcome: { Disconnected: "Disconnected", Abandoned: "Abandoned", Expired: "Expired" }
   },
   "./judge-runtime.service": judgeRuntimeModule,
   "./judge-architecture": judgeArchitectureModule,
-  "../logger": { logger: { log: noop, verbose: noop, error: noop, warn: message => warnings.push(message) } },
+  "../logger": { logger: gatewayLogger },
   "../file/file.service": { MinioSignFor: { Judge: "Judge" }, JUDGE_FILE_DOWNLOAD_EXPIRE_TIME: 21600 },
   "../event-report/event-report.service": { EventReportType: { Success: "Success", Warning: "Warning" } },
   "../socket-io.constants": { SOCKET_IO_MAX_MESSAGE_SIZE: 64 * 1024 * 1024 },
@@ -300,9 +304,75 @@ test("a disconnected client's leases are released, and only connected tasks are 
 
 test("canceling a task also cancels its job", async () => {
   const { gateway, canceled } = fixture();
-  gateway.cancelTask("task-a");
-  await new Promise(setImmediate);
+  await gateway.cancelTask("task-a");
   assert.deepEqual(canceled, ["task-a"]);
+});
+
+test("a lost connection or disconnection lock clears only that judge session and releases its assignments", async t => {
+  const errors = t.mock.method(gatewayLogger, "error", noop);
+  const { LockLeaseLostError } = require("../redis/lock-lease.ts");
+  const { gateway, queue, released, connect } = fixture();
+  const ordinary = gateway.lockService.lock;
+  gateway.lockService.lock = async (name, work) => {
+    await ordinary(name, work);
+    throw new LockLeaseLostError(new Error("lost while returning from the lock"));
+  };
+  const forgotten = [];
+  gateway.judgeClientService.forgetDisconnectedSession = async (judge, session) => forgotten.push([judge.id, session]);
+  const a = await connect(1);
+  assert.equal(a.client.disconnected, true);
+  assert.equal(a.emitted.some(([event]) => event === "ready"), false);
+  assert.equal(gateway.mapSessionIdToJudgeClient.size, 0);
+
+  gateway.lockService.lock = ordinary;
+  const b = await connect(2);
+  queue.push(submissionTask("outstanding", []));
+  await gateway.onConsumeTask(b.client, 0);
+  b.client.connected = false;
+  gateway.lockService.lock = async () => { throw new LockLeaseLostError(new Error("Redis unavailable")); };
+  await gateway.handleDisconnect(b.client);
+  assert.deepEqual(forgotten, [[1, "socket-1"], [2, "socket-2"]]);
+  assert.deepEqual(released, [["outstanding", 1, "socket-2", "Disconnected"]]);
+  assert.equal(gateway.mapTaskIdToSocket.size, 0);
+  assert.equal(errors.mock.callCount(), 2);
+  assert.match(errors.mock.calls[0].arguments[0], /initialize judge client 1.*LockLeaseLostError/);
+  assert.match(errors.mock.calls[1].arguments[0], /clear judge client 2.*LockLeaseLostError/);
+});
+
+test("intentional lock shutdown during judge connect and disconnect cleans up quietly", async t => {
+  const { EventEmitter } = require("node:events");
+  const { LockService } = require("../redis/lock.service.ts");
+  const { assertLockLeasesHeld } = require("../redis/lock-lease.ts");
+  const errors = t.mock.method(gatewayLogger, "error", noop);
+  const { gateway, connect, released, queue } = fixture();
+  const locks = new LockService({
+    getClient: () => Object.assign(new EventEmitter(), { defineCommand: noop, disconnect: noop, callLock: async () => true })
+  });
+  gateway.lockService = locks;
+  const forgotten = [];
+  gateway.judgeClientService.forgetDisconnectedSession = async (_judge, session) => forgotten.push(session);
+  const a = await connect(1);
+  queue.push(submissionTask("still-assigned", []));
+  await gateway.onConsumeTask(a.client, 0);
+
+  gateway.judgeQueueService.releaseEarlierLeases = async () => {
+    locks.onModuleDestroy();
+    assertLockLeasesHeld();
+  };
+  const b = await connect(2);
+  assert.equal(b.client.disconnected, true);
+  assert.equal(b.emitted.some(([event]) => event === "ready"), false);
+  a.client.connected = false;
+  await gateway.handleDisconnect(a.client);
+  assert.deepEqual(forgotten, ["socket-2", "socket-1"]);
+  assert.deepEqual(released, [["still-assigned", 1, "socket-1", "Disconnected"]]);
+  assert.equal(gateway.mapTaskIdToSocket.size, 0);
+  assert.equal(errors.mock.callCount(), 0);
+
+  gateway.judgeClientService.forgetDisconnectedSession = async () => { throw new Error("session cleanup failed"); };
+  await connect(3);
+  assert.equal(errors.mock.callCount(), 1);
+  assert.match(errors.mock.calls[0].arguments[0], /session cleanup failed/);
 });
 
 test("files are only signed when referenced by the requesting client's tasks, with a bounded lifetime", async () => {

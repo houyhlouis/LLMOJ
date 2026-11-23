@@ -4,6 +4,8 @@ import { JudgeClientSystemInfo } from "@libreoj/judge-protocol";
 
 import { JudgeRuntimeDto } from "./judge-runtime.dto";
 
+import { WorkerProvenanceDto } from "../../health/build-provenance.dto";
+
 export class JudgeClientCapabilitiesDto {
   @ApiProperty()
   protocolVersion: number;
@@ -41,6 +43,13 @@ export class JudgeClientCapabilitiesDto {
 }
 
 export class JudgeClientInfoDto {
+  @ApiProperty({
+    type: WorkerProvenanceDto,
+    required: false,
+    description: "Administrator view of the last announced program digest"
+  })
+  provenance?: WorkerProvenanceDto;
+
   @ApiProperty()
   id: number;
 

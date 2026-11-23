@@ -142,7 +142,9 @@ test(
       async deleteFile(uuids, manager) {
         const list = [].concat(uuids);
         if (list.length) await manager.delete(FileEntity, { uuid: In(list) });
-        return () => removedObjects.push(...list);
+        return async () => {
+          removedObjects.push(...list);
+        };
       },
       signDownloadLink: async () => "signed",
       getContentHashes: uuids =>
@@ -243,7 +245,7 @@ test(
       return await problems.findOneBy({ id });
     }
     const submit = async (submitter, p, contest) => (await svc.createSubmission(
-      submitter, p, code, null, contest && { ...contest, admit: async () => new Date() }
+      submitter, p, code, null, contest && (async () => ({ ...contest, submitTime: new Date() }))
     ))[1];
     const load = async id => await ds.getRepository(SubmissionEntity).findOneBy({ id });
     const finish = async (id, status, judgeRuntimeId) =>

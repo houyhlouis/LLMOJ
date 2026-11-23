@@ -15,11 +15,9 @@ import {
   contestSubmissionsPublic,
   contestSubmissionVisibility
 } from "./contest-policy";
-import { isContestLanguageAllowed } from "./contest-languages";
+import { requireContestSubmissionLanguage } from "./contest-languages";
 
 import type { ContestRequestData } from "./contest-request.dto";
-
-import type { SubmissionContentTraditional } from "../problem-type/types/traditional/submission-content.interface";
 
 import { UserEntity } from "../user/user.entity";
 import { UserPrivilegeType } from "../user/user-privilege.service";
@@ -46,30 +44,19 @@ export class ContestSubmissionService {
     private readonly submissionJudging: SubmissionJudgingService
   ) {}
 
-  async submit(user: UserEntity, id: number, problemId: number, data: ContestRequestData, prepare = false) {
+  async submit(user: UserEntity, id: number, slotId: number, data: ContestRequestData, prepare = false) {
     await this.access.requirePrivilege(user, UserPrivilegeType.ParticipateContest);
     await this.access.requirePrivilege(user, UserPrivilegeType.SubmitProblem);
     const { contest, manager, virtualRun, now } = await this.access.get(user, id, true);
     if (!manager && contestEnded(contest, now)) throw new ForbiddenException("Contest has ended");
-    const row = await this.db.getRepository(ContestProblemEntity).findOneBy({ id: problemId, contestId: id });
+    const row = await this.db.getRepository(ContestProblemEntity).findOneBy({ id: slotId, contestId: id });
     if (!row) throw new NotFoundException();
     return await this.problemLocks.lockProblemById(row.problemId, "Read", async problem => {
       if (!problem || !(await this.problems.getProblemJudgeInfo(problem))[1])
         throw new BadRequestException("Problem cannot be submitted");
-      const payload = data.content as Partial<SubmissionContentTraditional> & {
-        userProgram?: SubmissionContentTraditional;
-      };
-      const codeContent = payload?.language ? payload : payload?.userProgram;
-      if (
-        codeContent?.language &&
-        !isContestLanguageAllowed(
-          contest.languages,
-          codeContent.language,
-          codeContent.compileAndRunOptions as Record<string, unknown>
-        )
-      )
-        throw new ForbiddenException("Language is not allowed in this contest");
-      const errors = await this.submissions.validateSubmissionContent(problem, data.content);
+      const { content } = data;
+      requireContestSubmissionLanguage(contest.languages, content);
+      const errors = await this.submissions.validateSubmissionContent(problem, content);
       if (errors.length) throw new BadRequestException(errors);
       if (!contestSubmissionsOpen(contest, manager, contestViewerTime(contest, virtualRun)))
         throw new ForbiddenException("Contest has ended");
@@ -78,19 +65,14 @@ export class ContestSubmissionService {
         const result = await this.submissions.prepareSubmissionFileUpload(problem, data.fileSize);
         return typeof result === "string" ? { error: result } : { signedUploadRequest: result };
       }
+      const requestedSlot = { id: slotId, contestId: id, problemId: problem.id };
       const [error, submission] = await this.submissions.createSubmission(
         user,
         problem,
-        data.content,
+        content,
         data.uploadInfo,
-        {
-          contestId: id,
-          contestProblemId: row.id,
-          contestInputFilename: row.inputFilename,
-          contestOutputFilename: row.outputFilename,
-          contestSubtaskAllOrNothing: row.subtaskAllOrNothing,
-          admit: transaction => this.access.admitSubmission(user, id, transaction)
-        }
+        (transaction, uploadStartedAt) =>
+          this.access.admitSubmission(user, requestedSlot, content, transaction, uploadStartedAt)
       );
       if (error) return typeof error === "string" ? { error } : { signedUploadRequest: error };
       return { submissionId: submission.id };

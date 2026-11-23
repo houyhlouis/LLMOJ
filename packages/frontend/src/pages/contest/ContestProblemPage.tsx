@@ -17,10 +17,13 @@ import {
 import {
   DRAFT_RETENTION_DAYS,
   DraftOwner,
+  DraftSaveResult,
+  DraftWriter,
+  createDraftWriter,
+  currentDraftSession,
   latestDraftLanguage,
   loadDraft,
-  removeDraft,
-  saveDraft
+  removeDraft
 } from "@/utils/contestDrafts";
 import formatDateTime from "@/utils/formatDateTime";
 import { callContest, contestRequest, submitContest, prepareContestUpload, tr } from "./api";
@@ -29,9 +32,6 @@ import { virtualRunActive } from "./VirtualRun";
 import style from "./ContestPages.module.less";
 import SelfEvalButton from "@/pages/self-eval/SelfEvalButton";
 import { saveBlob } from "@/utils/downloadFile";
-
-/** How long typing pauses before the draft is saved; leaving the page saves it at once. */
-const DRAFT_SAVE_DELAY = 500;
 
 function initialOptions(value: string) {
   const [language, variant] = value.split(":");
@@ -67,17 +67,24 @@ function draftOptions(selectedLanguages: string[], language: CodeLanguage, saved
     })
   );
 }
-type DraftStatus = { savedAt: number; restored?: boolean } | "not-kept" | null;
+type DraftStatus = { savedAt: number; restored?: boolean } | "not-kept" | "ended" | null;
 
 export function ContestProblemPage({ detail, initial }: { detail: any; initial: any }) {
   const navigation = useNavigationChecked(),
     _ = useLocalizer("code_language");
   const initialLanguages = problemLanguages(initial);
-  // Code is kept as a draft in this browser, per account, contest, problem and language
-  const draftOwner: DraftOwner =
+  // Code is kept as a draft in this browser, per account, contest, problem and language, while the browser's draft
+  // session the page opened in lasts
+  const [draftOwner] = useState<DraftOwner>(() =>
     appState.currentUser && initial.type !== "SubmitAnswer"
-      ? { userId: appState.currentUser.id, contestId: initial.contest.id, problemId: initial.problem.id }
-      : null;
+      ? {
+          userId: appState.currentUser.id,
+          contestId: initial.contest.id,
+          problemId: initial.problem.id,
+          session: currentDraftSession()
+        }
+      : null
+  );
   // The page opens with the draft changed last, in a language the contest still allows
   const [start] = useState(() => {
     const languages = [...new Set(initialLanguages.map(l => l.split(":")[0]))];
@@ -113,51 +120,35 @@ export function ContestProblemPage({ detail, initial }: { detail: any; initial: 
   const selectedLanguages = problemLanguages(data);
   const allowedLanguages = [...new Set<string>(selectedLanguages.map(l => l.split(":")[0]))];
 
-  // The draft waiting to be saved: typing saves it after a pause, and leaving the page right away
-  const pendingDraft = useRef<{ language: string; code: string; options: Record<string, unknown> }>(null);
-  const draftTimer = useRef<ReturnType<typeof setTimeout>>(null);
-  function saveDraftNow() {
-    if (draftTimer.current != null) clearTimeout(draftTimer.current);
-    draftTimer.current = null;
-    const next = pendingDraft.current;
-    pendingDraft.current = null;
-    if (!next || !draftOwner) return;
-    const result = saveDraft(draftOwner, next.language, next.code, next.options);
-    setDraftStatus(result === "saved" ? { savedAt: Date.now() } : result === "not-kept" ? "not-kept" : null);
-  }
-  function keepDraft(next: { language: string; code: string; options: Record<string, unknown> }) {
-    if (!draftOwner) return;
-    pendingDraft.current = next;
-    if (draftTimer.current != null) clearTimeout(draftTimer.current);
-    draftTimer.current = setTimeout(() => saveDraftNow(), DRAFT_SAVE_DELAY);
-  }
-  const saveDraftOnExit = useRef(saveDraftNow);
-  saveDraftOnExit.current = saveDraftNow;
+  // Typing saves the draft after a pause, hiding the tab or leaving the page at once, and signing out (here or in
+  // another tab) drops what was still waiting
+  const draftWriter = useRef<DraftWriter>(null);
   useEffect(() => {
-    const save = () => saveDraftOnExit.current();
-    const saveWhenHidden = () => document.visibilityState === "hidden" && save();
-    window.addEventListener("pagehide", save);
-    document.addEventListener("visibilitychange", saveWhenHidden);
+    const writer = createDraftWriter(draftOwner, (result: DraftSaveResult) =>
+      setDraftStatus(
+        result === "saved" ? { savedAt: Date.now() } : result === "not-kept" || result === "ended" ? result : null
+      )
+    );
+    draftWriter.current = writer;
     return () => {
-      window.removeEventListener("pagehide", save);
-      document.removeEventListener("visibilitychange", saveWhenHidden);
-      save();
+      writer.close();
+      if (draftWriter.current === writer) draftWriter.current = null;
     };
   }, []);
 
   function changeCode(value: string) {
     setCode(value);
-    keepDraft({ language, code: value, options });
+    draftWriter.current?.keep(language, value, options);
   }
   function changeOptions(value: Record<string, unknown>) {
     setOptions(value);
-    if (code) keepDraft({ language, code, options: value });
+    if (code) draftWriter.current?.keep(language, code, value);
   }
   // Each language has its own draft. Choosing a language without one keeps the code in the editor, and its draft moves
   // to that language.
   function changeLanguage(next: CodeLanguage) {
     if (next === language) return;
-    saveDraftNow();
+    draftWriter.current?.flush();
     const draft = loadDraft(draftOwner, next);
     setLanguage(next);
     if (draft) {
@@ -170,18 +161,14 @@ export function ContestProblemPage({ detail, initial }: { detail: any; initial: 
     setOptions(nextOptions);
     if (draftOwner && code) {
       removeDraft(draftOwner, language);
-      pendingDraft.current = { language: next, code, options: nextOptions };
-      saveDraftNow();
+      draftWriter.current?.save(next, code, nextOptions);
     }
   }
   function discardDraft() {
     if (!window.confirm(tr("删除这份草稿并清空编辑器？", "Delete this draft and empty the editor?"))) return;
-    if (draftTimer.current != null) clearTimeout(draftTimer.current);
-    draftTimer.current = null;
-    pendingDraft.current = null;
-    removeDraft(draftOwner, language);
+    draftWriter.current?.discard(language);
     setCode("");
-    setDraftStatus(null);
+    setDraftStatus(status => (status === "ended" ? status : null));
   }
 
   useEffect(() => {
@@ -216,7 +203,7 @@ export function ContestProblemPage({ detail, initial }: { detail: any; initial: 
           )
         );
       // The draft stays, to fix after a wrong answer
-      saveDraftNow();
+      draftWriter.current?.flush();
       await navigation.navigate(`/contest/${id}/submission/${result.response.submissionId}`);
     } catch (e) {
       setError(e.message);
@@ -466,6 +453,15 @@ export function ContestProblemPage({ detail, initial }: { detail: any; initial: 
 /** Where the code is kept: its draft in this browser, with the rules for deleting it and a way to delete it now */
 function DraftNotice(props: { status: DraftStatus; onDiscard: () => void }) {
   if (!props.status) return null;
+  if (props.status === "ended")
+    return (
+      <Message info size="small">
+        {tr(
+          "此页面已停止保存草稿：此浏览器中已退出登录，或有其他账号登录。请刷新页面。",
+          "This page has stopped keeping drafts: someone signed out, or another account signed in, on this browser. Reload the page."
+        )}
+      </Message>
+    );
   if (props.status === "not-kept")
     return (
       <Message warning size="small">

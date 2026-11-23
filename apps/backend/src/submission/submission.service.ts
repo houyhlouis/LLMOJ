@@ -40,7 +40,7 @@ import { JudgeGateway } from "../judge/judge.gateway";
 import { JudgeRuntimeService } from "../judge/judge-runtime.service";
 import { ProblemTypeFactoryService } from "../problem-type/problem-type-factory.service";
 import { AuditLogObjectType, AuditService } from "../audit/audit.service";
-import { FileService } from "../file/file.service";
+import { FileService, RegisterUpload } from "../file/file.service";
 import { ConfigService } from "../config/config.service";
 import { FileEntity } from "../file/file.entity";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
@@ -48,6 +48,21 @@ import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.
 import { teamResourceVisibilitySql } from "../team/team-access";
 
 import { FileUploadInfoDto, SignedFileUploadRequestDto } from "../file/dto";
+
+type ContestAdmission = Pick<
+  SubmissionEntity,
+  | "submitTime"
+  | "contestId"
+  | "contestProblemId"
+  | "contestInputFilename"
+  | "contestOutputFilename"
+  | "contestSubtaskAllOrNothing"
+>;
+
+type CreateSubmissionResult = [
+  fileUploadErrorOrRequest: "FILE_UUID_EXISTS" | "FILE_NOT_UPLOADED" | "FILE_TOO_LARGE" | SignedFileUploadRequestDto,
+  submission: SubmissionEntity
+];
 
 /**
  * Submissions: taking them (admission), reading and listing them, and the changes people make to them (publicness,
@@ -231,83 +246,66 @@ export class SubmissionService {
     problem: ProblemEntity,
     content: SubmissionContent,
     uploadInfo: FileUploadInfoDto,
-    contestContext?: Pick<
-      SubmissionEntity,
-      "contestId" | "contestProblemId" | "contestInputFilename" | "contestOutputFilename" | "contestSubtaskAllOrNothing"
-    > & { admit: (transaction: EntityManager) => Promise<Date> }
-  ): Promise<
-    [
-      fileUploadErrorOrRequest:
-        "FILE_UUID_EXISTS" | "FILE_NOT_UPLOADED" | "FILE_TOO_LARGE" | SignedFileUploadRequestDto,
-      submission: SubmissionEntity
-    ]
-  > {
+    admitToContest?: (transaction: EntityManager, uploadStartedAt?: number) => Promise<ContestAdmission>
+  ): Promise<CreateSubmissionResult> {
     const problemTypeService = this.problemTypeFactoryService.type(problem.type);
     const dataVersion = await this.submissionJudgingService.dataVersionToPin(problem);
     let countChanges: number[] = [];
 
-    const [fileUploadErrorOrRequest, submission] = await this.connection.transaction<
-      [
-        fileUploadErrorOrRequest:
-          "FILE_UUID_EXISTS" | "FILE_NOT_UPLOADED" | "FILE_TOO_LARGE" | SignedFileUploadRequestDto,
-        submission: SubmissionEntity
-      ]
-    >("READ COMMITTED", async transactionalEntityManager => {
-      // Check the contest's window before consuming an answer-file upload. The admitted timestamp and
-      // the user/contest locks stay with this transaction even if sealing the upload runs past the deadline.
-      // eslint-disable-next-line @typescript-eslint/no-shadow
-      const submission = new SubmissionEntity();
-      submission.isPublic = contestContext ? false : problem.isPublic;
-      if (contestContext) {
-        const { admit, ...metadata } = contestContext;
-        Object.assign(submission, metadata);
-        submission.submitTime = await admit(transactionalEntityManager);
-      }
-      let file: FileEntity = null;
-      if (problemTypeService.shouldUploadAnswerFile()) {
-        const result = await this.fileService.processUploadRequest(
-          uploadInfo,
-          size => (size <= this.configService.config.resourceLimit.submissionFileSize ? null : "FILE_TOO_LARGE"),
-          transactionalEntityManager
-        );
+    const needsFile = problemTypeService.shouldUploadAnswerFile();
+    const uploadStartedAt = needsFile && admitToContest && uploadInfo?.uuid ? Date.now() : undefined;
+    const insert = (registerFile?: RegisterUpload<"FILE_TOO_LARGE">) =>
+      this.connection.transaction<CreateSubmissionResult>("READ COMMITTED", async transactionalEntityManager => {
+        // Admission precedes registration. The slot and language policy stay locked through commit.
+        const submission = new SubmissionEntity();
+        submission.isPublic = admitToContest ? false : problem.isPublic;
+        if (admitToContest)
+          Object.assign(submission, await admitToContest(transactionalEntityManager, uploadStartedAt));
+        let file: FileEntity = null;
+        if (registerFile) {
+          const result = await registerFile(transactionalEntityManager);
+          if (result instanceof FileEntity) file = result;
+          else return [result, null];
+        }
 
-        if (result instanceof FileEntity) file = result;
-        else return [result, null];
-      }
+        const pair = await problemTypeService.getCodeLanguageAndAnswerSizeFromSubmissionContentAndFile(content, file);
+        submission.codeLanguage = pair.language;
+        submission.answerSize = pair.answerSize;
+        submission.score = null;
+        submission.status = SubmissionStatus.Pending;
+        submission.submitTime ??= new Date();
+        submission.problemId = problem.id;
+        submission.submitterId = submitter.id;
+        submission.problemDataVersionId = dataVersion?.id ?? null;
+        await transactionalEntityManager.save(submission);
 
-      const pair = await problemTypeService.getCodeLanguageAndAnswerSizeFromSubmissionContentAndFile(content, file);
-      submission.codeLanguage = pair.language;
-      submission.answerSize = pair.answerSize;
-      submission.score = null;
-      submission.status = SubmissionStatus.Pending;
-      submission.submitTime ??= new Date();
-      submission.problemId = problem.id;
-      submission.submitterId = submitter.id;
-      submission.problemDataVersionId = dataVersion?.id ?? null;
-      await transactionalEntityManager.save(submission);
+        const submissionDetail = new SubmissionDetailEntity();
+        submissionDetail.submissionId = submission.id;
+        submissionDetail.content = content;
+        // The sealed copy of the answer, not the upload
+        submissionDetail.fileUuid = file?.uuid;
+        submissionDetail.result = null;
+        await transactionalEntityManager.save(submissionDetail);
 
-      const submissionDetail = new SubmissionDetailEntity();
-      submissionDetail.submissionId = submission.id;
-      submissionDetail.content = content;
-      // The sealed copy of the answer, not the upload
-      submissionDetail.fileUuid = file?.uuid;
-      submissionDetail.result = null;
-      await transactionalEntityManager.save(submissionDetail);
+        // The submission and its judge task are committed together, so a new submission is never left unjudged.
+        await this.submissionJudgingService.queueJudgeTask(submission, false, transactionalEntityManager);
+        countChanges = await this.statisticsOutboxService.record(transactionalEntityManager, null, submission);
 
-      // The submission and its judge task are committed together, so a new submission is never left unjudged.
-      await this.submissionJudgingService.queueJudgeTask(submission, false, transactionalEntityManager);
-      countChanges = await this.statisticsOutboxService.record(transactionalEntityManager, null, submission);
+        return [null, submission];
+      });
 
-      return [null, submission];
-    });
-
-    if (submission) {
+    const checkSize = (size: number): "FILE_TOO_LARGE" | null =>
+      size <= this.configService.config.resourceLimit.submissionFileSize ? null : "FILE_TOO_LARGE";
+    let result: CreateSubmissionResult;
+    if (!needsFile) result = await insert();
+    else if (admitToContest) result = await this.fileService.withPreparedUpload(uploadInfo, checkSize, insert);
+    else result = await insert(manager => this.fileService.processUploadRequest(uploadInfo, checkSize, manager));
+    const [, saved] = result;
+    if (saved) {
       this.judgeQueueService.notifyJobsAvailable();
       await this.statisticsOutboxService.apply(countChanges);
-      return [null, submission];
     }
-
-    return [fileUploadErrorOrRequest, null];
+    return result;
   }
 
   async getSubmissionBasicMeta(submission: SubmissionEntity): Promise<SubmissionBasicMetaDto> {
@@ -397,7 +395,6 @@ export class SubmissionService {
       if (!lockedSubmission) return false;
       if (lockedSubmission.status === SubmissionStatus.Fake) return true;
       const oldSubmission = { ...lockedSubmission };
-      if (lockedSubmission.taskId) this.judgeGateway.cancelTask(lockedSubmission.taskId);
       lockedSubmission.taskId = null;
       lockedSubmission.status = SubmissionStatus.Fake;
       lockedSubmission.score = 0;
@@ -407,8 +404,9 @@ export class SubmissionService {
         await manager.save(lockedSubmission);
         countChanges = await this.statisticsOutboxService.record(manager, oldSubmission, lockedSubmission);
       });
-      await this.statisticsOutboxService.apply(countChanges);
       await this.submissionStatisticsService.onSubmissionUpdated(oldSubmission, lockedSubmission);
+      if (oldSubmission.taskId) await this.judgeGateway.cancelTask(oldSubmission.taskId);
+      await this.statisticsOutboxService.apply(countChanges);
       await this.auditService.log(actingUserId, "submission.fake", AuditLogObjectType.Submission, lockedSubmission.id, {
         previousStatus: oldSubmission.status,
         previousScore: oldSubmission.score,
@@ -452,8 +450,8 @@ export class SubmissionService {
         if (persistHack) await persistHack(manager);
         countChanges = await this.statisticsOutboxService.record(manager, old, locked);
       });
-      await this.statisticsOutboxService.apply(countChanges);
       await this.submissionStatisticsService.onSubmissionUpdated(old, locked);
+      await this.statisticsOutboxService.apply(countChanges);
       await this.auditService.log(hackerId, "submission.hacked", AuditLogObjectType.Submission, locked.id, {
         hackId,
         previousStatus: old.status,
@@ -470,16 +468,12 @@ export class SubmissionService {
 
   async deleteSubmission(submission: SubmissionEntity): Promise<void> {
     // This function updates related info, lock the problem for Read first, then lock the submission
-    let deleteFileActually: () => void = null;
+    let deleteFileActually: () => Promise<void> = null;
     // eslint-disable-next-line @typescript-eslint/no-shadow
     await this.submissionJudgingService.lockSubmission(submission, true, async submission => {
       if (!submission) return;
 
-      if (submission.taskId) {
-        this.judgeGateway.cancelTask(submission.taskId);
-        await this.submissionProgressService.emitSubmissionEvent(submission.id, SubmissionEventType.Deleted);
-      }
-
+      const { id, taskId } = submission;
       let countChanges: number[] = [];
       await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
         const submissionDetail = await this.getSubmissionDetail(submission);
@@ -489,10 +483,14 @@ export class SubmissionService {
         await transactionalEntityManager.remove(submission);
         countChanges = await this.statisticsOutboxService.record(transactionalEntityManager, submission, null);
       });
-      await this.statisticsOutboxService.apply(countChanges);
       await this.submissionStatisticsService.onSubmissionUpdated(submission, null);
+      if (taskId) {
+        await this.judgeGateway.cancelTask(taskId);
+        await this.submissionProgressService.emitSubmissionEvent(id, SubmissionEventType.Deleted);
+      }
+      await this.statisticsOutboxService.apply(countChanges);
     });
-    if (deleteFileActually) deleteFileActually();
+    if (deleteFileActually) await deleteFileActually();
   }
 
   async getSubmissionDataVersion(
@@ -580,22 +578,25 @@ export class SubmissionService {
   }
 
   /**
-   * Cancel pending submissions when a problem is deleted.
+   * Capture the tasks before their submissions are deleted. Cancel them only after the delete commits.
    */
-  async onDeleteProblem(problemId: number): Promise<void> {
-    const pendingSubmissions = await this.submissionRepository
+  async onDeleteProblem(problemId: number, manager: EntityManager): Promise<() => Promise<void>> {
+    const pendingSubmissions = await manager
+      .getRepository(SubmissionEntity)
       .createQueryBuilder()
       .select()
       .where("problemId = :problemId", { problemId })
       .andWhere("contestId IS NULL")
       .andWhere("taskId IS NOT NULL")
       .getMany();
-    await Promise.all(
-      pendingSubmissions.map(async submission => {
-        this.judgeGateway.cancelTask(submission.taskId);
-        await this.submissionProgressService.emitSubmissionEvent(submission.id, SubmissionEventType.Deleted);
-      })
-    );
+    return async () => {
+      await Promise.all(
+        pendingSubmissions.map(async submission => {
+          await this.judgeGateway.cancelTask(submission.taskId);
+          await this.submissionProgressService.emitSubmissionEvent(submission.id, SubmissionEventType.Deleted);
+        })
+      );
+    };
   }
 
   /**

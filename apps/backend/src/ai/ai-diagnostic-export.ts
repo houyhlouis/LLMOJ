@@ -11,7 +11,7 @@ export function diagnosticJobIdentity(job: Pick<AiJobEntity, "id" | "revision" |
 }
 
 /** Export is an allowlisted metadata projection; never serialize a job/configuration entity. */
-export const AI_EXPORT_VERSION = 1;
+export const AI_EXPORT_VERSION = 2;
 export function redactDiagnostic(value: unknown, depth = 0, field = ""): unknown {
   if (depth > 12) return { omitted: "depth_limit" };
   if (typeof value === "string") {

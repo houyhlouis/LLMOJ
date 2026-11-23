@@ -148,9 +148,11 @@ sudo journalctl -u libreoj-judge.service -n 50 --no-pager
 
 ## 更新远程评测机
 
-在站点更新之后，把远程评测机更新到站点的版本：
+升级站点不会自动更新远程评测机：站点升级后，请单独更新并重启每台远程评测机：
 1. 在站点的 **评测机状态** 页面将其[排空](Distributed-Judging.zh-CN.md#排空密钥与能力)，等到显示 **已排空**。然后停止它：`sudo systemctl stop libreoj-judge.target`。
 2. 在 `/opt/LLMOJ` 中按[第 1 步](#1-下载与站点相同的版本)切换到站点的版本。删除原生模块的构建目录，以便用新的构建工具重新配置：`sudo rm -rf apps/judge/build packages/simple-sandbox/build`。然后按[第 2 步](#2-安装-nodejs-和-pnpm-并构建评测机)安装并构建；`pnpm install` 会安装新版本锁定的依赖。
 3. 用与[第 4 步](#4-保存密钥并生成配置)相同的变量再次运行 `configure-judge.py`。它保留已有配置，并在评测机账户不存在时创建它。沙箱启动器之前的版本整个评测机以 root 运行，没有该账户。
 4. 按[第 5 步](#5-安装服务并检查沙箱)设置文件可读并检查沙箱（`chmod`，然后沙箱检查），再运行 `sudo bash /opt/LLMOJ/deploy/sandbox/self-test.sh`。
 5. 用 `sudo systemctl start libreoj-judge.target` 启动它，并在 **评测机状态** 页面点击 **恢复**。
+
+在 **评测机状态** 页面中（站点管理员可见的 **容量** → **发布版本** 一行，以及 **部署版本** 和诊断下载中），只有当评测机声明的评测程序摘要与本站已验证的发布版本一致时，**发布版本** 才显示 **与本站发布版本相同**（站点有已验证提交时会附带提交编号；这需要带有效 `deploy/release-manifest.json` 的 `all` 站点，在 `web` 仅网站站点、未验证的站点构建、不同版本的评测机或未上报摘要的旧评测机上，都会显示 **不是本站已验证的发布版本，来源未知**）。这里显示的只是每台评测机当前声明的版本，并不表示早期某次提交或 AI 任务是由哪个版本运行的。能运行 AI 任务的远程评测机如果不是本站的发布版本，可能会在候选程序预检（`testdata.candidate-preflight`）时使 AI 任务失败；见[运维手册](Runbook.zh-CN.md#ai)。

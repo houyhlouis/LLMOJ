@@ -28,14 +28,13 @@ import { AI_JOB_STATUSES, AiJobEntity } from "../ai/ai.entity";
 import { AuditService } from "../audit/audit.service";
 import { ConfigService } from "../config/config.service";
 import { REQUEST_UUID, unexpectedErrors } from "../event-report/unexpected-errors";
-import { deploymentBuildIdentity } from "../health/deployment-identity";
+import { deploymentBuildIdentity, workerProvenance } from "../health/deployment-identity";
 import { HealthService, withTimeout } from "../health/health.service";
 import { JudgeClientEntity } from "../judge/judge-client.entity";
 import { JudgeClientService } from "../judge/judge-client.service";
 import { AiPolicyService } from "../settings/ai-policy.service";
 import { RegistrationMode, RegistrationSettingsService } from "../settings/registration-settings.service";
 import { UserEntity } from "../user/user.entity";
-import { appGitRepoInfo } from "../common/server-revision";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires, import/extensions
 const serverVersion: string = require("../../package.json").version;
@@ -371,7 +370,7 @@ export class DiagnosticBundleService {
     const bundle = finishBundle(
       {
         bundle: {
-          bundleVersion: 1,
+          bundleVersion: 2,
           generatedAt: new Date(now).toISOString(),
           requestId: REQUEST_UUID.test(requestId) ? requestId : randomUUID(),
           administratorId: user.id
@@ -407,7 +406,8 @@ export class DiagnosticBundleService {
     const { server, services, security, preference, metrics, resourceLimit, queryLimit } = this.config.config;
     return {
       serverVersion,
-      revision: match(appGitRepoInfo.abbreviatedSha, /^[0-9a-f]{4,40}$/),
+      revision: deploymentBuildIdentity.backend.provenance.commit,
+      backendProvenance: deploymentBuildIdentity.backend.provenance,
       backendBuild: deploymentBuildIdentity.backend.sha256,
       nodeVersion: process.version,
       platform: process.platform,
@@ -471,6 +471,7 @@ export class DiagnosticBundleService {
           memoryBudget: numberOrNull(caps?.memoryBudget),
           nodeVersion: match(caps?.runtime?.node, /^v?\d{1,3}\.\d{1,3}\.\d{1,4}$/),
           judgeProgram: match(caps?.runtime?.judgeProgram, /^[a-f0-9]{64}$/),
+          provenance: workerProvenance(caps?.runtime?.judgeProgram),
           sandboxImage: match(caps?.runtime?.sandboxImage, /^[a-f0-9]{64}$/),
           lastSeenAgeSeconds: state?.seenAt ? Math.max(0, Math.floor((now - state.seenAt) / 1000)) : null
         };

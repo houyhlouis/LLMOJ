@@ -52,6 +52,8 @@ import { ConfigService } from "../config/config.service";
 import { EventReportService, EventReportType } from "../event-report/event-report.service";
 import { RedisService } from "../redis/redis.service";
 import { LockService } from "../redis/lock.service";
+import { assertLockLeasesHeld, LockLeaseLostError } from "../redis/lock-lease";
+import { writeWithLockLeases } from "../redis/lease-redis-command";
 import { MetricsService } from "../metrics/metrics.service";
 import { JudgePolicyService } from "../settings/judge-policy.service";
 import { SOCKET_IO_MAX_MESSAGE_SIZE } from "../socket-io.constants";
@@ -97,6 +99,11 @@ const ACKNOWLEDGED_TASK_GRACE_TIME = 10 * 1000;
 const MAX_FILES_PER_REQUEST = 10000;
 
 const CONSUME_TASK_RETRY_DELAY = 1000;
+
+// Socket.IO disconnects clients during Nest shutdown, after the lock service has stopped.
+function logJudgeLockFailure(message: string, error: unknown): void {
+  if (!LockLeaseLostError.isShutdown(error)) logger.error(`${message}: ${error}`);
+}
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -278,9 +285,19 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
   }
 
   // Send the cancel task operation to ALL nodes
-  cancelTask(taskId: string) {
-    this.redis.publish(REDIS_CHANNEL_CANCEL_TASK, taskId);
-    this.judgeQueueService.cancel(taskId).catch(e => logger.error(`Failed to cancel the job of task ${taskId}: ${e}`));
+  async cancelTask(taskId: string): Promise<void> {
+    assertLockLeasesHeld();
+    await Promise.all(
+      [
+        writeWithLockLeases(this.redis, "publish", REDIS_CHANNEL_CANCEL_TASK, taskId),
+        this.judgeQueueService.cancel(taskId)
+      ].map(operation =>
+        operation.catch(e => {
+          if (e instanceof LockLeaseLostError) throw e;
+          logger.error(`Failed to cancel judge task ${taskId}: ${e}`);
+        })
+      )
+    );
   }
 
   // A revoked judge client (its key was reset, or it was deleted) is disconnected at once, in every backend process;
@@ -342,27 +359,39 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     // Maybe the socket "disconnect" event is emitted before the query finished
     if (!client.connected) return;
 
-    await this.lockService.lock(REDIS_LOCK_JUDGE_CLIENT_CONNECT_DISCONNECT.format(judgeClient.id), async () => {
-      await this.judgeClientService.setJudgeClientOnlineSessionId(judgeClient, client.id);
-      // What it leased through an earlier connection ended with it (e.g. this backend restarted meanwhile)
-      await this.judgeQueueService
-        .releaseEarlierLeases(judgeClient.id, client.id)
-        .catch(e => logger.error(`Failed to queue again the tasks of judge client ${judgeClient.id}: ${e}`));
-      // Until it announces them again
-      await this.judgeClientService.updateJudgeClientCapabilities(judgeClient, null);
+    try {
+      await this.lockService.lock(REDIS_LOCK_JUDGE_CLIENT_CONNECT_DISCONNECT.format(judgeClient.id), async () => {
+        await this.judgeClientService.setJudgeClientOnlineSessionId(judgeClient, client.id);
+        // What it leased through an earlier connection ended with it (e.g. this backend restarted meanwhile)
+        await this.judgeQueueService
+          .releaseEarlierLeases(judgeClient.id, client.id)
+          .catch(e => logJudgeLockFailure(`Failed to queue again the tasks of judge client ${judgeClient.id}`, e));
+        // Until it announces them again
+        await this.judgeClientService.updateJudgeClientCapabilities(judgeClient, null);
 
-      if (!client.connected) {
-        await this.judgeClientService.disconnectJudgeClient(judgeClient);
-      }
+        if (!client.connected) {
+          await this.judgeClientService.disconnectJudgeClient(judgeClient);
+        }
 
-      this.mapSessionIdToJudgeClient.set(client.id, {
-        socket: client,
-        judgeClient,
-        capabilities: null,
-        judgeRuntimeId: Promise.resolve(null),
-        assignedTasks: new Map()
+        assertLockLeasesHeld();
+        this.mapSessionIdToJudgeClient.set(client.id, {
+          socket: client,
+          judgeClient,
+          capabilities: null,
+          judgeRuntimeId: Promise.resolve(null),
+          assignedTasks: new Map()
+        });
       });
-    });
+    } catch (error) {
+      // Nest's connection lifecycle hooks have no request awaiting their rejection.
+      logJudgeLockFailure(`Failed to initialize judge client ${judgeClient.id}`, error);
+      this.mapSessionIdToJudgeClient.delete(client.id);
+      client.disconnect(true);
+      await this.judgeClientService
+        .forgetDisconnectedSession(judgeClient, client.id)
+        .catch(e => logger.error(`Failed to clear disconnected judge session: ${e}`));
+      return;
+    }
 
     if (!client.connected) {
       return;
@@ -376,7 +405,13 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
       this.configService.config.server.trustProxy
     )}.`;
     logger.log(message);
-    if ((await this.redis.del(REDIS_KEY_JUDGE_CLIENT_TEMPORARILY_DISCONNENTED.format(judgeClient.id))) === 0) {
+    const reconnect = await this.redis
+      .del(REDIS_KEY_JUDGE_CLIENT_TEMPORARILY_DISCONNENTED.format(judgeClient.id))
+      .catch(e => {
+        logger.error(`Failed to read judge reconnect status: ${e}`);
+        return null;
+      });
+    if (reconnect === 0) {
       // If the judge client is NOT temporarily disconnected, report it with event-reporter
       this.eventReportService.report({
         type: EventReportType.Success,
@@ -399,11 +434,18 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
 
     // Another "connect" may be fired before the disconnect event
     // So directly call "disconnectJudgeClient" will disconnect the newly connected client
-    await this.lockService.lock(REDIS_LOCK_JUDGE_CLIENT_CONNECT_DISCONNECT.format(state.judgeClient.id), async () => {
-      // Ensure if this session holds the client
-      if (await this.judgeClientService.checkJudgeClientSession(state.judgeClient, client.id))
-        await this.judgeClientService.disconnectJudgeClient(state.judgeClient);
-    });
+    try {
+      await this.lockService.lock(REDIS_LOCK_JUDGE_CLIENT_CONNECT_DISCONNECT.format(state.judgeClient.id), async () => {
+        // Ensure if this session holds the client
+        if (await this.judgeClientService.checkJudgeClientSession(state.judgeClient, client.id))
+          await this.judgeClientService.disconnectJudgeClient(state.judgeClient);
+      });
+    } catch (error) {
+      logJudgeLockFailure(`Failed to clear judge client ${state.judgeClient.id} under its lock`, error);
+      await this.judgeClientService
+        .forgetDisconnectedSession(state.judgeClient, client.id)
+        .catch(e => logger.error(`Failed to clear disconnected judge session: ${e}`));
+    }
 
     if (state.assignedTasks.size !== 0) {
       logger.log(
@@ -417,7 +459,7 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
             await this.judgeQueueService.release(task.taskId, fence, client.id, JudgeJobAttemptOutcome.Disconnected);
           } catch (e) {
             // The lease is no longer renewed, so it expires and is reclaimed
-            logger.error(`Failed to release judge task ${task.taskId}: ${e}`);
+            logJudgeLockFailure(`Failed to release judge task ${task.taskId}`, e);
           }
         })
       );
@@ -425,19 +467,21 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     }
 
     // Report event
-    await this.redis.setex(
-      REDIS_KEY_JUDGE_CLIENT_TEMPORARILY_DISCONNENTED.format(state.judgeClient.id),
-      JUDGE_CLIENT_TEMPORARILY_DISCONNENTED_MAX_TIME,
-      "1"
-    );
-    setTimeout(async () => {
-      if (!(await this.judgeClientService.isJudgeClientOnline(state.judgeClient))) {
-        this.eventReportService.report({
-          type: EventReportType.Warning,
-          message
-        });
-      }
-    }, JUDGE_CLIENT_TEMPORARILY_DISCONNENTED_MAX_TIME * 1000);
+    await this.redis
+      .setex(
+        REDIS_KEY_JUDGE_CLIENT_TEMPORARILY_DISCONNENTED.format(state.judgeClient.id),
+        JUDGE_CLIENT_TEMPORARILY_DISCONNENTED_MAX_TIME,
+        "1"
+      )
+      .catch(e => logger.error(`Failed to record judge disconnect status: ${e}`));
+    setTimeout(() => {
+      this.judgeClientService
+        .isJudgeClientOnline(state.judgeClient)
+        .then(online =>
+          online ? undefined : this.eventReportService.report({ type: EventReportType.Warning, message })
+        )
+        .catch(e => logger.error(`Failed to check disconnected judge client: ${e}`));
+    }, JUDGE_CLIENT_TEMPORARILY_DISCONNENTED_MAX_TIME * 1000).unref();
   }
 
   @SubscribeMessage("systemInfo")
@@ -668,7 +712,7 @@ export class JudgeGateway implements OnGatewayConnection, OnGatewayDisconnect, O
         // A no-op once the result has been stored
         await this.judgeQueueService.release(task.taskId, fence, client.id, JudgeJobAttemptOutcome.Abandoned);
       } catch (e) {
-        logger.error(`Failed to release judge task ${task.taskId}: ${e}`);
+        logJudgeLockFailure(`Failed to release judge task ${task.taskId}`, e);
       }
     }, ACKNOWLEDGED_TASK_GRACE_TIME).unref();
   }

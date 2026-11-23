@@ -13,7 +13,9 @@ import { JudgeClientInfoDto } from "./dto/judge-client-info.dto";
 import { JudgeJobEntity, JudgeJobState } from "./judge-job.entity";
 import { C_ARCHITECTURES, judgeClientArchitectures } from "./judge-architecture";
 
+import { workerProvenance } from "../health/deployment-identity";
 import { RedisService } from "../redis/redis.service";
+import { writeWithLockLeases } from "../redis/lease-redis-command";
 
 const JUDGE_CLIENT_KEY_BYTE_LENGTH = 30;
 
@@ -72,6 +74,7 @@ export class JudgeClientService {
     showSensitive = false,
     showKey = showSensitive
   ): Promise<JudgeClientInfoDto> {
+    const capabilities = (await this.getJudgeClientCapabilities(judgeClient)) ?? undefined;
     return {
       id: judgeClient.id,
       name: judgeClient.name,
@@ -84,7 +87,8 @@ export class JudgeClientService {
         judgeClientId: judgeClient.id,
         state: JudgeJobState.Leased
       }),
-      capabilities: (await this.getJudgeClientCapabilities(judgeClient)) ?? undefined
+      capabilities,
+      provenance: showSensitive ? workerProvenance(capabilities?.runtime?.judgeProgram) : undefined
     };
   }
 
@@ -134,7 +138,9 @@ export class JudgeClientService {
   }
 
   async setJudgeClientOnlineSessionId(judgeClient: JudgeClientEntity, sessionId: string): Promise<void> {
-    await this.redis.mset(
+    await writeWithLockLeases(
+      this.redis,
+      "mset",
       REDIS_KEY_JUDGE_CLIENT_SESSION_ID.format(judgeClient.id),
       sessionId,
       revokedKey(judgeClient.id),
@@ -145,7 +151,17 @@ export class JudgeClientService {
   }
 
   async disconnectJudgeClient(judgeClient: JudgeClientEntity): Promise<void> {
-    await this.redis.del(REDIS_KEY_JUDGE_CLIENT_SESSION_ID.format(judgeClient.id));
+    await writeWithLockLeases(this.redis, "del", REDIS_KEY_JUDGE_CLIENT_SESSION_ID.format(judgeClient.id));
+  }
+
+  /** Clean up a disconnected socket even if its lock was lost after it registered its session. */
+  async forgetDisconnectedSession(judgeClient: JudgeClientEntity, sessionId: string): Promise<void> {
+    await this.redis.eval(
+      'if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) end',
+      1,
+      REDIS_KEY_JUDGE_CLIENT_SESSION_ID.format(judgeClient.id),
+      sessionId
+    );
   }
 
   async checkJudgeClientSession(judgeClient: JudgeClientEntity, sessionId: string): Promise<boolean> {
@@ -160,7 +176,12 @@ export class JudgeClientService {
     judgeClient: JudgeClientEntity,
     capabilities: JudgeClientCapabilities
   ): Promise<void> {
-    await this.redis.set(REDIS_KEY_JUDGE_CLIENT_CAPABILITIES.format(judgeClient.id), JSON.stringify(capabilities));
+    await writeWithLockLeases(
+      this.redis,
+      "set",
+      REDIS_KEY_JUDGE_CLIENT_CAPABILITIES.format(judgeClient.id),
+      JSON.stringify(capabilities)
+    );
   }
 
   async getJudgeClientCapabilities(judgeClient: JudgeClientEntity): Promise<JudgeClientCapabilities> {

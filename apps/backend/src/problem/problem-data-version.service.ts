@@ -96,7 +96,9 @@ export class ProblemDataVersionService {
       });
       try {
         // eslint-disable-next-line no-await-in-loop -- Retried after a concurrent insert.
-        await this.problemDataVersionRepository.insert(version);
+        await this.problemDataVersionRepository.manager.transaction("READ COMMITTED", manager =>
+          manager.insert(ProblemDataVersionEntity, version)
+        );
         return version;
       } catch (e) {
         // Another submission created a version at the same time

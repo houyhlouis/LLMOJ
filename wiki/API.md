@@ -37,7 +37,9 @@ Accounts with the privilege **Skip human verification** (set by an administrator
 
 - **Success:** HTTP 200 or 201 with a JSON answer.
 - **Expected failures** are part of the answer, with HTTP 200 or 201: `{"error": "NO_SUCH_PROBLEM"}`, `{"error": "PERMISSION_DENIED"}` and so on. The generated client lists each endpoint's codes.
-- **HTTP errors:** 400 for a malformed request (the body names the invalid fields), 403 when a site permission or a proof of work refuses it, 404, 409 when the request conflicts with a change made at the same time (send it again), 429 when the address sent too many requests (`security.rateLimit`: 200 in 10 seconds by default), and 500 `{"error": "INTERNAL_ERROR", "requestId": "..."}` for an unexpected failure.
+- **HTTP errors:** 400 for a malformed request (the body names the invalid fields), 403 when a site permission or a proof of work refuses it, 404, 409 when the request conflicts with a change made at the same time (send it again), 429 when the address sent too many requests (`security.rateLimit`: 200 in 10 seconds by default), and 500 for a server failure:
+  - `{"error": "INTERNAL_ERROR", "requestId": "..."}` for an unexpected failure.
+  - `{"error": "LOCK_LEASE_LOST", "requestId": "..."}` when an operation lost the Redis lock that protected it (Redis became unreachable, slow, restarted or evicted the lock, or the backend process paused past the lock's lease). Nothing the operation would have written after the loss is written; a step it completed before the loss may have been saved, so reload the resource before retrying.
 - **Request IDs:** every answer has an `X-Request-Id` header, and a server error repeats it in its body. Quote it when you report a problem: the server's log line for the request has the same ID.
 
 ## Pages of results

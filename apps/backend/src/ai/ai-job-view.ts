@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import type { AiJobEntity } from "./ai.entity";
 import type { AiBlockingReason, AiStageAttempt as WorkflowStage } from "./ai-workflow-state";
 
+import { backendBinding } from "../health/release-provenance";
 import { deploymentBuildIdentity } from "../health/deployment-identity";
 
 /** Extensible wire codes: clients must display unknown codes using the supplied message. */
@@ -49,6 +50,7 @@ export interface AiStageAttempt {
   endedAt?: string;
   deployment?: {
     backendBuild: string | null;
+    backendBinding?: string;
     qualityPolicyVersion: number;
     receiptVersion: number;
     executionProtocolVersion: number;
@@ -324,6 +326,10 @@ export function advanceStage(
       startedAt: now,
       deployment: {
         backendBuild: deploymentBuildIdentity.backend.sha256,
+        backendBinding: backendBinding(
+          deploymentBuildIdentity.backend.sha256,
+          deploymentBuildIdentity.backend.provenance
+        ),
         qualityPolicyVersion: deploymentBuildIdentity.qualityPolicyVersion,
         receiptVersion: deploymentBuildIdentity.receiptVersion,
         executionProtocolVersion: deploymentBuildIdentity.executionProtocolVersion

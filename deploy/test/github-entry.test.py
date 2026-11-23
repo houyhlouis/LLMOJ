@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exercise the GitHub entry point with fake HTTPS downloads, without deploying."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -23,7 +24,7 @@ class GitHubEntry(unittest.TestCase):
             (source / "LICENSE").write_text("MIT")
             (source / "infra/sandbox-rootfs/Dockerfile").write_text("FROM scratch")
             (source / "deploy/install.sh").write_text(
-                '#!/bin/bash\nprintf "LANG=%s\\n" "$LLMOJ_INSTALL_LANG"\nprintf "SOURCE=%s\\n" "$OJ_SOURCE_COMMIT"\nprintf "ARG=%s\\n" "$@"\n')
+                '#!/bin/bash\nprintf "LANG=%s\\n" "$LLMOJ_INSTALL_LANG"\nprintf "SOURCE=%s\\n" "$OJ_SOURCE_COMMIT"\nprintf "ARCHIVE=%s\\n" "$OJ_SOURCE_ARCHIVE_SHA256"\nprintf "ARG=%s\\n" "$@"\n')
             archive = root / "source.tar.gz"
             with tarfile.open(archive, "w:gz") as package:
                 package.add(source, arcname=source.name)
@@ -32,9 +33,14 @@ class GitHubEntry(unittest.TestCase):
                     member.type = tarfile.SYMTYPE
                     member.linkname = "/etc"
                     package.addfile(member)
+            self.archive_hash = hashlib.sha256(archive.read_bytes()).hexdigest()
             (root / "commit.json").write_text(json.dumps({"sha": SHA}))
             executable = root / "bin"
             executable.mkdir()
+            # Keep the downloaded copy alongside the fake HTTPS responses in the disposable test directory.
+            mktemp = executable / "mktemp"
+            mktemp.write_text('#!/bin/sh\nexec /usr/bin/mktemp -d "$ENTRY_FIXTURE/download-XXXXXXXX"\n')
+            mktemp.chmod(0o755)
             curl = executable / "curl"
             curl.write_text('''#!/usr/bin/env python3
 import json, os, shutil, sys
@@ -61,6 +67,7 @@ shutil.copyfile(root / source, arguments[arguments.index('-o') + 1])
         self.assertIn('/commits/release%2Fv1', requests)
         self.assertIn('/tar.gz/' + SHA, requests)
         self.assertIn('SOURCE=' + SHA, result.stdout)
+        self.assertIn('ARCHIVE=' + self.archive_hash, result.stdout)
         self.assertIn('ARG=AI Site', result.stdout)
         self.assertIn('ARG=8080', result.stdout)
 

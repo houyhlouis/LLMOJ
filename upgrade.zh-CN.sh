@@ -125,7 +125,8 @@ try:
             # The upgrader goes on when the terminal goes away (a dropped SSH connection), and so does this script,
             # which deletes the downloaded source afterwards.
             signal.signal(signal.SIGHUP, signal.SIG_IGN)
-            result = subprocess.run(command,stdin=terminal)
+            result = subprocess.run(command,stdin=terminal,
+                                    env={**os.environ, 'LLMOJ_UPGRADE_ARCHIVE_SHA256': hashlib.sha256(archive).hexdigest()})
         finally:
             if terminal:
                 terminal.close()

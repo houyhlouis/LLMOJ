@@ -96,6 +96,22 @@ test("the administrator exports real stored jobs, queue counts, judge lifecycle 
   await assertEmptyDiagnosticDatabase(runner);
   ownedTables = db.entityMetadatas.map(entity => entity.tableName);
   await db.synchronize();
+  await t.test("concurrent verified startups share a bounded history and preserve the earliest observation", async () => {
+    const { recordBackendBinding, readBackendBindings } = require("../health/deployment-history.ts");
+    const binding = i => ({ sha256: i.toString(16).padStart(64, "0"), capturedAt: "2025-01-02T00:00:00.000Z",
+      provenance: { status: "verified", commit: i.toString(16).padStart(40, "0"), treeSha256: "a".repeat(64) } });
+    await Promise.all([1, 2, 3, 4].map(i => recordBackendBinding(db, binding(i))));
+    assert.equal((await readBackendBindings(db)).length, 4);
+    for (let i = 5; i <= 24; i++) await recordBackendBinding(db, binding(i));
+    const first = "2025-01-01T00:00:00.000Z";
+    await Promise.all([first, "2025-01-03T00:00:00.000Z"].map(capturedAt => recordBackendBinding(db, { ...binding(9), capturedAt })));
+    for (const status of ["unknown", "mismatch"]) await recordBackendBinding(db, { ...binding(30), provenance: { status } });
+    const history = await readBackendBindings(db);
+    assert.equal(history.length, 20);
+    assert.equal(history[0].sha256, binding(9).sha256);
+    assert.equal(history[0].firstSeenAt, first);
+    assert.deepEqual(history.map(row => row.sha256).sort(), Array.from({ length: 20 }, (_, i) => binding(i+5).sha256));
+  });
   await db.getRepository(UserEntity).insert([3,4].map(id => ({
     id, username: "fixture" + id, email: id + "@example.invalid", nickname: "", bio: "", avatarInfo: "",
     isAdmin: id === 3, acceptedProblemCount: 0, submissionCount: 0, rating: 0, publicEmail: false

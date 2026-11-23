@@ -126,5 +126,11 @@ for required in ('deploy/install.sh', 'package.json', 'LICENSE', 'infra/sandbox-
 print(source)
 PY
 )"
+OJ_SOURCE_ARCHIVE_SHA256="$(sha256sum "$DOWNLOAD_DIRECTORY/source.tar.gz" | cut -d' ' -f1)"
+export OJ_SOURCE_ARCHIVE_SHA256
+if [[ "$READ_ONLY" == 0 && -f "$SOURCE_DIRECTORY/deploy/release-manifest.mjs" ]]; then
+    OJ_SOURCE_TREE_SHA256="$(python3 -B "$SOURCE_DIRECTORY/deploy/upgrade.py" --source "$SOURCE_DIRECTORY" --source-digest)"
+    export OJ_SOURCE_TREE_SHA256
+fi
 export OJ_SOURCE_REPOSITORY="$REPOSITORY" OJ_SOURCE_COMMIT="$SOURCE_COMMIT"
 bash "$SOURCE_DIRECTORY/deploy/install.sh" "${INSTALL_ARGUMENTS[@]}"

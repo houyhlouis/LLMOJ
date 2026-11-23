@@ -244,7 +244,7 @@ The section must be present; leave `telegramBotToken` empty to turn notification
 
 ### What a report contains
 
-When a request fails with an unexpected server error (the user sees `INTERNAL_ERROR` and a request ID), the backend sends `sentTo` a short message with an attached `Event_<event ID>.json`. Both contain only:
+When a request fails with an unexpected server error (the user sees `INTERNAL_ERROR` or `LOCK_LEASE_LOST` and a request ID; lock losses caused by backend shutdown aren't reported), the backend sends `sentTo` a short message with an attached `Event_<event ID>.json`. Both contain only:
 
 | Field | Content |
 | --- | --- |

@@ -366,7 +366,7 @@ export class TestDataRetentionService implements OnModuleInit, OnModuleDestroy {
    * version kept since the first look (`keep` locks the same records) keeps its files.
    */
   private async settle(uuids: string[], now: number): Promise<number> {
-    let removeObjects: () => void = null;
+    let removeObjects: () => Promise<void> = null;
     let deleted = 0;
     await this.connection.transaction("READ COMMITTED", async manager => {
       const rows = await manager
@@ -381,7 +381,7 @@ export class TestDataRetentionService implements OnModuleInit, OnModuleDestroy {
       removeObjects = await this.fileService.deleteFile(deleting, manager);
       deleted = deleting.length;
     });
-    removeObjects?.();
+    removeObjects?.().catch(e => logger.error(`Failed to remove deferred test data objects: ${e}`));
     return deleted;
   }
 

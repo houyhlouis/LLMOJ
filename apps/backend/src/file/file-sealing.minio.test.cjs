@@ -8,6 +8,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const { once } = require("node:events");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
@@ -63,6 +64,9 @@ test.before(async () => {
     ["server", "--quiet", "--address", `127.0.0.1:${port}`, "--console-address", `127.0.0.1:${consolePort}`, directory],
     { env: { ...process.env, MINIO_ROOT_USER: accessKey, MINIO_ROOT_PASSWORD: secretKey }, stdio: "ignore" }
   );
+  const stopped = new Promise(resolve => server.once("close", resolve));
+  context = { server, directory, stopped };
+  await once(server, "spawn");
   const client = new Client({ endPoint: "127.0.0.1", port, useSSL: false, accessKey, secretKey, region: "us-east-1" });
   for (let attempt = 0; ; attempt++) {
     try {
@@ -96,11 +100,12 @@ test.before(async () => {
       services: { minio: { default: { endpoint, urlEndpoint: null }, accessKey, secretKey, bucket: "sealing" } }
     }
   });
-  context = { server, directory, client, service, manager, files };
+  Object.assign(context, { client, service, manager, files });
 });
-test.after(() => {
+test.after(async () => {
   if (!context) return;
   context.server.kill();
+  await context.stopped;
   fs.rmSync(context.directory, { recursive: true, force: true });
 });
 

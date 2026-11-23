@@ -1,8 +1,10 @@
 // Run with: node --test packages/frontend/test/contest-drafts.test.cjs
 // Audit 2026-11-07 RM-06 (draft recovery): code written for a contest problem is kept in the browser, per account,
 // contest, problem and language, so a reload or a wrong click doesn't lose it; signing out, another account signing in
-// and 14 days without changes delete it. The real utils/contestDrafts.ts, ContestProblemPage, the session refresh of
-// initApp.ts and the sign-out of AppLayout.tsx, with a fake browser storage.
+// and 14 days without changes delete it. Review 2026-11-20 RV-05: a save still waiting when someone signs out (or
+// another account signs in), in this tab or another, must not bring a deleted draft back. The real
+// utils/contestDrafts.ts, ContestProblemPage, the session refresh of initApp.ts and the sign-out of AppLayout.tsx, with
+// a fake browser storage; contest-drafts-browser.test.cjs repeats the lifecycle cases in a real browser.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -60,7 +62,9 @@ function load(file, modules, globals) {
   return module.exports;
 }
 
-const loadDrafts = window => load("utils/contestDrafts.ts", {}, { window });
+// One module per page: its own module state, like a browser tab, over whatever storage the window has
+const loadDrafts = (window, globals = {}) => load("utils/contestDrafts.ts", {}, { window, ...globals });
+const SESSION_KEY = "llmoj.contestDraftSession.v1";
 // Values made in the modules' own realm, compared as plain data
 const plain = value => JSON.parse(JSON.stringify(value));
 const owner = { userId: 7, contestId: 3, problemId: 11 };
@@ -106,9 +110,13 @@ test("signing out deletes every draft; another account signing in deletes the ea
   drafts.saveDraft({ ...owner, userId: 8 }, "cpp", "someone else's", {}, 10 * DAY);
   drafts.keepOnlyDraftsOf(7, 15 * DAY);
   assert.deepEqual(draftKeys(storage), [`${KEY}7:3:11:cpp`]);
-  drafts.removeAllDrafts();
+  drafts.signOutDrafts();
   assert.deepEqual(draftKeys(storage), []);
-  assert.deepEqual([...storage.values.keys()].sort(), ["appState", "session-swr"], "other settings stay");
+  assert.deepEqual(
+    [...storage.values.keys()].sort(),
+    ["appState", SESSION_KEY, "session-swr"],
+    "other settings stay; the new draft session is recorded"
+  );
 });
 
 test("empty code removes the draft; code too long to submit isn't kept, and the older draft doesn't come back", () => {
@@ -159,8 +167,11 @@ test("without browser storage (blocked or failing) there are no drafts and no er
   assert.equal(drafts.saveDraft(owner, "cpp", "code", {}, 0), "not-kept");
   assert.equal(drafts.loadDraft(owner, "cpp", 0), null);
   assert.equal(drafts.latestDraftLanguage(owner, ["cpp"], 0), null);
-  drafts.removeAllDrafts();
+  drafts.signOutDrafts();
   drafts.keepOnlyDraftsOf(7);
+  const writer = drafts.createDraftWriter(null, () => assert.fail("nothing to report"));
+  writer.keep("cpp", "code", {});
+  writer.close();
 });
 
 test("the page opens with the draft changed last, in a language the contest still allows", () => {
@@ -181,7 +192,16 @@ const codeLanguage = load(
   {}
 );
 
-function page({ storage, user = { id: 7 }, type = "Traditional", submittable = true, languages, api = {}, confirm }) {
+function page({
+  storage,
+  user = { id: 7 },
+  type = "Traditional",
+  submittable = true,
+  languages,
+  api = {},
+  confirm,
+  drafts: shared
+}) {
   const listeners = { window: new Map(), document: new Map() };
   const target = name => ({
     addEventListener: (event, listener) => listeners[name].set(event, listener),
@@ -189,6 +209,9 @@ function page({ storage, user = { id: 7 }, type = "Traditional", submittable = t
   });
   const window = { localStorage: storage, ...target("window"), confirm: () => confirm?.() ?? true };
   const document = { visibilityState: "visible", ...target("document") };
+  // The draft writer's timers, run by runTimers with the page's own
+  const draftTimers = [];
+  const drafts = shared ?? loadDrafts(window, { document, setTimeout: fn => draftTimers.push(fn), clearTimeout() {} });
   const calls = [];
   const initial = {
     type,
@@ -210,7 +233,7 @@ function page({ storage, user = { id: 7 }, type = "Traditional", submittable = t
     deps: {
       "@/appState": { appState: { currentUser: user, locale: "en_US", userPreference: {} } },
       "@/interfaces/CodeLanguage": codeLanguage,
-      "@/utils/contestDrafts": loadDrafts(window),
+      "@/utils/contestDrafts": drafts,
       "@/components/LazyCodeEditor": { __esModule: true, default: { name: "CodeEditor" } },
       "@/markdown/MarkdownContent": { __esModule: true, default: { name: "MarkdownContent" } },
       "@/utils/callApiWithFileUpload": { callApiWithFileUpload: async () => ({}) },
@@ -232,8 +255,10 @@ function page({ storage, user = { id: 7 }, type = "Traditional", submittable = t
   const editor = () => h.find("CodeEditor");
   const notice = () => h.all(node => node.type?.name === "DraftNotice")[0]?.props.status ?? null;
   const select = label => h.find("Form.Select", props => props.label === label);
-  const runTimers = () => h.timers.splice(0).forEach(timer => timer());
-  return { h, editor, notice, select, runTimers, listeners, document, calls };
+  const runTimers = () => [...draftTimers.splice(0), ...h.timers.splice(0)].forEach(timer => timer());
+  // A real browser fires `storage` on the other tabs' windows when one tab changes the storage
+  const storageEvent = key => listeners.window.get("storage")?.({ key });
+  return { h, editor, notice, select, runTimers, storageEvent, listeners, window, document, drafts, calls };
 }
 
 test("typing keeps a draft after a short pause, and a reload brings it back", async () => {
@@ -405,7 +430,8 @@ test("a session refresh for another account deletes the earlier account's drafts
   assert.deepEqual(draftKeys(storage), []);
 });
 
-test("signing out deletes the drafts kept in this browser", async () => {
+// AppLayout's real onLogoutClick, with the sign-out API's outcome and the browser's reload given by the test
+function logoutHandler({ outcome, signOutDrafts, reload = () => {} }) {
   const filename = path.join(src, "layouts/AppLayout.tsx");
   const ast = ts.createSourceFile(
     filename,
@@ -420,26 +446,192 @@ test("signing out deletes the drafts kept in this browser", async () => {
     ts.forEachChild(node, visit);
   })(ast);
   assert.ok(handler, "AppLayout signs out in onLogoutClick");
-  const run = (outcome, removed) =>
-    new Function(
-      "api",
-      "toast",
-      "_",
-      "appState",
-      "location",
-      "removeAllContestDrafts",
-      `return (${ts.transpile(handler, { target: ts.ScriptTarget.ES2020 }).replace(/^"use strict";\s*/, "")})`
-    )(
-      { auth: { logout: async () => outcome } },
-      { error() {} },
-      text => text,
-      {},
-      { reload() {} },
-      () => removed.push(true)
-    );
+  return new Function(
+    "api",
+    "toast",
+    "_",
+    "appState",
+    "location",
+    "signOutDrafts",
+    `return (${ts.transpile(handler, { target: ts.ScriptTarget.ES2020 }).replace(/^"use strict";\s*/, "")})`
+  )({ auth: { logout: async () => outcome } }, { error() {} }, text => text, {}, { reload }, signOutDrafts);
+}
+
+test("signing out deletes the drafts kept in this browser", async () => {
   const removed = [];
-  await run({ requestError: () => "offline" }, removed)();
+  await logoutHandler({ outcome: { requestError: () => "offline" }, signOutDrafts: () => removed.push(true) })();
   assert.equal(removed.length, 0, "not while the server still has the session");
-  await run({ response: {} }, removed)();
+  await logoutHandler({ outcome: { response: {} }, signOutDrafts: () => removed.push(true) })();
   assert.equal(removed.length, 1);
+});
+
+// Review 2026-11-20 RV-05: a save still waiting when the draft session ends
+
+// What initApp does when the server says `userId` is signed in (one tab's session refresh)
+const signedIn = (storage, userId = 7) => loadDrafts({ localStorage: storage }).keepOnlyDraftsOf(userId);
+
+test("RV-05: signing out with a save still waiting leaves no draft, whatever runs after it", async () => {
+  const storage = fakeStorage();
+  signedIn(storage);
+  const view = page({ storage });
+  await view.h.settle();
+  view.editor().props.onChange("int main() { return 1; }");
+  await view.h.settle();
+  assert.deepEqual(draftKeys(storage), [], "the save is still waiting");
+  let reloaded = false;
+  await logoutHandler({
+    outcome: { response: {} },
+    signOutDrafts: view.drafts.signOutDrafts,
+    reload: () => (reloaded = true)
+  })();
+  assert.equal(reloaded, true);
+  assert.deepEqual(draftKeys(storage), []);
+  await view.h.settle();
+  assert.equal(view.notice(), "ended");
+  // A reload hides the tab and fires pagehide; the save timer may still run; then the page goes
+  view.document.visibilityState = "hidden";
+  view.listeners.document.get("visibilitychange")();
+  view.listeners.window.get("pagehide")();
+  view.runTimers();
+  view.h.unmount();
+  assert.deepEqual(draftKeys(storage), [], "nothing wrote the draft back");
+  // The next page load, signed out, starts from nothing
+  const next = page({ storage, user: null });
+  await next.h.settle();
+  assert.deepEqual(draftKeys(storage), []);
+});
+
+test("RV-05: after a sign-out in another tab, this tab's waiting save is dropped as soon as it hears of it", async () => {
+  const storage = fakeStorage();
+  signedIn(storage);
+  const tab = page({ storage });
+  await tab.h.settle();
+  tab.editor().props.onChange("this tab's code");
+  await tab.h.settle();
+  // The other tab: its own page module over the same storage
+  loadDrafts({ localStorage: storage }).signOutDrafts();
+  tab.storageEvent(SESSION_KEY);
+  await tab.h.settle();
+  assert.equal(tab.notice(), "ended", "the page says it stopped keeping drafts");
+  tab.editor().props.onChange("typed afterwards");
+  await tab.h.settle();
+  tab.runTimers();
+  tab.listeners.window.get("pagehide")();
+  tab.h.unmount();
+  assert.deepEqual(draftKeys(storage), []);
+});
+
+test("RV-05: without the storage event, the old tab's late timer, pagehide and closing still write nothing", async () => {
+  const storage = fakeStorage();
+  signedIn(storage);
+  const tab = page({ storage });
+  await tab.h.settle();
+  tab.editor().props.onChange("first");
+  await tab.h.settle();
+  loadDrafts({ localStorage: storage }).signOutDrafts();
+  tab.runTimers();
+  await tab.h.settle();
+  assert.deepEqual(draftKeys(storage), [], "the late timer wrote nothing");
+  assert.equal(tab.notice(), "ended");
+  tab.editor().props.onChange("second");
+  await tab.h.settle();
+  tab.listeners.window.get("pagehide")();
+  tab.h.unmount();
+  assert.deepEqual(draftKeys(storage), [], "nor did pagehide or closing the page");
+});
+
+test("RV-05: another account signing in, in another tab, ends the earlier account's pages", async () => {
+  const storage = fakeStorage();
+  signedIn(storage, 7);
+  const tab = page({ storage });
+  await tab.h.settle();
+  tab.editor().props.onChange("account 7's code");
+  await tab.h.settle();
+  signedIn(storage, 8);
+  tab.runTimers();
+  tab.listeners.window.get("pagehide")();
+  tab.h.unmount();
+  assert.deepEqual(draftKeys(storage), []);
+});
+
+test("RV-05: an old tab can't write even after the same account signs in again; a new page keeps drafts", async () => {
+  const storage = fakeStorage();
+  signedIn(storage, 7);
+  const old = page({ storage });
+  await old.h.settle();
+  old.editor().props.onChange("from before signing out");
+  await old.h.settle();
+  // Another tab signs out (and reloads), then account 7 signs in again there
+  loadDrafts({ localStorage: storage }).signOutDrafts();
+  signedIn(storage, 7);
+  old.runTimers();
+  old.listeners.window.get("pagehide")();
+  old.h.unmount();
+  assert.deepEqual(draftKeys(storage), []);
+
+  const fresh = page({ storage });
+  await fresh.h.settle();
+  fresh.editor().props.onChange("after signing in again");
+  await fresh.h.settle();
+  fresh.runTimers();
+  fresh.h.unmount();
+  assert.equal(JSON.parse(storage.getItem(`${KEY}7:3:11:cpp`)).code, "after signing in again");
+});
+
+test("RV-05: a draft written just as another tab signs out is taken back", () => {
+  const storage = fakeStorage();
+  signedIn(storage);
+  const drafts = loadDrafts({ localStorage: storage });
+  const other = loadDrafts({ localStorage: storage });
+  const pageOwner = { ...owner, session: drafts.currentDraftSession() };
+  const setItem = storage.setItem;
+  // The other tab signs out between this tab's check of its session and its write
+  storage.setItem = (key, value) => {
+    if (key.startsWith(KEY)) {
+      storage.setItem = setItem;
+      other.signOutDrafts();
+    }
+    setItem(key, value);
+  };
+  assert.equal(drafts.saveDraft(pageOwner, "cpp", "raced", {}), "ended");
+  assert.deepEqual(draftKeys(storage), []);
+  assert.equal(drafts.draftSessionIsCurrent(pageOwner), false);
+});
+
+test("RV-05: a login session that ends without signing out keeps the page saving, for the same account", async () => {
+  const storage = fakeStorage();
+  signedIn(storage, 7);
+  const tab = page({ storage });
+  await tab.h.settle();
+  // The server answers as to a visitor (expired, or ended on another device): initApp leaves the drafts alone, and the
+  // same account signs in again
+  tab.editor().props.onChange("still mine");
+  await tab.h.settle();
+  signedIn(storage, 7);
+  tab.storageEvent(SESSION_KEY);
+  tab.runTimers();
+  await tab.h.settle();
+  assert.equal(typeof tab.notice().savedAt, "number");
+  tab.h.unmount();
+  assert.equal(JSON.parse(storage.getItem(`${KEY}7:3:11:cpp`)).code, "still mine");
+});
+
+test("RV-05: deleting a draft stays deleted, whatever save was still waiting", async () => {
+  const storage = fakeStorage();
+  signedIn(storage);
+  const view = page({ storage });
+  await view.h.settle();
+  view.editor().props.onChange("to be deleted");
+  await view.h.settle();
+  view.runTimers();
+  view.editor().props.onChange("to be deleted, edited");
+  await view.h.settle();
+  view.h.all(node => node.type?.name === "DraftNotice")[0].props.onDiscard();
+  await view.h.settle();
+  view.document.visibilityState = "hidden";
+  view.listeners.document.get("visibilitychange")();
+  view.listeners.window.get("pagehide")();
+  view.runTimers();
+  view.h.unmount();
+  assert.deepEqual(draftKeys(storage), []);
 });

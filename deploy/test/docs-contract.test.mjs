@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -90,3 +91,34 @@ test('Wiki pages and the AI developer README agree with the shipped judge protoc
     for (const issue of mismatches(fs.readFileSync(path.join(root, file), 'utf8'), versions)) issues.push(`${file}:${issue}`);
   assert.deepEqual(issues, [], issues.join('\n'));
 });
+
+const backend = createRequire(new URL('../../apps/backend/package.json', import.meta.url));
+const ts = backend('typescript');
+const previousLoader = backend.extensions['.ts'];
+backend.extensions['.ts'] = (module, filename) => module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+  compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS }
+}).outputText, filename);
+const { allocateAiTestcases } = backend('./src/ai/ai-case-allocation.ts');
+if (previousLoader) backend.extensions['.ts'] = previousLoader;
+else delete backend.extensions['.ts'];
+const parser = backend('markdown-it')();
+for (const page of ['wiki/AI.md', 'wiki/AI.zh-CN.md']) {
+  test(`${page} gives the allocator's counts for the 98/2-point example`, () => {
+    const markdown = fs.readFileSync(path.join(root, page), 'utf8');
+    const lines = markdown.split(/\r?\n/);
+    const tables = parser.parse(markdown, {}).filter(token => token.type === 'table_open').map(({ map: [start, end] }) =>
+      lines.slice(start + 2, end).map(line => line.trim().slice(1, -1).split('|').map(cell => cell.trim()))
+    );
+    const modes = ['coverage', 'score_ratio'];
+    const rowsFor = (table, mode) => table.filter(([label]) => label.startsWith('`' + mode + '`'));
+    const table = tables.find(block => modes.every(mode => rowsFor(block, mode).length));
+    assert.ok(table, 'Missing allocation table with `coverage` and `score_ratio` rows');
+    const subtasks = [{ id: 1, points: 98 }, { id: 2, points: 2 }];
+    const targets = [{ id: 'second-subtask-boundary', subtasks: [2] }];
+    for (const mode of modes) {
+      const { allocations, count } = allocateAiTestcases(subtasks, 5, targets, mode);
+      assert.deepEqual(rowsFor(table, mode).map(row => row.slice(1)),
+        [[...allocations.map(subtask => String(subtask.count)), String(count)]], mode);
+    }
+  });
+}

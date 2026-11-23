@@ -14,6 +14,8 @@ const { ContestService } = require("./contest.service.ts");
 const { ContestProblemService } = require("./contest-problem.service.ts");
 const { ContestSubmissionService } = require("./contest-submission.service.ts");
 const { UserPrivilegeType: P } = require("../user/user-privilege.service.ts");
+const { logger } = require("../logger.ts");
+const { LockLeaseLostError } = require("../redis/lock-lease.ts");
 
 const second = 1000;
 const start = Date.UTC(2026, 0, 1), end = start + 60 * second, virtualStart = end + 123 * second;
@@ -84,9 +86,8 @@ function fixture(t, rule = "ioi") {
   const storage = {
     validateSubmissionContent: async () => [],
     prepareSubmissionFileUpload: async () => ({ method: "POST" }),
-    createSubmission: async (user, _p, _data, _upload, context) => {
-      const submitTime = await context.admit(transaction);
-      const s = { id: 12, contestProblemId: context.contestProblemId, contestId: context.contestId, submitTime,
+    createSubmission: async (user, _p, _data, _upload, admit) => {
+      const s = { id: 12, ...await admit(transaction),
         submitterId: user.id, status: "Accepted", score: 100, timeUsed: 54, memoryUsed: 64 };
       submissions.push(s);
       return [null, s];
@@ -173,6 +174,20 @@ test("contest submissions and answer uploads follow the run window and both perm
   assert.equal((await f.contestProblems.problem(f.me, 1, f.slot.id, "en_US")).submittable, false);
 });
 
+test("admission rejects a slot reassigned to a different source problem", async t => {
+  const f = fixture(t);
+  await f.service.startVirtual(f.me, f.contest.id);
+  const findOne = f.transaction.findOne;
+  f.transaction.findOne = async (entity, options) => {
+    if (entity.name !== "ContestProblemEntity") return await findOne(entity, options);
+    assert.deepEqual(options.where, { id: f.slot.id, contestId: f.contest.id });
+    assert.equal(options.lock.mode, "pessimistic_read");
+    return { ...f.slot, problemId: f.slot.problemId + 1 };
+  };
+  await assert.rejects(f.writer.submit(f.me, f.contest.id, f.slot.id, {}), denied(404));
+  assert.deepEqual(f.submissions, []);
+});
+
 test("schedule edits hold the exclusive contest lock and preserve every stored run window", async t => {
   const f = fixture(t);
   let saved = { ...f.contest };
@@ -237,14 +252,20 @@ test("contest deletion drains new submissions outside its finalization lock", as
     records.shift();
     if (cleaned.length === 1) records.push({ id: 9 }); // A submit admitted while cleanup ran.
   } };
+  const removal = Promise.withResolvers();
+  const log = t.mock.method(logger, "error", () => {});
   f.service.files = { deleteFile: async ids => {
     assert.deepEqual(ids, ["file"]); assert.equal(locked, true);
-    return () => { assert.equal(locked, false); removedFiles = true; };
+    return () => { assert.equal(locked, false); removedFiles = true; return removal.promise; };
   } };
   assert.deepEqual(await f.service.delete(f.me, f.contest.id), {});
   assert.deepEqual(cleaned, [8, 9]);
   assert.equal(contestDeleted, true);
   assert.equal(removedFiles, true);
+  removal.reject(new LockLeaseLostError(new Error("owner expired")));
+  await new Promise(setImmediate);
+  assert.equal(log.mock.callCount(), 1);
+  assert.match(log.mock.calls[0].arguments[0], /contest 1.*LockLeaseLostError/);
 });
 
 for (const rule of ["noi", "ioi", "strictioi", "acm"]) {

@@ -86,6 +86,12 @@ The upgrader installs `/etc/systemd/system/libreoj-backend.service.d/90-libreoj-
 
 Settings saved in the site, such as the [registration mode](Registration-Approval.md) and the homepage, are kept.
 
+## Release manifest
+
+Both the installer and the upgrader generate `deploy/release-manifest.json` after building. It's a generated file, not tracked in Git or included in source archives (see [Publishing](Publishing.md#starting-a-new-repository-from-a-source-archive)). During an upgrade, the upgrader writes it in the staged copy before switching, so it switches in together with the code; a rollback (automatic or with `--rollback`) brings back the previous release's manifest, or removes it when rolling back to a release that didn't have one.
+
+The manifest records the build time, the source attribution — the GitHub repository, source commit, archive SHA-256 and source tree SHA-256 when downloaded from GitHub (or the commit and tree SHA-256 for a clean Git checkout, the tree SHA-256 alone for a trusted local source upgrade, and `dirty` or `unknown` for modified, overlaid or unattributed trees) — and the SHA-256 digests of the built artifacts (the backend, the deployed frontend's offline manifest, and the judge program on `all` installations; `web`-only installations record `null` for the judge program). It contains no secrets, credentials or file paths. The backend reads it once at startup to verify the loaded files for [diagnostics](Runbook.md#collecting-a-diagnostic-bundle).
+
 ## The database at startup
 
 Before it serves anything, the backend compares the database with the tables and columns its version uses, the same comparison the upgrader's schema check makes:
@@ -139,6 +145,12 @@ The upgrader refuses to roll back to a version that can't handle data you now ha
 
 - If a registration mode is saved in **Site management** and the old version doesn't have that page, first click **Restore server configuration** and check that the mode in `backend.yaml` is what you want.
 - While there are pending or rejected registration applications, an old version could let those people sign in without approval, so rollback is refused. If the upgrade moved old pending or rejected accounts into applications, rollback stays refused even after they're approved.
+
+## Redis locks
+
+The reader/writer lock uses new Redis keys (`rwlock-v2:…`) and a new protocol. Old and new backends must not run against the same Redis at the same time. The official upgrader stops Nginx, the judge and the backend before switching code, and does the same on rollback, so a normal upgrade needs nothing extra; keys the old version left behind expire within one lease (5 seconds).
+
+Only a custom installation with several backend servers sharing one Redis needs extra care: stop every old backend before starting a new one, both when upgrading and when rolling back. No database change, configuration change, or judge or remote-judge update is needed for this.
 
 ## Registration approval migration
 

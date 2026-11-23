@@ -27,6 +27,7 @@ import { FileService } from "../file/file.service";
 import { ConfigService } from "../config/config.service";
 import { RedisService } from "../redis/redis.service";
 import { LockService } from "../redis/lock.service";
+import { LockLeaseLostError } from "../redis/lock-lease";
 import { ProblemTypeFactoryService } from "../problem-type/problem-type-factory.service";
 import { FileEntity } from "../file/file.entity";
 import { FileUploadInfoDto, SignedFileUploadRequestDto } from "../file/dto";
@@ -117,7 +118,7 @@ export class ProblemFileService {
           await input.close();
         }
       }
-      const removeObjects: (() => void)[] = [];
+      const removeObjects: (() => Promise<void>)[] = [];
       await this.lockManageProblemFile(problem.id, type, async current => {
         if (!current) throw new ArchiveError("NO_SUCH_PROBLEM");
         await options.authorize();
@@ -209,13 +210,17 @@ export class ProblemFileService {
           }
         );
         committed = true;
-        for (const remove of removeObjects) remove();
+        await Promise.all(removeObjects.map(remove => remove()));
         if (type === ProblemFileType.TestData)
           await invalidatePreprocessedJudgeInfo(this.redisService.generationCache, problem.id);
       });
       return prepared.map(file => ({ uuid: file.uuid, filename: file.filename, size: file.size }));
-    } finally {
-      if (!committed) for (const file of prepared) this.fileService.deleteUnfinishedUploadedFile(file.uuid);
+    } catch (error) {
+      // On loss the registration callback may still be receiving its commit reply. Maintenance checks
+      // the durable file rows after the grace period and collects only the unregistered copies.
+      if (!committed && !(error instanceof LockLeaseLostError))
+        for (const file of prepared) this.fileService.deleteUnfinishedUploadedFile(file.uuid);
+      throw error;
     }
   }
 
@@ -338,7 +343,7 @@ export class ProblemFileService {
     return await this.lockManageProblemFile(problem.id, type, async problem => {
       if (!problem) return "NO_SUCH_PROBLEM";
 
-      let deleteOldFileActually: () => void = null;
+      let deleteOldFileActually: () => Promise<void> = null;
       const ret = await this.connection.transaction("REPEATABLE READ", async transactionalEntityManager => {
         await this.problemAccess.authorizeProblemMutation(transactionalEntityManager, problem, actingUser);
         const result = await this.fileService.processUploadRequest(
@@ -378,7 +383,7 @@ export class ProblemFileService {
         return null;
       });
 
-      if (deleteOldFileActually) deleteOldFileActually();
+      if (deleteOldFileActually) await deleteOldFileActually();
       if (type === ProblemFileType.TestData)
         await invalidatePreprocessedJudgeInfo(this.redisService.generationCache, problem.id);
 
@@ -396,7 +401,7 @@ export class ProblemFileService {
     return await this.lockManageProblemFile(problem.id, type, async problem => {
       if (!problem) return;
 
-      let deleteFilesActually: () => void = null;
+      let deleteFilesActually: () => Promise<void> = null;
       await this.connection.transaction("READ COMMITTED", async transactionalEntityManager => {
         await this.problemAccess.authorizeProblemMutation(transactionalEntityManager, problem, actingUser);
         const problemFiles = await transactionalEntityManager.findBy(ProblemFileEntity, {
@@ -424,7 +429,7 @@ export class ProblemFileService {
           );
       });
 
-      if (deleteFilesActually) deleteFilesActually();
+      if (deleteFilesActually) await deleteFilesActually();
       if (type === ProblemFileType.TestData)
         await invalidatePreprocessedJudgeInfo(this.redisService.generationCache, problem.id);
     });

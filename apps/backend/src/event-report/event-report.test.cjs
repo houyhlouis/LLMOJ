@@ -21,6 +21,7 @@ require.extensions[".ts"] = (module, filename) =>
 const { Logger } = require("@nestjs/common");
 const { ErrorFilter } = require("../error.filter.ts");
 const { EventReportService, EventReportType } = require("./event-report.service.ts");
+const { LockLeaseLostError } = require("../redis/lock-lease.ts");
 
 function reportingFixture() {
   const messages = [],
@@ -54,6 +55,43 @@ function reportingFixture() {
   const filter = new ErrorFilter(service, { counter: () => ({ inc: labels => counted.push(labels) }) });
   return { service, filter, messages, documents, deliveries, counted };
 }
+
+test("lost leases return their stable code and request ID and produce an infrastructure error report", async t => {
+  const fixture = reportingFixture();
+  const logged = t.mock.method(Logger.prototype, "error", () => {});
+  const requestId = "d6167693-a98b-43b2-8c34-37f8e4d84391";
+  const request = { requestId, method: "POST", originalUrl: "/api/submission/submit" };
+  const error = new LockLeaseLostError(new Error("internal owner details"));
+  let body;
+  const host = {
+    getType: () => "http",
+    switchToHttp: () => ({
+      getRequest: () => request,
+      getResponse: () => ({
+        status(code) { assert.equal(code, 500); return this; },
+        send(value) { body = value; }
+      })
+    })
+  };
+  fixture.filter.catch(error, host);
+  await Promise.all(fixture.deliveries);
+  assert.deepEqual(body, { error: "LOCK_LEASE_LOST", requestId });
+  assert.deepEqual(fixture.counted, [{ error: "LockLeaseLostError" }]);
+  assert.equal(fixture.documents.length, 1);
+  const context = JSON.parse(fixture.documents[0].source.toString("utf8"));
+  assert.equal(context.requestId, requestId);
+  assert.equal(context.errorClass, "LockLeaseLostError");
+  assert.doesNotMatch(JSON.stringify([body, context, fixture.messages]), /internal owner details/);
+  assert.equal(logged.mock.callCount(), 1);
+
+  body = undefined;
+  fixture.filter.catch(new LockLeaseLostError(new Error("service stopping"), "shutdown"), host);
+  await Promise.all(fixture.deliveries);
+  assert.deepEqual(body, { error: "LOCK_LEASE_LOST", requestId });
+  assert.equal(fixture.counted.length, 2);
+  assert.equal(logged.mock.callCount(), 1);
+  assert.equal(fixture.documents.length, 1);
+});
 
 const fixtures = [
   ["auth/login", { username: "fixture-username", password: "fixture-login-password" }],

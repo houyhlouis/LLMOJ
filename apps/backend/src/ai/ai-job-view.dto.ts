@@ -1,5 +1,7 @@
 import { ApiProperty } from "@nestjs/swagger";
 
+import { BuildProvenanceDto, WorkerProvenanceDto } from "../health/build-provenance.dto";
+
 /** Response envelopes also carry the existing expected-error shape. Conditional replies omit payload fields. */
 export class AiViewResponseDto {
   error?: string;
@@ -292,10 +294,41 @@ export class AiAllocationApprovalResponseDto extends AiViewResponseDto {
 
   id?: string;
 }
-export class AiDeploymentIdentityResponseDto extends AiViewResponseDto {
-  @ApiProperty({ type: Object, required: false }) backend?: Record<string, unknown>;
+class AiArtifactIdentityDto {
+  @ApiProperty({ type: String, nullable: true }) sha256: string | null;
 
-  @ApiProperty({ type: Object, required: false }) frontend?: Record<string, unknown>;
+  @ApiProperty({ enum: ["available", "missing", "truncated"] }) status: string;
+
+  @ApiProperty() basis: string;
+
+  @ApiProperty({ type: BuildProvenanceDto }) provenance: BuildProvenanceDto;
+}
+class AiBackendIdentityDto extends AiArtifactIdentityDto {
+  @ApiProperty({ format: "date-time" }) capturedAt: string;
+}
+class AiWorkerIdentityDto {
+  @ApiProperty() id: number;
+
+  @ApiProperty() online: boolean;
+
+  @ApiProperty({ type: String, nullable: true }) build: string | null;
+
+  @ApiProperty({ type: WorkerProvenanceDto }) provenance: WorkerProvenanceDto;
+
+  @ApiProperty({ type: String, nullable: true }) sandboxImage: string | null;
+
+  @ApiProperty({ type: Number, nullable: true }) protocolVersion: number | null;
+
+  @ApiProperty({ type: [Number] }) qualityPolicies: number[];
+
+  @ApiProperty({ type: [Number] }) receiptVersions: number[];
+
+  @ApiProperty({ type: Object, nullable: true }) taskCapabilities: Record<string, unknown> | null;
+}
+export class AiDeploymentIdentityResponseDto extends AiViewResponseDto {
+  @ApiProperty({ type: AiBackendIdentityDto, required: false }) backend?: AiBackendIdentityDto;
+
+  @ApiProperty({ type: AiArtifactIdentityDto, required: false }) frontend?: AiArtifactIdentityDto;
 
   qualityPolicyVersion?: number;
 
@@ -307,7 +340,7 @@ export class AiDeploymentIdentityResponseDto extends AiViewResponseDto {
 
   @ApiProperty({ type: Object, required: false }) usageIdentityColumns?: Record<string, boolean>;
 
-  @ApiProperty({ type: [Object], required: false }) workers?: Record<string, unknown>[];
+  @ApiProperty({ type: [AiWorkerIdentityDto], required: false }) workers?: AiWorkerIdentityDto[];
 
   workersTruncated?: boolean;
 }

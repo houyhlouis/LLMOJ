@@ -90,6 +90,8 @@ cd ~/llmoj-publish/LibreOJ
 
 压缩包中是一个 `LibreOJ/` 目录，其中包括根目录的 `upgrade.sh`、`upgrade.zh-CN.sh` 和共享的代码检查规则 `eslint.airbnb-base.mjs`。该工具会检查源码包是否完整：Git 跟踪的每个文件要么在包中，要么属于某条已命名的排除规则（见[源码包](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/SOURCE-PACKAGE.zh-CN.md)）；如果某个被跟踪的文件两者都不是（例如仓库根目录新增的文件），工具会停止，不生成源码包。testlib 及其许可证作为普通文件包含在内：请原样提交，这样 GitHub 的下载快照可以直接安装；不要把这个目录改回子模块链接。`.gitmodules` 仍然记录 testlib 的来源。
 
+`deploy/release-manifest.json` 是构建时生成的文件，不进入 Git 也不包含在源码包中：不要提交或打包它。安装器和升级器会在目标服务器上生成该文件（升级时写入暂存副本，使其随代码一起切换，回滚时恢复上一个版本的清单或其缺失状态）。它记录源码提交（从 GitHub 下载或从干净检出构建时）、源码树和归档的 SHA-256 摘要，以及构建产物的摘要（后端、前端离线清单，以及 `all` 安装上的本机评测程序），不包含任何密钥或文件路径。
+
 在 GitHub 上创建一个空的**公开**仓库，不要自动生成 README 或许可证（匿名一键安装需要公开仓库）。把两份 README 和 Wiki 命令中的 `houyhlouis/LLMOJ` 替换为你的仓库路径，然后推送：
 
 ```bash

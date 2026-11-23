@@ -90,6 +90,8 @@ cd ~/llmoj-publish/LibreOJ
 
 The archive contains a `LibreOJ/` directory, including the root `upgrade.sh`/`upgrade.zh-CN.sh` and the shared lint rules `eslint.airbnb-base.mjs`. The tool checks that the archive is complete: every file Git tracks is either in it or left out by one of its named rules (see [Source package](https://github.com/houyhlouis/LLMOJ/blob/main/deploy/SOURCE-PACKAGE.md)), and it stops without writing an archive when a tracked file matches neither, such as a new file at the top of the repository. testlib and its license are included as ordinary files: commit them as they are, so that GitHub's download snapshots can be installed directly, rather than turning the directory back into a submodule link. `.gitmodules` still records where testlib comes from.
 
+`deploy/release-manifest.json` is a generated build-time file excluded from both Git and source archives: never commit or package it. The installer and the upgrader write it on the target server (in the staged copy during an upgrade, so it switches with the code and a rollback restores the previous manifest or its absence). It records the source commit (when downloaded from GitHub or built from a clean checkout), the source tree and archive SHA-256 digests, and the built artifact digests (backend, frontend offline manifest, and local judge program on `all` installations), and contains no secrets or file paths.
+
 Create an empty **public** repository on GitHub, without a generated README or license (anonymous one-command installation needs a public repository). Replace `houyhlouis/LLMOJ` with your repository's path in both READMEs and in the wiki's commands, then push:
 
 ```bash

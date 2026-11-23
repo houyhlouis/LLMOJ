@@ -334,7 +334,7 @@ def source_files(root):
         for name in sorted(names):
             path = current/name
             rel = path.relative_to(root)
-            if rel == Path('packages/bootstrap-config/config.json') or name.endswith(('.pyc', '.tsbuildinfo')) or name in ('.DS_Store', 'stats.html', '.eslintcache') or (not relative.parts and name in PERSISTENT):
+            if rel in (Path('packages/bootstrap-config/config.json'), Path('deploy/release-manifest.json')) or name.endswith(('.pyc', '.tsbuildinfo')) or name in ('.DS_Store', 'stats.html', '.eslintcache') or (not relative.parts and name in PERSISTENT):
                 continue
             if not stat.S_ISREG(path.lstat().st_mode):
                 fail('Source contains a non-regular file')
@@ -1158,8 +1158,15 @@ class Upgrade:
                              'config': self.config_before, 'aiMasterKeySha256': self.key_before, 'unitHashes': self.unit_fingerprint,
                              'guardBefore': self.guard_before, 'entries': [], 'port': self.port, 'dependencyChanges': self.dependency_changes}
             self.save()
+            writer = self.stage/'deploy/release-manifest.mjs'
+            exact_source = writer.is_file() and tree_digest(self.stage) == provenance['treeSha256']
         self.build()
         with self.progress.step('trial'):
+            if writer.is_file():
+                # A published source revision describes exactly that tree. A legacy overlay may contain
+                # additional source files from a previous installation; preserve its upgrade without attributing them.
+                binding = provenance if exact_source and tree_digest(self.stage) == provenance['treeSha256'] else {'kind': 'unknown'}
+                self.host.run([self.node, writer, 'write', self.stage, self.role, json.dumps(binding)], cwd=self.stage)
             self.make_publish_readable()
             self.check_backend_configuration()
             self.assert_preserved()
@@ -2019,6 +2026,11 @@ def main(argv=None):
             if not re.fullmatch(r'[0-9a-f]{40}', args.verified_commit):
                 fail('Invalid verified commit')
             provenance.update(kind='github-bootstrap', commit=args.verified_commit)
+            archive = os.environ.get('LLMOJ_UPGRADE_ARCHIVE_SHA256')
+            if archive is not None:
+                if not re.fullmatch(r'[0-9a-f]{64}', archive):
+                    fail('Invalid release archive digest')
+                provenance['archiveSha256'] = archive
         if args.source_sha256 and args.source_sha256 != source_hash:
             fail('Local source digest differs from the supplied trusted release digest')
         upgrade.compatibility(source)

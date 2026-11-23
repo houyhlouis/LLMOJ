@@ -4,6 +4,7 @@ import { ArrayMaxSize, ArrayUnique, IsArray, IsInt, IsUUID, Max, Min, ValidateIf
 
 import { JudgeTaskType, SubmissionStatus } from "@libreoj/judge-protocol";
 
+import { BuildProvenanceDto, WorkerProvenanceDto } from "../health/build-provenance.dto";
 import { REGISTRATION_MODES, RegistrationMode } from "../settings/registration-settings.service";
 import { AI_JOB_STATUSES } from "../ai/ai.entity";
 
@@ -63,7 +64,7 @@ const uuid = { type: String, format: "uuid" };
 
 @ApiSchema(model)
 class BundleHeaderDto {
-  @ApiProperty({ type: Number, enum: [1] }) bundleVersion: 1;
+  @ApiProperty({ type: Number, enum: [2] }) bundleVersion: 2;
   @ApiProperty(timestamp) generatedAt: string;
   @ApiProperty(uuid) requestId: string;
   @ApiProperty() administratorId: number;
@@ -93,6 +94,7 @@ class DiagnosticSettingsDto {
 export class DiagnosticDeploymentDto {
   @ApiProperty() serverVersion: string;
   @ApiProperty(nullableText) revision: string | null;
+  @ApiProperty({ type: BuildProvenanceDto }) backendProvenance: BuildProvenanceDto;
   @ApiProperty(nullableText) backendBuild: string | null;
   @ApiProperty() nodeVersion: string;
   @ApiProperty() platform: string;
@@ -130,6 +132,7 @@ export class DiagnosticJudgeMachineDto {
   @ApiProperty(nullableNumber) aiExecutionSlots: number | null;
   @ApiProperty(nullableNumber) memoryBudget: number | null;
   @ApiProperty(nullableText) nodeVersion: string | null;
+  @ApiProperty({ type: WorkerProvenanceDto }) provenance: WorkerProvenanceDto;
   @ApiProperty(nullableText) judgeProgram: string | null;
   @ApiProperty(nullableText) sandboxImage: string | null;
   @ApiProperty(nullableNumber) lastSeenAgeSeconds: number | null;

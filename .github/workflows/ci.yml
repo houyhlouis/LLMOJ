@@ -18,7 +18,7 @@ jobs:
   code:
     name: Code
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 85
     services:
       mariadb:
         image: mariadb:10.11
@@ -69,8 +69,23 @@ jobs:
           sudo groupadd --force libreoj
           id -u libreoj >/dev/null 2>&1 || sudo useradd --system --gid libreoj --no-create-home --shell /usr/sbin/nologin libreoj
           sudo apt-get update
-          sudo apt-get install --yes mariadb-client mariadb-server nginx python3-cryptography python3-yaml redis-server
+          sudo apt-get install --yes gnupg mariadb-client mariadb-server nginx python3-cryptography python3-yaml redis-server
           node deploy/test/setup-community-ci.mjs
+      - name: Identify the pinned MinIO build
+        id: minio
+        run: |
+          source deploy/minio-source.sh
+          echo "commit=$MINIO_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "LLMOJ_MINIO_BINARY=$RUNNER_TEMP/llmoj-minio/minio" >> "$GITHUB_ENV"
+      - name: Cache the pinned MinIO executable
+        id: minio-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/llmoj-minio/minio
+          key: minio-${{ runner.os }}-${{ runner.arch }}-${{ steps.minio.outputs.commit }}-${{ hashFiles('deploy/minio-source.sh', 'deploy/test/build-minio.sh') }}
+      - name: Build the installer MinIO with its verified Go toolchain
+        if: steps.minio-cache.outputs.cache-hit != 'true'
+        run: bash deploy/test/build-minio.sh "$LLMOJ_MINIO_BINARY"
       # The suites are listed in deploy/test/run-tests.mjs, which `pnpm test` runs locally
       - name: Run test-data generation regressions
         run: node deploy/test/run-tests.mjs --ci ai
@@ -78,10 +93,10 @@ jobs:
         run: node deploy/test/run-tests.mjs --ci judge
       - name: Run community and moderation regressions
         timeout-minutes: 15
-        run: node deploy/test/run-tests.mjs --ci backend frontend
+        run: python3 -B deploy/test/with-service-fixture.py registration -- node deploy/test/run-tests.mjs --ci backend frontend
       - name: Run deployment regressions and root-owned fixtures
         timeout-minutes: 20
-        run: node deploy/test/run-tests.mjs --ci deploy
+        run: python3 -B deploy/test/with-service-fixture.py admin -- node deploy/test/run-tests.mjs --ci deploy
       - name: Check Wiki export and navigation
         run: node deploy/test/run-tests.mjs --ci wiki
 

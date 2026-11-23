@@ -50,6 +50,19 @@ node packages/frontend/scripts/generate-api.js --from-backend-build
 
 The judge's sandbox image is built with Docker, and submissions run in the native `simple-sandbox`. The English and Chinese installers share the same code and differ only in their messages; a test checks that their download scripts stay identical apart from that. See [Docker sources](wiki/Docker-Sources.md).
 
+## Redis locks
+
+`LockService` (`apps/backend/src/redis/lock.service.ts`) and `LockLease` (`apps/backend/src/redis/lock-lease.ts`) wrap both exclusive locks and reader/writer locks in owned leases:
+
+- **Lease window:** each acquisition is a 5-second lease, renewed every 2.5 seconds; the backend treats it as held only until 100 ms before expiry, counted from when the last successful lock or renewal request was sent. Lock commands use a dedicated Redis connection with a 2.5-second timeout and no offline queue or replay.
+- **Loss and write fencing:** when a renewal fails, is refused, the lock connection closes, or the lease's validity window runs out (or the backend shuts down), the lease is lost: renewal stops, the lease's `AbortSignal` fires, and the operation ends with `LockLeaseLostError` (HTTP 500 `LOCK_LEASE_LOST`). A callback that keeps running can't write:
+  - `LockLeaseSubscriber` (`apps/backend/src/redis/lock-lease.subscriber.ts`) checks the local deadline before queries (still allowing `ROLLBACK` and TypeORM savepoint rollbacks) and verifies Redis ownership before transaction commits and autocommit non-`SELECT` statements;
+  - Redis writes through `writeWithLockLeases` (`apps/backend/src/redis/lease-redis-command.ts`, also used by `RedisService.cacheDelete`) check every enclosing lease atomically in Lua;
+  - lock-protected object-storage writes in `FileService` recheck Redis ownership and the local deadline before dispatching to MinIO.
+  Callbacks receive the lease (`lease.signal`, `lease.assertHeld()`); nested locks inherit their enclosing leases.
+- **Rules for new code:** keep a lock-protected mutation's SQL and its commit in one transaction (an autocommit statement waiting on a row lock could otherwise finish after the loss); make Redis and object-storage writes under a lock through the checked helpers (`writeWithLockLeases`, `RedisService.cacheDelete`, `FileService`); after a lost lease, re-read state before retrying, because a step dispatched while the lease was still valid can have completed.
+- **Reader/writer locks:** `apps/backend/src/redis/scripts/read-write-lock.lua` (`rwlock-v2:<name>:write-intent`, `rwlock-v2:<name>:write-lock`, `rwlock-v2:<name>:readers`) gives each reader its own token in a Redis sorted set with its expiry time as the score. A reader whose lease expired can't release or renew another reader's lease, a dead reader stops counting once its lease runs out, and a waiting writer still goes before new readers.
+
 ## Running it locally
 
 `deploy/dev/stack.mjs` starts a disposable MariaDB, Redis and MinIO for the backend and the frontend's development server, adds sample data if you want, and removes it all again, without root: see [Local development](wiki/Development.md). [Using the API](wiki/API.md) describes the HTTP API's conventions, and [Capacity](wiki/Capacity.md#repeating-the-measurement) the benchmark kit in `deploy/benchmark`.
@@ -62,16 +75,16 @@ pnpm test
 
 runs every suite, through [deploy/test/run-tests.mjs](deploy/test/run-tests.mjs), and ends with a summary. Name groups to run only those, for example `pnpm test backend frontend`: `ai`, `judge`, `backend`, `frontend`, `deploy` and `wiki`. Build first (`pnpm build`): the schema and API contract suites read the built backend. CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the same groups with `--ci`.
 
-Before any suite starts, the runner checks that every test file in the repository belongs to exactly one group or to an exclusion with a written reason ([deploy/test/suite-inventory.mjs](deploy/test/suite-inventory.mjs)): a new test file that isn't registered, or one registered twice, stops the run. Register a new suite in `deploy/test/run-tests.mjs` (a MariaDB suite also needs its database in `deploy/test/setup-community-ci.mjs`). The deployment suites are classified there, each with its reason: portable ones run as a normal user, those that need root run through `sudo` (in CI too), and host acceptance tests that need a real installation stay out of CI. With `--ci`, a missing database variable or `redis-server` that CI provides stops the run instead of letting suites skip. The summary lists, for each suite, how many cases ran and were skipped, and why.
+Before any suite starts, the runner checks that every test file in the repository belongs to exactly one group or to an exclusion with a written reason ([deploy/test/suite-inventory.mjs](deploy/test/suite-inventory.mjs)): a new test file that isn't registered, or one registered twice, stops the run. Register a new suite in `deploy/test/run-tests.mjs` (a MariaDB suite also needs its database in `deploy/test/setup-community-ci.mjs`). The deployment suites are classified there, each with its reason: portable ones run as a normal user, those that need root run through `sudo` (in CI too), and host acceptance tests that need a real installation or a separately prepared fixture stay out of CI. With `--ci`, any fixture CI promises that is missing (the database variables, `redis-server`, the socket-only MariaDB fixtures `LLMOJ_REGISTRATION_TEST_DATABASE` and `LIBREOJ_ADMIN_TEST_SOCKET`, an executable `LLMOJ_MINIO_BINARY`, or root/`sudo` for `deploy`) stops the run before suites start, and any skipped case (or zero executed cases) in the five promised service suites (`registration-review.mariadb.test.cjs`, `registration-settings.mariadb.test.cjs`, `file-sealing.minio.test.cjs`, `bootstrap-admin.test.mjs` and `verify-backup.test.py`) fails the run instead of skipping. The summary lists, for each suite, how many cases ran and were skipped, and why.
 
 Suites that need something this machine lacks skip those cases, and the summary says what was missing:
 
-- **MariaDB:** the [database tests](#database-tests) below need their variables;
-- **redis-server**, for the judge queue and Redis suites;
+- **MariaDB:** the [database tests](#database-tests) below need their variables, and the registration tests and `bootstrap-admin.test.mjs`'s transaction case need a private socket-only MariaDB (`deploy/test/with-service-fixture.py`);
+- **redis-server**, for the judge queue and Redis suites (including `apps/backend/src/redis/{read-write-lock,lock-caller-recovery,lock-pause,lock-lease.mariadb}.test.cjs`; `lock-lifecycle.test.cjs` runs without it);
 - **root**, for the deployment suites' cases that create accounts, mount file systems or run services. The runner uses passwordless `sudo` when it can, as CI does (set `LLMOJ_TEST_NO_SUDO=1` to stop it even trying), and runs Python with `-B` so that no root-owned cache files appear in the tree;
-- **MinIO** (`LLMOJ_MINIO_BINARY`, or an installation's `runtime/minio`), for the upload sealing test and the backup verifier's content check;
+- **MinIO** (`LLMOJ_MINIO_BINARY`, or an installation's `runtime/minio`), for the upload sealing test and the backup verifier's content check. CI builds it from the same pinned, checksum-verified Go 1.26.8 and MinIO source the installer uses (`deploy/minio-source.sh`, `deploy/test/build-minio.sh`) and caches the executable by commit and recipe;
 - **2 GiB in `TMPDIR`**, for the AI suites' ZIP archives. The runner uses `/var/tmp` when the temporary directory is smaller;
-- **Chrome or Chromium** (`LLMOJ_TEST_CHROME`, or `google-chrome` or `chromium` on `PATH`), for the test that the site removes the old bootstrap service worker. It runs the browser headless and without its sandbox, on local test pages only.
+- **Chrome or Chromium** (`LLMOJ_TEST_CHROME`, or `google-chrome` or `chromium` on `PATH`), for the service-worker retirement test (`deploy/test/service-worker-retirement.test.mjs`) and the contest drafts browser test (`packages/frontend/test/contest-drafts-browser.test.cjs`). Both run the browser headless and without its sandbox, on local test pages only.
 
 These use temporary directories and simulated services: they don't replace trying an installation or upgrade on a real Ubuntu server.
 
@@ -103,6 +116,7 @@ Tests named `*.mariadb.test.*` (and a few others) use a real MariaDB. Each is sk
 | `LLMOJ_STATISTICS_CACHE_TEST_DB_CONFIG` | `submission/submission-statistics-cache.mariadb.test.cjs` (practice statistics cache against late reads; also needs `redis-server`) |
 | `LLMOJ_CONTEST_VIRTUAL_TEST_DB_CONFIG` | `contest/contest-virtual-start.mariadb.test.cjs` (starting virtual runs against concurrent submissions and edits; database `llmoj_test_contest_virtual`, empty) |
 | `LLMOJ_DIAGNOSTIC_BUNDLE_TEST_DB_CONFIG` | `site-management/diagnostic-bundle.mariadb.test.cjs` (the diagnostic bundle's stored jobs, queue and judge state; database `llmoj_test_diagnostic_bundle`, empty; also needs `redis-server`) |
+| `LLMOJ_LOCK_LEASE_TEST_DB_CONFIG` | `redis/lock-lease.mariadb.test.cjs` (owned lock leases against row locks, pauses and Redis restarts; database `llmoj_test_lock_lease`, empty, JSON config; also needs `redis-server`) |
 | `LLMOJ_NARROW_WRITES_TEST_DB_CONFIG` | `user/user-narrow-writes.mariadb.test.cjs`, `submission/submission-visibility.mariadb.test.cjs` (concurrent changes during profile, email and visibility updates; their own random tables) |
 | `LLMOJ_SCHEMA_TEST_DB_CONFIG` | `deploy/test/initialize-schema.test.mjs` |
 | `LLMOJ_REGISTRATION_TEST_DATABASE` | `auth/registration-review.mariadb.test.cjs`, `site-management/registration-settings.mariadb.test.cjs` |
@@ -113,18 +127,32 @@ Some suites also accept an output file for their results (`HYHOJ_DISCUSSION_TEST
 
 In CI, a disposable MariaDB service runs on port 3307 and `deploy/test/setup-community-ci.mjs` creates a separate database and restricted account for each suite, writing their configuration under `RUNNER_TEMP`. It refuses to run outside CI; locally, create your own disposable databases.
 
-### Upgrade migration test
-
-`deploy/test/upgrade-migration.integration.mjs` tests the registration data migration on a real database. Build the backend, prepare a disposable MariaDB and a single-database SQL dump from before registration applications existed, then:
+The CI **Code** job also runs `backend frontend` and `deploy` under `deploy/test/with-service-fixture.py`, which starts a private socket-only MariaDB for each group (a database-scoped account for `registration`, socket root for `admin`), verifies its server identity and networking, and tears it down afterwards, alongside the pinned MinIO executable built by `deploy/test/build-minio.sh` (which `run-tests.mjs` passes across `sudo` to `verify-backup.test.py`). To run the same locally as an ordinary test account with your disposable `*_TEST_DB_CONFIG` variables set (needs `gnupg`, `mariadb-client`, `mariadb-server`, `nginx`, `python3-cryptography`, `python3-yaml`, `redis-server`, the `libreoj` system user, and passwordless `sudo` for `deploy`):
 
 ```bash
-UPGRADE_TEST_ALLOW_DATABASE_CREATION=1 \
-UPGRADE_TEST_MARIADB_SOCKET=/var/tmp/llmoj-registration-test/mariadb/mysql.sock \
-UPGRADE_TEST_BASELINE_SQL=/path/to/dump.sql \
-node deploy/test/upgrade-migration.integration.mjs
+pnpm --filter @libreoj/judge-protocol build
+pnpm --filter @libreoj/backend build
+source deploy/minio-source.sh
+export LLMOJ_MINIO_BINARY="${TMPDIR:-/var/tmp}/llmoj-minio-$MINIO_COMMIT/minio"
+bash deploy/test/build-minio.sh "$LLMOJ_MINIO_BINARY"
+
+python3 -B deploy/test/with-service-fixture.py registration -- node deploy/test/run-tests.mjs --ci backend frontend
+python3 -B deploy/test/with-service-fixture.py admin -- node deploy/test/run-tests.mjs --ci deploy
 ```
 
-The socket must match the pattern above, and dumps that switch databases or run client commands are refused. It creates and drops databases named `libreoj_upgrade_<16 hex digits>`. Without its variables it prints SKIP.
+### Upgrade migration test
+
+`deploy/test/upgrade-migration.integration.mjs` tests the registration data migration on a real database. It remains a release-host acceptance test rather than a CI suite because no trusted pristine pre-registration SQL dump is tracked in the repository, and reversing today's TypeORM entities would assume today's column types, indexes and relations instead of testing a real historical schema.
+
+Build the backend, obtain a trusted synthetic pre-registration single-database SQL dump (containing a synthetic administrator), record its SHA-256 digest, and run it through the wrapper as an ordinary account:
+
+```bash
+BASELINE=/var/tmp/llmoj-registration-fixture/baseline.sql
+sha256sum "$BASELINE"
+python3 -B deploy/test/with-service-fixture.py --baseline "$BASELINE" migration
+```
+
+The wrapper creates a fresh private socket-only MariaDB matching the `llmoj-registration-*` layout, sets `UPGRADE_TEST_MARIADB_SOCKET`, `UPGRADE_TEST_ALLOW_DATABASE_CREATION=1` and `UPGRADE_TEST_BASELINE_SQL`, runs `upgrade-migration.integration.mjs` (16 cases, including the upgrader's file-size normalization), and tears the server down afterwards. Dumps that switch databases or run client commands are refused. It creates and drops databases named `libreoj_upgrade_<16 hex digits>`. Running `upgrade-migration.integration.mjs` directly without its variables prints SKIP.
 
 ### Judge and sandbox
 

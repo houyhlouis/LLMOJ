@@ -41,7 +41,7 @@ import { EmojiRenderer } from "@/components/EmojiRenderer";
 import { detailPreviewCloseMessage, detailPreviewFocusMessage, embeddedDetailMode } from "@/utils/embeddedDetail";
 import { actsAsButton, installKeyboardMenus, keyboardMenu } from "@/utils/keyboard";
 import { announce, initAnnouncer } from "@/utils/announce";
-import { removeAllDrafts as removeAllContestDrafts } from "@/utils/contestDrafts";
+import { signOutDrafts } from "@/utils/contestDrafts";
 
 export type NavButtonName =
   | "home"
@@ -176,10 +176,11 @@ let AppLayout: React.FC<React.PropsWithChildren> = props => {
     if (requestError) {
       toast.error(requestError(_));
     } else {
+      // What this browser kept for the account goes with the session (shared computers). The pages' draft writers
+      // stop first, here and in other tabs, so that a save still waiting can't bring a deleted draft back.
+      signOutDrafts();
       appState.token = null;
       appState.logout = true;
-      // What this browser kept for the account goes with the session (shared computers)
-      removeAllContestDrafts();
       location.reload();
     }
   }

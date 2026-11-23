@@ -115,6 +115,7 @@ class SourcePackage(unittest.TestCase):
             "runtime/node/bin/node": "instance-data",
             "data/submissions/1.txt": "instance-data",
             "apps/backend/dist/main.js": "build-output",
+            "deploy/release-manifest.json": "build-output",
             "apps/backend/node_modules/example/index.js": "installed-dependencies",
             "release/source.tar.gz": "local-release-output",
             "deploy/noi/judge.yaml": "local-deployment-artifacts",

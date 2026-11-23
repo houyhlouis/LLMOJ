@@ -322,7 +322,7 @@ if [[ "$SOURCE_ROOT" != "$PROJECT_ROOT" ]]; then
     # Root's, and writable by root only: a checkout made by another account keeps that account and its umask
     rsync -a --chown=root:root --chmod=go-w --exclude='.git' --exclude='node_modules' --exclude='__pycache__' \
         --exclude='/runtime/' --exclude='/data/' --exclude='/logs/' --exclude='/backups/' \
-        --exclude='/release/' --exclude='/public/' --exclude='dist/' --exclude='build/' --exclude='lib/' \
+        --exclude='/deploy/release-manifest.json' --exclude='/release/' --exclude='/public/' --exclude='dist/' --exclude='build/' --exclude='lib/' \
         --include='/config/*.example' --exclude='/config/*' "$SOURCE_ROOT/" "$PROJECT_ROOT/"
 fi
 install -d -m 0755 -o root -g root "$PROJECT_ROOT" "$PROJECT_ROOT/runtime" "$PROJECT_ROOT/runtime/downloads"
@@ -335,13 +335,7 @@ for directory in apps packages infra deploy wiki .github; do
 done
 find "$PROJECT_ROOT" -maxdepth 1 -type f -exec chown root:root {} + -exec chmod a+r,go-w {} +
 DOWNLOADS="$PROJECT_ROOT/runtime/downloads"
-download() {
-    local url=$1 sha=$2 archive=$3
-    if [[ -f "$archive" ]] && printf '%s  %s\n' "$sha" "$archive" | sha256sum --check --status; then return; fi
-    curl --proto '=https' --tlsv1.2 --fail --location --retry 3 --output "$archive.partial" "$url"
-    printf '%s  %s\n' "$sha" "$archive.partial" | sha256sum --check --status || die "Download checksum mismatch"
-    mv "$archive.partial" "$archive"
-}
+source "$SOURCE_ROOT/deploy/minio-source.sh"
 NODE_VERSION=24.21.0
 # SHA-256 from https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt
 case "$ARCHITECTURE" in
@@ -363,39 +357,11 @@ export NODE_OPTIONS=--max-old-space-size=2300
 export pnpm_config_verify_deps_before_run=false
 
 step 'Build pinned MinIO from source and retain its AGPL license/source'
-GO_VERSION=1.26.8
-# SHA-256 from https://go.dev/dl/
-case "$ARCHITECTURE" in
-    amd64) GO_SHA256=d0f743b33e8d8945e6b1f432edd15785c70507121d6e2a723b21285eddf8b57b ;;
-    arm64) GO_SHA256=211ffced9dcb9633a55eac6364816ec0ddd951389a740e88fa8b3337971bdda0 ;;
-esac
-GO_ARCHIVE="$DOWNLOADS/go$GO_VERSION.linux-$ARCHITECTURE.tar.gz"
-download "https://go.dev/dl/go$GO_VERSION.linux-$ARCHITECTURE.tar.gz" \
-    "$GO_SHA256" "$GO_ARCHIVE"
-install -d -m 0755 "$PROJECT_ROOT/runtime/go-$GO_VERSION"
-tar -xzf "$GO_ARCHIVE" --strip-components=1 -C "$PROJECT_ROOT/runtime/go-$GO_VERSION"
-MINIO_COMMIT=7aac2a2c5b7c882e68c1ce017d8256be2feea27f
-MINIO_ARCHIVE="$DOWNLOADS/minio-$MINIO_COMMIT.tar.gz"
-download "https://codeload.github.com/minio/minio/tar.gz/$MINIO_COMMIT" \
-    71794c2df26aad0cc99e8421c58b7aa2dd55969f979b0e7d1e931042e9fabcd6 "$MINIO_ARCHIVE"
-install -d -m 0755 "$PROJECT_ROOT/runtime/third-party"
-tar -xzf "$MINIO_ARCHIVE" -C "$PROJECT_ROOT/runtime/third-party"
-MINIO_SOURCE="$PROJECT_ROOT/runtime/third-party/minio-$MINIO_COMMIT"
-if [[ ! -x "$PROJECT_ROOT/runtime/minio" || ! -f "$PROJECT_ROOT/runtime/minio.commit" || "$(cat "$PROJECT_ROOT/runtime/minio.commit")" != "$MINIO_COMMIT" ]]; then
-    # Go's work files go to disk too: /tmp may be a small tmpfs (half the RAM by default on Ubuntu 26.04)
-    install -d -m 0700 "$PROJECT_ROOT/runtime/go-tmp"
-    (cd "$MINIO_SOURCE"
-     GOTOOLCHAIN=local GOMAXPROCS=2 CGO_ENABLED=0 GOTMPDIR="$PROJECT_ROOT/runtime/go-tmp" \
-     GOCACHE="$PROJECT_ROOT/runtime/go-cache" GOMODCACHE="$PROJECT_ROOT/runtime/go-modules" \
-        "$PROJECT_ROOT/runtime/go-$GO_VERSION/bin/go" build -mod=readonly -buildvcs=false -trimpath -o "$PROJECT_ROOT/runtime/minio.partial" .)
-    rm -rf -- "${PROJECT_ROOT:?}/runtime/go-tmp"
-    mv "$PROJECT_ROOT/runtime/minio.partial" "$PROJECT_ROOT/runtime/minio"
-    printf '%s\n' "$MINIO_COMMIT" > "$PROJECT_ROOT/runtime/minio.commit"
-fi
-chmod 0755 "$PROJECT_ROOT/runtime/minio"
+build_minio "$PROJECT_ROOT/runtime" "$ARCHITECTURE"
 
 step 'Install locked workspace dependencies and build the application'
 cd "$PROJECT_ROOT"
+release_source="$("$NODE" deploy/release-manifest.mjs install-source "$SOURCE_ROOT" "$PROJECT_ROOT")"
 pnpm install --frozen-lockfile --store-dir "$PROJECT_ROOT/runtime/pnpm-store"
 pnpm build:artifacts
 if [[ "$INSTALL_ROLE" == all ]]; then
@@ -406,6 +372,8 @@ pnpm --filter @libreoj/backend build
 [[ "$INSTALL_ROLE" != all ]] || pnpm --filter @libreoj/judge build
 HYHOJ_PUBLIC_DIR="$PROJECT_ROOT/public" PNPM_BINARY="$PROJECT_ROOT/runtime/tooling/node_modules/.bin/pnpm" \
     HYHOJ_QUOTE_FILE= OJ_SITE_NAME="$SITE_NAME" "$NODE" deploy/build-frontend-offline.mjs --build
+[[ "$release_source" == "$("$NODE" deploy/release-manifest.mjs install-source "$SOURCE_ROOT" "$PROJECT_ROOT")" ]] || die "Source changed during build"
+"$NODE" deploy/release-manifest.mjs write "$PROJECT_ROOT" "$INSTALL_ROLE" "$release_source"
 chmod -R a+rX "$PROJECT_ROOT/apps" "$PROJECT_ROOT/packages"
 
 if [[ "$INSTALL_ROLE" == all ]]; then

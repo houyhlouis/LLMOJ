@@ -135,7 +135,7 @@ test("virtual contest transactions and replay queries in MariaDB", {
   });
   const contests = new ContestService(db, access, scores, {
     problemList: id => db.getRepository(ContestProblemEntity).findBy({ contestId: id })
-  }, submissions, { deleteFile: async () => () => {} });
+  }, submissions, { deleteFile: async () => async () => {} });
   const writer = new ContestSubmissionService(db, access, { getProblemJudgeInfo: async () => [{}, true] },
     { lockProblemById: (_id, _mode, cb) => cb(problem) }, submissions);
   async function contest(rule = "acm") {

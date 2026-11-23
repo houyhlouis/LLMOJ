@@ -220,6 +220,8 @@ test("the judge machine list never includes keys; they are shown one at a time",
   const judges = Object.assign(Object.create(JudgeClientController.prototype), { judgeClientService: service });
   const listed = await judges.listJudgeClients(admin);
   assert.equal(listed.judgeClients[0].key, null);
+  assert.deepEqual(listed.judgeClients[0].provenance, { status: "unknown", commit: null, treeSha256: null });
+  assert.equal((await judges.listJudgeClients(member)).judgeClients[0].provenance, undefined);
   assert.deepEqual(listed.judgeClients[0].allowedHosts, ["10.0.0.2"]);
   assert.equal((await judges.listJudgeClients(member)).judgeClients[0].allowedHosts, null);
   // Adding a machine still shows its new key once, to the administrator who confirmed.

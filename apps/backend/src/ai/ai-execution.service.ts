@@ -960,7 +960,7 @@ export class AiExecutionService
       { taskId, state: In(ACTIVE_STATES) },
       { state: AiExecutionState.Canceled, finishedAt: new Date() }
     );
-    if (affected) this.judgeGateway.cancelTask(taskId);
+    if (affected) await this.judgeGateway.cancelTask(taskId);
   }
 
   private async removeExecution(taskId: string): Promise<void> {
@@ -1081,9 +1081,16 @@ export class AiExecutionService
   }
 
   async onTaskFailed(taskId: string, message: string): Promise<void> {
-    await this.repository.update(
-      { taskId, state: In(ACTIVE_STATES) },
-      { state: AiExecutionState.Failed, result: { finished: true, status: "Failed", message }, finishedAt: new Date() }
+    await this.connection.transaction("READ COMMITTED", manager =>
+      manager.update(
+        AiExecutionEntity,
+        { taskId, state: In(ACTIVE_STATES) },
+        {
+          state: AiExecutionState.Failed,
+          result: { finished: true, status: "Failed", message },
+          finishedAt: new Date()
+        }
+      )
     );
   }
 

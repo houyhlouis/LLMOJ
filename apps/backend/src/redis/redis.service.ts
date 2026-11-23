@@ -1,8 +1,9 @@
 import { Injectable, OnModuleInit } from "@nestjs/common";
 
-import Redis from "ioredis";
+import Redis, { RedisOptions } from "ioredis";
 
 import { GenerationCache } from "./generation-cache";
+import { writeWithLockLeases } from "./lease-redis-command";
 
 import { ConfigService } from "../config/config.service";
 
@@ -64,7 +65,7 @@ export class RedisService implements OnModuleInit {
   }
 
   async cacheDelete(key: string): Promise<void> {
-    await this.client.del(key);
+    await writeWithLockLeases(this.client, "del", key);
   }
 
   /** Rejects if Redis doesn't answer (a disconnected client queues the command until it reconnects). */
@@ -86,7 +87,7 @@ export class RedisService implements OnModuleInit {
    * Each call opens a new connection: call it once (in a constructor) and keep the client, or `quit()` it when done.
    * Please use `cacheGet` and `cacheSet` for caching since they handle the expire time automatically.
    */
-  getClient(): Redis {
-    return this.client.duplicate();
+  getClient(options?: RedisOptions): Redis {
+    return this.client.duplicate(options);
   }
 }

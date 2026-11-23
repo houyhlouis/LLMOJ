@@ -94,6 +94,34 @@ const upload = crypto.randomUUID;
 const staging = uuid => `staging/${uuid}`;
 const sha256 = data => crypto.createHash("sha256").update(data).digest("hex");
 
+test("preparing an upload leaves registration and staging cleanup to the admitting transaction", async () => {
+  const uuid = upload(), bytes = Buffer.from("answer for the judging fixture");
+  const { service, calls, store, files, manager, check } = fixture({ objects: { [staging(uuid)]: bytes } });
+  service.fileRepository.manager = manager;
+  const wrongSize = { uuid, size: bytes.length + 1 };
+  await assert.rejects(service.withPreparedUpload(wrongSize, check, async () => { throw Error("admission refused"); }),
+    /admission refused/);
+  await assert.rejects(service.withPreparedUpload(wrongSize, check, register => register(manager)), /FILE_SIZE_MISMATCH/);
+  const prepare = transact => service.withPreparedUpload({ uuid, size: bytes.length }, check, transact);
+  await assert.rejects(prepare(async () => {
+    assert.equal(calls.reads.length, 1, "the immutable copy was hashed before the transaction");
+    throw Error("admission refused");
+  }), /admission refused/);
+  assert.equal(files.length, 0);
+  assert.deepEqual([...store.keys()], [staging(uuid)]);
+  assert.deepEqual(store.get(staging(uuid)).data, bytes);
+
+  const file = await prepare(async register => {
+    const registered = await register(manager);
+    assert.ok(store.has(staging(uuid)), "the transaction has not committed yet");
+    return registered;
+  });
+  assert.equal(file.uploadUuid, uuid);
+  assert.equal(file.sha256, sha256(bytes));
+  assert.deepEqual(files, [file]);
+  assert.deepEqual([...store.keys()], [file.uuid]);
+});
+
 test("registered uploads, and files registered under their upload's UUID, are not registered again", async () => {
   const { service, calls, manager, check } = fixture({ registered: true });
   assert.equal(await service.processUploadRequest({ uuid: upload(), size: 1000 }, check, manager), "FILE_UUID_EXISTS");

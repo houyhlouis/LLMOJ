@@ -1,8 +1,10 @@
-import { BadRequestException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException } from "@nestjs/common";
 
 import { CodeLanguage } from "../code-language/code-language.type";
 import { CPP_STANDARDS } from "../code-language/compile-and-run-options/cpp";
 import { PYTHON_VERSIONS } from "../code-language/compile-and-run-options/python";
+import type { SubmissionContentTraditional } from "../problem-type/types/traditional/submission-content.interface";
+import type { SubmissionContent } from "../submission/submission-content.interface";
 
 const variants: Partial<Record<CodeLanguage, string[]>> = {
   [CodeLanguage.Cpp]: CPP_STANDARDS,
@@ -38,4 +40,14 @@ export function isContestLanguageAllowed(
     language === CodeLanguage.Cpp ? options?.std : language === CodeLanguage.Python ? options?.version : null;
   if (variants[language] && !variants[language].includes(version)) return false;
   return allowed.includes(language) || (typeof version === "string" && allowed.includes(`${language}:${version}`));
+}
+
+export function requireContestSubmissionLanguage(allowed: string[], content: SubmissionContent): void {
+  const payload = content as Partial<SubmissionContentTraditional> & { userProgram?: SubmissionContentTraditional };
+  const program = payload?.language ? payload : payload?.userProgram;
+  if (
+    program?.language &&
+    !isContestLanguageAllowed(allowed, program.language, program.compileAndRunOptions as Record<string, unknown>)
+  )
+    throw new ForbiddenException("Language is not allowed in this contest");
 }

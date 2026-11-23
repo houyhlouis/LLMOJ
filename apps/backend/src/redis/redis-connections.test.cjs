@@ -46,10 +46,10 @@ test("Redis connections are opened in constructors or closed where they're opene
   for (const file of sources(src)) {
     const lines = fs.readFileSync(file, "utf8").split("\n");
     lines.forEach((line, index) => {
-      if (!line.includes(".getClient()") || /^\s*(\*|\/\/)/.test(line) || /getClient\(\): Redis/.test(line)) return;
+      if (!line.includes(".getClient(") || /^\s*(\*|\/\/)/.test(line)) return;
       opened++;
       const { header, body } = member(lines, index);
-      const kept = /^ {2}constructor\(/.test(header) && /this\.\w+ = (this\.)?redisService\.getClient\(\)/.test(line);
+      const kept = /^ {2}constructor\(/.test(header) && /this\.\w+ = (this\.)?redisService\.getClient\(/.test(line);
       const local = line.match(/const (\w+) = this\.redisService\.getClient\(\);/);
       const closed = local && new RegExp(`${local[1]}\\.(quit|disconnect)\\(\\)`).test(body);
       if (!kept && !closed) offenders.push(`${path.relative(src, file)}:${index + 1}`);

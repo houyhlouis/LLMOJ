@@ -53,10 +53,12 @@ async function initialize(): Promise<[packageInfo: any, configService: ConfigSer
 
   // Create nestjs app
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    forceCloseConnections: true,
     logger: new RequestLogger(undefined, {
       ...(process.env.NODE_ENV === "production" ? { logLevels: ["warn", "error"] } : {})
     })
   });
+  app.get(ClusterService).enableShutdownHooks(app);
   const configService = app.get(ConfigService);
   app.setGlobalPrefix("api");
   app.useGlobalFilters(app.get(ErrorFilter));

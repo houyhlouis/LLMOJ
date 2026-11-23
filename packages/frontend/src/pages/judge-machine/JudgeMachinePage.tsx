@@ -162,6 +162,26 @@ let JudgeMachinePage: React.FC<JudgeMachinePageProps> = props => {
           _(".capabilities.judge_program"),
           <code title={runtime.judgeProgram}>{runtime.judgeProgram.slice(0, 12)}</code>
         ],
+        ...(judgeClient.provenance
+          ? [
+              [
+                _(".capabilities.release"),
+                judgeClient.provenance.status === "server_release" ? (
+                  <>
+                    {_(".capabilities.release_server")}
+                    {judgeClient.provenance.commit && (
+                      <>
+                        {" "}
+                        <code title={judgeClient.provenance.commit}>{judgeClient.provenance.commit.slice(0, 12)}</code>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  _(".capabilities.release_unknown")
+                )
+              ] as [string, React.ReactNode]
+            ]
+          : []),
         [
           _(".capabilities.sandbox_image"),
           <code title={runtime.sandboxImage}>{runtime.sandboxImage.slice(0, 12)}</code>

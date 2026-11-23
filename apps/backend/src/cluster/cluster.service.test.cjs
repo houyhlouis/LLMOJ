@@ -1,11 +1,15 @@
 const assert = require("node:assert/strict");
+const { spawn } = require("node:child_process");
 const cluster = require("node:cluster");
-const { EventEmitter } = require("node:events");
+const { EventEmitter, once } = require("node:events");
 const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
+const path = require("node:path");
 const { test } = require("node:test");
+const { setTimeout: delay } = require("node:timers/promises");
 const ts = require("typescript");
+const { redisAvailable, startRedis } = require("../../test/temporary-redis.cjs");
 
 require("reflect-metadata");
 require.extensions[".ts"] = (module, filename) =>
@@ -227,3 +231,133 @@ test("zero still assigns one slot per CPU", async t => {
   );
   assert.equal(serve.mock.callCount(), 0);
 });
+
+test("SIGTERM before primary initialization prevents the first worker fork", async t => {
+  const prior = process.listeners("SIGTERM");
+  const fork = t.mock.method(cluster, "fork", () => assert.fail("forked after shutdown"));
+  const service = new ClusterService({ config: { server: { clusters: 2 } } });
+  t.after(() => service.onModuleDestroy());
+  t.mock.method(process, "kill", () => true);
+  process.listeners("SIGTERM").find(handler => !prior.includes(handler))("SIGTERM");
+  await service.initialization(() => assert.fail("primary started serving"));
+  assert.equal(fork.mock.callCount(), 0);
+});
+
+// Keep a real judge namespace transport and an active request on a reused keep-alive connection open
+// across the signal. TCP and Redis are confined to the suite's own ephemeral ports.
+async function openClients(t, port) {
+  const { io } = require(require.resolve("socket.io-client", { paths: [path.resolve(__dirname, "../../../judge")] }));
+  const judge = io(`http://127.0.0.1:${port}/judge`, {
+    path: "/api/socket", transports: ["websocket"], parser: require("socket.io-msgpack-parser"), reconnection: false
+  });
+  t.after(() => judge.close());
+  await new Promise((resolve, reject) => { judge.once("connect", resolve); judge.once("connect_error", reject); });
+  const judgeClosed = new Promise(resolve => judge.once("disconnect", resolve));
+
+  const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+  t.after(() => agent.destroy());
+  const options = { host: "127.0.0.1", port, agent };
+  let firstSocket;
+  await new Promise((resolve, reject) => http.get({ ...options, path: "/docs-json" }, res => {
+    if (res.statusCode !== 200) reject(new Error(`Swagger HTTP status ${res.statusCode}`));
+    firstSocket = res.socket;
+    res.resume().once("end", resolve);
+  }).once("error", reject));
+  const pending = http.get({ ...options, path: "/api/hold" });
+  pending.on("error", () => {}); // Shutdown interrupts this unfinished response.
+  const [socket] = await once(pending, "socket");
+  assert.equal(socket, firstSocket);
+  const httpClosed = new Promise(resolve => socket.once("close", resolve));
+  return { closed: Promise.all([judgeClosed, httpClosed]) };
+}
+
+async function stopProcessGroup(t, mode) {
+  const redis = mode === "tcp" ? await startRedis(t) : null;
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cluster-stop-"));
+  const log = path.join(directory, "events");
+  fs.writeFileSync(log, "");
+  const stderr = path.join(directory, "stderr");
+  const fd = fs.openSync(stderr, "wx", 0o600);
+  let child;
+  try {
+    child = spawn(process.execPath, [
+      "--unhandled-rejections=strict", path.join(__dirname, "cluster-shutdown-child.cjs"),
+      directory, mode, String(redis?.options?.port || 0)
+    ], { detached: true, env: { ...process.env, NODE_ENV: "production" }, stdio: ["ignore", fd, fd] });
+  } finally {
+    fs.closeSync(fd);
+  }
+  const exited = once(child, "close");
+  const errors = () => fs.readFileSync(stderr, "utf8").slice(-4000);
+  t.after(async () => {
+    if (child.pid && child.exitCode === null && child.signalCode === null) process.kill(-child.pid, "SIGKILL");
+    await exited;
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  function events(name) {
+    return fs.readFileSync(log, "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line))
+      .filter(row => row.event === name);
+  }
+  async function until(condition) {
+    const timeout = Date.now() + 30000;
+    while (!condition()) {
+      assert.ok(child.exitCode === null && child.signalCode === null && Date.now() < timeout,
+        `Fixture did not reach start barrier. ${errors()}\n${fs.readFileSync(log, "utf8")}`);
+      await delay(15);
+    }
+  }
+  let clients;
+  if (redis) {
+    await until(() => events("listening").length === 2);
+    clients = await openClients(t, events("listening")[0].value);
+    await until(() => events("judge-connected").length === 1 && events("request-pending").length === 1);
+  } else await until(() => events("ready").length === 3);
+  fs.writeFileSync(path.join(directory, "acquire"), "");
+  await until(() => events(redis ? "held" : "refresh-pending").length === 3);
+  const holders = events("held").map(row => row.pid).sort();
+  assert.deepEqual(events("held").map(row => row.slot).sort(), [0, 1, 2]);
+  assert.equal(events("fork").length, 2);
+
+  // systemd KillMode=control-group delivers the signal to the primary and all workers.
+  const signaledAt = performance.now();
+  process.kill(-child.pid, "SIGTERM");
+  const stopped = Promise.all([exited, clients?.closed]);
+  let timer;
+  const limit = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Shutdown took over 15s. ${errors()}\n${fs.readFileSync(log, "utf8")}`)), 15000);
+  });
+  const [[code, signal]] = await Promise.race([stopped, limit]).finally(() => clearTimeout(timer));
+  t.diagnostic(`Stopped the process group and closed its clients in ${Math.round(performance.now() - signaledAt)} ms`);
+  assert.ok(code === 0 || signal === "SIGTERM", `primary exited with ${code}/${signal}: ${errors()}`);
+  assert.equal(events("fork").length, 2, "no workers replaced after SIGTERM");
+  if (mode === "stuck") {
+    assert.match(errors(), /Worker slot 2 did not finish shutdown/);
+    assert.match(errors(), /Backend shutdown timed out/);
+  }
+  assert.deepEqual(events("lost").map(row => row.pid).sort(), holders);
+  if (!redis) assert.deepEqual(events("disconnected").map(row => row.pid).sort(), holders);
+  assert.deepEqual(events("closed").map(row => row.slot).sort(), mode === "stuck" ? [1] : [0, 1, 2]);
+  const exits = events("worker-exit").map(row => row.value);
+  assert.deepEqual(exits.map(exit => exit.pid).sort(), events("fork").map(row => row.value).sort());
+  for (const exit of exits) {
+    const forced = mode === "stuck" && events("held").some(row => row.slot === 2 && row.pid === exit.pid);
+    if (forced) assert.equal(exit.signal, "SIGKILL");
+    else assert.ok(exit.code === 0 || exit.signal === "SIGTERM", JSON.stringify(exit));
+  }
+  if (redis) {
+    const connected = await redis.client("LIST");
+    for (const pid of holders) {
+      assert.ok(!connected.includes(`name=shutdown-${pid} `), "the lock connection closed");
+      const remaining = await redis.pttl(`shutdown-${pid}`);
+      assert.ok(remaining === -2 || (remaining >= 0 && remaining <= 5000), "surviving lease has bounded TTL");
+    }
+  }
+}
+
+test("process-group SIGTERM drains Nest leases and workers before the cluster primary exits", { timeout: 60000 },
+  t => stopProcessGroup(t, "ipc"));
+test("process-group shutdown remains bounded when a worker's Nest shutdown hook stalls", { timeout: 60000 },
+  t => stopProcessGroup(t, "stuck"));
+test("process-group SIGTERM closes the judge websocket, HTTP request and Redis lease clients", {
+  skip: !redisAvailable && "needs redis-server", timeout: 60000
+}, t => stopProcessGroup(t, "tcp"));

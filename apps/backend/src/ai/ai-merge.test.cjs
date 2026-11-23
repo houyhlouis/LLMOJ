@@ -81,6 +81,67 @@ test('detail leads with typed blocking data, one timeline, and safe contract/cor
   assert(!JSON.stringify(detail).includes('PRIVATE_QUERY'));
 });
 
+test('an old timeline keeps the verified source of its own backend across release changes and identical rebuilds', async t => {
+  const identity = require('../health/deployment-identity.ts');
+  const { HealthService } = require('../health/health.service.ts');
+  const { SettingsEntity } = require('../settings/settings.entity.ts');
+  const { UserEntity } = require('../user/user.entity.ts');
+  const original = identity.deploymentBuildIdentity;
+  t.after(() => { identity.deploymentBuildIdentity = original; });
+  let history;
+  const settings = {
+    findOneByOrFail: async () => ({ value: history }),
+    findOneBy: async ({ key }) => key === 'deployment.buildHistory' ? { value: history } : null,
+    update: async (_where, data) => { history = structuredClone(data.value); }
+  };
+  const db = {
+    transaction: async (_isolation, work) => work({ query: async () => { history ??= []; }, getRepository: () => settings }),
+    getRepository: entity => entity === SettingsEntity ? settings : entity === UserEntity ?
+      { findOneBy: async () => ({ id: 1, isAdmin: true }) } : { find: async () => [] },
+    query: async () => []
+  };
+  const health = new HealthService(db, {}, {});
+  const old = { status: 'verified', commit: '1'.repeat(40), treeSha256: '2'.repeat(64) };
+  const current = { status: 'verified', commit: '3'.repeat(40), treeSha256: '4'.repeat(64) };
+  const unknown = { status: 'unknown', commit: null, treeSha256: null };
+  const oldDigest = '5'.repeat(64), newDigest = '6'.repeat(64);
+  async function start(sha256, provenance) {
+    identity.deploymentBuildIdentity = { ...original, backend: { ...original.backend, sha256, provenance } };
+    await health.onModuleInit();
+  }
+  await start(oldDigest, old);
+  const job = makeJob();
+  advanceStage(job, job.step);
+  const historical = job.timeline.entries[0];
+  // Digest-only rows predate startup verification. Neither their bytes nor an unknown observation can acquire a
+  // revision just because a later backend verified the same bytes.
+  for (const binding of [undefined, 'unknown', 'mismatch']) job.timeline.entries.push({ ...historical,
+    deployment: { ...historical.deployment, backendBinding: binding, unexpected: '/private/PRIVATE_FIXTURE' } });
+  await start(oldDigest, current);
+  await start(newDigest, current);
+  assert.equal(history.length, 3);
+  advanceStage(job, 'testdata.generate');
+  const view = Object.assign(Object.create(AiJobViewService.prototype), {
+    db, judges: { listJudgeClients: async () => [] }, authorizedJob: async () => job,
+    coordinator: { assertEvidenceAccess: async () => {} }, workflow: { retryOptions: () => [], repairRoles: () => [] },
+    usage: { jobTotals: async () => new Map(), generations: async () => [], generationCounts: async () => ({}),
+      recentFailures: async () => [], stageTotals: async () => new Map() }, problemRows: async () => new Map()
+  });
+  const output = await view.exportDiagnostic({ id: 1 }, job.id);
+  assert.equal(output.exportVersion, 2);
+  assert.equal(output.deployment.backend.sha256, newDigest);
+  assert.deepEqual({ ...output.deployment.backend.provenance }, current);
+  const entries = output.detail.timeline.entries.items.map(entry => entry.deployment);
+  assert.deepEqual(entries.map(entry => entry.backendBuild), [oldDigest, oldDigest, oldDigest, oldDigest, newDigest]);
+  assert.deepEqual(entries.map(entry => ({ ...entry.backendProvenance })), [old, unknown, unknown, { ...unknown, status: 'mismatch' }, current]);
+  assert.doesNotMatch(JSON.stringify(output), /PRIVATE_FIXTURE|backendBinding/);
+  const before = structuredClone(history);
+  await start(oldDigest, unknown);
+  assert.deepEqual(history, before);
+  history = history.slice(0, 1);
+  assert.equal((await view.exportDiagnostic({ id: 1 }, job.id)).detail.timeline.entries.items[0].deployment.backendProvenance.status, 'unknown');
+});
+
 test('recovered model dispatch keeps one stage/generation across workflow, journal, usage and timeline', async () => {
   const original = provider.generateText;
   let job = makeJob(); advanceStage(job, job.step);

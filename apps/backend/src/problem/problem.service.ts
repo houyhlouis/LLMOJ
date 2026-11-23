@@ -616,7 +616,8 @@ export class ProblemService {
    */
   async deleteProblem(problem: ProblemEntity): Promise<void> {
     const problemId = problem.id; // TypeORM clears the primary key on remove.
-    let deleteFilesActually: () => void = null;
+    let deleteFilesActually: () => Promise<void> = null;
+    let cancelTasks: () => Promise<void>;
     await this.connection.transaction("REPEATABLE READ", async transactionalEntityManager => {
       // update user submission count and accepted problem count
       await this.userService.onDeleteProblem(problem.id, transactionalEntityManager);
@@ -641,16 +642,17 @@ export class ProblemService {
       );
 
       // cancel submissions
-      await this.submissionService.onDeleteProblem(problem.id);
+      cancelTasks = await this.submissionService.onDeleteProblem(problem.id, transactionalEntityManager);
 
       // delete everything
       await transactionalEntityManager.remove(problem);
     });
-    if (deleteFilesActually) deleteFilesActually();
     await Promise.all([
       this.submissionService.onProblemDeleted(problemId),
       invalidatePreprocessedJudgeInfo(this.redisService.generationCache, problemId)
     ]);
+    await cancelTasks();
+    if (deleteFilesActually) await deleteFilesActually();
   }
 
   /**

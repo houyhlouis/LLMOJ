@@ -1,46 +1,38 @@
--- The write intent key of this lock
--- The value is the random token of the client attempting to write-lock it
--- It will block ALL new read and write lock requests
+-- The waiting writer's token gives it preference over new readers and other writers.
 local key_write_intent = KEYS[1]
-
--- The write lock key of this lock
--- The value is the random token of the locker
--- It will block ALL new read and write lock requests
 local key_write_lock = KEYS[2]
-
--- The read lock key of this lock
--- The value is how many readers have locked this lock
--- It will block ALL new write lock requests
--- The expire time is refreshed by the latest locker who sends a refresh request
+-- Each member is a reader token. Its score is the absolute expiry in Redis milliseconds.
 local key_readers = KEYS[3]
 
--- Lock the write lock with random token, with a expire time in MS
-local function write_lock(token, expire)
-  local value_readers = redis.call("get", key_readers)
-  local value_write_lock = redis.call("get", key_write_lock)
-  local value_write_intent = redis.call("get", key_write_intent)
-  if value_readers ~= false or value_write_lock ~= false then
-    -- A reader or writer is locked the lock
-    -- Attempt to set the write intent
+local time = redis.call("time")
+local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
+if ARGV[1] == "read_check" then
+  local expiry = redis.call("zscore", key_readers, ARGV[2])
+  return expiry ~= false and tonumber(expiry) > now
+elseif ARGV[1] == "write_check" then
+  return redis.call("get", key_write_lock) == ARGV[2]
+end
+redis.call("zremrangebyscore", key_readers, "-inf", now)
 
-    if value_write_intent == false or value_write_intent == token then
-      redis.call("set", key_write_intent, token, "PX", expire)
-      return false
-    end
-
-    -- Failed to set the write intent -- we must wait for the previous waiting writer
-    return false
+local function expire_reader_set()
+  -- A short lease must never shorten another reader's lease. Redis deletes the empty set itself.
+  local last = redis.call("zrange", key_readers, -1, -1, "withscores")
+  if last[2] then
+    redis.call("pexpireat", key_readers, last[2])
   end
+end
 
-  -- If another writer set the write intent, let it first
+local function write_lock(token, expire)
+  local value_write_intent = redis.call("get", key_write_intent)
   if value_write_intent ~= false and value_write_intent ~= token then
     return false
   end
+  if redis.call("exists", key_readers, key_write_lock) > 0 then
+    redis.call("set", key_write_intent, token, "PX", expire)
+    return false
+  end
 
-  -- Remove the write intent
   redis.call("del", key_write_intent)
-
-  -- Lock the write lock
   redis.call("set", key_write_lock, token, "PX", expire)
   return true
 end
@@ -65,52 +57,30 @@ local function write_refresh(token, expire)
   return false
 end
 
--- Lock the read lock with a expire time in MS
-local function read_lock(expire)
-  local value_write_intent = redis.call("get", key_write_intent)
-  local value_write_lock = redis.call("get", key_write_lock)
-  if value_write_intent ~= false or value_write_lock ~= false then
-    -- A writer holds the lock or a writer is attmpting to lock the lock
-    -- Let the writers first
+local function read_lock(token, expire)
+  if redis.call("exists", key_write_intent, key_write_lock) > 0 then
     return false
   end
-
-  -- A stale non-positive count represents no readers.
-  if redis.call("incr", key_readers) <= 0 then
-    redis.call("set", key_readers, 1)
-  end
-
-  -- Refresh the expire time of read lock
-  redis.call("pexpire", key_readers, expire)
+  redis.call("zadd", key_readers, now + expire, token)
+  expire_reader_set()
   return true
 end
 
--- Unlock the read lock locked by this client
-local function read_unlock()
-  local count = tonumber(redis.call("get", key_readers))
-  if not count then
-    -- It expired before unlock or refresh
+local function read_unlock(token)
+  if redis.call("zrem", key_readers, token) == 0 then
     return false
   end
-
-  if count > 1 then
-    redis.call("decr", key_readers)
-    return true
-  end
-
-  -- Remove the last reader, or discard a stale count with no reader to release.
-  redis.call("del", key_readers)
-  return count == 1
+  expire_reader_set()
+  return true
 end
 
--- Reset expire time of the read lock locked by this client
-local function read_refresh(expire)
-  local count = tonumber(redis.call("get", key_readers))
-  if not count or count <= 0 then
-    -- There is no lease to extend. A legacy zero key can expire on its original deadline.
+local function read_refresh(token, expire)
+  if not redis.call("zscore", key_readers, token) then
     return 0
   end
-  return redis.call("pexpire", key_readers, expire)
+  redis.call("zadd", key_readers, now + expire, token)
+  expire_reader_set()
+  return 1
 end
 
 -- Handle commands from Redis client
@@ -121,9 +91,9 @@ elseif ARGV[1] == "write_unlock" then
 elseif ARGV[1] == "write_refresh" then
   return write_refresh(ARGV[2], ARGV[3])
 elseif ARGV[1] == "read_lock" then
-  return read_lock(ARGV[2])
+  return read_lock(ARGV[2], ARGV[3])
 elseif ARGV[1] == "read_unlock" then
-  return read_unlock()
+  return read_unlock(ARGV[2])
 elseif ARGV[1] == "read_refresh" then
-  return read_refresh(ARGV[2])
+  return read_refresh(ARGV[2], ARGV[3])
 end

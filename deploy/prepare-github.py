@@ -66,6 +66,8 @@ def exclusion_rule(relative):
         return "diagnostic-output"
     if relative.name.startswith(".env") and relative.name != ".env.example":
         return "environment-secrets"
+    if relative == Path("deploy/release-manifest.json"):
+        return "build-output"
     if relative.name in {"ADMIN-CREDENTIALS.txt", "secrets.json", "installation-summary.json", "local-changes.patch"}:
         return "private-installation-state"
     if "verification" in relative.name and relative.suffix == ".json":

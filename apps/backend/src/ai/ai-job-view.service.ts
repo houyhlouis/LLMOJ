@@ -22,7 +22,9 @@ import { AiJobSummaryQueryDto, AiJobDetailDto } from "./ai.dto";
 
 import { JudgeClientService } from "../judge/judge-client.service";
 import { SettingsEntity } from "../settings/settings.entity";
-import { deploymentBuildIdentity } from "../health/deployment-identity";
+import { historicalProvenance, readBackendBindings } from "../health/deployment-history";
+import { isDigest } from "../health/release-provenance";
+import { deploymentBuildIdentity, workerProvenance } from "../health/deployment-identity";
 
 import { UserEntity } from "../user/user.entity";
 import { ProblemAccessService, ProblemPermissionType } from "../problem/problem-access.service";
@@ -190,7 +192,8 @@ export class AiJobViewService {
         return {
           id: client.id,
           online: await this.judges.isJudgeClientOnline(client),
-          build: capabilities?.runtime?.judgeProgram || null,
+          build: isDigest(capabilities?.runtime?.judgeProgram) ? capabilities.runtime.judgeProgram : null,
+          provenance: workerProvenance(capabilities?.runtime?.judgeProgram),
           sandboxImage: capabilities?.runtime?.sandboxImage || null,
           protocolVersion: capabilities?.protocolVersion || null,
           qualityPolicies: capabilities?.aiQualityPolicyVersions || [],
@@ -218,7 +221,7 @@ export class AiJobViewService {
   async exportDiagnostic(user: UserEntity, id: string, includeRejectedProposal = false) {
     await this.administrator(user);
     const job = await this.authorizedJob(user, id);
-    const detail = await this.detail(user, { id });
+    const detail = await this.detail(user, { id }, true);
     const requests = await this.db
       .getRepository(AiUsageEntity)
       .find({ where: { ownerId: user.id, jobId: id }, order: { createdAt: "DESC" }, take: 1001 });
@@ -281,7 +284,7 @@ export class AiJobViewService {
     return { queued: true, id };
   }
 
-  async detail(user: UserEntity, query: AiJobDetailDto) {
+  async detail(user: UserEntity, query: AiJobDetailDto, exportProvenance = false) {
     const job = await this.authorizedJob(user, query.id);
     // Authorization is checked even for an unchanged response.
     if (query.ifRevision === job.revision) return { unchanged: true, id: job.id, revision: job.revision };
@@ -353,6 +356,11 @@ export class AiJobViewService {
       ...Object.values(state.optionalSearchFailures || {})
     ];
     const diagnostics = searches.filter(search => search.diagnostic);
+    const entries = job.timeline?.entries || [];
+    const history =
+      exportProvenance && entries.some(entry => isDigest(entry.deployment?.backendBinding))
+        ? await readBackendBindings(this.db)
+        : [];
     return {
       unchanged: false,
       id: job.id,
@@ -407,7 +415,23 @@ export class AiJobViewService {
           : null
       },
       timeline: {
-        entries: job.timeline?.entries || [],
+        entries: entries.map(entry => {
+          const build = entry.deployment;
+          if (!build) return entry;
+          const backendBuild = isDigest(build.backendBuild) ? build.backendBuild : null;
+          return {
+            ...entry,
+            deployment: {
+              backendBuild,
+              qualityPolicyVersion: build.qualityPolicyVersion,
+              receiptVersion: build.receiptVersion,
+              executionProtocolVersion: build.executionProtocolVersion,
+              ...(exportProvenance && {
+                backendProvenance: historicalProvenance(backendBuild, build.backendBinding, history)
+              })
+            }
+          };
+        }),
         omitted: job.timeline?.omitted || 0,
         legacyHistoryUnavailable: job.timeline?.legacyHistoryUnavailable ?? !job.timeline
       },

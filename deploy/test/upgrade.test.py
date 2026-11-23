@@ -117,6 +117,9 @@ class FakeHost:
             (stage/'node_modules/.pnpm-workspace-state-v1.json').write_text(json.dumps({'projects':{str(stage):{},str(stage)+'/apps/backend':{}}}))
             package=stage/'node_modules/.pnpm/tool@2.0.0/node_modules/tool/index.js'; package.parent.mkdir(parents=True,exist_ok=True)
             package.write_text('// built in '+str(stage)+'\n')
+        elif len(args) > 2 and args[1].endswith('/deploy/release-manifest.mjs') and args[2]=='write':
+            # The node executable in the fixture installation is a stub. Execute the actual staged writer.
+            subprocess.run([shutil.which('node'), *args[1:]], check=True, capture_output=True)
         elif args[-1]=='--version': output=b'11.13.1' if 'pnpm' in args[-2] else b'v24.21.0'
         elif args[-2:]==['run','build'] and '@libreoj/backend' in args:
             dist=Path(kwargs['cwd'])/'apps/backend/dist'
@@ -141,6 +144,8 @@ class FixtureUpgrade(u.Upgrade):
         (self.stage/'apps/backend/dist/database/database.providers.js').write_text('LIBREOJ_SCHEMA_SYNC')
         (self.stage/'public/index.html').write_text('new frontend')
         (self.stage/'public/new-hash.js').write_text('new chunk')
+        (self.stage/'public/offline-manifest.json').write_text(json.dumps({'files': [
+            {'path': '/index.html', 'sha256': u.digest(self.stage/'public/index.html')}]}))
     def health(self): self.host.calls.append(('health',))
     def schema(self,database,action='audit'):
         if not hasattr(self,'schemas'): self.schemas={}
@@ -725,6 +730,60 @@ class UpgradeTests(unittest.TestCase):
         self.prepare(); (self.root/'config/judge.yaml').write_text('administrator edit')
         with self.assertRaises(u.UpgradeError): self.up.activate()
         self.assertTrue(all(self.host.states.values()))
+    def release_cycle(self, with_previous):
+        manifest = Path('deploy/release-manifest.json')
+        files = ('deploy/release-manifest.mjs', 'apps/judge/src/judge-program.ts',
+                 'apps/backend/src/health/artifact-identity.ts', 'apps/backend/src/health/release-provenance.ts')
+        for tree in (self.root, self.source):
+            for name in files:
+                (tree/name).parent.mkdir(parents=True,exist_ok=True)
+                shutil.copyfile(MODULE.parents[1]/name, tree/name)
+        # The old release has its own backend digest (or predates the manifest).
+        previous = None
+        if with_previous:
+            (self.root/'public/offline-manifest.json').write_text('{"files":[]}')
+            old = {'kind':'local','treeSha256':u.tree_digest(self.root)}
+            subprocess.run([shutil.which('node'), self.root/files[0], 'write', self.root, 'all', json.dumps(old)],
+                           check=True,capture_output=True)
+            previous = (self.root/manifest).read_bytes()
+        tree_hash = u.tree_digest(self.source)
+        # Ignore a manifest supplied in an input overlay. Only the staged build may produce it.
+        (self.source/manifest).write_text('PRIVATE_FIXTURE')
+        self.assertEqual(tree_hash, u.tree_digest(self.source))
+        source = {'kind':'github', 'repository':u.REPOSITORY, 'commit':'d'*40, 'archiveSha256':'e'*64,
+                  'treeSha256':tree_hash}
+        self.up.preflight()
+        self.up.prepare(self.source,source)
+        if with_previous:
+            self.assertEqual((self.root/manifest).read_bytes(),previous)
+        else:
+            self.assertFalse((self.root/manifest).exists())
+        staged = (self.up.stage/manifest).read_bytes()
+        record = json.loads(staged)
+        self.assertEqual(record['source'],source)
+        self.assertEqual(record['artifacts']['frontend'],u.digest(self.up.stage/'public/offline-manifest.json'))
+        dist = self.up.stage/'apps/backend/dist'
+        backend = hashlib.sha256()
+        for file in sorted(dist.rglob('*.js')):
+            backend.update(str(file.relative_to(dist)).encode()+bytes(1)+file.read_bytes()+bytes(1))
+        self.assertEqual(record['artifacts']['backend'],backend.hexdigest())
+        self.assertNotIn(str(self.base).encode(),staged)
+        self.assertNotIn(b'PRIVATE_FIXTURE',staged)
+        self.up.activate()
+        self.assertEqual((self.root/manifest).read_bytes(),staged)
+        self.up.rollback(manual=True)
+        self.assertEqual((self.root/'apps/backend/dist/main.js').read_text(),'old backend')
+        if with_previous:
+            self.assertEqual((self.root/manifest).read_bytes(),previous)
+        else:
+            self.assertFalse((self.root/manifest).exists())
+
+    def test_verified_manifest_switches_and_rolls_back_with_its_code(self):
+        self.release_cycle(True)
+
+    def test_rollback_to_a_release_without_a_manifest_restores_its_absence(self):
+        self.release_cycle(False)
+
     def test_start_failure_rolls_back_code_and_guard_without_importing_db(self):
         self.prepare(); self.host.fail_start='libreoj-backend.service'
         with self.assertRaises(u.UpgradeError): self.up.activate()

@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { AsyncLocalStorage } from "async_hooks";
 
 import { Injectable } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
@@ -19,6 +20,7 @@ import { FileEntity } from "../file/file.entity";
 import { FileService } from "../file/file.service";
 import { RedisService } from "../redis/redis.service";
 import { LockService } from "../redis/lock.service";
+import { assertLockLeasesHeld, LockLeaseLostError } from "../redis/lock-lease";
 import { UserService } from "../user/user.service";
 import { UserPrivilegeService, UserPrivilegeType } from "../user/user-privilege.service";
 import { UserEntity } from "../user/user.entity";
@@ -85,6 +87,12 @@ export class ProblemArchiveService {
         }
         return { signedUploadRequest: signed };
       }
+      // The sealed archive is private to this attempt. Once it is no longer being read, delete its
+      // temporary registration even if the import lost its lease. Never clean up by the upload UUID.
+      const discardArchive = AsyncLocalStorage.bind(async (uuid: string) => {
+        const remove = await this.connection.transaction(manager => this.fileService.deleteFile(uuid, manager));
+        await remove();
+      });
       return await this.lockService.lock("problem-zip-extraction", async () => {
         const leaseKey = `problem-zip:${request.uploadInfo.uuid}`;
         const actualLease = await this.redisService.cacheGet(leaseKey);
@@ -99,6 +107,7 @@ export class ProblemArchiveService {
           if (!(claimed instanceof FileEntity))
             throw new ArchiveError(typeof claimed === "string" ? claimed : "INVALID_ZIP");
           archive = claimed;
+          assertLockLeasesHeld();
           const base = process.env.HYHOJ_ARCHIVE_WORK_DIRECTORY || "/opt/LLMOJ/data/backend-archives";
           await fs.promises.mkdir(base, { recursive: true, mode: 0o700 });
           workspace = await fs.promises.mkdtemp(path.join(base, "zip-"));
@@ -109,6 +118,7 @@ export class ProblemArchiveService {
           )
             throw new ArchiveError("ZIP_INTEGRITY_ERROR");
           const extracted = await extractSafeZip(zip, path.join(workspace, "files"));
+          assertLockLeasesHeld();
           const importedFiles = await this.problemFiles.addProblemFilesFromDisk(
             problem,
             ProblemFileType.TestData,
@@ -140,15 +150,14 @@ export class ProblemArchiveService {
         } finally {
           if (workspace) await fs.promises.rm(workspace, { recursive: true, force: true });
           if (archive) {
-            const remove = await this.connection.transaction(manager =>
-              this.fileService.deleteFile(archive.uuid, manager)
-            );
-            await remove();
+            await discardArchive(archive.uuid);
+            assertLockLeasesHeld();
             await this.redisService.cacheDelete(leaseKey);
           }
         }
       });
     } catch (error) {
+      if (error instanceof LockLeaseLostError) throw error;
       return { error: error instanceof ArchiveError ? error.code : "INVALID_ZIP" };
     }
   }

@@ -12,6 +12,7 @@ import { isAiRequest, AI_ERROR_REPORT_MESSAGE } from "./ai/ai-security";
 import { localErrorDiagnostics, reportErrorClass, reportErrorMessage } from "./event-report/report-redaction";
 
 import { unexpectedErrors } from "./event-report/unexpected-errors";
+import { LockLeaseLostError } from "./redis/lock-lease";
 
 const logger = new Logger("ErrorFilter");
 
@@ -38,11 +39,13 @@ export class ErrorFilter implements ExceptionFilter {
       requestId = request.requestId ?? requestId;
       const response = host.switchToHttp().getResponse<Response>();
       if (error instanceof HttpException) response.status(error.getStatus()).send(error.getResponse());
+      else if (error instanceof LockLeaseLostError) response.status(500).send({ error: error.code, requestId });
       else response.status(500).send({ error: "INTERNAL_ERROR", requestId });
     }
 
     if (!(error instanceof HttpException)) {
       this.metricErrorCount.inc({ error: unexpectedErrors.record(error, requestId, request) });
+      if (LockLeaseLostError.isShutdown(error)) return;
       if (error instanceof Error) {
         // Lost or refused connections (a dependency restarting or overloaded) are counted and logged at most once a
         // minute, without event reports.

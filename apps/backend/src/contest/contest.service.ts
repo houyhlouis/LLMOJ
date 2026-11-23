@@ -29,6 +29,7 @@ import { SubmissionEntity } from "../submission/submission.entity";
 import { FileService } from "../file/file.service";
 import { getCurrentRequest } from "../auth/auth.middleware";
 import { AuditLogEntity } from "../audit/audit-log.entity";
+import { logger } from "../logger";
 
 /**
  * Contests themselves: the contest list and page, creating, changing and deleting contests, scoreboards and their
@@ -353,7 +354,7 @@ export class ContestService {
         return { remove };
       });
       if (!batch.submissions) {
-        batch.remove?.();
+        batch.remove?.().catch(e => logger.error(`Failed to remove attachments for contest ${id}: ${e}`));
         return {};
       }
       for (const submission of batch.submissions) {

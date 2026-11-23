@@ -18,7 +18,7 @@ function load(file, overrides) {
   }).outputText;
   const loaded = { exports: {} };
   new Function("require", "module", "exports", "__dirname", source)(
-    name => (name in overrides ? overrides[name] : require(name)),
+    name => (name in overrides ? overrides[name] : name === "./judge-program" ? require("./judge-program.ts") : require(name)),
     loaded,
     loaded.exports,
     __dirname

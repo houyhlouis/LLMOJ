@@ -46,7 +46,11 @@ const BACKEND_SUITES = [
   'apps/backend/src/submission/submission-priority.test.cjs', 'apps/backend/src/submission/submission-boundaries.test.cjs',
   'apps/backend/src/auth/*.test.cjs', 'apps/backend/src/site-management/*.test.cjs', 'apps/backend/src/database/*.test.cjs',
   'apps/backend/src/study-list/*.test.cjs', 'apps/backend/src/auth/two-factor/*.test.cjs', 'apps/backend/src/health/*.test.cjs',
-  'apps/backend/src/common/*.test.cjs', 'apps/backend/src/metrics/*.test.cjs', 'apps/backend/src/redis/*.test.cjs',
+  'apps/backend/src/common/*.test.cjs', 'apps/backend/src/metrics/*.test.cjs',
+  'apps/backend/src/redis/generation-cache.test.cjs', 'apps/backend/src/redis/redis-connections.test.cjs',
+  'apps/backend/src/redis/read-write-lock.test.cjs', 'apps/backend/src/redis/lock-lifecycle.test.cjs',
+  'apps/backend/src/redis/lock-pause.test.cjs', 'apps/backend/src/redis/lock-lease.mariadb.test.cjs',
+  'apps/backend/src/redis/lock-caller-recovery.test.cjs',
   'apps/backend/src/file/file-maintenance.test.cjs', 'apps/backend/src/file/file-content-hash.test.cjs',
   'apps/backend/src/file/file-sealing.minio.test.cjs',
   'apps/backend/src/archive/*.test.cjs', 'apps/backend/src/statement-export/*.test.cjs'
@@ -93,12 +97,14 @@ const DEPLOYMENT_SUITES = {
   'deploy/test/sandbox-staging.test.py': asRoot('Tests archive assembly and stages a disposable chroot in a private mount namespace when available.'),
   'deploy/test/source-package.test.py': portable('Builds a source archive from the checkout and inspects it in a temporary directory.'),
   'deploy/test/upgrade.test.py': asRoot('Exercises the schema-plan comparison and health checks alongside the root-owned installation fixtures.'),
+  'deploy/test/service-fixture.test.py': portable('Checks the private MariaDB directory and server identity guards.'),
   'deploy/test/verify-backup.test.py': asRoot('Checks archives and restores a private MariaDB as the mysql user; object content checks also use MinIO when installed.'),
   'deploy/test/wiki-export.test.py': wiki('Exports and compares local Markdown trees in temporary directories.'),
 
   'deploy/fake-migration.test.cjs': portable('Uses the MariaDB client and the disposable fake-migration database.'),
   'deploy/test/ai-lifecycle-schema.mariadb.test.mjs': portable('Uses the disposable schema database and its isolated upgrade namespace.'),
   'deploy/test/ai-lifecycle-schema.test.mjs': portable('Validates the AI schema contract against synthetic plans and metadata.'),
+  'deploy/test/release-manifest.test.mjs': portable('Checks clean, dirty and source-less builds and the GitHub release handoff.'),
   'deploy/test/backup-keys.test.mjs': portable('Verifies temporary key files against values encrypted by the backend.'),
   'deploy/test/benchmark-load.test.mjs': portable('Measures scheduled arrivals, page requests, errors and metrics with a simulated backend.'),
   'deploy/test/benchmark-seed.test.mjs': portable('Checks the deterministic SQL fixtures and disposable database guard.'),
@@ -109,7 +115,7 @@ const DEPLOYMENT_SUITES = {
   'deploy/test/contest-virtual-schema.test.mjs': portable('Checks the compiled virtual participation entity and resumable MariaDB DDL contract.'),
   'deploy/test/dependency-audit.test.mjs': portable('Classifies synthetic audit reports and reads the repository toolchain pins.'),
   'deploy/test/dev-stack.test.mjs': portable('Checks local stack configuration, port conflicts and process ownership without starting services.'),
-  'deploy/test/docs-contract.test.mjs': wiki('Checks bilingual documentation against the exported protocol constants.'),
+  'deploy/test/docs-contract.test.mjs': wiki('Checks bilingual documentation against the protocol constants and the testcase allocator.'),
   'deploy/test/initialize-schema.test.mjs': portable('Checks the initializer CLI and builds the current schema in a disposable database.'),
   'deploy/test/service-worker-retirement.test.mjs': {
     ...portable('Runs a headless browser against a temporary loopback site when Chrome or Chromium is available.'),
@@ -120,7 +126,7 @@ const DEPLOYMENT_SUITES = {
   'deploy/test/team-storage.test.mjs': portable('Checks the storage migration with simulated queries.'),
   'deploy/test/upgrade-migration.integration.mjs': {
     group: 'deploy', classification: 'host-acceptance', format: 'script',
-    reason: 'Requires a dedicated MariaDB fixture socket, a pristine legacy SQL dump and explicit permission to create temporary databases.'
+    reason: 'Release acceptance uses a trusted pre-registration dump independent of current TypeORM entities. Run with-service-fixture.py --baseline DUMP migration on its dedicated MariaDB fixture.'
   },
   'deploy/test/upgrade-registration.test.mjs': portable('Checks registration migration with simulated database metadata and rows.'),
   'deploy/test/upgrade-schema.test.mjs': portable('Checks exact SQL plans and privilege metadata against the upgrade allowlist.')
@@ -150,6 +156,13 @@ export const suiteGroups = {
   deploy: deploymentGroup('deploy'),
   wiki: deploymentGroup('wiki')
 };
+
+const requiredServiceSuites = new Set([
+  'apps/backend/src/auth/registration-review.mariadb.test.cjs',
+  'apps/backend/src/site-management/registration-settings.mariadb.test.cjs',
+  'apps/backend/src/file/file-sealing.minio.test.cjs', 'deploy/test/bootstrap-admin.test.mjs',
+  'deploy/test/verify-backup.test.py'
+]);
 
 // These predate node:test and report assertions through the process exit status.
 const scripts = new Set(['apps/backend/src/access/access-permissions.test.cjs', 'apps/backend/src/contest/contest-scoring.test.cjs']);
@@ -206,7 +219,9 @@ async function main(argv) {
     let { program, args } = suite;
     if (suite.asRoot && canSudo) {
       // The root-owned fixtures need the pinned Node and must leave the checkout writable by the runner.
-      args = ['-n', 'env', `PATH=${path.dirname(process.execPath)}:${process.env.PATH}`, 'PYTHONDONTWRITEBYTECODE=1', program, ...args];
+      const storage = file === 'deploy/test/verify-backup.test.py' && process.env.LLMOJ_MINIO_BINARY
+        ? [`LLMOJ_MINIO_BINARY=${process.env.LLMOJ_MINIO_BINARY}`] : [];
+      args = ['-n', 'env', ...storage, `PATH=${path.dirname(process.execPath)}:${process.env.PATH}`, 'PYTHONDONTWRITEBYTECODE=1', program, ...args];
       program = 'sudo';
     }
     console.log(`\n▶ ${group}: ${file}`);
@@ -216,6 +231,10 @@ async function main(argv) {
     if (tmpdir) env.TMPDIR = tmpdir;
     if (format === 'python') env.PYTHONDONTWRITEBYTECODE = '1';
     const result = await runSuite(program, args, { cwd: root, env, format, timeout });
+    if (ci && result.ok && requiredServiceSuites.has(file) && (result.skipped || !result.executed)) {
+      result.ok = false;
+      result.error = new Error('Promised service cases must execute without skips');
+    }
     if (!result.ok) console.error(`${file}: ${result.error?.message || `exited with ${result.status}`}`);
     results.push({ ...result, file, seconds: Math.round((Date.now() - started) / 1000) });
   }

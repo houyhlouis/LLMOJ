@@ -5,7 +5,7 @@ import fs from "fs";
 import { Injectable } from "@nestjs/common";
 import { InjectDataSource, InjectRepository } from "@nestjs/typeorm";
 
-import { DataSource, IsNull, Not, Repository } from "typeorm";
+import { DataSource, EntityManager, IsNull, Not, Repository } from "typeorm";
 import { Redis } from "ioredis";
 
 import { UserTwoFactorEntity } from "./user-two-factor.entity";
@@ -34,6 +34,7 @@ import {
 import { UserEntity } from "../../user/user.entity";
 import { RedisService } from "../../redis/redis.service";
 import { LockService } from "../../redis/lock.service";
+import { writeWithLockLeases } from "../../redis/lease-redis-command";
 import { ConfigService } from "../../config/config.service";
 import { loadServiceKey } from "../../common/service-key";
 
@@ -216,12 +217,12 @@ export class TwoFactorService {
   private async saveSettings(
     userId: number,
     change: (settings: UserTwoFactorEntity) => void,
-    passkeyDelta = 0
+    manager: EntityManager = this.connection.manager
   ): Promise<string[] | null> {
     const settings =
-      (await this.settingsRepository.findOneBy({ userId })) ??
+      (await manager.findOneBy(UserTwoFactorEntity, { userId })) ??
       Object.assign(new UserTwoFactorEntity(), { userId, totpSecret: null, totpEnabledAt: null, recoveryCodes: null });
-    const passkeyCount = (await this.passkeyRepository.countBy({ userId })) + passkeyDelta;
+    const passkeyCount = await manager.countBy(UserPasskeyEntity, { userId });
     change(settings);
     let recoveryCodes: string[] = null;
     if (!settings.totpSecret && passkeyCount <= 0) settings.recoveryCodes = null;
@@ -230,7 +231,7 @@ export class TwoFactorService {
       settings.recoveryCodes = recoveryCodes.map(hashRecoveryCode);
     }
     settings.updatedAt = new Date();
-    await this.settingsRepository.save(settings);
+    await manager.save(settings);
     return recoveryCodes;
   }
 
@@ -261,7 +262,7 @@ export class TwoFactorService {
         settings.totpSecret = encrypted;
         settings.totpEnabledAt = new Date();
       });
-      await this.redis.del(REDIS_KEY_TOTP_SETUP.format(user.id));
+      await writeWithLockLeases(this.redis, "del", REDIS_KEY_TOTP_SETUP.format(user.id));
       return { recoveryCodes };
     });
   }
@@ -401,9 +402,11 @@ export class TwoFactorService {
         createdAt: new Date(),
         lastUsedAt: null
       });
-      await this.passkeyRepository.save(passkey);
-      const recoveryCodes = await this.saveSettings(user.id, () => undefined);
-      return { recoveryCodes };
+      return await this.connection.transaction("READ COMMITTED", async manager => {
+        await manager.save(passkey);
+        const recoveryCodes = await this.saveSettings(user.id, () => undefined, manager);
+        return { recoveryCodes };
+      });
     });
   }
 
@@ -411,8 +414,10 @@ export class TwoFactorService {
     return await this.lockUser(userId, async () => {
       const passkey = await this.passkeyRepository.findOneBy({ id: passkeyId, userId });
       if (!passkey) return { error: TwoFactorError.NO_SUCH_PASSKEY };
-      await this.passkeyRepository.delete({ id: passkey.id });
-      await this.saveSettings(userId, () => undefined);
+      await this.connection.transaction("READ COMMITTED", async manager => {
+        await manager.delete(UserPasskeyEntity, { id: passkey.id });
+        await this.saveSettings(userId, () => undefined, manager);
+      });
       return {};
     });
   }
@@ -567,7 +572,9 @@ export class TwoFactorService {
           ceremony,
           { publicKey: fromBase64url(passkey.publicKey), signCount: passkey.signCount }
         );
-        await this.passkeyRepository.update({ id: passkey.id }, { signCount, lastUsedAt: new Date() });
+        await this.connection.transaction("READ COMMITTED", manager =>
+          manager.update(UserPasskeyEntity, { id: passkey.id }, { signCount, lastUsedAt: new Date() })
+        );
         return true;
       });
     } catch (error) {

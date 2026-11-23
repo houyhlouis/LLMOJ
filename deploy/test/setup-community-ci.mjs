@@ -24,6 +24,7 @@ const fixtures = [
   ['schema', 'llmoj_test_schema', { LLMOJ_SCHEMA_TEST_DB_CONFIG: ['deploy'] }],
   ['two_factor', 'llmoj_test_two_factor', { LLMOJ_TWO_FACTOR_TEST_DB_CONFIG: ['backend'] }],
   ['judge_queue', 'llmoj_test_judge_queue', { LLMOJ_JUDGE_QUEUE_TEST_DB_CONFIG: ['backend'] }],
+  ['lock_lease', 'llmoj_test_lock_lease', { LLMOJ_LOCK_LEASE_TEST_DB_CONFIG: ['backend'] }],
   ['data_version', 'llmoj_test_data_version', { LLMOJ_DATA_VERSION_TEST_DB_CONFIG: ['backend'] }],
   ['ai', 'llmoj_test_ai', { HYHOJ_AI_TEST_DB_CONFIG: ['ai'] }],
   ['ai_budget', 'llmoj_test_ai_budget', { LLMOJ_AI_BUDGET_TEST_DB_CONFIG: ['ai'] }],
@@ -33,6 +34,7 @@ const fixtures = [
   ['judge_info_cache', 'llmoj_test_judge_info_cache', { LLMOJ_JUDGE_INFO_CACHE_TEST_DB_CONFIG: ['backend'] }],
   ['statistics_cache', 'llmoj_test_statistics_cache', { LLMOJ_STATISTICS_CACHE_TEST_DB_CONFIG: ['backend'] }],
   ['contest_virtual', 'llmoj_test_contest_virtual', { LLMOJ_CONTEST_VIRTUAL_TEST_DB_CONFIG: ['backend'] }],
+  ['contest_admission', 'llmoj_test_contest_admission', { LLMOJ_CONTEST_ADMISSION_TEST_DB_CONFIG: ['backend'] }],
   ['diagnostic_bundle', 'llmoj_test_diagnostic_bundle', { LLMOJ_DIAGNOSTIC_BUNDLE_TEST_DB_CONFIG: ['backend'] }]
 ];
 
